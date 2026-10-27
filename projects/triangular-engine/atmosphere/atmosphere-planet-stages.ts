@@ -1,6 +1,6 @@
 import { Matrix3, Matrix4, Quaternion, Vector3, type IUniform, type Object3D } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
-import { Fn, If, abs, cameraProjectionMatrix, cross, dot, float, max, min, mix, normalize, positionView, select, uniform, vec3, vec4 } from 'three/tsl';
+import { Fn, If, abs, cameraProjectionMatrix, clamp, cross, dot, float, max, min, mix, normalize, positionView, select, uniform, vec3, vec4 } from 'three/tsl';
 import { AtmosphereAerialPerspectiveLut, type AtmosphereAerialPerspectiveOptions } from './atmosphere-aerial-perspective';
 import type { AtmosphereBackdrop } from './atmosphere-backdrop';
 import type { AtmosphereGpuModel } from './atmosphere-gpu-model';
@@ -31,6 +31,27 @@ export interface IAtmosphereLightingInput {
   readonly sunVisibility: any;
   readonly surface: { readonly albedo: any };
   readonly emissive?: any;
+}
+
+/**
+ * Optional per-pixel inputs to {@link PlanetAtmosphereBinding.lighting}, for surfaces whose shading differs from the
+ * planet's sphere: a canopy, a roof, an impostor. Each is a function of the context and the stage's input, returning a
+ * TSL node. With neither given, the stage builds exactly the graph it builds without inputs. Same shape as the planet
+ * material's `IPlanetLightingInputs`.
+ */
+export interface IAtmosphereLightingInputs {
+  /**
+   * The normal for the direct sun's `N.L`, a `vec3` in the frame of `context.sphereNormal` (the planet's body frame);
+   * normalised for you. The sun's transmittance through the air and the sky light keep the sphere normal's sun angle, so
+   * a canopy, a building and the far form that stands in for them get the same sky light.
+   */
+  readonly normal?: (context: IAtmospherePlanetContext, input: IAtmosphereLightingInput) => any;
+  /**
+   * How much direct sunlight reaches the pixel, a `float` from 0 (in a cast shadow) to 1; clamped to that range. It
+   * scales the direct term only; the sky light stays. (`sunVisibility` and the binding's
+   * {@link PlanetAtmosphereBinding.sunVisibility} dim both, as an eclipse does.)
+   */
+  readonly directShadow?: (context: IAtmospherePlanetContext, input: IAtmosphereLightingInput) => any;
 }
 
 export interface PlanetAtmosphereBindingOptions {
@@ -260,21 +281,28 @@ export class PlanetAtmosphereBinding {
   }
 
   /**
-   * Stage 4 of the planet material: the surface relit from the atmosphere. `albedo x (sunT x N.L +
+   * Stage 4 of the planet material: the surface relit from the atmosphere. `albedo x (sunT x N.L x directShadow +
    * skyIrradiance) x sunVisibility x sunIrradiance / pi x exposure`, with the sun and the sky read at the ground for the point's own
    * sun angle (so it varies across the terminator and across a flat map). Replaces the PBR result, so the
    * scene's other lights and normal maps do not reach it; the emissive stack is added back.
+   *
+   * `inputs.normal` replaces the sphere normal in `N.L` only; the transmittance and the sky light keep the sphere
+   * normal's sun angle. `inputs.directShadow` defaults to 1. Without inputs the graph is the same as before they existed.
    */
-  lighting(): (context: IAtmospherePlanetContext, input: IAtmosphereLightingInput) => any {
+  lighting(inputs: IAtmosphereLightingInputs = {}): (context: IAtmospherePlanetContext, input: IAtmosphereLightingInput) => any {
     const { model } = this;
-    return (context, { sunVisibility, surface, emissive }) => {
+    return (context, input) => {
+      const { sunVisibility, surface, emissive } = input;
       const up = normalize(context.sphereNormal);
       const muSun = dot(up, this.sunBody);
       const sunT = model.sunTransmittance(float(0), model.uRadius, muSun);
       // Both eclipse inputs scale the direct light and the sky light: the stage-3 occluders (this surface's own) and the
       // binding's (a planet-wide one, which also dims the haze and the sky behind it).
       const visible = sunVisibility.mul(this.sunVisibility);
-      const direct = sunT.mul(max(muSun, 0));
+      const cosSun = inputs.normal ? dot(normalize(inputs.normal(context, input)), this.sunBody) : muSun;
+      let direct = sunT.mul(max(cosSun, 0));
+      // A cast shadow takes only the direct sun; the sky light stays.
+      if (inputs.directShadow) direct = direct.mul(clamp(inputs.directShadow(context, input), 0, 1));
       const sky = model.skyIrradiance(float(0), muSun);
       const lit = surface.albedo.mul(direct.add(sky).mul(visible)).mul(model.uSunIrradiance).div(Math.PI).mul(this.exposure);
       return emissive ? lit.add(emissive) : lit;

@@ -1,5 +1,8 @@
 /** Framework-free deterministic ground-scatter core (trees, grass, rocks, clutter). */
 export * from './core/scatter-hash';
+export * from './core/scatter-lattice-hash';
+export * from './core/scatter-density-field';
+export * from './core/scatter-fade-band';
 export * from './core/scatter-species-definition';
 export * from './core/scatter-layer-definition';
 export * from './core/scatter-instance-id';
@@ -14,6 +17,7 @@ export * from './core/scatter-removal-overlay';
 export * from './terrain/scatter-terrain-cells';
 export * from './terrain/scatter-terrain-instances';
 export * from './terrain/scatter-lod-batches';
+export * from './terrain/scatter-planet-lattice';
 export * from './three/scatter-instance-transform';
 export * from './three/scatter-collider-descriptors';
 export * from './three/scatter-instanced-mesh';

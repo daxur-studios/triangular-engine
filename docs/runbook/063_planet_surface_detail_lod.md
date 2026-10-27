@@ -366,3 +366,325 @@ produces dark areas the owner does not want (dark blobs). Scope item 4 (height-f
 is **rejected**. Shadow steps now default to 0 (layer uniform and panel). The march stays behind the existing 0/2/4
 toggle because it costs nothing to keep; it is not tuned further and is not part of the forest work. The checklist's
 shadow items (5 and the 6 km / 25 km shadow check) no longer apply.
+
+## 2026-10-27 — Library: per-pixel normal and direct-shadow inputs to the planet lighting stages
+
+The spike found two gaps (2026-10-25 entries): the atmosphere lighting stage read only `context.sphereNormal`, so a
+canopy or roof normal could not reach the lit colour, and the only shadow input was `sunVisibility`, which also dims the
+sky term (and `sunVisibilityLighting` keeps only `mix(0.15, 1, ...)`), so the spike baked shade into its colour with
+`mix(1, 0.32, shade)`. Status: **library change done, specs and build pass; not seen in a page.**
+
+### API
+
+Both inputs are optional factory arguments, each `(context, input) => TSL node`, so a page or a layer decides per
+material what feeds them (a function can read a field a layer put on `input.surface`). Pages keep storing unlit data
+(albedo, normal, shade); every form is lit by the same stage.
+
+- `triangular-engine/atmosphere`: `PlanetAtmosphereBinding.lighting(inputs?: IAtmosphereLightingInputs)`.
+  `normal` (`vec3`, body frame, normalised for you) replaces the sphere normal in the direct `N.L` only.
+  `directShadow` (`float`, clamped to 0..1) multiplies the direct term only. Formula:
+  `albedo x (sunT(mu_sphere) x max(N.L, 0) x directShadow + skyIrradiance(mu_sphere)) x sunVisibility x sunIrradiance / pi x exposure`.
+  `sunVisibility` (occluders x `binding.sunVisibility`) still dims both terms: it is the eclipse input.
+- `triangular-engine/planet-material`: `IPlanetLightingInputs { normal?, directShadow? }`.
+  `simpleDayNightLighting(uniforms, options?: ISimpleDayNightLightingOptions)` takes both plus `skyShare` (default
+  0.35): with an input the day factor becomes `mix(direct, daySphere, skyShare)`, where `direct` is the smoothstep of the
+  normal's own sun angle times `sunVisibility x directShadow`, and the golden-hour glow is scaled by
+  `mix(directShadow, 1, skyShare)`. `sunVisibilityLighting({ floor?, directShadow? })` takes `directShadow` only (it
+  has no sun direction; the PBR before it already used the geometric normal) and multiplies it into `sunVisibility`,
+  keeping `floor`.
+- Without the inputs every stage builds the same TSL graph as before (the new nodes are added only when an input is
+  given), so existing pages are unchanged.
+
+### Sky-term approximation
+
+The sky (and, in the day/night stage, the sky share) keeps the **sphere normal**, as does the sun's transmittance
+through the air. No sky-view factor such as `(1 + dot(n, up)) / 2` is applied. Reasons: the far form in the surface
+material has no per-object normal, so a normal-dependent sky term would make the mesh and the far form disagree in the
+fade band; for canopy and roof normals within 40 degrees of up that factor would be 0.88 or more; and it keeps the
+"tilted normal changes only the direct term" contract simple to test. If a later page needs darker steep faces, add the
+factor as an opt-in, not a default.
+
+### Verified
+
+- `npm run test:triangular-engine:planet-material` 78/78 and `npm run test:triangular-engine:atmosphere` 203/203,
+  headless. New GPU-evaluated cases (`evaluateOnGpu`, stages called directly):
+  - `planet-lighting.spec.ts`: no-input output matches the CPU formula and equals neutral inputs; a tilted normal
+    changes only the direct share (N.L -0.5, 0, 0.05 against the closed form); a direct shadow of 0 keeps the sky share
+    (and `skyShare` sets it); `sunVisibilityLighting` with and without `directShadow`.
+  - `atmosphere-planet-stages.spec.ts`: no inputs equals neutral inputs; shadow 0 keeps the sky light (above 2 % and
+    below 90 % of full sun, equal to a normal turned from the sun), a half shadow is the midpoint, a planet-wide
+    `sunVisibility` of 0 still gives black; a tilted normal is `sky + max(N.L, 0) x (full - sky)`, and with the sun low
+    on the sphere a normal facing the sun gets `1 / 0.3` times the direct term through the same air.
+- `npm run build:triangular-engine` passes. Not checked by eye: `/cell-planet-tsl`,
+  `/planet-material-extensions`, `/atmosphere-planet` and the spike page (the owner's server serves the main checkout);
+  their output should not change, since none of them passes the new inputs.
+
+### Switching the spike from colour-baked shading
+
+1. Forest layer (`forest-layer.ts`): drop `mix(1, 0.32, shade)` from the albedo; keep the unlit albedo and write the
+   shade (0 shadowed, 1 lit) to a field the lighting can read, for example a `canopyShade` on the returned surface
+   sample, or a uniform-free node the page closes over. Build the surface material's stage with
+   `binding.lighting({ directShadow: (_c, input) => input.surface.canopyShade })` instead of `binding.lighting()`. The
+   0.32 floor goes: the sky light is the floor now. If a canopy normal from the density gradient is wanted, pass it as
+   `normal` the same way (body frame).
+2. Instances (`forest-instances.ts`): pass the radial direction as `sphereNormal` and the leaned crown normal
+   (`normalize(radial x 0.7 + normalWorld x 0.3)`, in the body frame) as `normal`, so the sky light on the crowns equals
+   the far form's. Instance self-shadow, if added, goes to `directShadow`.
+3. Re-run the split view (mode 3) at 250 m and 1.5 km, noon and low sun: the two halves should agree at least as well
+   as the 2026-10-25 table, and shaded floor should no longer look black at low sun.
+4. `PlanetAtmosphere.withAtmosphere(surface)` (the component path) still uses `binding.lighting()` without inputs; a
+   per-surface `lighting inputs` option there is a follow-up if a page needs it through the component.
+
+## 2026-10-27 — Scatter gap check: spike scatter against `triangular-engine/scatter`
+
+Read-only comparison of the spike's scatter (`forest-field.ts`, `rock-field.ts`, the worker, `forest-instances.ts`)
+with `scatter/core` and `scatter/terrain`, before moving the spike onto the library.
+
+| # | Point | Spike | Library today | Verdict |
+|---|---|---|---|---|
+| 1 | Lattice and domain | Fixed 3-D body-fixed lattice of `spacingM` cells; only cells whose jittered point lies in the one-cell shell `[R, R + S)` above the datum count, so there is about one candidate per `S²` of surface on any part of the sphere, with no face seams. Cell size is in metres. | `selectFixedLevelScatterCells` walks an `IHierarchicalTerrainSurfaceDomain` quadtree to a fixed level. Cell size is a level, not metres, and on a cube-sphere the cells change size across a face. Assumes the terrain entry's domains. | **Lacks.** Add a second domain beside the quadtree one: a planet shell lattice with a cell size in metres. The quadtree path stays as is. |
+| 2 | Hash and candidate | 32-bit integer hash of `(ix, iy, iz, salt)`; one candidate per cell; draws for jitter x/y/z, keep, and one shared draw for yaw and scale. GPU-friendly (no strings). | `generateScatterCandidates`: FNV-1a over a composed string plus mulberry32, a pool of `candidatePoolSize` candidates in a 2-D `[0,1)²` patch square. Stable ids via `composeScatterInstanceId`. | **Needs an extension.** Keep the id format (so the removal overlay and colliders work), add an integer lattice hash and a one-candidate-per-cell draw with a third jitter axis. Strings only for accepted instances. |
+| 3 | Density input, CPU and TSL parity | Value noise (trilinear, smoothstep fade, integer hash) summed over octaves, smoothstep edge, height band; CPU function plus a hand-written TSL twin; parity checked on the page (`__psd.parity`, max 0.0008). | `baseDensity01 × suitability(sample)` on the CPU only. No noise, no TSL, no parity contract. | **Lacks.** Add a density-field definition (octaves, edge, height band) with one CPU evaluator and one TSL builder, and a headless parity spec. |
+| 4 | Placement on sphere terrain from a height worker | `heightAt(direction)` callback from the worldgen sampler in the worker; ground point = direction × (R + height); up is radial; no slope test. | `generateTerrainScatterInstances` samples an `ITerrainField` through `sampleTerrainSurface` (normal and slope by finite differences). The cell-planet height is a worldgen sampler, not an `ITerrainField`. | **Needs an extension.** The shell lattice takes a `heightAt(direction)` callback (`null` = water or ice). Normal is radial for now; slope rules are not applied on this path (noted in TSDoc). |
+| 5 | Distance fade and window | Fade band from object size by a pixel rule (12 px to 4 px at 1 px = 0.001 × distance); the window radius follows the band (`ceil((fadeEnd + 2 × recentre) / 100) × 100`); the window only selects cells, never moves them; alpha dissolve over 400 m inside the window edge (TSL, spike). | `computeScatterDistanceFade01` thins density with distance (grass with no far LOD). That is camera-dependent placement, the opposite of what the planet path needs. No band-from-size or window radius helper. | **Lacks** the band and window helpers: add them to core (pure). The window-edge dissolve is a material concern tied to the atmosphere stages; it stays in the spike until the impostor material (Plan 063 scope 5). |
+| 6 | Nearest-instance selection | `maxCount`: keeps the nearest by arc when the window holds more, so a short buffer loses the far edge, never a row; reports `accepted`. | None: cell selection by radius only, no capacity cap. | **Lacks.** Built into the shell lattice scatter. |
+| 7 | Physics residency | None in the spike. | `computeScatterPhysicsAnchor` and `diffScatterPhysicsResidency` keyed by cell key and centre; `buildScatterColliderDescriptors` takes `ITerrainScatterInstance`s with an f64 anchor; Jolt adapter adds compound bodies per cell. | **Covered**, with one gap for chunk 7: shell cells are 6–12 m, far too small to be residency cells; group them by a coarser key (for example `floor(index / k)`), give each group an f64 body-fixed anchor, and convert placements to `ITerrainScatterInstance` (radial normal and up). The adapter itself needs nothing new. |
+
+**Where the density noise belongs: `scatter`.** The noise is the placement contract: the same field decides where an
+instance stands and how dense the far form is, so it lives with the scatter and its identity rules. `procedural` builds
+geometry and has no TSL. The CPU half goes in `scatter/core`. The TSL half goes in a new secondary entry
+`triangular-engine/scatter/tsl`, so the main scatter entry does not import `three/tsl` (and with it the WebGPU build)
+for WebGL-only consumers.
+
+**Size:** step 2 (the shell lattice domain) is one file plus helpers, not a rewrite, so the move proceeds in this
+session.
+
+## 2026-10-27 — Spike scatter moved onto `triangular-engine/scatter`
+
+Follows the gap check above. Status: **library extended, spike moved; specs and builds pass; not seen by eye.**
+
+### Library additions
+
+- `scatter/core/scatter-lattice-hash.ts`: `hashScatterLattice01` (noise) and `hashScatterLatticeCell01` (per-cell draws
+  with a salt). The spike's two hashes, unchanged, so the spike's tree and rock positions are unchanged.
+- `scatter/core/scatter-density-field.ts`: `IScatterDensityFieldDefinition` (octaves, `octaveOffset`, `edge`,
+  `heightBandM`), `evaluateScatterDensityField` and its parts.
+- `scatter/core/scatter-fade-band.ts`: `computeScatterPixelFadeBand` (the pixel rule) and `computeScatterWindowRadiusM`.
+- `scatter/terrain/scatter-planet-lattice.ts`: `scatterPlanetLattice` (the shell lattice, one candidate per cell,
+  nearest-first `maxCount`), `IScatterPlanetLayerDefinition` (own `seed`, `cellSizeM`, `sizeRange`, `density`),
+  transferable result, `composeScatterPlanetInstanceId`, `measureScatterPlanetCover`.
+- New entry `triangular-engine/scatter/tsl`: `scatterDensityFieldNode` and parts, the TSL twin.
+
+One change of behaviour against the spike: yaw and size now use separate draws (salts 4 and 5); the spike used one draw
+for both. Positions and the keep test are the same.
+
+### Spike
+
+- `forest-field.ts` and `rock-field.ts` define `FOREST_FIELD` / `ROCK_FIELD` as library definitions and
+  `treeScatterLayer` / `rockScatterLayer` as planet layers; `scatterForest` and `scatterRocks` call
+  `scatterPlanetLattice`. Their own lattice code, `cellHash` and `SCATTER_STRIDE` are gone. Constants that
+  `forest-layer.ts` and `rock-layer.ts` import are kept, so neither file changed (another session owns the shading).
+- The worker posts the library result with its transferables; `SurfaceInstances.setInstances(result)` reads
+  `originM`, `offsetsM`, `yaw01`, `scale`. The window radius comes from `computeScatterWindowRadiusM`.
+- `forest-field.spec.ts` keeps the spike's checks (field, coast, clearance, cover, rocks); the generic placement checks
+  moved to `scatter-planet-lattice.spec.ts`.
+
+### Verified
+
+- `ng test triangular-engine --include=../scatter/**/*.spec.ts`: 161/161 headless, including the planet lattice specs
+  (stable between two window centres, independent of window size, one candidate per cell on six centres all over the
+  sphere, nearest kept, seeds independent), cover (0.65 within 0.03 for 12 m crowns on a 12 m lattice) and the CPU/TSL
+  parity spec (forest and rock fields, 256 points at 600 km, maximum difference under 0.01, `forceWebGL` backend).
+- `ng test demo-app` on the spike folder: 23/23 headless.
+- `npm run build:triangular-engine` (builds `scatter` and `scatter/tsl` as separate entries) and
+  `ng build demo-app --configuration development`: both clean.
+- **Not verified:** anything by eye. The owner's server serves the main checkout, not this worktree.
+
+### Owner checklist (after merging this worktree)
+
+On `/planet-surface-detail-spike`, **go to forest**, then the altitude slider; wait for terrain after each jump.
+
+1. Same trees after zoom: at 300 m pick a distinctive tree, zoom to 3 km and back, then pan far and back: same tree,
+   same place, size and turn. (Turn and size differ from before this change: one draw became two.)
+2. No row cut and the edge fade: zoom out slowly from 100 m to 6 km, oblique: no straight or curved line where trees
+   end; the far edge dissolves.
+3. Window size: change the fade band slider (the window grows and shrinks): trees inside both windows stay put.
+4. Split view at 250 m: the two halves match as before (the cover constant is unchanged, 0.65).
+5. Rocks on: meshes up close, sizes 1 to 3 m, gone into the speckle by about 500 m.
+6. `__psd.parity()` in the console: maximum difference as before (about 0.001).
+
+### For later
+
+- `forest-layer.ts` and `rock-layer.ts` still carry hand-written TSL twins (`hashNode`, `noiseNode`,
+  `fieldDensityNode`). Switch them to `scatterDensityFieldNode(FOREST_FIELD, ...)` and
+  `scatterDensityFieldNode(ROCK_FIELD, ...)` once the shading session has landed; parity is then by construction.
+- **Chunk 7 (Jolt colliders), what the adapter needs:** `ScatterJoltColliderAdapter` takes
+  `IScatterCellColliderDescriptors` (cell key, f64 `anchorWorldM`, anchor-relative descriptors) and needs nothing new.
+  Missing in between: (a) a residency cell coarser than the 6–12 m lattice cell, for example the lattice cell index
+  divided by a whole factor, with its body-fixed f64 anchor; (b) planet instances as `ITerrainScatterInstance`
+  (`instanceId` from `composeScatterPlanetInstanceId`, `worldPositionM` body-fixed, `normal` and `surfaceUp` radial, the
+  yaw and scale draws) so `buildScatterColliderDescriptors` can be reused, which today draws scale from
+  `scaleSeed01` and a `ScatterScaleRange` rather than taking a scale; (c) `collider` on a species definition for trees
+  (capsule or cylinder trunk) and rocks (sphere or hull, hull not supported yet); (d) residency anchored on the player
+  through `computeScatterPhysicsAnchor`, not the render window. Bodies must live in the physics frame (body-fixed or
+  the floating origin's), not the render anchor.
+
+## 2026-10-27 — Scope 1–2 in the library: flat features (height stamp, per-page lists, material layer)
+
+Q2 passed with one hand-placed runway in the spike. This moves the stamp and the SDF paint into the library as a
+general flat-feature system and switches the spike to it (runway plus a small airfield and road network).
+
+### Design
+
+- **One feature set for height and paint.** `FlatFeatureSet` (`worldgen/render/core`, framework-free, worker-safe)
+  holds resolved features: segments (great-circle arcs ≤ 45°, round ends) and rectangles (centre, heading, length,
+  width), each with a tangent frame (`along`, `across`) at its centre. Local coordinates are `a = dot(dir, along)·R`,
+  `b = dot(dir, across)·R`; the across axis is exact to the great circle, and the far hemisphere
+  (`dot(dir, centre) ≤ 0`) returns +∞. SDFs: box `length(max(q, 0)) + min(max(qx, qy), 0)`, capsule
+  `length(max(|a| − hl, 0), b) − hw`.
+- **Height stamp.** `heightStamp()` is the worker pipeline's `modifyElevation` hook; `stampElevation()` is the CPU
+  twin. Inside `width/2 + apronM` the height is the feature's (a segment interpolates its two end heights), then a
+  Hermite blend over `shoulderM`. It depends on the body-frame direction only (it ignores the radius the pipeline
+  passes), so every LOD, patch and edge vertex at the same direction gets the same height.
+- **Priority rule.** Features apply in ascending priority (then list order): `h += (target − h)·w`. Each step is
+  continuous, and the last (highest-priority) feature holds its height where it overlaps others. The material uses
+  the same priority for the markings; the body colour is the union.
+- **Per-page lists.** `FlatFeaturePageWindow`: an equirectangular grid at level L (2^(L+1) × 2^L pages) and a W×W
+  window (default 32) around the camera. The page height targets `max(400 m, altitude × ratio)` with 0.75–2.5×
+  hysteresis. Pages select features as they enter the window (lists are cached while they stay in it),
+  conservatively: a feature is listed when its SDF at the page centre is within the page's bounding-cap radius plus
+  2 m (the SDF is 1-Lipschitz); at most `maxPerPage` (default 8), highest priority first, then distance; overflow is
+  counted in `stats`. Two RGBA float textures: a feature table (capacity × 3 rows) and page slots
+  (`featureIndex + 1`).
+- **Layer.** `flatFeatureLayer` (`planet-material`) takes the window structurally (no `worldgen` import). Per pixel:
+  page from `context.latLon`, an unrolled walk of `maxPerPage` slots, every read at `.level(0)`, empty slots masked.
+  Pixel footprint `max(|dFdx(pos)|, |dFdy(pos)|, 1 cm)`, computed unconditionally; a feature narrower than a pixel
+  is spread at its area weight (`min(1, 2·hw / px)`). The winner key is `d − priority·10⁶` inside a feature, so the
+  highest priority owns the markings. Markings: runway (centreline dashes, edge lines, threshold bars), taxiway
+  (yellow centreline), road (dashed centre, edge lines).
+- **Clearance query** for scatter: `isInClearance(dir, margin)` (within `clearanceM`, default `apronM`, of the edge)
+  and `nearest(dir)`. Not wired into scatter (another session owns it).
+- **`roadLayer` decision: not a user of the list.** Its road is a planet-spanning great circle with an angular width
+  and no height. It exceeds the 45° segment limit and would sit in nearly every page list; its value is as a short
+  teaching example of a layer. It stays as is; placed roads use flat features. Recorded in the `planet-material`
+  README.
+
+### Spike switched to the library
+
+- `airfield-features.ts`: runway (priority 10), parallel taxiway and three stubs (5), concrete apron (4), a main road
+  (2) and an access road (1) that cross near (1200, 2350) in the runway frame. Roads are split into segments of at
+  most 600 m whose end heights follow the ground with the airfield already stamped (3-tap smoothed); over water a
+  road is paint-only. The worker builds the set once per world, uses it for the stamp and for ground height, and
+  returns the plain list to the page (`flatFeatures` message), which feeds a `FlatFeaturePageWindow`
+  (`pageAltitudeRatio` 0.5).
+- `runway-layer.ts` deleted; `runway-site.ts` keeps the site search, the frame and `runwayDistanceM` (forest
+  clearance). `?runway=on|paint|stamp|off` now covers the whole network. The panel shows the page level, page size,
+  pages listed, the longest list and whether any list was full. New `10 km` view preset.
+
+### Verified
+
+- Specs, headless (`ChromeHeadless`, `--watch=false`): `worldgen/render/core` `flat-features.spec.ts` and
+  `flat-feature-pages.spec.ts` 28/28 (SDF and frame maths; stamp plateau, shoulder and segment interpolation;
+  crossing priority in both orders with continuity at 1 m steps; clearance; page bounds; selection including clipped
+  edges and overflow; antimeridian wrap; streaming; **LOD continuity**: a level-0 patch and its four level-1
+  children through `handleCellPlanetMeshWorkerRequest` agree within 0.05 m at shared directions and sit on the
+  plateau). `planet-material` `flat-feature-layer.spec.ts` 4/4 on the GPU (paint, gaps, edge lines, outside;
+  crossing priority; outside the window, disabled, cleared; sub-pixel spread). Demo spike specs 30/30 (including
+  `airfield-features.spec.ts`).
+- `npm run build:triangular-engine` and `ng build demo-app --configuration development` pass.
+
+### Not verified
+
+- No visual check: the owner's server serves the main checkout, not this worktree.
+- No GPU timing of the layer (Q4 is still open).
+
+### Known limits
+
+- Float32 unit directions on the GPU: markings step at about 0.5 m on an Earth-size planet (fine on the spike's
+  smaller planet).
+- Equirectangular pages narrow in longitude near the poles; the window covers less ground there.
+- Features beyond the window are not drawn; a full page drops its lowest-priority features. At 10 km with the spike's
+  ratio a page is about 5 km, so the airfield page can overflow and drop road segments (`full` in the panel).
+- Material tiles (slope, cliff colour) are baked from the unstamped terrain.
+- The stamp scans features linearly (with a reach pre-test): fine for hundreds of features.
+
+### Owner checklist
+
+Route `/planet-surface-detail-spike`, after this branch's changes reach the served checkout. Use the view presets.
+
+1. **300 m.** Runway markings sharp (centreline dashes, edge lines, threshold bars); taxiway yellow centrelines;
+   concrete apron lighter than asphalt. Where the taxiway stubs meet the runway, the runway markings win; where the
+   two roads cross, the main road's markings win. No terrain poking through, no gap or cut along any edge; roads
+   blend into the ground on their shoulders.
+2. **1.5 km.** The whole airfield and the nearby roads visible and on the ground while zooming in and out (terrain
+   LOD changes must not move the paint off the flat ground). `?runway=paint` shows the paint on natural terrain,
+   `?runway=stamp` the flat ground alone, `?runway=off` neither.
+3. **10 km.** The runway is still visible; roads fade to faint lines rather than vanishing abruptly or growing wide.
+   The panel may show a full list (expected; low-priority road segments drop first). No flicker when the page level
+   changes while zooming between 6 km and 25 km.
+
+## 2026-10-27 — Spike S1: per-tree far shading replaces the shadow march; test buildings
+
+Follows the owner's Q3 verdict above. The height-field march is gone from the layer, its uniforms and the panel (the
+0/2/4 toggle and the `forestShadow` sun occlusion). In its place the far form draws the same trees the instances are
+scattered from.
+
+### What changed
+
+- **Per-tree lookup** (`forest-shading.ts`, CPU twin; `forest-layer.ts`, TSL). Each pixel finds the scatter's trees
+  from the cell hash alone: in the dominant axis's frame, 3 × 3 lattice columns around the point lifted to the shell's
+  middle, 5 cells per column. Exact for every tree within `LOOKUP_RADIUS_M` = S(1 − √½/2) ≈ 7.76 m; crowns and shadows
+  fade to nothing at that radius, so nothing ends in a line. 2 × 2 columns missed trees on faces tilted against the
+  lattice (a candidate half a cell off the shell's middle sits up to 4 m sideways).
+- **Tone:** a new draw `cellHash(seed·8 + 5)`, now the 5th float of the scatter (`SCATTER_STRIDE` = 5): brightness
+  ±12 %, slight red/blue hue shift, mean 1. The instances read the same draw through a per-instance colour attribute.
+- **Crown:** a disc of the tree's crown radius with a pixel-wide soft edge, lit as a dome by N·L. The dome normal
+  leans by `CROWN_NORMAL_LEAN` (0.3) to the up axis, the same lean the instances' shading normal now uses.
+- **Crown shadow:** a soft ellipse per tree (across 0.85 × crown radius; along crown radius + 0.35 × crown length /
+  tan(elevation), capped at 7.25 m), centred `0.56 H / tan(elevation)` away from the sun (the mean tree's crown centre),
+  found by a second lookup at the point moved that far toward the sun. tan(elevation) is floored at 0.035 (about 2°).
+- **Fade:** from 3 px to 2 px a crown (4–6 km for the 12 m crown) the pattern blends into `forestAverage`, a function of
+  sun height and density fitted to the pattern's own Monte Carlo mean (cover `0.668 d − 0.054 d²`; crown light
+  `0.989 + 0.249 exp(−s / 0.093)`; ground shade `0.467 d · smoothstep(0, 9.85 m, shadow offset)`; max fit errors 0.006,
+  0.008, 0.04). Beyond 6 km only the average runs.
+- **Temporary, documented in the code:** all shading is baked into the albedo against a fixed sky share of 0.25, because
+  the planet lighting stage reads only the sphere normal and its `sunVisibility` also dims the sky term. Move it to a
+  normal and a direct-shadow input when the library has them.
+- **Test buildings** (`building-field.ts`, `building-layer.ts`): up to 60 seeded candidates in a 500–3200 m ring
+  around the runway, 50–200 m footprints and heights, axis-aligned with the runway, at least 150 m off the apron and
+  40 m apart, none over water; trees and rocks keep 8 m off every footprint (worker `clearanceAt`). Meshes (sunk 10 m,
+  walls lit by their face normal) dissolve over 3–4 km into the far form: the roof footprint in the roof tone, and a
+  flat ground shadow, the convex hull of the footprint and the footprint moved away from the sun by
+  `height / tan(elevation)`, as plane distances; no march. The shadow draws at every distance (the meshes cast none).
+  Each building's far form fades out from 2 px to 1 px of its smallest side. Panel: show buildings toggle and count.
+
+Known limits: the building far form has no walls (visible in oblique views around 4 km); its shadow assumes flat
+ground and does not fall on other roofs; the forest far form still draws in the 8 m margin around a footprint where the
+instances leave a gap. Cost: within 6 km two lookups × 45 cells per pixel, about 300 hashes, plus one loop over the
+building list; not measured (Q4).
+
+### What was verified
+
+- `ng build demo-app --configuration development`: clean.
+- Spike specs headless (`--browsers=ChromeHeadless --watch=false`, `--include` the spike folder): 50/50. New:
+  `forest-shading.spec.ts` (crown shadow offset, shadow factor, tone mean and spread, crown light sides, the lookup
+  against the scatter on four tilted faces with matching tone draws, the 4–6 km band, the average against the pattern's
+  Monte Carlo mean within 0.03 at three sun/density cases) and `building-field.spec.ts` (placement constraints and
+  determinism, records round trip, trees and rocks off footprints, bands, footprint shadow offset and hull distance).
+- **Not verified:** nothing was seen by eye. The owner's server serves the main checkout, not this worktree, and no dev
+  server was started. GPU cost (Q4) and Q5 not touched.
+
+### Owner checklist (per-tree shading, buildings)
+
+Panel: **go to forest**, then the presets; wait for terrain to settle. Sun buttons **noon** (70°) and **low sun** (8°).
+
+1. 250 m, noon then low sun: instances carry visible per-tree tone; crowns brighter on the sun side; shadows short at
+   noon, long and pointing away from the sun at low sun.
+2. Split view (**split: instances | layer**) at 250 m and 1.5 km, noon and low sun: the layer half shows the same trees
+   (same places, tones, shadow directions) as the instance half; brightness of the halves agrees; no dark blobs.
+3. 1.5 km, noon and low sun: no seam where the instances dissolve into the layer (fade band 1–3 km).
+4. 6 km, noon and low sun: no brightness step while the pattern blends into the average (4–6 km); slow zoom 3 → 8 km.
+5. 25 km, noon and low sun: an even forest tone, darker at low sun only through the average; no pattern or banding.
+6. Buildings, **back to runway**: at 250 m and 1.5 km boxes stand on the ground with lit and dark walls and a ground
+   shadow on the side away from the sun; no trees or rocks inside them. At 6 km and 25 km roof footprints and swept
+   shadows, no pop around 3–4 km; at low sun the shadows are long but stay on the ground. Try the three view modes.

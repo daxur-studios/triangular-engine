@@ -15,5 +15,6 @@ export * from './macro-variation-layer';
 export * from './checker-debug-layer';
 export * from './cell-lookup-layer';
 export * from './streamed-material-layer';
+export * from './flat-feature-layer';
 export * from './planet-line-materials';
 export * from './planet-ocean-material';

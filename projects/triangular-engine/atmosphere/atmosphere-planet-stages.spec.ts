@@ -1,14 +1,16 @@
 import { Object3D, PerspectiveCamera, Vector3 } from 'three';
-import { float } from 'three/tsl';
+import { float, vec3, vec4 } from 'three/tsl';
 import { PlanetSurfaceMaterial } from '../planet-material/planet-surface-material';
-import { getEvalRenderer } from '../planet-material/gpu-eval.testing';
+import { evaluateOnGpu, getEvalRenderer } from '../planet-material/gpu-eval.testing';
 import { meshOf, renderRgba, triangleWith } from '../planet-material/render-eval.testing';
 import { AtmosphereBackdrop } from './atmosphere-backdrop';
 import { AtmosphereGpuModel } from './atmosphere-gpu-model';
-import { PlanetAtmosphereBinding } from './atmosphere-planet-stages';
+import { PlanetAtmosphereBinding, type IAtmosphereLightingInputs } from './atmosphere-planet-stages';
 import { earthAtmosphereProfile } from './atmosphere-presets';
 import { scaleAtmosphereProfile } from './atmosphere-scaling';
 import type { PhysicalAtmosphereProfile } from './atmosphere-profile';
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const SMALL = {
   transmittanceSize: [128, 32],
@@ -350,5 +352,79 @@ describe('planet material atmosphere stages on the GPU', () => {
     expect(results[0][2]).toBeGreaterThan(0);
     for (let c = 0; c < 3; c++) expect(results[1][c]).toBeCloseTo(results[0][c], 6);
     model.dispose();
+  });
+});
+
+/**
+ * `lighting(inputs)` called directly on the GPU. Each row is `[sphereNormal], [normal, directShadow]`; the test context
+ * carries slot 1 so the input callbacks can read it. The albedo is 1 and the sun is on +Z.
+ */
+describe('PlanetAtmosphereBinding.lighting inputs (normal and direct shadow) on the GPU', () => {
+  const normal = (context: any) => context.testNormal;
+  const directShadow = (context: any) => context.testShadow;
+
+  async function evaluate(inputs: IAtmosphereLightingInputs | undefined, rows: number[][][], configure?: (b: PlanetAtmosphereBinding) => void) {
+    const model = smallPlanetModel();
+    const binding = new PlanetAtmosphereBinding(model, { radiusUnits: 1 });
+    binding.setSunBody(0, 0, 1);
+    configure?.(binding);
+    const stage = binding.lighting(inputs);
+    const out = await evaluateOnGpu(rows, (at) => {
+      const up = at(0).xyz;
+      const context = { sphereNormal: up, radialDirection: up, cameraDistance: float(1), testNormal: at(1).xyz, testShadow: at(1).w } as any;
+      return vec4(stage(context, { color: vec3(0), sunVisibility: float(1), surface: { albedo: vec3(1, 1, 1) }, emissive: null }), 1);
+    });
+    model.dispose();
+    return rows.map((_, i) => [out[i * 4], out[i * 4 + 1], out[i * 4 + 2]]);
+  }
+
+  const noon = [0, 0, 1];
+  const low = [Math.sqrt(1 - 0.3 ** 2), 0, 0.3];
+
+  it('gives the same output without inputs as with neutral ones (the sphere normal, no shadow)', async () => {
+    const rows = [noon, low].map((s) => [s, [...s, 1]]);
+    const plain = await evaluate(undefined, rows);
+    const neutral = await evaluate({ normal, directShadow }, rows);
+    for (let i = 0; i < rows.length; i++) {
+      expect(plain[i][0]).toBeGreaterThan(0);
+      for (let c = 0; c < 3; c++) expect(neutral[i][c]).toBeCloseTo(plain[i][c], 4);
+    }
+  });
+
+  it('a direct shadow of 0 keeps the sky light, and a partial shadow scales only the direct term', async () => {
+    const rows = [0, 0.5, 1].map((shadow) => [noon, [...noon, shadow]]);
+    const [shade, half, sun] = await evaluate({ directShadow }, rows);
+    // The sky light alone, measured by turning the direct term off another way: a sun below the horizon of the normal.
+    const [skyOnly] = await evaluate({ normal }, [[noon, [0, 0, -1, 1]]]);
+    for (let c = 0; c < 3; c++) {
+      expect(shade[c]).toBeGreaterThan(sun[c] * 0.02);
+      expect(shade[c]).toBeLessThan(sun[c] * 0.9);
+      expect(shade[c]).toBeCloseTo(skyOnly[c], 4);
+      expect(half[c]).toBeCloseTo((shade[c] + sun[c]) / 2, 4);
+    }
+    // An eclipse still takes the sky light too: a planet-wide sunVisibility of 0 leaves nothing.
+    const [eclipsed] = await evaluate({ directShadow }, rows.slice(2), (b) => (b.sunVisibility.value = 0));
+    expect(eclipsed[0]).toBe(0);
+  });
+
+  it('a tilted normal changes only the direct term: N.L follows the normal, the sky and the transmittance stay', async () => {
+    const shadowed = (await evaluate({ directShadow }, [[noon, [...noon, 0]]]))[0];
+    const full = (await evaluate(undefined, [[noon, [...noon, 1]]]))[0];
+    const cosines = [1, 0.5, 0, -0.5];
+    const rows = cosines.map((mu) => [noon, [Math.sqrt(1 - mu * mu), 0, mu, 1]]);
+    const out = await evaluate({ normal }, rows);
+    cosines.forEach((mu, i) => {
+      for (let c = 0; c < 3; c++) {
+        const expected = shadowed[c] + Math.max(mu, 0) * (full[c] - shadowed[c]);
+        expect(out[i][c]).withContext(`N.L ${mu}, channel ${c}`).toBeCloseTo(expected, 4);
+      }
+    });
+    // With the sun low on the sphere, a normal turned towards it gets more direct light, through the same (low-sun) air.
+    // The sphere's own N.L is 0.3 there, so the direct term of a normal facing the sun is 1 / 0.3 times the sphere's.
+    const [onSphere, facingSun] = await evaluate({ normal }, [[low, [...low, 1]], [low, [0, 0, 1, 1]]]);
+    const [lowSky] = await evaluate({ directShadow }, [[low, [...low, 0]]]);
+    for (let c = 0; c < 3; c++) {
+      expect(facingSun[c] - lowSky[c]).toBeCloseTo((onSphere[c] - lowSky[c]) / 0.3, 4);
+    }
   });
 });

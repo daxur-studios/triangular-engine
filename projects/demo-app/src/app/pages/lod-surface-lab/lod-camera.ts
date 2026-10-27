@@ -33,6 +33,7 @@ const SPHERE_GROUND: Vec3 = [0.9, 0.85, 1];
 export function poseView(id: PoseId, domain: LodDomain): CameraView {
   const ground = domain.kind === 'plane' ? PLANE_GROUND : SPHERE_GROUND;
   const headingRad = domain.kind === 'plane' ? 0.6 : -0.75;
+  if (id === 'biome-canyon' && domain.kind === 'plane') return { ground: [34_000, 0, -4_000], altitudeM: 5500, headingRad: 0, pitchRad: -65 * DEG };
   if (id === 'biome-mountain' || id === 'biome-canyon') return biomeView(domain, id === 'biome-mountain' ? -0.04 : 0.36);
   switch (id) {
     case 'eye-2m': return { ground, altitudeM: 2, headingRad, pitchRad: -8 * DEG };

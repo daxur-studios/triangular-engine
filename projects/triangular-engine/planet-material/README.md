@@ -15,7 +15,7 @@ One `PlanetSurfaceMaterial` runs six stages. All of them read one shared `IPlane
 | 1 | Position: sphere <-> flat-map morph, shading normal, seam cull | Fixed. Drive `material.morph` uniforms (`uMorph`, projection, ...) |
 | 2 | Surface layers: an ordered stack that outputs albedo, roughness, metalness | `addSurfaceLayer` / `removeSurfaceLayer` |
 | 3 | Sun occlusion: occluders multiply into `sunVisibility` (0 shadowed, 1 lit) | `addSunOcclusion` / `removeSunOcclusion` |
-| 4 | Lighting: standard PBR, then an optional replaceable stage on the lit colour | `lighting` option, `setLightingStage` |
+| 4 | Lighting: standard PBR, then an optional replaceable stage on the lit colour. Stock stages take an optional per-pixel `normal` (direct sun only) and `directShadow` (darkens direct sun only) | `lighting` option, `setLightingStage`; `IPlanetLightingInputs` |
 | 5 | Emissive: an additive stack | `addEmissive` / `removeEmissive` |
 | 6 | Atmosphere: runs last, before fog. Identity by default | `atmosphere` option, `setAtmosphereStage` |
 
@@ -43,13 +43,37 @@ Geometry needs the attributes the stages read: `aFlatPos` / `aFlatNorm` (the fla
 | `PlanetSurfaceMaterial` | The material, with the stage/slot API above |
 | `vertexColorLayer`, `solidColorLayer` | Base layers |
 | `cellLookupLayer`, `streamedMaterialLayer`, `macroVariationLayer` | Stock surface layers (ports of the GLSL patches) |
+| `flatFeatureLayer` | Runways, taxiways, aprons and roads from a per-page feature list, with markings ([below](#flat-features-runways-roads)) |
 | `checkerDebugLayer` | A debug checkerboard as a layer: geography (`latLon`) or map-UV cells, `fwidth`-filtered, live-toggled |
 | `planetOceanMaterial` | The ocean shell: `MeshStandardNodeMaterial` + stage 1 |
 | `planetBorderMaterial`, `planetMapBorderMaterial` | Cell-grid lines and the flat-map frame |
-| `simpleDayNightLighting`, `sunVisibilityLighting` | Lighting stages |
+| `simpleDayNightLighting`, `sunVisibilityLighting` | Lighting stages; `IPlanetLightingInputs`, `ISimpleDayNightLightingOptions`, `ISunVisibilityLightingOptions` are their options |
 | `roadLayer`, `moonEclipseOcclusion`, `nightLightsEmissive` | Working examples of a layer, an occluder and an emissive. Use or copy them |
 | `createPlanetMorphUniforms`, `planetMorphGraph`, `createPlanetContext` | Stage 1 pieces, to build a different material from the same graph |
 | `equirectangularFlat`, `equalEarthFlat`, `seam*` | The projection and seam `Fn`s |
+
+## Flat features (runways, roads)
+
+`flatFeatureLayer(pages, options?)` paints placed flat features: asphalt or concrete with runway, taxiway or road markings. The features and their per-page lists come from a `FlatFeaturePageWindow` (`triangular-engine/worldgen/render/core`, see [Flat features](../worldgen/render/README.md#6-flat-features-runways-roads)); the layer only reads its two textures and uniforms, so this entry does not import `worldgen`. The same feature set flattens the terrain in the mesh worker, so the paint and the flat ground always agree.
+
+```ts
+import { flatFeatureLayer, SURFACE_LAYER_ORDER } from 'triangular-engine/planet-material';
+import { FlatFeaturePageWindow, FlatFeatureSet } from 'triangular-engine/worldgen/render/core';
+
+const pages = new FlatFeaturePageWindow(new FlatFeatureSet(features, radiusM));
+const flat = flatFeatureLayer(pages, { concrete: '#8f8a80' });
+material.addSurfaceLayer({ id: 'flatFeatures', order: SURFACE_LAYER_ORDER.game, layer: flat.layer });
+
+// each frame, before rendering: camera direction from the planet centre and altitude in metres
+pages.update(cameraDirection, altitudeM);
+```
+
+- Per pixel the layer finds its page from `context.latLon`, walks that page's short list (at most `maxPerPage`, default 8, unrolled), and takes the signed distance of each feature: a box for rectangles, a round-ended capsule for segments. All texture reads use an explicit level, like `streamedMaterialLayer`.
+- **Crossings.** Where features overlap, the one with the highest `priority` owns the markings; the body colour is the union. Between equal priorities the pixel goes to the feature it is deeper inside.
+- **Far away.** A feature narrower than a pixel is spread over the pixel at its area weight instead of vanishing or widening, so a road fades to a faint line from altitude.
+- `enabled` (uniform) toggles it live; the colour options (`asphalt`, `concrete`, `paint`, `taxiwayPaint`) are linear RGB triplets or CSS colours and are live uniforms too.
+
+**Why `roadLayer` is not built on it.** `roadLayer` stays a standalone example of writing a layer: its road is a planet-spanning great circle with an angular width and no height. That shape is longer than the 45° a flat-feature segment may span and would sit in nearly every page list. Use `flatFeatureLayer` for placed roads, runways and airfields, and `roadLayer` as a template for your own analytic layer.
 
 ## Debug checkerboard
 
@@ -101,6 +125,17 @@ A sun occluder is `(context) => number node` (1 = lit), an emissive is `(context
 - **`fwidth` and other derivatives** must be evaluated unconditionally (WGSL), not inside a branch.
 - **Prefer `mix` over `select`** when blending vec3 values from `outputNode.rgb`: a `select` there returned 0 on the false branch in the day/night stage and was not root-caused.
 - **The lighting stage runs on the final lit colour**, as the GLSL day/night patch does. With occluders and no custom stage, `sunVisibilityLighting` scales the colour by `mix(0.15, 1, sunVisibility)`, exact for a sun-only scene and approximate otherwise.
+- **Occluders dim the sky too; a direct shadow does not.** `sunVisibility` (the occluders' product) stands for an eclipse: it dims direct and sky light. For a cast shadow (a canopy, a building, a cloud's shadow on one surface) pass `directShadow` (0 shadowed, 1 lit) to the lighting stage instead, and for a canopy or roof normal pass `normal` (body frame, the frame of `context.sphereNormal`). Both are `(context, input) => node`, so they can read a field a layer put on `input.surface`. The sky or ambient term keeps the sphere normal, so a mesh, its impostor and its far form in the surface material get the same sky light. Without either input a stage builds the same graph as before.
+
+  ```ts
+  const stage = simpleDayNightLighting(dayNight, {
+    normal: (_context, input) => (input.surface as any).canopyNormal, // vec3, body frame
+    directShadow: (_context, input) => (input.surface as any).canopyShade, // float, 0..1
+    skyShare: 0.35, // the share of day light that is sky light (default)
+  });
+  ```
+
+  `simpleDayNightLighting` has no sky model, so with inputs it splits its day factor: `skyShare` (default 0.35) stays on the sphere normal, the rest follows the normal's own sun angle and the shadow (the golden-hour glow's direct share too). `sunVisibilityLighting` takes `directShadow` only (it knows no sun direction; it multiplies into `sunVisibility` and keeps `floor`). The atmosphere's `binding.lighting(inputs)` takes both; see the [atmosphere guide](../atmosphere/README.md#on-the-planet-material).
 - **`lightingTurn`** (`createPlanetMorphLightingUniforms().uMorphLightingTurn`, a `mat3`) makes the shading normal `normalize(turn * sphereNormal)` instead of the morphed normal, so lighting follows the globe while the geometry morphs.
 - **The morphed normal is a vertex-stage varying (`vMorphedNormal`)**, so it stays correct when a material replaces `positionNode` with its own (for example a camera-relative position) and in batched terrain. It is computed from the batch offset in the vertex stage, where `positionLocal` is still the batched, unmorphed position. A `normalNode` expression that reads `positionLocal` itself still sees the replaced position in the fragment stage; keep per-vertex values in varyings. The varying costs one inter-stage slot (16 max) and is not created under `lightingTurn`.
 

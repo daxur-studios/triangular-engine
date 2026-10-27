@@ -44,6 +44,9 @@
       "triangular-engine/scatter": [
         "projects/triangular-engine/scatter/public-api"
       ],
+      "triangular-engine/scatter/tsl": [
+        "projects/triangular-engine/scatter/tsl/public-api"
+      ],
       "triangular-engine/clouds": [
         "projects/triangular-engine/clouds/public-api"
       ],

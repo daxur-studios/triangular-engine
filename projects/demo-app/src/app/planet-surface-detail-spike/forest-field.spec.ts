@@ -1,3 +1,4 @@
+import { measureScatterPlanetCover, scatterPlanetLattice, type IScatterPlanetLatticeResult } from 'triangular-engine/scatter';
 import {
   FOREST_CANOPY_COVER,
   FOREST_CLEARANCE_M,
@@ -8,13 +9,9 @@ import {
   forestFieldDensity,
   forestHash,
   forestNoise,
-  cellHash,
-  scatterCells,
   scatterForest,
-  SCATTER_STRIDE,
-  TREE_SEED,
+  treeScatterLayer,
 } from './forest-field';
-import { TREE_SHAPE } from './forest-instances';
 import { ROCK_COVER, ROCK_SIZE_RANGE_M, rockBands, rockFieldDensity, scatterRocks } from './rock-field';
 import { RUNWAY_APRON_M, RUNWAY_LENGTH_M, runwayFrame, type IRunwaySite, type Vec3 } from './runway-site';
 
@@ -83,23 +80,11 @@ describe('forest density field', () => {
   });
 
   it('keeps the far form cover equal to the crown cover the scatter measures from above', () => {
-    // Union area of the crown discs of a solid stand, by Monte Carlo on a fixed sequence of points.
-    const solid = scatterCells({ centre, radiusM: RADIUS_M, areaRadiusM: 500, spacingM: FOREST_SPACING_M, seed: TREE_SEED, heightAt: () => 100, densityAt: () => 1 });
-    const trees: [number, number, number][] = [];
-    for (let i = 0; i < solid.instances.length; i += SCATTER_STRIDE) {
-      const [x, y, z] = [solid.instances[i], solid.instances[i + 1], solid.instances[i + 2]];
-      trees.push([x * along[0] + y * along[1] + z * along[2], x * across[0] + y * across[1] + z * across[2], (FOREST_CROWN_WIDTH_M / 2) * TREE_SHAPE.scale(solid.instances[i + 3])]);
-    }
-    let covered = 0;
-    const n = 4000;
-    for (let k = 0; k < n; k += 1) {
-      const r = 200 * Math.sqrt((k + 0.5) / n);
-      const angle = k * 2.399963229728653;
-      const px = r * Math.cos(angle);
-      const py = r * Math.sin(angle);
-      if (trees.some(([tx, ty, radius]) => Math.hypot(tx - px, ty - py) < radius)) covered += 1;
-    }
-    expect(Math.abs(covered / n - FOREST_CANOPY_COVER)).toBeLessThan(0.03);
+    // Union area of the crown discs of a solid stand of the tree layer, measured on the scatter itself.
+    const layer = { ...treeScatterLayer(FOREST_SPACING_M, 1, null, RADIUS_M), density: () => 1 };
+    const solid = scatterPlanetLattice(layer, { centre, radiusM: RADIUS_M, windowRadiusM: 500, heightAt: () => 100 });
+    const cover = measureScatterPlanetCover(solid, { footprintRadiusM: FOREST_CROWN_WIDTH_M / 2, sampleRadiusM: 200 });
+    expect(Math.abs(cover - FOREST_CANOPY_COVER)).toBeLessThan(0.03);
     expect(FOREST_CANOPY_COVER).toBeLessThan((Math.PI * (FOREST_CROWN_WIDTH_M / 2) ** 2) / FOREST_SPACING_M ** 2);
   });
 
@@ -118,58 +103,13 @@ describe('forest density field', () => {
   });
 });
 
-describe('scatterForest', () => {
-  const heightAt = () => 200;
-  const options = { centre, radiusM: RADIUS_M, areaRadiusM: 1500, spacingM: 15, densityScale: 1, site: null as IRunwaySite | null, heightAt };
-  const scatter = (o: Partial<Omit<typeof options, 'site'>> & { site?: IRunwaySite | null } = {}) => scatterForest({ ...options, ...o }).instances;
-
-  it('is deterministic', () => {
-    expect(Array.from(scatter())).toEqual(Array.from(scatter()));
-  });
-
-  it('puts trees where the field is dense and none where it is empty', () => {
-    const trees = scatter();
-    expect(trees.length / SCATTER_STRIDE).toBeGreaterThan(50);
-    let dense = 0;
-    let bare = 0;
-    for (let i = 0; i < trees.length; i += SCATTER_STRIDE) {
-      const x = trees[i] + centre[0] * RADIUS_M;
-      const y = trees[i + 1] + centre[1] * RADIUS_M;
-      const z = trees[i + 2] + centre[2] * RADIUS_M;
-      const d = forestFieldDensity(x, y, z, 200);
-      if (d > 0.5) dense += 1;
-      if (d === 0) bare += 1;
-    }
-    expect(bare).toBe(0);
-    expect(dense / (trees.length / SCATTER_STRIDE)).toBeGreaterThan(0.5);
-  });
-
-  it('scales with the density scale and drops to nothing at zero', () => {
-    const full = scatter().length;
-    const half = scatter({ densityScale: 0.5 }).length;
-    expect(half).toBeLessThan(full);
-    expect(scatter({ densityScale: 0 }).length).toBe(0);
-  });
-
-  it('skips water, and keeps trees off the runway', () => {
-    expect(scatterForest({ ...options, heightAt: () => null }).instances.length).toBe(0);
-    const trees = scatter({ site, areaRadiusM: 1800 });
-    for (let i = 0; i < trees.length; i += SCATTER_STRIDE) {
-      const px = trees[i] + centre[0] * RADIUS_M;
-      const py = trees[i + 1] + centre[1] * RADIUS_M;
-      const pz = trees[i + 2] + centre[2] * RADIUS_M;
-      const a = px * along[0] + py * along[1] + pz * along[2];
-      const b = px * across[0] + py * across[1] + pz * across[2];
-      const outside = Math.hypot(Math.max(Math.abs(a) - RUNWAY_LENGTH_M / 2, 0), Math.max(Math.abs(b) - 22.5, 0));
-      // The apron is cleared too (a few metres of slack for the flat-tangent approximation).
-      expect(outside).toBeGreaterThanOrEqual(RUNWAY_APRON_M - 5);
-    }
-  });
-});
-
-/** Absolute body-fixed position of instance `i` in a result scattered around `from`. */
-function absolute(offset: Float32Array, i: number, from: Vec3): Vec3 {
-  return [offset[i] + from[0] * RADIUS_M, offset[i + 1] + from[1] * RADIUS_M, offset[i + 2] + from[2] * RADIUS_M];
+/** Absolute body-fixed position of instance `i` of a result. */
+function absolute(result: IScatterPlanetLatticeResult, i: number): Vec3 {
+  return [
+    result.offsetsM[i * 3] + result.originM[0],
+    result.offsetsM[i * 3 + 1] + result.originM[1],
+    result.offsetsM[i * 3 + 2] + result.originM[2],
+  ];
 }
 
 /** Arc distance in metres on the datum sphere from a direction to a body-fixed point. */
@@ -186,114 +126,67 @@ function around(origin: Vec3, metresAlong: number, metresAcross: number): Vec3 {
   return [x / l, y / l, z / l];
 }
 
-/** Instances of two windows that lie within `within` metres of both centres, paired with B's nearest instance of the same random draw. */
-function overlap(a: { centre: Vec3; result: Float32Array }, b: { centre: Vec3; result: Float32Array }, within: number) {
-  // The draw is 24 bits, so a window of tens of thousands holds a few repeats: pair by draw, then by position.
-  const inB = new Map<number, Vec3[]>();
-  for (let i = 0; i < b.result.length; i += SCATTER_STRIDE) {
-    const list = inB.get(b.result[i + 3]) ?? [];
-    list.push(absolute(b.result, i, b.centre));
-    inB.set(b.result[i + 3], list);
+/** Lattice cell keys of a result. */
+const cellKeys = (result: IScatterPlanetLatticeResult): string[] =>
+  Array.from({ length: result.scale.length }, (_, i) => [result.cells[i * 3], result.cells[i * 3 + 1], result.cells[i * 3 + 2]].join());
+
+/** Instances of a result clear of the runway rectangle plus its apron (a few metres of slack for the flat tangent). */
+function expectClearOfRunway(result: IScatterPlanetLatticeResult): void {
+  for (let i = 0; i < result.scale.length; i += 1) {
+    const [px, py, pz] = absolute(result, i);
+    const a = px * along[0] + py * along[1] + pz * along[2];
+    const b = px * across[0] + py * across[1] + pz * across[2];
+    const outside = Math.hypot(Math.max(Math.abs(a) - RUNWAY_LENGTH_M / 2, 0), Math.max(Math.abs(b) - 22.5, 0));
+    expect(outside).toBeGreaterThanOrEqual(RUNWAY_APRON_M - 5);
   }
-  const pairs: { a: Vec3; b: Vec3 | undefined; random: number }[] = [];
-  for (let i = 0; i < a.result.length; i += SCATTER_STRIDE) {
-    const point = absolute(a.result, i, a.centre);
-    if (arcTo(point, a.centre) > within || arcTo(point, b.centre) > within) continue;
-    const candidates = inB.get(a.result[i + 3]) ?? [];
-    const distance = (q: Vec3) => Math.hypot(point[0] - q[0], point[1] - q[1], point[2] - q[2]);
-    const nearest = candidates.sort((p, q) => distance(p) - distance(q))[0];
-    pairs.push({ a: point, b: nearest, random: a.result[i + 3] });
-  }
-  return pairs;
 }
 
-describe('deterministic placement (same body-fixed place, same object)', () => {
-  const heightAt = (direction: Vec3) => 150 + 40 * direction[0];
-  const common = { radiusM: RADIUS_M, areaRadiusM: 1200, spacingM: 12, densityScale: 1.4, site: null, heightAt };
+describe('scatterForest (library planet lattice with the forest field)', () => {
+  const heightAt = (): number | null => 200;
+  const options = { centre, radiusM: RADIUS_M, areaRadiusM: 1500, spacingM: 15, densityScale: 1, site: null as IRunwaySite | null, heightAt };
+  const scatter = (o: Partial<Omit<typeof options, 'site'>> & { site?: IRunwaySite | null } = {}) => scatterForest({ ...options, ...o });
 
-  it('returns identical trees in the overlap of two windows with different centres', () => {
+  it('puts trees where the field is dense and none where it is empty', () => {
+    const trees = scatter();
+    expect(trees.scale.length).toBeGreaterThan(50);
+    let dense = 0;
+    let bare = 0;
+    for (let i = 0; i < trees.scale.length; i += 1) {
+      const [x, y, z] = absolute(trees, i);
+      const d = forestFieldDensity(x, y, z, 200);
+      if (d > 0.5) dense += 1;
+      if (d === 0) bare += 1;
+    }
+    expect(bare).toBe(0);
+    expect(dense / trees.scale.length).toBeGreaterThan(0.5);
+  });
+
+  it('scales with the density scale and drops to nothing at zero', () => {
+    const full = scatter().scale.length;
+    expect(scatter({ densityScale: 0.5 }).scale.length).toBeLessThan(full);
+    expect(scatter({ densityScale: 0 }).scale.length).toBe(0);
+  });
+
+  it('skips water, and keeps trees off the runway', () => {
+    expect(scatter({ heightAt: () => null }).scale.length).toBe(0);
+    expectClearOfRunway(scatter({ site, areaRadiusM: 1800 }));
+  });
+
+  it('keeps the same trees after a recentre (zoom) and for any window size', () => {
+    const common = { ...options, spacingM: 12, densityScale: 1.4, areaRadiusM: 1200 };
     const centreB = around(centre, 310, -170);
-    const a = { centre, result: scatterForest({ ...common, centre }).instances };
-    const b = { centre: centreB, result: scatterForest({ ...common, centre: centreB }).instances };
-    const pairs = overlap(a, b, 850);
-    expect(pairs.length).toBeGreaterThan(100);
-    for (const pair of pairs) {
-      expect(pair.b).toBeDefined();
-      expect(Math.hypot(pair.a[0] - pair.b![0], pair.a[1] - pair.b![1], pair.a[2] - pair.b![2])).toBeLessThan(0.02);
-    }
-    // And nothing extra: no tree of B inside the overlap is missing from A.
-    expect(overlap(b, a, 850).every((pair) => pair.b !== undefined)).toBeTrue();
-  });
-
-  it('does not depend on the window size or on a second request', () => {
-    const small = scatterForest({ ...common, centre, areaRadiusM: 600 }).instances;
-    const large = scatterForest({ ...common, centre, areaRadiusM: 2000 }).instances;
-    const again = scatterForest({ ...common, centre, areaRadiusM: 600 }).instances;
-    expect(Array.from(again)).toEqual(Array.from(small));
-    const inLarge = new Set<number>();
-    for (let i = 0; i < large.length; i += SCATTER_STRIDE) inLarge.add(large[i + 3]);
-    for (let i = 0; i < small.length; i += SCATTER_STRIDE) expect(inLarge.has(small[i + 3])).toBeTrue();
-  });
-
-  it('is not tied to the dominant axis: a solid window anywhere on the sphere holds one object per cell', () => {
-    for (const c of [[1, 0.2, 0.1], [-0.3, 0.9, 0.2], [0.1, -0.2, -1], [0.6, -0.6, 0.5], [-0.5, -0.5, -0.7]] as Vec3[]) {
-      const l = Math.hypot(...c);
-      const centreN: Vec3 = [c[0] / l, c[1] / l, c[2] / l];
-      const result = scatterCells({ centre: centreN, radiusM: RADIUS_M, areaRadiusM: 800, spacingM: 12, seed: 4, heightAt, densityAt: () => 1 });
-      const expected = (Math.PI * 800 ** 2) / 12 ** 2;
-      expect(result.accepted).toBeGreaterThan(expected * 0.9);
-      expect(result.accepted).toBeLessThan(expected * 1.1);
-      for (let i = 0; i < result.instances.length; i += SCATTER_STRIDE) {
-        expect(arcTo(absolute(result.instances, i, centreN), centreN)).toBeLessThanOrEqual(801);
-      }
-    }
-  });
-
-  it('holds about one candidate per cell: a solid stand is a tree every spacing, not clumps or rows', () => {
-    const solid = scatterCells({
-      centre,
-      radiusM: RADIUS_M,
-      areaRadiusM: 1000,
-      spacingM: 12,
-      seed: 9,
-      heightAt: () => 100,
-      densityAt: () => 1,
+    const a = scatterForest({ ...common, centre });
+    const b = new Set(cellKeys(scatterForest({ ...common, centre: centreB })));
+    let checked = 0;
+    cellKeys(a).forEach((key, i) => {
+      const point = absolute(a, i);
+      if (arcTo(point, centre) > 850 || arcTo(point, centreB) > 850) return;
+      expect(b.has(key)).toBeTrue();
+      checked += 1;
     });
-    const expected = (Math.PI * 1000 ** 2) / 12 ** 2;
-    expect(solid.accepted).toBeGreaterThan(expected * 0.9);
-    expect(solid.accepted).toBeLessThan(expected * 1.1);
-  });
-
-  it('keeps the nearest when the buffer is short, so what is lost is the far edge', () => {
-    const all = scatterForest({ ...common, centre });
-    const cut = scatterForest({ ...common, centre, maxCount: 300 });
-    expect(cut.accepted).toBe(all.accepted);
-    expect(cut.instances.length / SCATTER_STRIDE).toBe(300);
-    const kept = new Set<number>();
-    let farthestKept = 0;
-    for (let i = 0; i < cut.instances.length; i += SCATTER_STRIDE) {
-      kept.add(cut.instances[i + 3]);
-      farthestKept = Math.max(farthestKept, arcTo(absolute(cut.instances, i, centre), centre));
-    }
-    let nearestDropped = Infinity;
-    for (let i = 0; i < all.instances.length; i += SCATTER_STRIDE) {
-      if (!kept.has(all.instances[i + 3])) nearestDropped = Math.min(nearestDropped, arcTo(absolute(all.instances, i, centre), centre));
-    }
-    expect(nearestDropped).toBeGreaterThanOrEqual(farthestKept - 0.01);
-  });
-
-  it('gives each class its own draws: a rock cell is not a tree cell', () => {
-    expect(cellHash(5, 6, 7, 8)).not.toBe(cellHash(5, 6, 7, 16));
-    expect(cellHash(5, 6, 7, 8)).toBe(cellHash(5, 6, 7, 8));
-    let min = 1;
-    let max = 0;
-    for (let i = 0; i < 500; i += 1) {
-      const h = cellHash(i, -i * 7, i * 13, 3);
-      min = Math.min(min, h);
-      max = Math.max(max, h);
-    }
-    expect(min).toBeLessThan(0.05);
-    expect(max).toBeGreaterThan(0.95);
+    expect(checked).toBeGreaterThan(100);
+    const large = new Set(cellKeys(scatterForest({ ...common, centre, areaRadiusM: 2000 })));
+    for (const key of cellKeys(scatterForest({ ...common, centre, areaRadiusM: 600 }))) expect(large.has(key)).toBeTrue();
   });
 });
 
@@ -346,19 +239,21 @@ describe('rocks', () => {
 
   it('scatters on its own field, deterministically and independent of the window centre', () => {
     const a = scatterRocks(options);
-    expect(a.instances.length / SCATTER_STRIDE).toBeGreaterThan(20);
-    expect(Array.from(scatterRocks(options).instances)).toEqual(Array.from(a.instances));
-    const shifted = around(centre, 200, 150);
-    const b = scatterRocks({ ...options, centre: shifted });
-    const inB = new Set<number>();
-    for (let i = 0; i < b.instances.length; i += SCATTER_STRIDE) inB.add(b.instances[i + 3]);
-    let checked = 0;
-    for (let i = 0; i < a.instances.length; i += SCATTER_STRIDE) {
-      const point = absolute(a.instances, i, centre);
-      if (arcTo(point, shifted) > 650 || arcTo(point, centre) > 650) continue;
-      checked += 1;
-      expect(inB.has(a.instances[i + 3])).toBeTrue();
+    expect(a.scale.length).toBeGreaterThan(20);
+    expect(Array.from(scatterRocks(options).offsetsM)).toEqual(Array.from(a.offsetsM));
+    for (const size of a.scale) {
+      expect(size).toBeGreaterThanOrEqual(ROCK_SIZE_RANGE_M[0]);
+      expect(size).toBeLessThanOrEqual(ROCK_SIZE_RANGE_M[1]);
     }
+    const shifted = around(centre, 200, 150);
+    const inB = new Set(cellKeys(scatterRocks({ ...options, centre: shifted })));
+    let checked = 0;
+    cellKeys(a).forEach((key, i) => {
+      const point = absolute(a, i);
+      if (arcTo(point, shifted) > 650 || arcTo(point, centre) > 650) return;
+      checked += 1;
+      expect(inB.has(key)).toBeTrue();
+    });
     expect(checked).toBeGreaterThan(10);
   });
 
@@ -389,14 +284,7 @@ describe('rocks', () => {
     expect(openSamples).toBeGreaterThan(50);
     expect(underForest / forestSamples).toBeLessThan(open / openSamples);
     expect(rockFieldDensity(RADIUS_M * 0.6, 1, RADIUS_M * 0.8, 0)).toBe(0);
-    expect(scatterRocks({ ...options, heightAt: () => null }).instances.length).toBe(0);
-    const rocks = scatterRocks({ ...options, site, areaRadiusM: 1500 }).instances;
-    for (let i = 0; i < rocks.length; i += SCATTER_STRIDE) {
-      const [px, py, pz] = absolute(rocks, i, centre);
-      const a = px * along[0] + py * along[1] + pz * along[2];
-      const b = px * across[0] + py * across[1] + pz * across[2];
-      const outside = Math.hypot(Math.max(Math.abs(a) - RUNWAY_LENGTH_M / 2, 0), Math.max(Math.abs(b) - 22.5, 0));
-      expect(outside).toBeGreaterThanOrEqual(RUNWAY_APRON_M - 5);
-    }
+    expect(scatterRocks({ ...options, heightAt: () => null }).scale.length).toBe(0);
+    expectClearOfRunway(scatterRocks({ ...options, site, areaRadiusM: 1500 }));
   });
 });

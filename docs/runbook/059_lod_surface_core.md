@@ -943,3 +943,26 @@ The prescribed headless hardware, standard, noisy launches ran one per case on N
 The floor thumbnails are visually alike: ridges show as narrow, jagged pale bands. The plane canyon thumbnail looks almost flat and does not clearly show the winding cut. Zero crack pixels do not establish that the crests and canyon look right or that no triangles are inverted. The 100 km plane's roughly 98 m texels may limit steep detail; this has not been visually separated from the camera and simple shading. Visual review, a better canyon view and an uncapped floor comparison remain open.
 
 Verification: 142 lab specs before, 149 after, all green with the prescribed headless command; `npm run build:triangular-engine` passed. No GPU height readback or visual acceptance was performed.
+
+## 2026-10-27 — Biome terrain follow-up: budget, lighting and traversal
+
+Terrain v5 replaces the cap-masked 2/4 px floor cases with two plane-mountain ABAB comparisons. The lab already shaded height gradients with a sun; it now exposes a lighting toggle, defaults it on in biome cases, and uses a lower side light for the canyon view. The plane canyon camera looks down over the winding path. Traversals replay the route after the timing window and probe five positions (0, 0.25, 0.5, 0.75, 1), advancing between positions; this does not measure every point of the original timed traversal. Selection timing is split into selector/frustum and instance packing/anchor time.
+
+Noisy headless NVIDIA WebGPU, standard mode, one launcher per case; all eight ABAB cases passed automated checks, with zero crack pixels. Performance is inconclusive because the headless hardware/power profile was not independently verified. Canvas device pixels per triangle is an upper bound. GPU scene times are median / p95 milliseconds.
+
+| Comparison and round | triangles | canvas px / triangle upper bound | GPU scene ms med / p95 | crack px |
+| --- | ---: | ---: | ---: | ---: |
+| cap 1024 A1 | 1,626,112 | 1.659 | 0.253 / 0.265 | 0 |
+| cap 512 B1 | 759,808 | 3.551 | 0.145 / 0.155 | 0 |
+| cap 1024 A2 | 1,626,112 | 1.659 | 0.257 / 0.267 | 0 |
+| cap 512 B2 | 759,808 | 3.551 | 0.142 / 0.151 | 0 |
+| cells 32 A1 | 1,626,112 | 1.659 | 0.249 / 0.253 | 0 |
+| cells 16 B1 | 406,528 | 6.636 | 0.104 / 0.112 | 0 |
+| cells 32 A2 | 1,626,112 | 1.659 | 0.249 / 0.254 | 0 |
+| cells 16 B2 | 406,528 | 6.636 | 0.106 / 0.115 | 0 |
+
+The crests remain narrow and jagged in the 240 px thumbnails; these do not establish full-resolution quality. Plane traversal selection p95 was 0.3 ms, selector/frustum 0.3 and instance upload 0.1; sphere was 0.4, 0.3 and 0.1 ms, respectively. The 0.1 ms browser clock resolution limits attribution; selector work dominates, but no internal selector phase was profiled. Still views return early for the same view while movement rebuilds the tree. Each traversal had five zero-crack samples.
+
+The initial revised canyon case was pale, and a later run timed out reading GPU timestamps while specs were running; it was rerun after the specs. The final overhead camera and lower side light passed the probe (0 px), but the winding cut remains too faint in the 240 px thumbnail; readable canyon appearance and visual acceptance remain open. The last successful canyon case drew 675,840 triangles. The earlier biome floor comparison remains in historical v4 only.
+
+Verification: 149 specs before and 151 after, all green under the prescribed headless command; `npm run docs:records:check` passed.

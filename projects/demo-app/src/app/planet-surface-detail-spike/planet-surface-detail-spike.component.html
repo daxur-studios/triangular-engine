@@ -38,6 +38,7 @@
   <h2>Surface detail LOD · S1</h2>
   <p>{{ runwayLengthM }} m × {{ runwayWidthM }} m runway · mode <b>{{ runwayMode }}</b></p>
   <p>{{ siteText() }}</p>
+  <p>{{ featureText() }}</p>
   <p class="row">
     @for (view of views; track view.altitudeM) {
       <button (click)="jump(view.altitudeM)" [class.on]="altitudeM() === view.altitudeM">{{ view.label }}</button>
@@ -95,11 +96,9 @@
   <label>density scale {{ densityScale() }}
     <input type="range" min="0" max="2" step="0.05" [value]="densityScale()" (input)="setDensityScale($event)" />
   </label>
-  <p class="row">
-    Shadow steps:
-    @for (steps of [0, 2, 4]; track steps) {
-      <button (click)="setShadowSteps(steps)" [class.on]="shadowSteps() === steps">{{ steps }}</button>
-    }
+  <p>
+    Far form: per-tree crowns (tone, dome light) and crown shadows from the same cell hash as the instances; it blends
+    into one sun-dependent average over {{ patternBand.startM.toFixed(0) }}–{{ patternBand.endM.toFixed(0) }} m (3 → 2 px a crown).
   </p>
   <h3>Rocks</h3>
   <p class="row">
@@ -110,6 +109,17 @@
     {{ rockSizeRangeM[0] }}–{{ rockSizeRangeM[1] }} m rocks (band from {{ rockSizeM }} m): meshes up to {{ rockBandsM.meshStartM.toFixed(0) }} m, mesh → speckle over
     {{ rockBandsM.meshStartM.toFixed(0) }}–{{ rockBandsM.meshEndM.toFixed(0) }} m, speckle → nothing over
     {{ rockBandsM.speckleStartM.toFixed(0) }}–{{ rockBandsM.speckleEndM.toFixed(0) }} m. Same view modes as the forest.
+  </p>
+  <h3>Buildings</h3>
+  <p class="row">
+    <label><input type="checkbox" [checked]="showBuildings()" (change)="setShowBuildings($any($event.target).checked)" /> show buildings</label>
+    · {{ buildingCount() }} boxes
+  </p>
+  <p>
+    {{ buildingSizeRangeM[0] }}–{{ buildingSizeRangeM[1] }} m footprints, {{ buildingHeightRangeM[0] }}–{{ buildingHeightRangeM[1] }} m tall:
+    meshes up to {{ buildingBandsM.meshStartM.toFixed(0) }} m, mesh → roof footprint over {{ buildingBandsM.meshStartM.toFixed(0) }}–{{
+      buildingBandsM.meshEndM.toFixed(0)
+    }} m, footprint gone from 2 → 1 px of its smallest side. Ground shadow (footprint swept from the sun) at every distance. Same view modes as the forest.
   </p>
   <hr />
   <label>exposure {{ exposure() }}

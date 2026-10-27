@@ -3,18 +3,25 @@
 import { buildCellBorderLineGeometry } from 'triangular-engine/worldgen/render';
 import {
   defaultCellPlanetWorldCache,
+  FlatFeatureSet,
   handleCellPlanetWorkerMessage,
   type CellPlanetWorkerMessage,
+  type FlatFeature,
+  type ICellPlanetWorkerPipelineOptions,
 } from 'triangular-engine/worldgen/render/core';
+import { scatterPlanetLatticeTransferables } from 'triangular-engine/scatter';
 import type { WorldProfileKind } from 'triangular-engine/worldgen';
 import { forestClearance, forestFieldDensity, scatterForest } from './forest-field';
 import { scatterRocks } from './rock-field';
-import { findRunwaySite, runwayHeightStamp, type IRunwaySite, type ModifyElevation, type Vec3 } from './runway-site';
+import { airfieldFeatures } from './airfield-features';
+import { buildingClearance, buildingInstances, placeBuildings, type IBuilding } from './building-field';
+import { findRunwaySite, type IRunwaySite, type Vec3 } from './runway-site';
 
 /**
- * Plan 063 spike S1: the cell-planet worker with one extra hook. Mesh requests flagged `runwayStamp` get the
- * runway's height stamp through the pipeline's `modifyElevation`; a `runwaySite` message returns the site so the
- * page can drive the material layer from the same numbers. The material tile path is untouched.
+ * Plan 063 spike S1: the cell-planet worker with one extra hook. Mesh requests flagged `flatFeatureStamp` get the
+ * library flat-feature height stamp (the airfield and its roads) through the pipeline's `modifyElevation`; a
+ * `runwaySite` message returns the site and a `flatFeatures` message the feature list, so the page draws the paint
+ * from the same features. The material tile path is untouched.
  */
 export interface IRunwaySiteRequest {
   readonly kind: 'runwaySite';
@@ -25,7 +32,7 @@ export interface IRunwaySiteRequest {
   readonly seed: number;
 }
 
-/** Q1/Q3: instances for the forest near `centre`, scattered from the density field at the sampler's ground height. */
+/** Q1/Q3: instances near `centre` from the library's planet lattice (`scatterPlanetLattice`) at the sampler's ground height. */
 export interface IForestScatterRequest {
   readonly kind: 'forestScatter';
   readonly id: number;
@@ -34,7 +41,7 @@ export interface IForestScatterRequest {
   readonly worldProfile: WorldProfileKind;
   readonly seed: number;
   readonly centre: Vec3;
-  /** Object class: trees (forest field) or rocks (rock field, own seed and spacing). */
+  /** Object class: trees (forest field) or rocks (rock field, own seed, cell size and size range). */
   readonly objectClass: 'tree' | 'rock';
   readonly areaRadiusM: number;
   readonly spacingM: number;
@@ -59,21 +66,75 @@ export interface IForestSpotRequest {
   readonly stamp: boolean;
 }
 
-export type SpikeWorkerRequest = CellPlanetWorkerMessage | IRunwaySiteRequest | IForestScatterRequest | IForestSpotRequest;
+/** The airfield's flat features (plain data) for the page's material layer. */
+export interface IFlatFeaturesRequest extends Omit<IRunwaySiteRequest, 'kind'> {
+  readonly kind: 'flatFeatures';
+}
+
+/** The test buildings around `site`: their mesh records (`buildingInstances`), from which the page reads the list too. */
+export interface IBuildingsRequest {
+  readonly kind: 'buildings';
+  readonly id: number;
+  readonly radiusM: number;
+  readonly heightScaleM: number;
+  readonly worldProfile: WorldProfileKind;
+  readonly seed: number;
+  readonly site: IRunwaySite;
+  readonly stamp: boolean;
+}
+
+export type SpikeWorkerRequest =
+  | CellPlanetWorkerMessage
+  | IRunwaySiteRequest
+  | IFlatFeaturesRequest
+  | IForestScatterRequest
+  | IForestSpotRequest
+  | IBuildingsRequest;
 
 const sites = new Map<string, IRunwaySite | null>();
+const featureSets = new Map<string, { features: FlatFeature[]; set: FlatFeatureSet } | null>();
+const buildingLists = new Map<string, IBuilding[]>();
 
-/** Ground height above the datum in metres at a direction, or `null` over water or ice. */
-function groundHeight(request: IForestScatterRequest | IForestSpotRequest): (direction: Vec3) => number | null {
-  const world = defaultCellPlanetWorldCache.getOrCreateWorld(request.worldProfile, request.seed);
-  const stamp = request.stamp && request.site ? runwayHeightStamp(request.site) : null;
+/** The building list for a site, placed once per worker: trees and rocks scattered later keep off its footprints. */
+function buildingsFor(request: IForestScatterRequest | IBuildingsRequest, site: IRunwaySite): IBuilding[] {
+  const key = `${request.worldProfile}:${request.seed}:${request.radiusM}:${request.heightScaleM}:${site.centre.join(',')}`;
+  let list = buildingLists.get(key);
+  if (!list) {
+    list = placeBuildings(site, request.radiusM, groundHeight({ ...request, site }));
+    buildingLists.set(key, list);
+  }
+  return list;
+}
+
+/** Natural ground height above the datum in metres at a direction, or `null` over water or ice. */
+function naturalHeight(worldProfile: WorldProfileKind, seed: number, heightScaleM: number): (direction: Vec3) => number | null {
+  const world = defaultCellPlanetWorldCache.getOrCreateWorld(worldProfile, seed);
   return (direction) => {
     const sample = world.sampler.sample({ x: direction[0], y: direction[1], z: direction[2] });
     if (sample.isIce) return null;
     const surface = sample.elevation - sample.seaLevel;
-    if (surface <= 0) return null;
-    const heightM = surface * request.heightScaleM;
-    return stamp ? stamp(direction, heightM, request.radiusM) : heightM;
+    return surface <= 0 ? null : surface * heightScaleM;
+  };
+}
+
+/** The airfield and roads around the site, built once per world; `null` when there is no site. */
+function featuresFor(request: Omit<IRunwaySiteRequest, 'kind' | 'id'>): { features: FlatFeature[]; set: FlatFeatureSet } | null {
+  const key = `${request.worldProfile}:${request.seed}:${request.radiusM}:${request.heightScaleM}`;
+  if (!featureSets.has(key)) {
+    const site = siteFor({ ...request, kind: 'runwaySite', id: 0 });
+    const features = site ? airfieldFeatures(site, request.radiusM, naturalHeight(request.worldProfile, request.seed, request.heightScaleM)) : null;
+    featureSets.set(key, features ? { features, set: new FlatFeatureSet(features, request.radiusM) } : null);
+  }
+  return featureSets.get(key) ?? null;
+}
+
+/** Ground height above the datum in metres at a direction, or `null` over water or ice. */
+function groundHeight(request: IForestScatterRequest | IForestSpotRequest | IBuildingsRequest): (direction: Vec3) => number | null {
+  const natural = naturalHeight(request.worldProfile, request.seed, request.heightScaleM);
+  const set = request.stamp && request.site ? (featuresFor(request)?.set ?? null) : null;
+  return (direction) => {
+    const heightM = natural(direction);
+    return heightM === null || !set ? heightM : set.stampElevation(direction, heightM);
   };
 }
 
@@ -118,18 +179,7 @@ function forestSpot(request: IForestSpotRequest): { centre: Vec3; heightM: numbe
 function siteFor(request: IRunwaySiteRequest): IRunwaySite | null {
   const key = `${request.worldProfile}:${request.seed}:${request.radiusM}:${request.heightScaleM}`;
   if (!sites.has(key)) {
-    const world = defaultCellPlanetWorldCache.getOrCreateWorld(request.worldProfile, request.seed);
-    const site = findRunwaySite(
-      {
-        heightM: (direction) => {
-          const sample = world.sampler.sample({ x: direction[0], y: direction[1], z: direction[2] });
-          if (sample.isIce) return null;
-          const surface = sample.elevation - sample.seaLevel;
-          return surface <= 0 ? null : surface * request.heightScaleM;
-        },
-      },
-      request.radiusM,
-    );
+    const site = findRunwaySite({ heightM: naturalHeight(request.worldProfile, request.seed, request.heightScaleM) }, request.radiusM);
     sites.set(key, site);
   }
   return sites.get(key) ?? null;
@@ -140,22 +190,41 @@ addEventListener('message', async ({ data }: MessageEvent<SpikeWorkerRequest>) =
     postMessage({ id: data.id, runwaySite: siteFor(data) ?? null });
     return;
   }
+  if (data.kind === 'flatFeatures') {
+    postMessage({ id: data.id, flatFeatures: featuresFor(data)?.features ?? null });
+    return;
+  }
   if (data.kind === 'forestScatter') {
-    const common = { centre: data.centre, radiusM: data.radiusM, areaRadiusM: data.areaRadiusM, maxCount: data.maxCount, site: data.site, heightAt: groundHeight(data) };
-    const { instances, accepted } =
+    const site = data.site;
+    const buildings = site ? buildingsFor(data, site) : [];
+    const common = {
+      centre: data.centre,
+      radiusM: data.radiusM,
+      areaRadiusM: data.areaRadiusM,
+      maxCount: data.maxCount,
+      site,
+      heightAt: groundHeight(data),
+      clearanceAt: (direction: Vec3) => buildingClearance(buildings, site, direction, data.radiusM),
+    };
+    const scatter =
       data.objectClass === 'rock'
         ? scatterRocks(common)
         : scatterForest({ ...common, spacingM: data.spacingM, densityScale: data.densityScale });
-    postMessage({ id: data.id, trees: instances, accepted }, [instances.buffer]);
+    postMessage({ id: data.id, scatter }, scatterPlanetLatticeTransferables(scatter));
+    return;
+  }
+  if (data.kind === 'buildings') {
+    const records = buildingInstances(buildingsFor(data, data.site), data.site, data.radiusM, groundHeight(data));
+    postMessage({ id: data.id, buildings: records }, [records.buffer]);
     return;
   }
   if (data.kind === 'forestSpot') {
     postMessage({ id: data.id, forestSpot: forestSpot(data) });
     return;
   }
-  let modifyElevation: ModifyElevation | undefined;
+  let modifyElevation: ICellPlanetWorkerPipelineOptions['modifyElevation'];
   const flagged = data as {
-    runwayStamp?: boolean;
+    flatFeatureStamp?: boolean;
     radius?: number;
     radiusM?: number;
     heightScaleM?: number;
@@ -163,16 +232,13 @@ addEventListener('message', async ({ data }: MessageEvent<SpikeWorkerRequest>) =
     worldProfile?: WorldProfileKind;
     seed?: number;
   };
-  if (flagged.runwayStamp) {
-    const site = siteFor({
-      kind: 'runwaySite',
-      id: 0,
+  if (flagged.flatFeatureStamp) {
+    modifyElevation = featuresFor({
       radiusM: flagged.radiusM ?? flagged.radius ?? 1,
       heightScaleM: flagged.heightScaleM ?? flagged.heightScale ?? 160,
       worldProfile: flagged.worldProfile ?? 'volcanic',
       seed: flagged.seed ?? 1,
-    });
-    if (site) modifyElevation = runwayHeightStamp(site);
+    })?.set.heightStamp();
   }
   const { response, transfer } = await handleCellPlanetWorkerMessage(data, {
     buildCellBorderGeometry: buildCellBorderLineGeometry,

@@ -153,7 +153,15 @@ engine.beforeRender$.subscribe(() => { // after the camera controls have settled
 });
 ```
 
-- `lighting()` relights the surface as `albedo x (sun transmittance x N.L x sunVisibility + sky irradiance) x sun irradiance / pi x exposure`, using each point's own sun angle. It replaces the PBR result (other scene lights and normal maps do not reach it); the emissive stack is added back. An eclipse occluder darkens only the direct term.
+- `lighting()` relights the surface as `albedo x (sun transmittance x N.L x directShadow + sky irradiance) x sunVisibility x sun irradiance / pi x exposure`, using each point's own sun angle. It replaces the PBR result (other scene lights and normal maps do not reach it); the emissive stack is added back. `sunVisibility` (the material's occluders times `binding.sunVisibility`) is an eclipse: it darkens the direct and the sky light.
+- `lighting({ normal, directShadow })` takes two optional per-pixel inputs, each `(context, input) => node`. `normal` (`vec3`, the body frame of `context.sphereNormal`) replaces the sphere normal in `N.L` only. `directShadow` (`float`, 0 shadowed to 1 lit) scales the direct term only, so a cast shadow keeps the sky light. The sun's transmittance and the sky irradiance keep the sphere normal's sun angle: a tilted canopy or roof gets the same sky light as the far form that stands in for it (no sky-view factor; for normals within 40 degrees of up that factor would be 0.88 or more). Without inputs the graph is unchanged. The same stage works on any TSL material that supplies the context:
+
+  ```ts
+  const lit = binding.lighting({
+    normal: () => crownNormalBody, // vec3, body frame
+    directShadow: () => shade, // float, 0..1
+  })({ sphereNormal: radial, radialDirection: radial, cameraDistance }, { color, sunVisibility: float(1), surface: { albedo }, emissive: null });
+  ```
 - `perspective()` attenuates the colour along the camera-to-surface ray and adds that ray's in-scattering. With `aerialPerspective` it is one lookup in a froxel table (`AtmosphereAerialPerspectiveLut`: radiance and optical depth for a grid of screen positions and distances, re-rendered by `binding.update(renderer)` only when the camera, the sun or the profile moved); the fragment's real distance is used, so terrain height is included. Without it, one march per fragment on the sphere of the planet's radius (several times the cost on a planet that fills the screen). The table resolves the last texel of the planet's disc poorly, so the very rim can lose some haze. The mid-morph flat map is not modelled yet.
 - The planet may sit anywhere and turn any way: the stages work in its body frame, and `sync` points the backdrop's local frame at the camera's radial direction. The mesh's size in metres is the profile's radius, so `radiusUnits` sets the scale; call `binding.refreshScale()` after `model.setProfile` changes the radius (or `refreshScale(radiusUnits)` when the mesh's size changes). `options.morph` takes the material's morph uniform instead of the binding owning one.
 - `exposure` lives on the binding and is copied to the backdrop by `sync`, so the surface and the sky agree.

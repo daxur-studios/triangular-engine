@@ -10,7 +10,7 @@ performance: []
 
 # Plan 063: Planet Surface Detail LOD
 
-Status: **spike S1 in progress: Q2 passed (runway, `/planet-surface-detail-spike`); Q1 and Q3 revised after the owner's review (deterministic cell-hash placement, no hard edge, matched forms, rocks added as a second class), waiting for the owner's visual re-check (checklist in the runbook); Q3 failed by owner judgement (shadow march gives unwanted dark blobs; default is now 0 steps); Q4, Q5 open.** Design notes and reasoning: [Runbook 063](/docs/runbook/063_planet_surface_detail_lod.md).
+Status: **spike S1 in progress: Q2 passed (runway, `/planet-surface-detail-spike`); Q1 and Q3 revised after the owner's review (deterministic cell-hash placement, no hard edge, matched forms, rocks added as a second class), waiting for the owner's visual re-check (checklist in the runbook); Q3 failed by owner judgement (shadow march gave unwanted dark blobs); the march is removed and replaced by per-tree far shading (tone, dome-lit crowns, crown shadow ellipses from the scatter's own cell hash, fading into a fitted sun-dependent average) plus a test building class (meshes to about 4 km, then roof footprint and swept ground shadow). On 2026-10-27 four parts landed in the library and were combined on the spike page: optional `normal` and `directShadow` inputs to the planet lighting (not yet used by the spike, which still bakes its shading into the albedo), planet scatter (`triangular-engine/scatter` lattice, density field, fade band and the `scatter/tsl` entry), and flat features (Scope 1–2). Waiting for the owner's visual check of the combined page; Q4, Q5 open.** Design notes and reasoning: [Runbook 063](/docs/runbook/063_planet_surface_detail_lod.md).
 Depends on [Plan 050](/docs/plans/050_tsl_planet_surface_material.md) (surface material, streamed pages) and
 [Plan 049](/docs/plans/049_morphing_planet_atmosphere.md) (atmosphere lighting and aerial perspective).
 
@@ -34,10 +34,10 @@ Run on `/cell-planet-tsl` or a cloned spike page (`new-spike` skill). Nothing en
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Height stamp: flatten terrain under placed flat features in the height source | spiked (Q2 pass, demo worker hook) |
-| 2 | SDF feature layer: per-page list of segments/rectangles evaluated in the material | spiked (one rectangle, Q2 pass; per-page list still planned) |
-| 3 | Far-form layer: coverage, canopy height and normal channel, distance fade in | spiked as an analytic density field, no baked page (owner to judge Q1); the normal channel cannot reach the lighting stage |
-| 4 | Aggregate and height-field sun shadow in the far-form layer | **rejected** by the owner (Q3 failed: dark blobs, unwanted); the march stays behind the 0/2/4 toggle, default 0 |
+| 1 | Height stamp: flatten terrain under placed flat features in the height source | in the library (`FlatFeatureSet.heightStamp`, 2026-10-27); spike uses it; owner visual check pending |
+| 2 | SDF feature layer: per-page list of segments/rectangles evaluated in the material | in the library (`FlatFeaturePageWindow`, `flatFeatureLayer`, 2026-10-27); spike uses it; owner visual check pending |
+| 3 | Far-form layer: coverage, canopy height and normal channel, distance fade in | spiked as an analytic density field, no baked page (owner to judge Q1); placement and density now come from `triangular-engine/scatter` (2026-10-27); the lighting stage takes an optional per-pixel `normal` since 2026-10-27, the spike does not use it yet |
+| 4 | Aggregate and height-field sun shadow in the far-form layer | height-field march **rejected** by the owner (Q3 failed: dark blobs) and removed; **replaced** 2026-10-27 by per-tree far shading (crowns, tone and crown shadows looked up from the scatter's cell hash, blending into a fitted sun-dependent average beyond about 4 km) and footprint shadows for test buildings; owner to judge. Baked into the albedo; the lighting stage now takes `normal` and `directShadow` inputs (2026-10-27), switching the spike to them is a follow-up |
 | 5 | TSL impostor material that uses the planet lighting and haze stages | planned |
 | 6 | Page bake on stream-in from deterministic scatter and placed features; invalidation on edit | planned |
 | 7 | Emission channel for night lights on the far form | later |

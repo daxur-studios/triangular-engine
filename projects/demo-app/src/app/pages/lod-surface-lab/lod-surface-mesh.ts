@@ -66,6 +66,7 @@ export interface LodSurfaceMesh {
   /** Shrinks every leaf toward its centre by this share of its size: a gap the crack probe must find. 0 = off. */
   setInjectedGap(share: number): void;
   setSun(direction: Vec3): void;
+  setLighting(on: boolean): void;
   dispose(): void;
 }
 
@@ -114,6 +115,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const uGap = uniform(0) as any;
   const uLodColour = uniform(1) as any;
   const uBounds = uniform(1) as any;
+  const uLighting = uniform(1) as any;
   const uSun = uniform(new Vector3(0.4, 0.8, 0.45).normalize()) as any;
   // Per-frame anchor (lod-lattice.ts): its lattice vector, cube point, rounding error, cosines, and distance to the camera.
   const uAnchorT = uniform(new Vector3()) as any;
@@ -227,7 +229,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const light = max(dot(normalize(shadingNormal), uSun), 0).mul(0.85).add(0.2);
   const border = min(min(patchUv.x, float(1).sub(patchUv.x)), min(patchUv.y, float(1).sub(patchUv.y)));
   const line = float(1).sub(smoothstep(0, fwidth(border).mul(1.5), border)).mul(uBounds);
-  const colorNode = vec4(mix(base.mul(light), vec3(0.05, 0.05, 0.08), line.mul(0.85)), 1);
+  const colorNode = vec4(mix(base.mul(mix(float(1), light, uLighting)), vec3(0.05, 0.05, 0.08), line.mul(0.85)), 1);
 
   const material = new MeshBasicNodeMaterial({ side: FrontSide });
   material.positionNode = positionNode;
@@ -284,6 +286,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     setWireframe(on) { material.wireframe = on; material.needsUpdate = true; },
     setFolding(on) { uFolding.value = on ? 1 : 0; },
     setInjectedGap(share) { uGap.value = share; },
+    setLighting(on) { uLighting.value = on ? 1 : 0; },
     setSun(direction) { (uSun.value as Vector3).set(...direction).normalize(); },
     dispose() {
       geometry.dispose();

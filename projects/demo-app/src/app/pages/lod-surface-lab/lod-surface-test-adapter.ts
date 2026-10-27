@@ -50,6 +50,8 @@ export interface LodSurfaceTestHost {
   onRenderComplete(callback: (renderedAt: number) => void): () => void;
   /** Main-thread ms of selection plus instance upload, one sample per frame since the last reset. */
   selectionSamples(): readonly number[];
+  selectOnlySamples?(): readonly number[];
+  uploadOnlySamples?(): readonly number[];
   /** Leaves per frame since the last reset (same frames as {@link selectionSamples}). */
   leafSamples(): readonly number[];
   /** On-screen nodes that changed between split and merged per frame since the last reset (same frames; `visibleNewSplits + visibleMerges`). */
@@ -245,6 +247,8 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
         if (settings.motion === 'sweep') host.setSweepTime(undefined);
       }
       const selection = [...host.selectionSamples()];
+      const selectOnly = [...(host.selectOnlySamples?.() ?? [])];
+      const uploadOnly = [...(host.uploadOnlySamples?.() ?? [])];
       const leaves = [...host.leafSamples()];
       const levelChanges = [...host.levelChangeSamples()];
       const levelChangesAll = [...host.levelChangeAllSamples()];
@@ -254,7 +258,18 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
       // The probe runs after the window, so it never shares a frame with the timing. The zoom ends far from the pose it is
       // named for, so it has none. The sweep's last frame is a view like any other, and its tree carries the splits the
       // hysteresis kept from the swing, which is the tree the probe should see.
-      const probe = settings.motion === 'zoom' ? undefined : await host.crackProbe();
+      const traversalProbes: (CrackCount & { readonly width: number; readonly height: number })[] = [];
+      if (settings.motion === 'biome-sweep') {
+        // Replay the trajectory after timing, retaining the path's successive selections without contaminating CPU/GPU samples.
+        try {
+          for (let i = 0; i <= 16; i++) {
+            host.setZoomProgress(i / 16);
+            await waitForFrames(host, 2, context);
+            if (i % 4 === 0) traversalProbes.push(await host.crackProbe());
+          }
+        } finally { host.setZoomProgress(undefined); }
+      }
+      const probe = settings.motion === 'zoom' || settings.motion === 'biome-sweep' ? undefined : await host.crackProbe();
       await waitForFrames(host, 2, context);
       const mismatches = moving ? motionMismatches : settingsMismatches(host.read(), settings);
       const error = host.errors();
@@ -275,6 +290,9 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
           : { name: 'Control: the probe finds the cracks this case makes', passed: probe.cracks > 0, detail: `${probe.cracks} px of ${probe.width}x${probe.height}` });
         checks.push({ name: 'Surface seen by the probe', passed: probe.surface > 0, detail: `${probe.surface} px` });
       }
+      if (traversalProbes.length) {
+        checks.push({ name: 'No cracks at five traversal positions', passed: traversalProbes.every((p) => p.cracks === 0 && p.surface > 0), detail: traversalProbes.map((p) => p.cracks).join(', ') + ' px' });
+      }
       if (moving) {
         checks.push({ name: `No rebuild storm: every frame's selection under ${STORM_MS} ms`, passed: selection.length > 0 && maxOf(selection) < STORM_MS, detail: `most ${maxOf(selection).toFixed(2)} ms over ${selection.length} frames` });
       }
@@ -293,6 +311,9 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
           source: 'Main thread, per frame: quadtree rebuild, edge masks and instance upload (performance.now, 0.1 ms steps)',
           unavailableReason: selection.length ? undefined : 'No frame selected in the window',
         },
+        ...(selectOnly.length ? [{ name: 'selectorCpu', unit: 'ms', samples: selectOnly, source: 'Camera frustum and selector per frame' } satisfies TestMetric] : []),
+        ...(uploadOnly.length ? [{ name: 'instanceUploadCpu', unit: 'ms', samples: uploadOnly, source: 'Instance packing and anchor uniforms per frame' } satisfies TestMetric] : []),
+        ...(traversalProbes.length ? [{ name: 'traversalCrackPixels', unit: 'px', samples: traversalProbes.map((p) => p.cracks), source: 'Five positions from 0 to 1 along replayed traversal; probe outside timing window' } satisfies TestMetric] : []),
         { name: 'leaves', unit: 'count', samples: leaves, source: 'Leaves of the selected tree per frame (drawn and culled)' },
         { name: 'drawnLeaves', unit: 'count', samples: [info.instances], source: 'Instances drawn on the last frame' },
         { name: 'surfaceTriangles', unit: 'count', samples: [info.instances * info.trianglesPerLeaf], source: 'Drawn leaves x 2 N^2 on the last frame' },

@@ -201,6 +201,7 @@ interface RendererLike {
         <p class="label">Debug view</p>
         <p class="row">
           <button (click)="setView('lod')" [class.active]="view() === 'lod'">LOD colours</button>
+          <label><input type="checkbox" [checked]="lighting()" (change)="setLighting($any($event.target).checked)" /> Sun lighting</label>
           <button (click)="setView('shaded')" [class.active]="view() === 'shaded'">shaded</button>
         </p>
         <label class="feature">
@@ -270,6 +271,7 @@ export class LodSurfaceLabPageComponent {
   readonly view = signal<LodView>(DEFAULT_SETTINGS.view);
   readonly wireframe = signal(DEFAULT_SETTINGS.wireframe);
   readonly bounds = signal(DEFAULT_SETTINGS.bounds);
+  readonly lighting = signal(DEFAULT_SETTINGS.lighting);
   /** Baked texture size: 2^k texel cells per face side (not a test setting; the suites use the default). */
   readonly bakeK = signal<number>(DEFAULT_BAKE_K);
   readonly bakeStatus = signal('');
@@ -325,6 +327,8 @@ export class LodSurfaceLabPageComponent {
   private lastTriangles = 0;
   private readonly hudSamples: number[] = [];
   private selectionSamples: number[] = [];
+  private selectOnlySamples: number[] = [];
+  private uploadOnlySamples: number[] = [];
   private leafSamples: number[] = [];
   private levelChangeSamples: number[] = [];
   private levelChangeAllSamples: number[] = [];
@@ -350,10 +354,12 @@ export class LodSurfaceLabPageComponent {
     }),
     onRenderComplete: (callback) => { this.renderCallbacks.add(callback); return () => this.renderCallbacks.delete(callback); },
     selectionSamples: () => this.selectionSamples,
+    selectOnlySamples: () => this.selectOnlySamples,
+    uploadOnlySamples: () => this.uploadOnlySamples,
     leafSamples: () => this.leafSamples,
     levelChangeSamples: () => this.levelChangeSamples,
     levelChangeAllSamples: () => this.levelChangeAllSamples,
-    resetSamples: () => { this.selectionSamples = []; this.leafSamples = []; this.levelChangeSamples = []; this.levelChangeAllSamples = []; },
+    resetSamples: () => { this.selectionSamples = []; this.selectOnlySamples = []; this.uploadOnlySamples = []; this.leafSamples = []; this.levelChangeSamples = []; this.levelChangeAllSamples = []; },
     setZoomProgress: (t) => { this.zoomProgress = t; },
     setSweepTime: (seconds) => { this.sweepTime = seconds; },
     isSampling: () => this.engine.fpsController.frameSampler.isActive,
@@ -422,7 +428,7 @@ export class LodSurfaceLabPageComponent {
     this.drag = undefined;
   }
 
-  setSource(id: HeightSourceId): void { this.sourceId.set(id); this.rebuild(); }
+  setSource(id: HeightSourceId): void { this.sourceId.set(id); if (id === 'biome-mix') this.setLighting(true); this.rebuild(); }
   setBakeK(k: number): void { this.bakeK.set(k); this.rebuild(); }
   setMode(mode: LodMode): void { this.mode.set(mode); this.rebuild(); }
   setFixedLevel(level: number): void { this.fixedLevel.set(level); this.rebuild(); }
@@ -435,6 +441,7 @@ export class LodSurfaceLabPageComponent {
   setFolding(on: boolean): void { this.folding.set(on); this.surface?.setFolding(on); }
   setInjectedGap(share: number): void { this.injectedGap.set(share); this.surface?.setInjectedGap(share); }
   setView(view: LodView): void { this.view.set(view); this.surface?.setView(view); }
+  setLighting(on: boolean): void { this.lighting.set(on); this.surface?.setLighting(on); }
   setBounds(on: boolean): void { this.bounds.set(on); this.surface?.setBounds(on); }
   setWireframe(on: boolean): void { this.wireframe.set(on); this.surface?.setWireframe(on); }
 
@@ -487,7 +494,7 @@ export class LodSurfaceLabPageComponent {
     return {
       domain: this.domainId(), warp: this.warp(), source: this.sourceId(), patchCells: this.patchCells(), mode: this.mode(),
       fixedLevel: this.fixedLevel(), cellPixels: this.cellPixels(), leafCap: this.leafCap(), cull: this.cull(), hysteresis: this.hysteresis(), folding: this.folding(),
-      injectedGap: this.injectedGap(), pose: this.poseId(), view: this.view(), wireframe: this.wireframe(), bounds: this.bounds(),
+      injectedGap: this.injectedGap(), pose: this.poseId(), view: this.view(), wireframe: this.wireframe(), bounds: this.bounds(), lighting: this.lighting(),
       ...(this.zoomProgress !== undefined ? { motion: this.biomeMotion ? 'biome-sweep' as const : 'zoom' as const } : this.sweepTime !== undefined ? { motion: 'sweep' as const } : {}),
     };
   }
@@ -496,6 +503,7 @@ export class LodSurfaceLabPageComponent {
     this.domainId.set(settings.domain);
     this.warp.set(settings.warp);
     this.sourceId.set(settings.source);
+    this.setLighting(settings.lighting);
     this.patchCells.set(settings.patchCells);
     this.mode.set(settings.mode);
     this.fixedLevel.set(settings.fixedLevel);
@@ -547,6 +555,7 @@ export class LodSurfaceLabPageComponent {
     this.surface.setInjectedGap(this.injectedGap());
     this.surface.setView(this.view());
     this.surface.setBounds(this.bounds());
+    this.surface.setLighting(this.lighting());
     this.surface.setWireframe(this.wireframe());
     this.engine.scene.add(this.surface.mesh);
     this.builtKey = key;
@@ -675,7 +684,11 @@ export class LodSurfaceLabPageComponent {
       levelChanges = selector.stats.visibleNewSplits + selector.stats.visibleMerges;
       levelChangesAll = selector.stats.newSplits + selector.stats.merges;
     }
+    const selectedAt = performance.now();
     surface.upload(selector, camera.position);
+    const uploadedAt = performance.now();
+    this.selectOnlySamples.push(selectedAt - began);
+    this.uploadOnlySamples.push(uploadedAt - selectedAt);
     const elapsed = performance.now() - began;
     this.selectionSamples.push(elapsed);
     this.leafSamples.push(selector.stats.leaves);

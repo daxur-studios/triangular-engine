@@ -1,9 +1,18 @@
-import { FADE_END_PIXELS, FADE_START_PIXELS, FOREST_COAST_M, PIXEL_PER_DISTANCE, forestClearance, forestFieldDensity, forestNoise, scatterCells, type IScatterResult } from './forest-field';
+import {
+  DEFAULT_SCATTER_PIXEL_FADE_RULE,
+  computeScatterPixelFadeBand,
+  evaluateScatterDensityField,
+  scatterPlanetLattice,
+  type IScatterDensityFieldDefinition,
+  type IScatterPlanetLatticeResult,
+  type IScatterPlanetLayerDefinition,
+} from 'triangular-engine/scatter';
+import { FOREST_COAST_M, forestClearance, forestFieldDensity } from './forest-field';
 import type { IRunwaySite, Vec3 } from './runway-site';
 
 /**
  * Spike S1 (Plan 063) second object class: boulders of about 1 to 3 m. Same recipe as the trees, one size down:
- * a body-fixed cell hash with its own seed and its own density field, a mesh up close, a small albedo and roughness
+ * a layer of the library's planet shell lattice with its own seed, cell size, size range and density field, a mesh up close, a small albedo and roughness
  * speckle in the surface material at mid distance, and nothing beyond. Pure and framework-free; `rock-layer.ts` is the
  * TSL twin of {@link rockFieldDensity}.
  */
@@ -42,28 +51,36 @@ export interface IRockBands {
 
 /** The distance bands from the rock size, with the same pixel rule as the trees (1 px = 0.001 x distance). */
 export function rockBands(sizeM: number = ROCK_SIZE_M): IRockBands {
-  return {
-    meshStartM: sizeM / (FADE_START_PIXELS * PIXEL_PER_DISTANCE),
-    meshEndM: sizeM / (FADE_END_PIXELS * PIXEL_PER_DISTANCE),
-    speckleStartM: sizeM / (2 * PIXEL_PER_DISTANCE),
-    speckleEndM: sizeM / (1 * PIXEL_PER_DISTANCE),
-  };
+  const mesh = computeScatterPixelFadeBand(sizeM);
+  const speckle = computeScatterPixelFadeBand(sizeM, { ...DEFAULT_SCATTER_PIXEL_FADE_RULE, startPixels: 2, endPixels: 1 });
+  return { meshStartM: mesh.startM, meshEndM: mesh.endM, speckleStartM: speckle.startM, speckleEndM: speckle.endM };
 }
 
-const smooth = (edge0: number, edge1: number, x: number): number => {
-  const t = Math.min(Math.max((x - edge0) / (edge1 - edge0), 0), 1);
-  return t * t * (3 - 2 * t);
+/** The rock noise as a library density field: octaves past the forest's, the outcrop edge, and the coast. */
+export const ROCK_FIELD: IScatterDensityFieldDefinition = {
+  octaves: ROCK_OCTAVES,
+  octaveOffset: ROCK_OCTAVE_OFFSET,
+  edge: ROCK_EDGE,
+  heightBandM: { rise: FOREST_COAST_M },
 };
 
 /** Rock density in [0, 1] at a body-fixed point (metres), at `heightM` above the datum. No runway clearance. */
 export function rockFieldDensity(x: number, y: number, z: number, heightM: number): number {
-  let n = 0;
-  ROCK_OCTAVES.forEach((octave, i) => {
-    n += octave.weight * forestNoise(x, y, z, octave.cellM, ROCK_OCTAVE_OFFSET + i);
-  });
-  const land = smooth(FOREST_COAST_M[0], FOREST_COAST_M[1], heightM);
   const forest = forestFieldDensity(x, y, z, heightM);
-  return smooth(ROCK_EDGE[0], ROCK_EDGE[1], n) * land * (1 - (1 - ROCK_UNDER_FOREST) * forest);
+  return evaluateScatterDensityField(ROCK_FIELD, x, y, z, heightM) * (1 - (1 - ROCK_UNDER_FOREST) * forest);
+}
+
+/** The rock layer: the rock field, cleared off the runway. */
+export function rockScatterLayer(site: IRunwaySite | null, radiusM: number, clearanceAt?: (direction: Vec3) => number): IScatterPlanetLayerDefinition {
+  return {
+    id: 'rocks',
+    generatorVersion: 1,
+    seed: ROCK_SEED,
+    cellSizeM: ROCK_SPACING_M,
+    sizeRange: ROCK_SIZE_RANGE_M,
+    density: ([x, y, z], heightM, direction) =>
+      rockFieldDensity(x, y, z, heightM) * forestClearance(site, direction as Vec3, radiusM) * (clearanceAt?.(direction as Vec3) ?? 1),
+  };
 }
 
 export interface IRockScatterOptions {
@@ -73,16 +90,17 @@ export interface IRockScatterOptions {
   readonly site: IRunwaySite | null;
   readonly maxCount?: number;
   heightAt(direction: Vec3): number | null;
+  /** Extra clearance in [0, 1] at a direction (the test buildings' footprints); default 1. */
+  clearanceAt?(direction: Vec3): number;
 }
 
-/** Rocks: {@link scatterCells} with the rock field and the runway clearance. */
-export function scatterRocks(options: IRockScatterOptions): IScatterResult {
-  const { radiusM, site } = options;
-  return scatterCells({
-    ...options,
-    spacingM: ROCK_SPACING_M,
-    seed: ROCK_SEED,
-    densityAt: (direction, radius, heightM) =>
-      rockFieldDensity(direction[0] * radius, direction[1] * radius, direction[2] * radius, heightM) * forestClearance(site, direction, radiusM),
+/** Rocks: the library's planet lattice with {@link rockScatterLayer}. */
+export function scatterRocks(options: IRockScatterOptions): IScatterPlanetLatticeResult {
+  return scatterPlanetLattice(rockScatterLayer(options.site, options.radiusM, options.clearanceAt), {
+    centre: options.centre,
+    radiusM: options.radiusM,
+    windowRadiusM: options.areaRadiusM,
+    maxCount: options.maxCount,
+    heightAt: (direction) => options.heightAt(direction as Vec3),
   });
 }

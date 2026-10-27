@@ -1,11 +1,11 @@
 /**
- * Spike S1 (Plan 063) Q2: the runway's placement and the height stamp. Pure and framework-free: the worker uses it
- * to flatten the terrain, the page reads the same numbers to drive the material's SDF layer.
+ * Spike S1 (Plan 063) Q2: the runway's placement. Pure and framework-free. The height stamp and the paint now come
+ * from the library's flat features (`airfield-features.ts`); the runway distance stays here for the forest clearance.
  */
 
 export const RUNWAY_LENGTH_M = 2000;
 export const RUNWAY_WIDTH_M = 45;
-/** Flat plateau beyond the runway edge, then the blend back to natural terrain. Wide enough for the coarsest terrain LOD. */
+/** Flat plateau beyond the runway edge, then the blend back to natural terrain (the stamp's apron and shoulder). Wide enough for the coarsest terrain LOD. */
 export const RUNWAY_APRON_M = 120;
 export const RUNWAY_SHOULDER_M = 1400;
 
@@ -22,9 +22,6 @@ export interface IRunwaySite {
   /** Flattened surface height, metres above the sea datum (the same units `modifyElevation` receives). */
   readonly heightM: number;
 }
-
-/** `modifyElevation` argument shape (see `ICellPlanetWorkerPipelineOptions`). */
-export type ModifyElevation = (direction: Vec3, elevationM: number, radiusM: number) => number;
 
 const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a: Vec3, b: Vec3): Vec3 => [
@@ -54,23 +51,6 @@ export function runwayDistanceM(site: IRunwaySite, direction: Vec3, radiusM: num
   const qx = Math.abs(a) - RUNWAY_LENGTH_M / 2;
   const qy = Math.abs(b) - RUNWAY_WIDTH_M / 2;
   return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0);
-}
-
-/** Stamp weight: 1 on the runway and its apron, falling smoothly to 0 over the shoulder. */
-export function runwayStampWeight(site: IRunwaySite, direction: Vec3, radiusM: number): number {
-  const d = runwayDistanceM(site, direction, radiusM) - RUNWAY_APRON_M;
-  if (d <= 0) return 1;
-  if (d >= RUNWAY_SHOULDER_M) return 0;
-  const t = d / RUNWAY_SHOULDER_M;
-  return 1 - t * t * (3 - 2 * t);
-}
-
-/** The height stamp as a `modifyElevation` hook. */
-export function runwayHeightStamp(site: IRunwaySite): ModifyElevation {
-  return (direction, elevationM, radiusM) => {
-    const w = runwayStampWeight(site, direction, radiusM);
-    return w === 0 ? elevationM : elevationM + (site.heightM - elevationM) * w;
-  };
 }
 
 /** What the site search needs from the world sampler. */

@@ -20,7 +20,8 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/terrain/core` | Framework-free terrain contracts, domains, patch meshing, material evaluation, and worker tile baking. Use this entry from web workers. | — |
 | `triangular-engine/meshoptimizer` | Optional generic indexed-geometry simplification and Meshoptimizer readiness helpers. | `meshoptimizer` |
 | `triangular-engine/image-compression` | Opt-in adapter for ScreenshotService and impostor image compression. | `browser-image-compression` |
-| `triangular-engine/scatter` | Deterministic streamed placement, instanced LOD rendering, billboard/wind materials, picking, and collider descriptors. | — |
+| `triangular-engine/scatter` | Deterministic streamed placement (terrain quadtree cells or the planet shell lattice), density fields, instanced LOD rendering, billboard/wind materials, picking, and collider descriptors. | — |
+| `triangular-engine/scatter/tsl` | TSL (`WebGPURenderer` node) twins of the scatter density field, so a surface material draws the same field the CPU places instances from. See [scatter/tsl](../scatter/tsl/README.md). | `three` |
 | `triangular-engine/trail` | Ribbon trails, stamp decals, and surface-track geometry/materials. | — |
 | `triangular-engine/spline` | Authoring-neutral open/closed curves, arc-length sampling, and nearest-point queries. Core geometry only so far. | — |
 | `triangular-engine/life` | Fixed-step autonomous-agent movement, flocking behaviours, local influences, and obstacle queries. | — for `core`; optional adapters may add world dependencies |

@@ -61,6 +61,7 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/meshoptimizer` | [meshoptimizer/README.md](meshoptimizer/README.md) | Indexed-geometry simplification helpers | `meshoptimizer` |
 | `triangular-engine/image-compression` | [image-compression/README.md](image-compression/README.md) | Screenshot and impostor compression adapter | `browser-image-compression` |
 | `triangular-engine/scatter` | [scatter/README.md](scatter/README.md) | Deterministic streamed placement and instanced LOD rendering | — |
+| `triangular-engine/scatter/tsl` | [scatter/tsl/README.md](scatter/tsl/README.md) | TSL twins of the scatter density field, for surface materials | `three` |
 | `triangular-engine/spline` | [spline/README.md](spline/README.md) | Open and closed curves, arc-length sampling, nearest-point queries | — |
 | `triangular-engine/characters` | [characters/README.md](characters/README.md) | Humanoid rigs, locomotion, IK, facial animation channels | — |
 | `triangular-engine/procedural` | [procedural/README.md](procedural/README.md) | Procedural flora and craft parts with sockets and colliders | `three` |

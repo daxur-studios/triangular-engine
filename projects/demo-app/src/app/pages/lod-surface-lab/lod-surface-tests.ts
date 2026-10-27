@@ -25,6 +25,7 @@ export interface LodSurfaceTestSettings {
   readonly view: LodView;
   readonly wireframe: boolean;
   readonly bounds: boolean;
+  readonly lighting: boolean;
   /**
    * A scripted camera runs during the window instead of a still pose: `zoom` flies the ground-to-orbit path once; `sweep`
    * holds `pose` and swings the camera back and forth; `biome-sweep` traverses the five biome regions.
@@ -36,7 +37,7 @@ export interface LodSurfaceTestSettings {
 export const DEFAULT_SETTINGS: LodSurfaceTestSettings = {
   domain: 'sphere-600km', warp: 'equal-angle', source: 'bumps', patchCells: 32, mode: 'distance', fixedLevel: 5,
   cellPixels: 4, leafCap: 1024, cull: true, hysteresis: 0.15, folding: true, injectedGap: 0, pose: 'eye-2m', view: 'lod', wireframe: false,
-  bounds: true,
+  bounds: true, lighting: true,
 };
 
 /** What suites before the hysteresis existed were measured with: the single threshold. Their definitions keep it. */
@@ -226,5 +227,10 @@ const TERRAIN_V4: TestSuite<LodSurfaceTestSettings> = {
   scenarios: [...TERRAIN_V3.scenarios, ...BIOME_CASES, ...FLOOR_CASES],
 };
 
+const ABAB_COMMON: Partial<LodSurfaceTestSettings> = { source: 'biome-mix', domain: 'plane-100km', pose: 'biome-mountain', view: 'shaded', bounds: false };
+const CAP_ABAB = [1024, 512, 1024, 512].map((leafCap, index) => still(`biome-cap-${leafCap}-${index + 1}`, `biome mountain cap ${leafCap} round ${index + 1}`, { ...ABAB_COMMON, leafCap, patchCells: 32 }));
+const CELLS_ABAB = [32, 16, 32, 16].map((patchCells, index) => still(`biome-cells-${patchCells}-${index + 1}`, `biome mountain cells ${patchCells} round ${index + 1}`, { ...ABAB_COMMON, leafCap: 1024, patchCells: patchCells as PatchCells }));
+const TERRAIN_V5: TestSuite<LodSurfaceTestSettings> = { ...TERRAIN_V4, version: 5, title: 'LOD surface core: biome lighting, traversal probes and geometry comparisons (Plan 059)', scenarios: [...TERRAIN_V3.scenarios, ...BIOME_CASES, ...CAP_ABAB, ...CELLS_ABAB] };
+
 /** Oldest first; the final entry is "Run latest test". Earlier versions are still run by their exact version. */
-export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3, TERRAIN_V4];
+export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3, TERRAIN_V4, TERRAIN_V5];

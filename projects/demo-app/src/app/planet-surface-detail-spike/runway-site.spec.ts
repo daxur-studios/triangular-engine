@@ -1,14 +1,4 @@
-import {
-  findRunwaySite,
-  RUNWAY_APRON_M,
-  RUNWAY_LENGTH_M,
-  RUNWAY_SHOULDER_M,
-  runwayFrame,
-  runwayHeightStamp,
-  runwayStampWeight,
-  type IRunwaySite,
-  type Vec3,
-} from './runway-site';
+import { findRunwaySite, RUNWAY_LENGTH_M, runwayDistanceM, runwayFrame, type IRunwaySite, type Vec3 } from './runway-site';
 
 const RADIUS_M = 600_000;
 const centre: Vec3 = [0, 0, 1];
@@ -24,7 +14,7 @@ function at(a: number, b: number): Vec3 {
   return [x / l, y / l, z / l];
 }
 
-describe('runway height stamp', () => {
+describe('runway site frame', () => {
   it('builds an orthonormal tangent frame', () => {
     const dot = (p: Vec3, q: Vec3) => p[0] * q[0] + p[1] * q[1] + p[2] * q[2];
     expect(dot(along, centre)).toBeCloseTo(0, 9);
@@ -32,30 +22,9 @@ describe('runway height stamp', () => {
     expect(dot(along, across)).toBeCloseTo(0, 9);
   });
 
-  it('is fully applied on the runway and its apron', () => {
-    expect(runwayStampWeight(site, at(0, 0), RADIUS_M)).toBe(1);
-    expect(runwayStampWeight(site, at(RUNWAY_LENGTH_M / 2 + RUNWAY_APRON_M - 1, 0), RADIUS_M)).toBe(1);
-  });
-
-  it('leaves terrain beyond the shoulder untouched', () => {
-    const far = at(RUNWAY_LENGTH_M / 2 + RUNWAY_APRON_M + RUNWAY_SHOULDER_M + 50, 0);
-    expect(runwayStampWeight(site, far, RADIUS_M)).toBe(0);
-    expect(runwayHeightStamp(site)(far, 321, RADIUS_M)).toBe(321);
-  });
-
-  it('flattens to the site height on the runway', () => {
-    expect(runwayHeightStamp(site)(at(300, 5), 480, RADIUS_M)).toBeCloseTo(100, 6);
-  });
-
-  it('falls monotonically and continuously over the shoulder', () => {
-    const start = RUNWAY_LENGTH_M / 2 + RUNWAY_APRON_M;
-    let previous = 1;
-    for (let m = 0; m <= RUNWAY_SHOULDER_M; m += 20) {
-      const w = runwayStampWeight(site, at(start + m, 0), RADIUS_M);
-      expect(w).toBeLessThanOrEqual(previous + 1e-9);
-      expect(previous - w).toBeLessThan(0.08);
-      previous = w;
-    }
+  it('measures the distance outside the runway rectangle', () => {
+    expect(runwayDistanceM(site, at(0, 0), RADIUS_M)).toBeLessThan(0);
+    expect(runwayDistanceM(site, at(RUNWAY_LENGTH_M / 2 + 50, 0), RADIUS_M)).toBeCloseTo(50, 1);
   });
 });
 

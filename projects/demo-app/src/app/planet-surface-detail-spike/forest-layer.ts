@@ -3,12 +3,16 @@ import { StorageBufferAttribute } from 'three/webgpu';
 import {
   Fn,
   If,
+  Loop,
   clamp,
   dot,
+  exp,
   float,
   floor,
+  fract,
   instanceIndex,
   int,
+  ivec3,
   length,
   max,
   min,
@@ -22,22 +26,47 @@ import {
   storage,
   uint,
   uniform,
+  uvec3,
   vec2,
   vec3,
   vec4,
 } from 'three/tsl';
-import type { IPlanetContext, ISurfaceSample, SunOcclusion, SurfaceLayer } from 'triangular-engine/planet-material';
+import type { IPlanetContext, ISurfaceSample, SurfaceLayer } from 'triangular-engine/planet-material';
 import {
-  FOREST_CANOPY_COVER,
   FOREST_CLEARANCE_M,
   FOREST_COAST_M,
+  FOREST_CROWN_WIDTH_M,
   FOREST_EDGE,
   FOREST_OCTAVES,
+  FOREST_SPACING_M,
   FOREST_TREE_HEIGHT_M,
   FOREST_TREELINE_M,
+  PIXEL_PER_DISTANCE,
+  TREE_SEED,
   forestFadeBand,
   forestFieldDensity,
 } from './forest-field';
+import {
+  COVER_FIT,
+  CROWN_CENTRE_SHARE,
+  CROWN_LENGTH_SHARE,
+  CROWN_LIGHT_FIT,
+  CROWN_NORMAL_LEAN,
+  FOREST_SKY_SHARE,
+  GROUND_SHADE_FIT,
+  LOOKUP_CELLS_PER_COLUMN,
+  LOOKUP_RADIUS_M,
+  MIN_SUN_TAN,
+  SHADOW_MAX_M,
+  SHADOW_SOFTNESS,
+  SHADOW_STRETCH,
+  SHADOW_WIDTH_SHARE,
+  TREE_HUE_RANGE,
+  TREE_SCALE_RANGE,
+  TREE_TONE_DRAW,
+  TREE_TONE_RANGE,
+  patternFadeBand,
+} from './forest-shading';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -46,16 +75,16 @@ export type ForestViewMode = 0 | 1 | 2 | 3;
 
 export interface IForestLayer {
   readonly layer: SurfaceLayer;
-  readonly occlusion: SunOcclusion;
-  /** Live uniforms: change `.value`, nothing recompiles (the shadow step count is a uniform branch). */
+  /** Live uniforms: change `.value`, nothing recompiles. */
   readonly uniforms: {
     readonly enabled: any;
     readonly mode: any;
     readonly fadeStartM: any;
     readonly fadeEndM: any;
     readonly densityScale: any;
-    readonly shadowSteps: any;
-    readonly shadowStrength: any;
+    /** The per-tree pattern blends into the average between these camera distances (about 3 px and 2 px a crown). */
+    readonly patternStartM: any;
+    readonly patternEndM: any;
     /** Unit direction to the sun in the body frame. */
     readonly sunBody: any;
   };
@@ -120,32 +149,119 @@ export function fieldDensityNode(p: any, heightM: any): any {
   return smooth(FOREST_EDGE[0], FOREST_EDGE[1], n).mul(land);
 }
 
+/** `cellHash` of `forest-field.ts` in TSL, on a body-order cell (`uvec3`, the i32 bits): same constants, same wrap-around. */
+export function cellHashNode(cell: any, salt: number): any {
+  let h: any = cell.x
+    .mul(uint(0x8da6b343))
+    .bitXor(cell.y.mul(uint(0xd8163841)))
+    .bitXor(cell.z.mul(uint(0xcb1ab31f)))
+    .bitXor(uint(Math.imul(salt + 1, 0x27d4eb2f) >>> 0));
+  h = h.bitXor(h.shiftRight(uint(15)));
+  h = h.mul(uint(0x85ebca6b));
+  h = h.bitXor(h.shiftRight(uint(13)));
+  h = h.mul(uint(0xc2b2ae35));
+  h = h.bitXor(h.shiftRight(uint(16)));
+  return float(h.shiftRight(uint(8))).div(16777216);
+}
+
+/** `treeTone` in TSL. */
+export function treeToneNode(draw: any): any {
+  const brightness = float(1).add(draw.sub(0.5).mul(2 * TREE_TONE_RANGE));
+  const hue = fract(draw.mul(13.7)).sub(0.5).mul(2);
+  return vec3(
+    brightness.mul(float(1).add(hue.mul(TREE_HUE_RANGE))),
+    brightness.mul(float(1).add(hue.mul(TREE_HUE_RANGE * 0.3))),
+    brightness.mul(float(1).sub(hue.mul(TREE_HUE_RANGE))),
+  );
+}
+
+/** `shadowFactor` in TSL: light on shaded ground relative to lit flat ground (the sky share alone). */
+export const shadowFactorNode = (sinElevation: any): any =>
+  float(FOREST_SKY_SHARE).div(float(FOREST_SKY_SHARE).add(max(sinElevation, 0).mul(1 - FOREST_SKY_SHARE)));
+
+/** 0 once the sun is down, 1 from 0.05 in `sin(elevation)`, as in the CPU twin: a set sun shades nothing. */
+export const sunUpRamp = (sinElevation: any): any => clamp(sinElevation.div(0.05), 0, 1);
+
 /**
- * Plan 063 spike S1, Q1 and Q3: the forest's far form, evaluated per pixel from the same density field the instances are
- * scattered from. Nothing is baked: a fixed number of hashes per pixel, to the horizon.
+ * `treesNear` in TSL: calls `visit(offset, scale, toneDraw)` inside the shader loop for every tree the scatter placed
+ * near `point` (body-fixed metres) whose keep draw is under `density`. `offset` is tree base minus `point` in the
+ * tangent plane, body frame. The loop runs in the dominant axis's frame (`perm`), so the column logic of the CPU twin
+ * holds on every face; cells are hashed in body order. `prefix` keeps two lookups' loop variables apart.
+ */
+function eachTreeNear(point: any, radiusM: number, density: any, prefix: string, visit: (offset: any, scale: any, toneDraw: any) => void): void {
+  const S = FOREST_SPACING_M;
+  const seed = TREE_SEED * 8;
+  const rho = float(radiusM + S / 2);
+  const n: any = normalize(point);
+  const a: any = n.abs();
+  const kx = a.x.greaterThanEqual(a.y).and(a.x.greaterThanEqual(a.z));
+  const ky = kx.not().and(a.y.greaterThanEqual(a.z));
+  // (u, v, k) from body order and back: k = x gives (y, z, x), k = y gives (z, x, y).
+  const perm = (v: any): any => select(kx, v.yzx, select(ky, v.zxy, v));
+  const unperm = (v: any): any => select(kx, v.zxy, select(ky, v.yzx, v));
+  const N: any = perm(n).toVar();
+  const Q: any = N.mul(rho).toVar();
+  // Cells relative to a base cell at the point keep the float32 arithmetic small.
+  const base: any = ivec3(int(floor(Q.x.div(S))), int(floor(Q.y.div(S))), int(floor(Q.z.div(S)))).toVar();
+  const local: any = Q.sub(vec3(base).mul(S)).toVar();
+  const names = { u: `${prefix}u`, v: `${prefix}v`, j: `${prefix}j` };
+  // Three nested counters in one call: the typings only know the single-counter form.
+  (Loop as any)(
+    { start: -1, end: 2, type: 'int', name: names.u },
+    { start: -1, end: 2, type: 'int', name: names.v },
+    { start: 0, end: LOOKUP_CELLS_PER_COLUMN, type: 'int', name: names.j },
+    (vars: any) => {
+      const du = local.x.sub(float(vars[names.u]).add(0.5).mul(S));
+      const dv = local.y.sub(float(vars[names.v]).add(0.5).mul(S));
+      // Where the shell's middle crosses this column, then the cells around it.
+      const kColumn = local.z.add(Q.x.mul(du).add(Q.y.mul(dv)).div(Q.z));
+      const dk = int(floor(kColumn.div(S).sub(2))).add(vars[names.j]);
+      const offsetCells = ivec3(vars[names.u], vars[names.v], dk);
+      const cell = uvec3(unperm(base.add(offsetCells)));
+      const jitter = perm(vec3(cellHashNode(cell, seed), cellHashNode(cell, seed + 1), cellHashNode(cell, seed + 2)));
+      const rel = vec3(offsetCells).add(jitter).mul(S).sub(local);
+      const up = dot(rel, N);
+      const tangent = rel.sub(N.mul(up));
+      const radial = up.add(dot(tangent, tangent).div(rho.mul(2)));
+      const kept = radial.greaterThanEqual(-S / 2).and(radial.lessThan(S / 2)).and(cellHashNode(cell, seed + 3).lessThan(density));
+      If(kept, () => {
+        const scale = float(TREE_SCALE_RANGE[0]).add(cellHashNode(cell, seed + 4).mul(TREE_SCALE_RANGE[1] - TREE_SCALE_RANGE[0]));
+        visit(unperm(tangent), scale, cellHashNode(cell, seed + TREE_TONE_DRAW));
+      });
+    },
+  );
+}
+
+/**
+ * Plan 063 spike S1: the forest's far form, evaluated per pixel from the same density field and the same cell hash the
+ * instances are scattered from. Nothing is baked. The pattern is `forestPattern` of `forest-shading.ts` (the CPU twin,
+ * with the reasoning); the layer writes `albedo = ground x below + tree x treeAlbedo`.
  *
- * - Surface layer: canopy albedo = `mix(ground, tree albedo, density * weight)`; `weight` ramps in over the fade band.
- * - Sun occlusion: a short height-field march toward the sun over canopy height (`density * tree height`), 0, 2 or 4
- *   samples. The march starts at the pixel's own canopy top where the layer is showing canopy (far), and at the ground
- *   where instances are (near), so the floor between trees is shaded too.
+ * - Near (under the instances, `fadeWeight` 0): only the trees' ground shadows; the instances are the crowns.
+ * - Fade band: the crowns fade in as the instances dissolve; both are the same trees, same tone.
+ * - From about 3 px to 2 px a crown (`patternStartM` to `patternEndM`): the pattern blends into `forestAverage`, a
+ *   function of the sun's height and the density fitted to the pattern's own mean; beyond, the lookups are skipped.
  *
- * The atmosphere lighting stage reads `sphereNormal` and ignores `normalTS`, so a canopy normal from the density
- * gradient cannot reach the lit colour without changing the library; the march is the only canopy lighting term.
+ * **Temporary:** crown light and shadows are baked into the albedo, because the planet lighting stage reads only the
+ * sphere normal and its `sunVisibility` dims the sky light too. Move them to the library's normal and direct-shadow
+ * inputs when those land.
  */
 export function forestLayer(radiusM: number): IForestLayer {
   const band = forestFadeBand();
+  const patternBand = patternFadeBand();
   const enabled: any = uniform(1);
   const mode: any = uniform(0);
   const fadeStartM: any = uniform(band.startM);
   const fadeEndM: any = uniform(band.endM);
   const densityScale: any = uniform(1);
-  const shadowSteps: any = uniform(0);
-  const shadowStrength: any = uniform(0.85);
+  const patternStartM: any = uniform(patternBand.startM);
+  const patternEndM: any = uniform(patternBand.endM);
   const sunBody: any = uniform(new Vector3(0, 1, 0));
   const alongAxis: any = uniform(new Vector3(1, 0, 0));
   const acrossAxis: any = uniform(new Vector3(0, 0, 1));
   const treeAlbedo: any = uniform(new Vector3(0.035, 0.085, 0.03));
-  const shadowFloor = 0.32;
+  const H = FOREST_TREE_HEIGHT_M;
+  const crownRadius = FOREST_CROWN_WIDTH_M / 2;
 
   const clearance = (p: any): any => {
     const a = dot(p, alongAxis);
@@ -163,68 +279,95 @@ export function forestLayer(radiusM: number): IForestLayer {
       select(mode.equal(2), float(1), select(mode.equal(3), splitLayerWeight(), smoothstep(fadeStartM, fadeEndM, distance))),
     );
 
-  /**
-   * How shaded the floor between crowns is at density `dens`, in [0, 1]: the first step of the shadow march below,
-   * from the ground, with the density taken as uniform. Under instances the march shades the floor pixel by pixel; the
-   * far form shows canopy and floor in one pixel, so it darkens the floor's share of the albedo by the same amount.
-   */
-  const floorShade = (p: any, dens: any): any => {
-    const sunUp = dot(sunBody, normalize(p));
-    const horizontalLength = max(sqrt(max(float(1).sub(sunUp.mul(sunUp)), 0)), 1e-4);
-    const tanElevation = max(sunUp.div(horizontalLength), 0.02);
-    const treeHeight = float(FOREST_TREE_HEIGHT_M);
-    const reach = clamp(treeHeight.mul(1.2).div(tanElevation), 20, 500);
-    const firstStep = reach.div(max(shadowSteps, 1));
-    const shade = clamp(dens.mul(treeHeight).sub(firstStep.mul(tanElevation)).div(treeHeight.mul(0.2)), 0, 1);
-    return select(shadowSteps.greaterThan(0), shade, float(0));
+  const withinLookup = (d: any): any => float(1).sub(smooth(LOOKUP_RADIUS_M - 0.5, LOOKUP_RADIUS_M, d));
+
+  /** `crownLight` in TSL. */
+  const crownLight = (o: any, rc: any, sinElevation: any): any => {
+    const d = length(o);
+    const clamped = o.mul(min(rc.div(max(d, 1e-4)), 1));
+    const z = sqrt(float(1).sub(min(dot(o, o).div(rc.mul(rc)), 1)));
+    const lean = CROWN_NORMAL_LEAN;
+    const dome = dot(clamped, sunBody).div(rc).add(z.mul(sinElevation));
+    const norm = sqrt(float((1 - lean) ** 2 + lean ** 2).add(z.mul(2 * lean * (1 - lean))));
+    const nDotL = sinElevation.mul(1 - lean).add(dome.mul(lean)).div(norm);
+    const A = FOREST_SKY_SHARE;
+    const relative = float(A).add(max(nDotL, 0).mul(1 - A)).div(float(A).add(max(sinElevation, 0).mul(1 - A)));
+    return mix(float(1), relative, sunUpRamp(sinElevation));
+  };
+
+  /** `forestAverage` in TSL: `vec4(tree weight, ground weight)`. */
+  const average = (sinElevation: any, dens: any, crownWeight: any, tanElevation: any): any => {
+    const d = clamp(dens, 0, 1);
+    const cover = d.mul(COVER_FIT[0]).add(d.mul(d).mul(COVER_FIT[1])).mul(crownWeight);
+    const fitted = float(CROWN_LIGHT_FIT[0]).add(exp(max(sinElevation, 0).negate().div(CROWN_LIGHT_FIT[2])).mul(CROWN_LIGHT_FIT[1]));
+    const light = mix(float(1), fitted, sunUpRamp(sinElevation));
+    const shade = d.mul(GROUND_SHADE_FIT[0]).mul(smooth(0, GROUND_SHADE_FIT[1], float(CROWN_CENTRE_SHARE * H).div(tanElevation)));
+    const ground = float(1).sub(cover).mul(float(1).add(shadowFactorNode(sinElevation).sub(1).mul(shade)));
+    return (vec4 as any)(vec3(cover.mul(light)), ground);
   };
 
   const layer: SurfaceLayer = (context: IPlanetContext, below: ISurfaceSample) => {
     const p = bodyFixed(context);
     const heightM = length(p).sub(radiusM);
-    const weight = fadeWeight(context.cameraDistance);
+    const distance = context.cameraDistance;
+    const weight = fadeWeight(distance);
     const dens = density(p, heightM);
-    const cover = dens.mul(weight).mul(FOREST_CANOPY_COVER).mul(enabled);
-    const floor = mix(float(1), float(shadowFloor), floorShade(p, dens).mul(shadowStrength).mul(weight).mul(enabled));
+    const n = normalize(p);
+    const sinElevation = dot(sunBody, n);
+    const horizontal = sunBody.sub(n.mul(sinElevation));
+    const cosElevation = length(horizontal);
+    const toSun = horizontal.div(max(cosElevation, 1e-6));
+    const tanElevation = max(sinElevation.div(max(cosElevation, 1e-4)), MIN_SUN_TAN);
+    const pixelM = distance.mul(PIXEL_PER_DISTANCE);
+    const toAverage = smoothstep(patternStartM, patternEndM, distance);
+    const mean = average(sinElevation, dens, weight, tanElevation);
+
+    const weights: any = Fn(() => {
+      const ground: any = float(1).toVar();
+      const tree: any = vec3(0).toVar();
+      If(toAverage.lessThan(1).and(dens.greaterThan(0)).and(enabled.greaterThan(0)), () => {
+        // Ground shadows: the casters stand near the point one shadow offset toward the sun.
+        const shade: any = float(0).toVar();
+        const sunward = p.add(toSun.mul(float(CROWN_CENTRE_SHARE * H).div(tanElevation)));
+        eachTreeNear(sunward, radiusM, dens, 's', (offset, scale) => {
+          const r = offset.negate();
+          const x = dot(r, toSun);
+          const y = sqrt(max(dot(r, r).sub(x.mul(x)), 0));
+          const rc = scale.mul(crownRadius);
+          const a = min(rc.add(scale.mul(SHADOW_STRETCH * CROWN_LENGTH_SHARE * H).div(tanElevation)), SHADOW_MAX_M);
+          const b = rc.mul(SHADOW_WIDTH_SHARE);
+          const e = length(vec2(x.div(a), y.div(b)));
+          const s = float(1).sub(smoothstep(float(1 - SHADOW_SOFTNESS), float(1).add(pixelM.div(b)), e)).mul(withinLookup(length(r)));
+          shade.assign(max(shade, s));
+        });
+        ground.assign(mix(float(1), shadowFactorNode(sinElevation), shade));
+        // Crowns over the ground, in the lookup's order (the CPU twin's order).
+        const edge = max(pixelM.mul(0.5), 0.3);
+        eachTreeNear(p, radiusM, dens, 'c', (offset, scale, toneDraw) => {
+          const o = offset.negate();
+          const rc = scale.mul(crownRadius);
+          const d = length(o);
+          const c = float(1).sub(smoothstep(rc.sub(edge), rc.add(edge), d)).mul(withinLookup(d)).mul(weight);
+          const colour = treeToneNode(toneDraw).mul(crownLight(o, rc, sinElevation));
+          ground.assign(ground.mul(float(1).sub(c)));
+          tree.assign(mix(tree, colour, c));
+        });
+      });
+      return (vec4 as any)(mix(tree, mean.xyz, toAverage), mix(ground, mean.w, toAverage));
+    })();
+
+    const albedo = below.albedo.mul(weights.w).add(vec3(treeAlbedo).mul(weights.xyz));
+    const cover = clamp(float(1).sub(weights.w), 0, 1).mul(enabled);
     return {
       ...below,
-      albedo: mix(below.albedo.mul(floor), vec3(treeAlbedo), cover),
+      albedo: mix(below.albedo, albedo, enabled),
       roughness: mix(below.roughness, float(0.92), cover),
     };
   };
 
-  const occlusion: SunOcclusion = (context: IPlanetContext) =>
-    Fn(() => {
-      const p: any = bodyFixed(context);
-      const up = normalize(p);
-      const heightM = length(p).sub(radiusM);
-      const sunUp = dot(sunBody, up);
-      const horizontal = sunBody.sub(up.mul(sunUp));
-      const horizontalLength = max(length(horizontal), 1e-4);
-      const toSun = horizontal.div(horizontalLength);
-      const tanElevation = max(sunUp.div(horizontalLength), 0.02);
-      const treeHeight = float(FOREST_TREE_HEIGHT_M);
-      // Where the ray starts: the canopy top the pixel shows (far), the ground (near).
-      const start = density(p, heightM).mul(treeHeight).mul(fadeWeight(context.cameraDistance));
-      const reach = clamp(treeHeight.mul(1.2).div(tanElevation), 20, 500);
-      const steps = max(shadowSteps, 1);
-      const shade: any = float(0).toVar();
-      for (let k = 1; k <= 4; k += 1) {
-        If(shadowSteps.greaterThanEqual(k), () => {
-          const d = reach.mul(k).div(steps);
-          const occluder = density(p.add(toSun.mul(d)), heightM).mul(treeHeight);
-          const excess = occluder.sub(start).sub(d.mul(tanElevation));
-          shade.assign(max(shade, clamp(excess.div(treeHeight.mul(0.2)), 0, 1)));
-        });
-      }
-      const layerOn = select(mode.equal(1), float(0), enabled);
-      return mix(float(1), float(shadowFloor), shade.mul(shadowStrength).mul(layerOn));
-    })();
-
   return {
     layer,
-    occlusion,
-    uniforms: { enabled, mode, fadeStartM, fadeEndM, densityScale, shadowSteps, shadowStrength, sunBody },
+    uniforms: { enabled, mode, fadeStartM, fadeEndM, densityScale, patternStartM, patternEndM, sunBody },
     fadeWeight,
     density,
     clearance,

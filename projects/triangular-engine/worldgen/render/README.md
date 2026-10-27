@@ -138,3 +138,58 @@ projection independently of subsequent camera or parent-rig movement. Add its
 and materials. The demo's Freeze LOD helper uses the camera snapshot from the
 last selection. Its displayed far distance is shortened for readability; it
 does not change the camera's actual far plane or the selector's visibility test.
+
+## 6. Flat features (runways, roads)
+
+Runways, taxiways, aprons and roads are not meshes over the terrain. One `FlatFeatureSet` (from
+`triangular-engine/worldgen/render/core`, framework-free and worker-safe) both flattens the height source and feeds
+`flatFeatureLayer` in `triangular-engine/planet-material`, so the paint always lies on the flat ground.
+
+```ts
+import { FlatFeatureSet, type FlatFeature } from 'triangular-engine/worldgen/render/core';
+
+const features: FlatFeature[] = [
+  // 3 km runway, 45 m wide, flat at 120 m; blends back to the terrain over 30 m + 1.4 km
+  { kind: 'rectangle', id: 'runway', centre, headingRad: 0.4, lengthM: 3000, widthM: 45,
+    heightM: 120, apronM: 30, shoulderM: 1400, priority: 10, markings: 'runway' },
+  // road segment following the ground from 140 m to 155 m
+  { kind: 'segment', id: 'road-1', start, end, widthM: 8, heightM: [140, 155], priority: 1, markings: 'road' },
+];
+const set = new FlatFeatureSet(features, radiusM);
+```
+
+Positions are unit directions in the planet body frame (`[x, y, z]`, the same frame as the mesh worker). A segment is
+a great-circle arc of at most 45° with round ends; a rectangle is centred on a direction, `headingRad` measured from
+east towards north. `flatFeatureOffset(centre, flatFeatureFrame(centre, heading), alongM, acrossM, radiusM)` lays out
+an airfield in metres.
+
+**Height stamp.** In your mesh worker, pass `modifyElevation: set.heightStamp()` in the `ICellPlanetWorkerPipelineOptions`
+of `handleCellPlanetWorkerMessage` (the definitions are plain data: post them to the worker and build the set there). Inside `widthM/2 + apronM` the ground sits at the
+feature's `heightM` (a segment interpolates between its two ends); over the next `shoulderM` it blends back with a
+smooth step. The stamp is a function of the body-frame direction only, so every terrain LOD and every patch edge gets
+the same height. Leave `heightM` out to paint a feature on the natural ground (water, ice). Use
+`set.stampElevation(direction, naturalM)` on the CPU for the same height (placement, physics, camera ground).
+
+**Overlaps and crossings.** Features blend in ascending `priority` (then list order), each pulling the height towards
+its own: the higher-priority feature holds its height where they cross, and the result stays continuous. The material
+layer uses the same rule for the markings.
+
+**Per-page lists.** `FlatFeaturePageWindow(set, options)` keeps a window of `windowPages²` (default 32²) pages of an
+equirectangular grid around the camera. `update(cameraDirection, altitudeM)` picks the page size from the altitude
+(`max(minPageM, altitudeM × pageAltitudeRatio)`, with hysteresis), re-centres when the camera moved more than an eighth
+of the window, and selects the features of pages new to the window only: up to `maxPerPage` (default 8) per page,
+highest priority first. It packs them into two float textures for `flatFeatureLayer`. `stats` reports the level and
+how many pages overflowed. The window option `capacity` (default 256) is the most features it holds.
+
+**Clearance.** `set.isInClearance(direction, marginM?)` is true within a feature's `clearanceM` (default: its
+`apronM`) of its edge; scatter can use it to keep trees and rocks off runways and roads. `set.nearest(direction)`
+returns the nearest feature and its signed distance.
+
+Known limits:
+
+- Positions on the GPU are float32 unit directions: on an Earth-size planet markings step at about 0.5 m.
+- Equirectangular pages narrow in longitude towards the poles; the window covers less ground there.
+- Features beyond the window are not drawn; at coarse levels a full page drops its lowest-priority features (small
+  roads disappear from high altitude first).
+- Material tiles baked from the terrain (slope, cliff colour) do not see the stamp.
+- The stamp scans every feature with a cheap reach test; it suits hundreds of features, not tens of thousands.

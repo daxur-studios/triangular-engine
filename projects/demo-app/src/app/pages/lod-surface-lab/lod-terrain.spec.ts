@@ -368,6 +368,13 @@ describe('Plan 059 biome mix', () => {
     }
   });
 
+  it('lists the two alternating geometry comparisons in v5', () => {
+    const suite = LOD_SURFACE_TEST_HISTORY.find((item) => item.id === 'lod-surface-terrain' && item.version === 5)!;
+    expect(suite.scenarios.filter((item) => item.id.startsWith('biome-cap-')).map((item) => item.settings.leafCap)).toEqual([1024, 512, 1024, 512]);
+    expect(suite.scenarios.filter((item) => item.id.startsWith('biome-cells-')).map((item) => item.settings.patchCells)).toEqual([32, 16, 32, 16]);
+    expect(suite.scenarios.some((item) => item.id.startsWith('biome-mix-floor-'))).toBeFalse();
+  });
+
   it('lists both domains, all baseline poses, traversals, targets and the alternating floor cases in v4', () => {
     const suite = LOD_SURFACE_TEST_HISTORY.find((item) => item.id === 'lod-surface-terrain' && item.version === 4)!;
     for (const domain of ['plane-100km', 'sphere-10km']) {
@@ -465,7 +472,7 @@ describe('Plan 059 suite lod-surface-terrain', () => {
 
   it('is the last entry after the untouched baseline versions, and a valid history', () => {
     expect(history.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
-      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4',
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4', 'lod-surface-terrain@5',
     ]);
     expect(() => validateTestHistory(history)).not.toThrow();
     expect(terrain.purpose).toBe('performance');

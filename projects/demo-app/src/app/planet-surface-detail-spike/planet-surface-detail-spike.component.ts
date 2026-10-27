@@ -6,7 +6,9 @@ import { float } from 'three/tsl';
 import type { Material } from 'three/webgpu';
 import { EngineModule, EngineService, RaycastOrbitControlsComponent } from 'triangular-engine';
 import { PlanetAtmosphereComponent } from 'triangular-engine/atmosphere';
+import { computeScatterWindowRadiusM, type IScatterPlanetLatticeResult } from 'triangular-engine/scatter';
 import {
+  flatFeatureLayer,
   macroVariationLayer,
   planetOceanMaterial,
   PlanetSurfaceMaterial,
@@ -25,19 +27,22 @@ import {
   CellPlanetMorphStreamingViewComponent,
   WORLD_SIZE_TIER_RADIUS_M,
 } from 'triangular-engine/worldgen/render';
+import { FlatFeaturePageWindow, FlatFeatureSet, type FlatFeature } from 'triangular-engine/worldgen/render/core';
 import { CELL_PLANET_U0_FIXTURE } from '../pages/cell-planet-u0-fixture';
 import { getTerrainHeightScaleM } from '../pages/cell-planet-25d-map/cell-planet-terrain-scale';
 import type { CellPlanetMorphWorkerRequest } from '../pages/cell-planet-morph-streaming/cell-planet-morph-streaming.worker';
 import { FOREST_CROWN_WIDTH_M, FOREST_SPACING_M, forestFadeBand } from './forest-field';
-import { ROCK_SHAPE, SurfaceInstances, TREE_SHAPE, rockGeometry, treeGeometry } from './forest-instances';
+import { BUILDING_SHAPE, ROCK_SHAPE, SurfaceInstances, TREE_SHAPE, buildingGeometry, rockGeometry, treeGeometry } from './forest-instances';
 import { forestDensityParity, forestLayer, type ForestViewMode } from './forest-layer';
+import { patternFadeBand } from './forest-shading';
+import { BUILDING_HEIGHT_RANGE_M, BUILDING_SIZE_RANGE_M, buildingBands, buildingBatch, buildingsFromInstances } from './building-field';
+import { MAX_BUILDINGS, buildingLayer } from './building-layer';
 import { ROCK_SIZE_M, ROCK_SIZE_RANGE_M, ROCK_SPACING_M, rockBands } from './rock-field';
 import { rockLayer } from './rock-layer';
 import { MaterialStreaming } from './material-streaming';
-import { runwayLayer } from './runway-layer';
 import { RUNWAY_LENGTH_M, RUNWAY_WIDTH_M, runwayFrame, type IRunwaySite } from './runway-site';
 
-/** Grid spacing of the tree scatter and the instance buffer sizes. The scatter's grid is body-fixed (see `scatterCells`). */
+/** Lattice cell of the tree scatter and the instance buffer sizes. The lattice is body-fixed (see `scatterPlanetLattice`). */
 const SCATTER_SPACING_M = FOREST_SPACING_M;
 const TREE_CAPACITY = 300_000;
 const ROCK_CAPACITY = 60_000;
@@ -46,7 +51,7 @@ const SCATTER_RECENTRE_M = 400;
 /** Width of the dissolve inside a window's edge (metres). */
 const WINDOW_FADE_M = 400;
 /** A window must hold all the camera can still see of a class: the end of its fade band, the drift allowed, and the edge dissolve. */
-const windowRadiusFor = (fadeEndM: number): number => Math.ceil((fadeEndM + 2 * SCATTER_RECENTRE_M) / 100) * 100;
+const windowRadiusFor = (fadeEndM: number): number => computeScatterWindowRadiusM(fadeEndM, SCATTER_RECENTRE_M);
 
 type ObjectClass = 'tree' | 'rock';
 
@@ -62,7 +67,8 @@ interface IClassWindow {
 const query = new URLSearchParams(globalThis.location?.search ?? '');
 /**
  * `?runway=on` (default): height stamp and SDF paint. `paint`: SDF only, natural terrain under it. `stamp`: flattened
- * terrain only. `off`: neither. The stamp is baked into the terrain meshes, so it is chosen at load.
+ * terrain only. `off`: neither. The stamp is baked into the terrain meshes, so it is chosen at load. Since the library
+ * move (Plan 063 scope 1–2) the mode covers the whole airfield and road network (`airfield-features.ts`).
  */
 type RunwayMode = 'on' | 'paint' | 'stamp' | 'off';
 const RUNWAY: RunwayMode = (['paint', 'stamp', 'off'] as const).find((m) => m === query.get('runway')) ?? 'on';
@@ -107,6 +113,7 @@ export class PlanetSurfaceDetailSpikeComponent {
     { label: '300 m', altitudeM: 300 },
     { label: '1.5 km', altitudeM: 1500 },
     { label: '6 km', altitudeM: 6000 },
+    { label: '10 km', altitudeM: 10_000 },
     { label: '25 km', altitudeM: 25_000 },
     { label: '100 km', altitudeM: 100_000 },
     { label: '400 km', altitudeM: 400_000 },
@@ -129,7 +136,6 @@ export class PlanetSurfaceDetailSpikeComponent {
   readonly fadeStartM = signal(Math.round(forestFadeBand().startM));
   readonly fadeWidthM = signal(Math.round(forestFadeBand().endM - forestFadeBand().startM));
   readonly densityScale = signal(1);
-  readonly shadowSteps = signal(0);
   readonly treeCount = signal(0);
   /** Trees found in the window beyond the buffer: lost at the far edge, never along a row. */
   readonly treesDropped = signal(0);
@@ -140,6 +146,12 @@ export class PlanetSurfaceDetailSpikeComponent {
   readonly rockBandsM = rockBands();
   readonly crownWidthM = FOREST_CROWN_WIDTH_M;
   readonly forestBand = forestFadeBand();
+  readonly patternBand = patternFadeBand();
+  readonly showBuildings = signal(true);
+  readonly buildingCount = signal(0);
+  readonly buildingBandsM = buildingBands();
+  readonly buildingSizeRangeM = BUILDING_SIZE_RANGE_M;
+  readonly buildingHeightRangeM = BUILDING_HEIGHT_RANGE_M;
   readonly sunElevation = signal(50);
   readonly sunAzimuth = signal(0);
   readonly exposure = signal(8);
@@ -165,9 +177,16 @@ export class PlanetSurfaceDetailSpikeComponent {
   });
   private readonly streamed = streamedMaterialLayer(this.streaming.gpu);
   private readonly macroLayer = macroVariationLayer({ positionSpace: 'morphed' });
-  private readonly runway = runwayLayer();
+  /** Library flat features (Plan 063): per-page lists around the camera, drawn by `flatFeatureLayer`. */
+  private readonly flatPages = new FlatFeaturePageWindow(null, { pageAltitudeRatio: 0.5 });
+  private readonly flat = flatFeatureLayer(this.flatPages);
+  readonly featureText = signal('flat features: waiting for the site');
   private readonly forest = forestLayer(WORLD_SIZE_TIER_RADIUS_M.medium);
   private readonly rocks = rockLayer(this.forest, WORLD_SIZE_TIER_RADIUS_M.medium);
+  private readonly buildings = buildingLayer(this.forest);
+  private buildingInstances?: SurfaceInstances;
+  /** The worker's building records, kept until the meshes exist (they need the atmosphere's binding). */
+  private buildingRecords: Float32Array | null = null;
   private readonly windows: Record<ObjectClass, IClassWindow> = {
     tree: { centre: null, inFlight: false, radiusM: 0, densityScale: 1 },
     rock: { centre: null, inFlight: false, radiusM: 0, densityScale: 1 },
@@ -200,10 +219,10 @@ export class PlanetSurfaceDetailSpikeComponent {
     setPlanetMapExtent(this.surface.morph, this.radius);
     this.surface.addSurfaceLayer({ id: 'streamedMaterial', order: SURFACE_LAYER_ORDER.streamedMaterial, layer: this.streamed.layer });
     this.surface.addSurfaceLayer({ id: 'macroVariation', order: SURFACE_LAYER_ORDER.macroVariation, layer: this.macroLayer.layer });
-    this.surface.addSurfaceLayer({ id: 'runway', order: SURFACE_LAYER_ORDER.game, layer: this.runway.layer });
+    this.surface.addSurfaceLayer({ id: 'flatFeatures', order: SURFACE_LAYER_ORDER.game, layer: this.flat.layer });
     this.surface.addSurfaceLayer({ id: 'forest', order: SURFACE_LAYER_ORDER.game - 100, layer: this.forest.layer });
     this.surface.addSurfaceLayer({ id: 'rocks', order: SURFACE_LAYER_ORDER.game - 90, layer: this.rocks.layer });
-    this.surface.addSunOcclusion({ id: 'forestShadow', occlusion: this.forest.occlusion });
+    this.surface.addSurfaceLayer({ id: 'buildings', order: SURFACE_LAYER_ORDER.game - 80, layer: this.buildings.layer });
     this.addOcean();
 
     this.worker.onmessage = ({ data }: MessageEvent<{ id: number; patch?: unknown; runwaySite?: IRunwaySite | null; error?: string }>) => {
@@ -226,31 +245,43 @@ export class PlanetSurfaceDetailSpikeComponent {
           }).then((data) => {
             const site = data.runwaySite as IRunwaySite | null;
             if (!site) return;
-            this.runway.setSite(site.along, site.across);
             this.forest.setSite(site.along, site.across);
+            void this.request({
+              kind: 'flatFeatures',
+              radiusM: this.radius,
+              heightScaleM: this.heightScaleM,
+              worldProfile: CELL_PLANET_U0_FIXTURE.worldProfile,
+              seed: CELL_PLANET_U0_FIXTURE.seed,
+            }).then((reply) => {
+              const features = reply.flatFeatures as FlatFeature[] | null;
+              if (features) this.flatPages.setFeatures(new FlatFeatureSet(features, this.radius));
+            });
+            this.buildings.setSite(site.along, site.across);
             this.site.set(site);
             this.jump(this.altitudeM());
+            this.requestBuildings(site);
           });
 
     effect(() => {
-      this.runway.enabled.value = this.paintOn() && this.site() ? 1 : 0;
+      this.flat.enabled.value = this.paintOn() && this.site() ? 1 : 0;
     });
 
-    // Forest controls are live uniforms (nothing recompiles); the shadow step count is a uniform branch.
+    // Forest controls are live uniforms (nothing recompiles).
     effect(() => {
       const u = this.forest.uniforms;
       u.mode.value = this.viewMode();
       u.fadeStartM.value = this.fadeStartM();
       u.fadeEndM.value = this.fadeStartM() + this.fadeWidthM();
       u.densityScale.value = this.densityScale();
-      u.shadowSteps.value = this.shadowSteps();
       const [x, y, z] = this.sunDirection();
       u.sunBody.value.set(x, y, z);
       this.rocks.uniforms.enabled.value = this.showRocks() ? 1 : 0;
+      this.buildings.uniforms.enabled.value = this.showBuildings() ? 1 : 0;
       const trees = this.windows.tree.instances;
       const rocks = this.windows.rock.instances;
       if (trees) trees.mesh.visible = this.viewMode() !== 2;
       if (rocks) rocks.mesh.visible = this.viewMode() !== 2 && this.showRocks();
+      if (this.buildingInstances) this.buildingInstances.mesh.visible = this.viewMode() !== 2 && this.showBuildings();
     });
 
     // The near form needs the atmosphere's binding: build it once the atmosphere exists.
@@ -284,9 +315,27 @@ export class PlanetSurfaceDetailSpikeComponent {
         binding,
         bodyCentre,
       );
+      // Buildings: one fixed list, so the "window" is the whole placement ring and never moves.
+      const buildings = new SurfaceInstances(
+        {
+          geometry: buildingGeometry(),
+          shape: BUILDING_SHAPE,
+          capacity: MAX_BUILDINGS,
+          albedo: this.buildings.roofAlbedo,
+          opacity: (distance) => this.buildings.meshOpacity(distance),
+          windowRadiusM: 1e7,
+          windowFadeM: 1,
+          normalLean: 1,
+          alignTo: () => this.site()?.along,
+        },
+        binding,
+        bodyCentre,
+      );
       this.windows.tree.instances = trees;
       this.windows.rock.instances = rocks;
-      this.engine.scene.add(trees.mesh, rocks.mesh);
+      this.buildingInstances = buildings;
+      this.engine.scene.add(trees.mesh, rocks.mesh, buildings.mesh);
+      this.placeBuildingMeshes();
     });
 
     this.engine.beforeRender$.subscribe(() => {
@@ -298,6 +347,7 @@ export class PlanetSurfaceDetailSpikeComponent {
         this.drawingBuffer,
       );
       this.updateInstances(camera.position);
+      this.updateFlatFeatures(camera.position);
       const s = this.streaming.runtime.stats;
       const current = this.tileStats();
       if (s.resident !== current.resident || s.queued !== current.queued || s.maxLevel !== current.maxLevel) {
@@ -342,7 +392,9 @@ export class PlanetSurfaceDetailSpikeComponent {
     this.destroyRef.onDestroy(() => {
       this.windows.tree.instances?.dispose();
       this.windows.rock.instances?.dispose();
+      this.buildingInstances?.dispose();
       this.worker.terminate();
+      this.flatPages.dispose();
       this.streaming.dispose();
       this.surface.dispose();
       this.ocean.material.dispose();
@@ -361,7 +413,7 @@ export class PlanetSurfaceDetailSpikeComponent {
     request: ITerrainSurfaceGenerationRequest<ILatLonTerrainPatchAddress>,
   ): Promise<ITerrainPatchMesh<ILatLonTerrainPatchAddress>> => {
     await this.siteReady;
-    const workerRequest: CellPlanetMorphWorkerRequest & { runwayStamp: boolean } = {
+    const workerRequest: CellPlanetMorphWorkerRequest & { flatFeatureStamp: boolean } = {
       id: 0,
       address: request.address,
       radius: this.radius,
@@ -378,11 +430,24 @@ export class PlanetSurfaceDetailSpikeComponent {
       heightScale: this.heightScaleM,
       worldProfile: CELL_PLANET_U0_FIXTURE.worldProfile,
       seed: CELL_PLANET_U0_FIXTURE.seed,
-      runwayStamp: RUNWAY === 'on' || RUNWAY === 'stamp',
+      flatFeatureStamp: RUNWAY === 'on' || RUNWAY === 'stamp',
     };
     const data = await this.request(workerRequest as unknown as Record<string, unknown>);
     return data.patch as ITerrainPatchMesh<ILatLonTerrainPatchAddress>;
   };
+
+  /** Moves the flat-feature page window with the camera; the panel shows its level and list lengths. */
+  private updateFlatFeatures(cameraScene: Vector3): void {
+    const body = cameraScene.clone().sub(this.surface.morph.uBodyCentreScene.value as Vector3);
+    const direction = body.clone().normalize();
+    if (!this.flatPages.update([direction.x, direction.y, direction.z], body.length() - this.radius)) return;
+    const s = this.flatPages.stats;
+    const pageM = (Math.PI * this.radius) / this.flatPages.rows;
+    this.featureText.set(
+      `flat features: level ${s.level} (${(pageM / 1000).toFixed(2)} km pages), ${s.pagesWithFeatures} pages listed, ` +
+        `longest list ${s.longestList}/${this.flatPages.maxPerPage}, ${s.pagesOverflowing} full`,
+    );
+  }
 
   private addOcean(): void {
     const geometry = buildOceanMorphGeometry(this.radius, this.heightScaleM, 0, 'equalEarth', 128, 64).geometry;
@@ -401,6 +466,7 @@ export class PlanetSurfaceDetailSpikeComponent {
    */
   private updateInstances(cameraScene: Vector3): void {
     for (const cls of ['tree', 'rock'] as const) this.windows[cls].instances?.update();
+    this.buildingInstances?.update();
     if (this.viewMode() === 2) return;
     const body = cameraScene.clone().sub(this.surface.morph.uBodyCentreScene.value as Vector3);
     const altitudeM = body.length() - this.radius;
@@ -442,15 +508,42 @@ export class PlanetSurfaceDetailSpikeComponent {
         stamp: RUNWAY === 'on' || RUNWAY === 'stamp',
       })
         .then((data) => {
-          instances.setInstances(ground, data.trees as Float32Array);
+          const scatter = data.scatter as IScatterPlanetLatticeResult;
+          instances.setInstances(scatter);
           instances.setWindowRadius(radiusM);
           if (cls === 'tree') {
             this.treeCount.set(instances.instanceCount);
-            this.treesDropped.set(Math.max((data.accepted as number) - instances.instanceCount, 0));
+            this.treesDropped.set(Math.max(scatter.accepted - instances.instanceCount, 0));
           } else this.rockCount.set(instances.instanceCount);
         })
         .finally(() => (window.inFlight = false));
     }
+  }
+
+  /** Asks the worker for the test buildings around the site; the shader gets the list, the meshes the records. */
+  private requestBuildings(site: IRunwaySite): void {
+    void this.request({
+      kind: 'buildings',
+      radiusM: this.radius,
+      heightScaleM: this.heightScaleM,
+      worldProfile: CELL_PLANET_U0_FIXTURE.worldProfile,
+      seed: CELL_PLANET_U0_FIXTURE.seed,
+      site,
+      stamp: RUNWAY === 'on' || RUNWAY === 'stamp',
+    }).then((data) => {
+      this.buildingRecords = data.buildings as Float32Array;
+      const list = buildingsFromInstances(this.buildingRecords);
+      this.buildings.setBuildings(list);
+      this.buildingCount.set(Math.min(list.length, MAX_BUILDINGS));
+      this.placeBuildingMeshes();
+    });
+  }
+
+  /** Places the building meshes once both the worker's records and the instanced mesh exist. */
+  private placeBuildingMeshes(): void {
+    const site = this.site();
+    if (!site || !this.buildingRecords || !this.buildingInstances) return;
+    this.buildingInstances.setInstances(buildingBatch(this.buildingRecords, site, this.radius));
   }
 
   /** Finds solid forest near the runway site and points the camera presets at it. */
@@ -613,8 +706,8 @@ export class PlanetSurfaceDetailSpikeComponent {
     this.densityScale.set(+(event.target as HTMLInputElement).value);
   }
 
-  setShadowSteps(steps: number): void {
-    this.shadowSteps.set(steps);
+  setShowBuildings(on: boolean): void {
+    this.showBuildings.set(on);
   }
 
   /** Altitude slider: log scale from 30 m to 40 km, for a slow zoom through the fade band. */

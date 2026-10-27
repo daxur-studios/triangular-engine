@@ -893,6 +893,30 @@ describe('Plan 059 suite', () => {
     expect(zoom).toBeUndefined();
   });
 
+  it('probes five distinct positions on the biome traversal outside the timing window', async () => {
+    let t: number | undefined = 0;
+    let now = 0;
+    let sampling = false;
+    const probed: number[] = [];
+    const host = {
+      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, ...(t !== undefined ? { motion: 'biome-sweep' as const } : {}) }),
+      setZoomProgress: (value: number | undefined) => { t = value; }, setSweepTime: () => undefined,
+      renderedFrames: () => Math.floor(now / 16), errors: () => '', backendIsWebGpu: () => true,
+      frame: () => ({ stats: { leaves: 1, drawn: 1, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0 }, instances: 1, trianglesPerLeaf: 2, drawCalls: 1, rendererTriangles: 2, drawingBuffer: [1, 1] as const }),
+      onRenderComplete: () => () => undefined, selectionSamples: () => [0.1], leafSamples: () => [1], levelChangeSamples: () => [0], levelChangeAllSamples: () => [0], resetSamples: () => undefined,
+      isSampling: () => sampling, startSampling: () => { sampling = true; }, gpuSamplesSoFar: () => [],
+      stopSampling: () => { sampling = false; return { frames: 100, cpuMedianMs: 1, cpuP95Ms: 1, wallMedianMs: 6, wallP95Ms: 6, gpuMedianMs: null, gpuSamples: 0, invalidReasons: [], verdict: 'ok' as const }; },
+      crackProbe: () => { expect(sampling).toBeFalse(); probed.push(t!); return Promise.resolve({ cracks: 0, masked: 0, surface: 10, background: 10, width: 4, height: 4 }); }, environment: () => ({}),
+    } as unknown as LodSurfaceTestHost;
+    spyOn(performance, 'now').and.callFake(() => now);
+    const context = { mode: 'quick', repetition: 1, signal: new AbortController().signal, wait: (ms: number) => { now += ms; return Promise.resolve(); } } as unknown as TestContext;
+    const scenario = { id: 'test', label: 'test', settings: { ...DEFAULT_SETTINGS, motion: 'biome-sweep' as const }, warmupMs: 0, durationMs: 100, quickMs: 100 };
+    const result = await createLodSurfaceTestAdapter(host).measure(scenario, context);
+    expect(probed).toEqual([0, 0.25, 0.5, 0.75, 1]);
+    expect(result.metrics?.find((metric) => metric.name === 'traversalCrackPixels')?.samples).toEqual([0, 0, 0, 0, 0]);
+    expect(t).toBeUndefined();
+  });
+
   it('runs a sweep case on the sweep clock, checks its state while it runs, probes after it and reports the level churn', async () => {
     let sweepAt: number | undefined;
     const times: number[] = [];
@@ -940,7 +964,7 @@ describe('Plan 059 suite versions and hysteresis', () => {
 
   it('lists the versions oldest first with the latest terrain suite last', () => {
     expect(LOD_SURFACE_TEST_HISTORY.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
-      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4',
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4', 'lod-surface-terrain@5',
     ]);
   });
 

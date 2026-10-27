@@ -1,13 +1,18 @@
-import { float, uniform, vec3 } from 'three/tsl';
+import { float, uniform, vec3, vec4 } from 'three/tsl';
+import { evaluateOnGpu } from './gpu-eval.testing';
 import {
   createPlanetDayNightUniforms,
   createPlanetMorphLightingUniforms,
   identityAtmosphere,
   simpleDayNightLighting,
   sunVisibilityLighting,
+  type ISimpleDayNightLightingOptions,
+  type LightingStage,
 } from './planet-lighting';
 import { PlanetSurfaceMaterial } from './planet-surface-material';
 import { meshOf, renderRgba, triangleWith } from './render-eval.testing';
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const VIEW = { left: -3, right: 3, top: 1.5, bottom: -1.5 };
 const corners = [[-3, -1.5, 0], [3, -1.5, 0], [0, 1.5, 0]];
@@ -157,5 +162,84 @@ describe('planet lighting stages on the GPU', () => {
     uniforms.uMorphLightingTurn.value.set(1, 0, 0, 0, -1, 0, 0, 0, -1);
     const turnedAway = await pixel(material, [0, 1, 0], light);
     expect(lit[0]).toBeGreaterThan(turnedAway[0] + 0.05);
+  });
+});
+
+/**
+ * The stages called directly on the GPU. Each row is `[sphereNormal], [colour, sunVisibility], [normal, directShadow]`;
+ * the test context carries slot 2 so the input callbacks can read it.
+ */
+describe('planet lighting inputs (normal and direct shadow) on the GPU', () => {
+  const smooth = (e0: number, e1: number, x: number) => {
+    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+  };
+  /** The day/night light modifier on the red channel, for the default uniforms. */
+  const dayNightRed = (dayFactor: number, rim: number) => {
+    const night = 0.09 * 0.2;
+    return night + (1 - night) * dayFactor + rim * (1 - dayFactor * 0.6);
+  };
+  const rimAt = (sunDot: number) => Math.exp(-((sunDot / (0.12 * 1.5)) ** 2)) * 0.5;
+  const normal = (context: any) => context.testNormal;
+  const directShadow = (context: any) => context.testShadow;
+
+  const evaluate = async (stage: LightingStage, rows: number[][][]) => {
+    const out = await evaluateOnGpu(rows, (at) => {
+      const context = { sphereNormal: at(0).xyz, testNormal: at(2).xyz, testShadow: at(2).w } as any;
+      const input = { color: at(1).xyz, sunVisibility: at(1).w, surface: { albedo: at(1).xyz } as any, emissive: null };
+      return vec4(stage(context, input), 1);
+    });
+    return rows.map((_, i) => out[i * 4]);
+  };
+  const dayNight = (options?: ISimpleDayNightLightingOptions) => {
+    const day = createPlanetDayNightUniforms();
+    day.uDayNightEnabled.value = 1;
+    day.uSunDirection.value.set(0, 0, 1);
+    return simpleDayNightLighting(day, options);
+  };
+
+  // Sphere normals at sun angles 1 (noon), 0.05 (inside the twilight band) and 0.7.
+  const spheres = [[0, 0, 1], [Math.sqrt(1 - 0.05 ** 2), 0, 0.05], [Math.sqrt(1 - 0.49), 0, 0.7]];
+
+  it('gives the same output as before without inputs, and with neutral inputs (the sphere normal, no shadow)', async () => {
+    const rows = spheres.map((s) => [s, [1, 1, 1, 1], [...s, 1]]);
+    const plain = await evaluate(dayNight(), rows);
+    spheres.forEach((s, i) => {
+      expect(plain[i]).withContext(`sphere ${s}`).toBeCloseTo(dayNightRed(smooth(-0.12, 0.12, s[2]), rimAt(s[2])), 4);
+    });
+    const neutral = await evaluate(dayNight({ normal, directShadow }), rows);
+    neutral.forEach((v, i) => expect(v).toBeCloseTo(plain[i], 5));
+  });
+
+  it('a tilted normal changes only the direct share: the sky share stays on the sphere normal', async () => {
+    // Normals turned from the sun (N.L = -0.5), edge-on (0) and part-way (0.05); the sphere is at noon.
+    const tilts = [[Math.sqrt(0.75), 0, -0.5], [1, 0, 0], [Math.sqrt(1 - 0.05 ** 2), 0, 0.05]];
+    const out = await evaluate(dayNight({ normal }), tilts.map((n) => [[0, 0, 1], [1, 1, 1, 1], [...n, 1]]));
+    tilts.forEach((n, i) => {
+      const day = 0.35 + 0.65 * smooth(-0.12, 0.12, n[2]);
+      expect(out[i]).withContext(`normal ${n}`).toBeCloseTo(dayNightRed(day, rimAt(1)), 4);
+    });
+    // Turned fully away, the pixel keeps the sky share of the day light, far above the night floor.
+    expect(out[0]).toBeGreaterThan(0.3);
+  });
+
+  it('a direct shadow of 0 keeps the sky share of the day light, and skyShare sets that share', async () => {
+    const shadows = [0, 0.5, 1];
+    const rows = shadows.map((shadow) => [[0, 0, 1], [1, 1, 1, 1], [0, 0, 1, shadow]]);
+    const out = await evaluate(dayNight({ directShadow }), rows);
+    shadows.forEach((shadow, i) => {
+      expect(out[i]).withContext(`shadow ${shadow}`).toBeCloseTo(dayNightRed(0.35 + 0.65 * shadow, rimAt(1)), 4);
+    });
+    const half = await evaluate(dayNight({ directShadow, skyShare: 0.5 }), rows.slice(0, 1));
+    expect(half[0]).toBeCloseTo(dayNightRed(0.5, rimAt(1)), 4);
+  });
+
+  it('sunVisibilityLighting: a direct shadow scales towards the floor, and nothing changes without it', async () => {
+    const shadows = [0, 0.5, 1];
+    const rows = shadows.map((shadow) => [[0, 0, 1], [1, 1, 1, 0.8], [0, 0, 1, shadow]]);
+    const plain = await evaluate(sunVisibilityLighting(), rows);
+    plain.forEach((v) => expect(v).toBeCloseTo(0.15 + 0.85 * 0.8, 5));
+    const shadowed = await evaluate(sunVisibilityLighting({ directShadow }), rows);
+    shadows.forEach((shadow, i) => expect(shadowed[i]).toBeCloseTo(0.15 + 0.85 * 0.8 * shadow, 5));
   });
 });
