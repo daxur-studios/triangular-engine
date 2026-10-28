@@ -5,6 +5,7 @@ import {
   AnimationMixer,
   Bone,
   Box3,
+  CylinderGeometry,
   Group,
   Mesh,
   MeshStandardMaterial,
@@ -24,21 +25,31 @@ import { EngineModule, EngineService } from 'triangular-engine';
 import {
   applyLookAt,
   blendPoses,
+  CAPSULE_ACCESSORY_IDS,
+  CAPSULE_CHARACTER_PRESETS,
+  CAPSULE_CHEST_PATCH_IDS,
+  CAPSULE_FACIAL_HAIR_IDS,
+  CAPSULE_HAIR_STYLE_IDS,
   createHumanoidRig,
+  DEFAULT_CAPSULE_BOOT_COLORS,
+  DEFAULT_CAPSULE_HAIR_COLORS,
+  DEFAULT_CAPSULE_SKIN_TONES,
   EMOTION_NAMES,
   EXTENDED_EMOTION_NAMES,
   FacialAnimationController,
   HUMAN_BONE_NAMES,
-  mergeBlendShapeWeights,
   preProcessText,
-  sampleEmotion,
   sampleLocomotion,
-  sampleVisemeTrack,
   SIT_POSE,
   solveTwoBoneIk,
-  visemeToBlendShapes,
   wordsToVisemes,
-  type BlendShapeWeights,
+  type CapsuleAccessoryId,
+  type CapsuleCharacterDNA,
+  type CapsuleChestPatchId,
+  type CapsuleFacialHairId,
+  type CapsuleHairStyleId,
+  type CapsuleHandActionMode,
+  type CapsuleLocomotionMode,
   type EmotionName,
   type ExtendedEmotionName,
   type FaceSemanticChannelName,
@@ -60,6 +71,7 @@ import {
   buildProceduralChair,
   buildProceduralDoor,
   buildReferenceFaceMesh,
+  CapsuleCharacterActor,
   CHARACTER_BODY_STYLES,
   type CharacterBodyStyle,
   type IProceduralChairResult,
@@ -68,8 +80,9 @@ import {
 } from 'triangular-engine/procedural';
 
 export type TargetSourceMode = 'door-knob' | 'chair' | 'manual';
-export type CharactersLabViewMode = 'face-studio' | 'full-body';
-export type CameraFramingPreset = 'front' | 'three-quarter' | 'profile';
+export type CharactersLabViewMode = 'capsule-doodle' | 'face-studio' | 'full-body';
+export type CameraFramingPreset = 'front' | 'three-quarter' | 'profile' | 'full-shot';
+export type CapsuleLayoutMode = 'hero' | 'lineup';
 
 const WALK_RADIUS = 1.6;
 const TARGET_SWING_RADIUS = 2.5;
@@ -96,10 +109,34 @@ function lerpAngle(from: number, to: number, t: number): number {
 })
 export class CharactersLabPageComponent {
   // View mode
-  protected viewMode: CharactersLabViewMode = 'face-studio';
-  protected cameraFraming: CameraFramingPreset = 'three-quarter';
-  protected readonly cameraPosition = signal<[number, number, number]>([0.26, 1.62, 0.38]);
-  protected readonly cameraTarget = signal<[number, number, number]>([0, 1.58, 0]);
+  protected viewMode: CharactersLabViewMode = 'capsule-doodle';
+  protected cameraFraming: CameraFramingPreset = 'full-shot';
+  protected readonly cameraPosition = signal<[number, number, number]>([0.75, 1.38, 2.45]);
+  protected readonly cameraTarget = signal<[number, number, number]>([0, 0.92, 0]);
+
+  // Capsule Doodle Studio state
+  protected capsuleLayoutMode: CapsuleLayoutMode = 'hero';
+  protected readonly capsulePresets = CAPSULE_CHARACTER_PRESETS;
+  protected readonly capsuleHairStyles = CAPSULE_HAIR_STYLE_IDS;
+  protected readonly capsuleFacialHairStyles = CAPSULE_FACIAL_HAIR_IDS;
+  protected readonly capsuleAccessories = CAPSULE_ACCESSORY_IDS;
+  protected readonly capsuleChestPatches = CAPSULE_CHEST_PATCH_IDS;
+  protected readonly capsuleSkinTones = DEFAULT_CAPSULE_SKIN_TONES;
+  protected readonly capsuleHairColors = DEFAULT_CAPSULE_HAIR_COLORS;
+  protected readonly capsuleBootColors = DEFAULT_CAPSULE_BOOT_COLORS;
+
+  protected selectedPresetId = CAPSULE_CHARACTER_PRESETS[5].id!; // Wacky Hair Cosmonaut
+  protected capsuleLocomotion: CapsuleLocomotionMode = 'idle';
+  protected capsuleRightHandAction: CapsuleHandActionMode = 'wave';
+  protected capsuleLeftHandAction: CapsuleHandActionMode = 'none';
+  protected capsuleWavyMouth = false;
+  protected seedCounter = 1;
+
+  private readonly capsuleStudioGroup = new Group();
+  private readonly capsuleHeroGroup = new Group();
+  private readonly capsuleLineupGroup = new Group();
+  protected readonly capsuleHeroActor: CapsuleCharacterActor;
+  private readonly capsuleLineupActors: CapsuleCharacterActor[] = [];
 
   // Face Studio model selection & binding
   protected faceModelSource: 'reference-model' | 'procedural' = 'reference-model';
@@ -112,7 +149,7 @@ export class CharactersLabPageComponent {
 
   // Face Studio state
   protected readonly facialController = new FacialAnimationController({
-    autoBlink: false,
+    autoBlink: true,
     defaultTransitionSeconds: 0.2,
   });
   private referenceFace: IReferenceFaceResult;
@@ -121,7 +158,7 @@ export class CharactersLabPageComponent {
   protected gazeTargetPos = new Vector3(0, 1.58, 0.65);
 
   protected readonly extendedEmotions = EXTENDED_EMOTION_NAMES;
-  protected activeEmotion: ExtendedEmotionName = 'neutral';
+  protected activeEmotion: ExtendedEmotionName = 'happy';
   protected currentFrameState?: FacialFrameState;
 
   // Manual channel slider models
@@ -133,7 +170,7 @@ export class CharactersLabPageComponent {
     'eye.blink.right': 0,
     'eye.squint': 0,
     'eye.wide': 0,
-    'mouth.smile': 0,
+    'mouth.smile': 0.75,
     'mouth.frown': 0,
     'mouth.jawOpen': 0,
     'mouth.lipClose': 0,
@@ -153,7 +190,7 @@ export class CharactersLabPageComponent {
   protected doorOpen = false;
 
   protected emotion: EmotionName = 'happy';
-  protected speechText = 'Hello there, welcome to the characters lab!';
+  protected speechText = 'Hello there, welcome to the Capsule Doodle space program!';
   protected readonly emotions = EMOTION_NAMES;
 
   private readonly engine = inject(EngineService);
@@ -185,17 +222,31 @@ export class CharactersLabPageComponent {
 
   constructor() {
     this.ground = new Mesh(
-      new PlaneGeometry(10, 10),
-      new MeshStandardMaterial({ color: '#2a3540', roughness: 1 }),
+      new PlaneGeometry(16, 12),
+      new MeshStandardMaterial({ color: '#1b2631', roughness: 0.92 }),
     );
     this.ground.rotation.x = -Math.PI / 2;
+    this.ground.receiveShadow = true;
 
     this.target = new Mesh(
       new SphereGeometry(0.06, 16, 12),
       new MeshStandardMaterial({ color: '#ff4757', roughness: 0.3, emissive: 0x440000 }),
     );
 
-    // Procedural chair at X = 1.5, facing -X towards room center
+    // 1. Capsule Doodle Hero Actor & Concept Sheet Lineup
+    this.facialController.setExpression('happy', 1.0, 0);
+    this.capsuleHeroActor = new CapsuleCharacterActor({
+      dna: CAPSULE_CHARACTER_PRESETS[5],
+      facialController: this.facialController,
+    });
+    this.capsuleHeroActor.setHandAction('right', this.capsuleRightHandAction);
+
+    const heroPedestal = this.createPedestalMesh(0.65);
+    this.capsuleHeroGroup.add(this.capsuleHeroActor.root, heroPedestal);
+    this.buildCapsuleLineup();
+    this.capsuleStudioGroup.add(this.capsuleHeroGroup, this.capsuleLineupGroup);
+
+    // 2. Procedural chair at X = 1.5, facing -X towards room center
     this.chair = buildProceduralChair({
       style: 'dining',
       frameColorHex: '#78350f',
@@ -204,7 +255,7 @@ export class CharactersLabPageComponent {
     this.chair.group.position.set(1.5, 0, 0);
     this.chair.group.rotation.y = -Math.PI / 2;
 
-    // Procedural door at X = -1.5, facing +X towards room center
+    // 3. Procedural door at X = -1.5, facing +X towards room center
     this.door = buildProceduralDoor({
       frameWidthM: 0.96,
       frameHeightM: 2.15,
@@ -216,7 +267,7 @@ export class CharactersLabPageComponent {
     this.door.group.position.set(-1.5, 0, 0);
     this.door.group.rotation.y = Math.PI / 2;
 
-    // Reference Face for Face Studio
+    // 4. Reference Face for Face Studio
     this.referenceFace = buildReferenceFaceMesh({
       headRadius: 0.17,
       skinColorHex: '#f0c8a0',
@@ -237,6 +288,7 @@ export class CharactersLabPageComponent {
 
     this.character.add(this.visualization.group);
     this.engine.scene.add(
+      this.capsuleStudioGroup,
       this.character,
       this.referenceFace.root,
       this.referenceModelGroup,
@@ -255,6 +307,136 @@ export class CharactersLabPageComponent {
       .pipe(takeUntilDestroyed(destroyRef))
       .subscribe((deltaSeconds) => this.update(deltaSeconds));
     destroyRef.onDestroy(() => this.dispose());
+  }
+
+  private createPedestalMesh(radius = 0.58): Mesh {
+    const mat = new MeshStandardMaterial({ color: '#243442', roughness: 0.78, metalness: 0.15 });
+    const mesh = new Mesh(new CylinderGeometry(radius, radius * 1.06, 0.06, 32), mat);
+    mesh.position.y = -0.03;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  private buildCapsuleLineup(): void {
+    const cols = 5;
+    const spacingX = 1.55;
+    const spacingZ = 1.75;
+
+    const lineupConfigs: ReadonlyArray<{
+      loco: CapsuleLocomotionMode;
+      emotion: ExtendedEmotionName;
+      rightHand: CapsuleHandActionMode;
+      wavy?: boolean;
+    }> = [
+      { loco: 'idle', emotion: 'happy', rightHand: 'none' },
+      { loco: 'idle', emotion: 'happy', rightHand: 'none' },
+      { loco: 'idle', emotion: 'happy', rightHand: 'none' },
+      { loco: 'idle', emotion: 'fearful', rightHand: 'none' },
+      { loco: 'idle', emotion: 'skeptical', rightHand: 'wave' },
+      { loco: 'idle', emotion: 'surprised', rightHand: 'wave' },
+      { loco: 'idle', emotion: 'fearful', rightHand: 'point' },
+      { loco: 'run', emotion: 'fearful', rightHand: 'none' },
+      { loco: 'walk', emotion: 'happy', rightHand: 'none' },
+      { loco: 'float', emotion: 'neutral', rightHand: 'none', wavy: true },
+    ];
+
+    CAPSULE_CHARACTER_PRESETS.forEach((preset, idx) => {
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+      const x = (col - (cols - 1) * 0.5) * spacingX;
+      const z = (row === 0 ? -0.55 : 0.65) * spacingZ;
+
+      const cfg = lineupConfigs[idx] ?? { loco: 'idle', emotion: 'happy', rightHand: 'none' };
+      const actor = new CapsuleCharacterActor({ dna: preset, autoBlink: true });
+      actor.facialController.setExpression(cfg.emotion, 1.0, 0);
+      actor.setLocomotion(cfg.loco);
+      actor.setHandAction('right', cfg.rightHand);
+      if (cfg.wavy) {
+        actor.setWavyMouthOverride(0.8);
+      }
+
+      const slot = new Group();
+      slot.position.set(x, 0, z);
+      slot.add(actor.root, this.createPedestalMesh(0.52));
+      this.capsuleLineupGroup.add(slot);
+      this.capsuleLineupActors.push(actor);
+    });
+  }
+
+  // ===========================================================================
+  // CAPSULE DOODLE STUDIO CONTROLS
+  // ===========================================================================
+
+  protected setCapsuleLayoutMode(mode: CapsuleLayoutMode): void {
+    this.capsuleLayoutMode = mode;
+    this.applyCapsuleLayoutVisibility();
+    if (mode === 'lineup') {
+      this.cameraPosition.set([0, 2.55, 5.4]);
+      this.cameraTarget.set([0, 0.95, 0.1]);
+    } else {
+      this.setCameraFraming(this.cameraFraming);
+    }
+  }
+
+  private applyCapsuleLayoutVisibility(): void {
+    const isCapsule = this.viewMode === 'capsule-doodle';
+    this.capsuleStudioGroup.visible = isCapsule;
+    this.capsuleHeroGroup.visible = isCapsule && this.capsuleLayoutMode === 'hero';
+    this.capsuleLineupGroup.visible = isCapsule && this.capsuleLayoutMode === 'lineup';
+  }
+
+  protected selectCapsulePreset(presetId: string): void {
+    const found = CAPSULE_CHARACTER_PRESETS.find((p) => p.id === presetId);
+    if (!found) return;
+    this.selectedPresetId = presetId;
+    this.capsuleHeroActor.setDna(found);
+  }
+
+  protected randomizeCapsuleDna(): void {
+    this.seedCounter += 1;
+    this.selectedPresetId = 'custom';
+    this.capsuleHeroActor.setSeed(`cosmonaut-${this.seedCounter}`);
+  }
+
+  protected updateCapsuleDna(partial: Partial<CapsuleCharacterDNA>): void {
+    this.selectedPresetId = 'custom';
+    this.capsuleHeroActor.setDna(partial);
+  }
+
+  protected setCapsuleHairStyle(hairStyleId: CapsuleHairStyleId): void {
+    this.updateCapsuleDna({ hairStyleId });
+  }
+
+  protected setCapsuleFacialHair(facialHairId: CapsuleFacialHairId): void {
+    this.updateCapsuleDna({ facialHairId });
+  }
+
+  protected setCapsuleAccessory(accessory: CapsuleAccessoryId): void {
+    this.updateCapsuleDna({ accessory });
+  }
+
+  protected setCapsuleChestPatch(chestPatch: CapsuleChestPatchId): void {
+    this.updateCapsuleDna({ chestPatch });
+  }
+
+  protected setCapsuleLocomotion(mode: CapsuleLocomotionMode): void {
+    this.capsuleLocomotion = mode;
+    this.capsuleHeroActor.setLocomotion(mode);
+  }
+
+  protected setCapsuleRightHand(mode: CapsuleHandActionMode): void {
+    this.capsuleRightHandAction = mode;
+    this.capsuleHeroActor.setHandAction('right', mode);
+  }
+
+  protected setCapsuleLeftHand(mode: CapsuleHandActionMode): void {
+    this.capsuleLeftHandAction = mode;
+    this.capsuleHeroActor.setHandAction('left', mode);
+  }
+
+  protected toggleCapsuleWavyMouth(): void {
+    this.capsuleWavyMouth = !this.capsuleWavyMouth;
+    this.capsuleHeroActor.setWavyMouthOverride(this.capsuleWavyMouth ? 0.85 : undefined);
   }
 
   // ===========================================================================
@@ -278,7 +460,7 @@ export class CharactersLabPageComponent {
 
     this.referenceModelGroup.visible = isRef;
     this.referenceFace.root.visible = isProc;
-    this.gazeMarker.visible = isStudio;
+    this.gazeMarker.visible = isStudio || (this.viewMode === 'capsule-doodle' && this.wanderGaze);
   }
 
   private loadReferenceModel(): void {
@@ -300,25 +482,21 @@ export class CharactersLabPageComponent {
           const model = gltf.scene;
           this.referenceModelGroup.add(model);
 
-          // Reset model transforms
           model.position.set(0, 0, 0);
           model.scale.set(1, 1, 1);
           model.rotation.set(0, 0, 0);
           this.engine.scene.updateMatrixWorld(true);
 
-          // Measure natural size in scene
           const naturalBox = new Box3().setFromObject(model);
           const naturalSize = new Vector3();
           naturalBox.getSize(naturalSize);
           const naturalCenter = new Vector3();
           naturalBox.getCenter(naturalCenter);
 
-          // Scale to prominent portrait head height (~0.36m chin to crown)
           const targetHeight = 0.36;
           const scale = naturalSize.y > 0 ? targetHeight / naturalSize.y : 0.108;
           model.scale.setScalar(scale);
 
-          // Center the face at (0, 1.58, 0)
           model.position.x = -naturalCenter.x * scale;
           model.position.y = 1.58 - naturalCenter.y * scale;
           model.position.z = -naturalCenter.z * scale;
@@ -354,16 +532,30 @@ export class CharactersLabPageComponent {
   }
 
   private applyViewMode(mode: CharactersLabViewMode): void {
-    const isStudio = mode === 'face-studio';
+    const isFaceStudio = mode === 'face-studio';
+    const isFullBody = mode === 'full-body';
+    const isCapsule = mode === 'capsule-doodle';
+
     this.applyFaceModelVisibility();
+    this.applyCapsuleLayoutVisibility();
 
-    this.character.visible = !isStudio;
-    this.ground.visible = !isStudio;
-    this.target.visible = !isStudio;
-    this.chair.group.visible = !isStudio;
-    this.door.group.visible = !isStudio;
+    this.character.visible = isFullBody;
+    this.ground.visible = isFullBody || isCapsule;
+    this.target.visible = isFullBody;
+    this.chair.group.visible = isFullBody;
+    this.door.group.visible = isFullBody;
 
-    if (isStudio) {
+    if (isCapsule) {
+      if (this.capsuleLayoutMode === 'lineup') {
+        this.cameraPosition.set([0, 2.55, 5.4]);
+        this.cameraTarget.set([0, 0.95, 0.1]);
+      } else {
+        this.setCameraFraming(this.cameraFraming);
+      }
+    } else if (isFaceStudio) {
+      if (this.cameraFraming === 'full-shot') {
+        this.cameraFraming = 'three-quarter';
+      }
       this.setCameraFraming(this.cameraFraming);
     } else {
       this.cameraPosition.set([3.4, 2.4, 4.2]);
@@ -373,6 +565,23 @@ export class CharactersLabPageComponent {
 
   protected setCameraFraming(framing: CameraFramingPreset): void {
     this.cameraFraming = framing;
+    if (this.viewMode === 'capsule-doodle') {
+      if (framing === 'full-shot') {
+        this.cameraPosition.set([0.75, 1.38, 2.45]);
+        this.cameraTarget.set([0, 0.92, 0]);
+      } else if (framing === 'front') {
+        this.cameraPosition.set([0, 1.42, 1.38]);
+        this.cameraTarget.set([0, 1.36, 0]);
+      } else if (framing === 'three-quarter') {
+        this.cameraPosition.set([0.62, 1.48, 1.32]);
+        this.cameraTarget.set([0, 1.36, 0]);
+      } else {
+        this.cameraPosition.set([1.45, 1.36, 0.15]);
+        this.cameraTarget.set([0, 1.30, 0]);
+      }
+      return;
+    }
+
     if (framing === 'front') {
       this.cameraPosition.set([0, 1.58, 0.46]);
     } else if (framing === 'three-quarter') {
@@ -451,6 +660,7 @@ export class CharactersLabPageComponent {
 
   protected setGazePreset(preset: 'center' | 'left' | 'right' | 'up' | 'down'): void {
     this.wanderGaze = false;
+    this.applyFaceModelVisibility();
     switch (preset) {
       case 'center':
         this.gazeTargetPos.set(0, 1.58, 0.65);
@@ -481,6 +691,7 @@ export class CharactersLabPageComponent {
 
   protected toggleWanderGaze(): void {
     this.wanderGaze = !this.wanderGaze;
+    this.applyFaceModelVisibility();
   }
 
   // ===========================================================================
@@ -500,20 +711,19 @@ export class CharactersLabPageComponent {
   }
 
   protected playCombinedPerformance(): void {
-    // 1. Smiling
     this.setFaceExpression('happy');
-
-    // 2. Speaking text
     const words = preProcessText('Hello there, smiling while speaking with clear visemes and natural gaze!');
     this.facialController.playVisemes(wordsToVisemes(words));
-
-    // 3. Wandering gaze and periodic blinks
     this.wanderGaze = true;
+    this.applyFaceModelVisibility();
     this.facialController.blink('both', 0.18);
   }
 
   protected resetFaceToNeutral(): void {
     this.wanderGaze = false;
+    this.capsuleWavyMouth = false;
+    this.capsuleHeroActor.setWavyMouthOverride(undefined);
+    this.applyFaceModelVisibility();
     this.gazeTargetPos.set(0, 1.58, 0.65);
     this.gazeMarker.position.copy(this.gazeTargetPos);
     this.facialController.resetToNeutral(0.25);
@@ -655,7 +865,6 @@ export class CharactersLabPageComponent {
     this.speechStartedAt = performance.now();
     this.speaking = true;
 
-    // Also feed to the facial controller so face studio or full body moves identically
     this.facialController.playVisemes(this.visemeTrack);
 
     const utterance = new SpeechSynthesisUtterance(this.speechText);
@@ -694,7 +903,19 @@ export class CharactersLabPageComponent {
     const frame = this.facialController.update(deltaSeconds);
     this.currentFrameState = frame;
 
-    // Apply to active Face model in Face Studio
+    // 2. Capsule Doodle Studio Update
+    if (this.viewMode === 'capsule-doodle') {
+      if (this.capsuleLayoutMode === 'hero') {
+        this.capsuleHeroActor.update(deltaSeconds, frame);
+      } else {
+        for (const actor of this.capsuleLineupActors) {
+          actor.update(deltaSeconds);
+        }
+      }
+      return;
+    }
+
+    // 3. Apply to active Face model in Face Studio
     if (this.viewMode === 'face-studio') {
       if (this.faceModelSource === 'reference-model' && this.referenceModelBinding) {
         this.referenceModelBinding.applyPose(
@@ -704,9 +925,10 @@ export class CharactersLabPageComponent {
       } else {
         this.referenceFace.applyPose(frame.blendShapes, frame.gaze);
       }
+      return;
     }
 
-    // If in full body scene, animate door, locomotion, affordances, and body face
+    // 4. Full-body scene update
     if (this.viewMode === 'full-body') {
       const targetDoorAngle = this.doorOpen ? Math.PI / 2 : 0;
       const currentDoorAngle = this.door.getOpenAngle();
@@ -833,6 +1055,11 @@ export class CharactersLabPageComponent {
   private dispose(): void {
     window.speechSynthesis.cancel();
     this.danceMixer?.stopAllAction();
+    this.capsuleHeroActor.dispose();
+    for (const actor of this.capsuleLineupActors) {
+      actor.dispose();
+    }
+    this.capsuleStudioGroup.removeFromParent();
     this.character.removeFromParent();
     this.referenceModelBinding?.dispose();
     this.referenceModelGroup.removeFromParent();

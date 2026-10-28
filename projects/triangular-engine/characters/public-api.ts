@@ -12,3 +12,6 @@ export * from './core/visemes';
 export * from './core/character-affordance';
 export * from './core/face-semantic-channels';
 export * from './core/face-controller';
+export * from './core/capsule-dna';
+export * from './core/capsule-locomotion';
+export * from './core/capsule-face-projection';

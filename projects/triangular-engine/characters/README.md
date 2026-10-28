@@ -202,3 +202,13 @@ Open `/characters-lab` in the demo application:
 - **Articulation Fixture**: Play a deterministic sequence demonstrating `M` (closed), `A` (open), `O` (round), and `E` (wide).
 - **Combined Performance**: Test smiling while speaking, looking around, and blinking simultaneously.
 - **Reset**: Smoothly returns to neutral.
+
+## Capsule Doodle / Rubber-Hose Procedural Rig
+
+`triangular-engine/characters` also provides framework-free DNA, 3-point Quadratic Bezier limb IK, gait cycles, spring-damper secondary motion, and 2D SDF mouth / googly-eye projection for pill-shaped "Capsule Doodle" space characters:
+
+- `CapsuleCharacterDNA`, `CAPSULE_CHARACTER_PRESETS`, `normalizeCapsuleCharacterDNA`, `generateCapsuleCharacterDNA`
+- `solveRubberHoseLimb`, `evaluateQuadraticBezierPoint`, `evaluateQuadraticBezierTangent`, `sampleCapsuleLocomotion`, `stepSpringDamper3D`
+- `projectCapsuleFaceState` (maps `FacialFrameState` semantic channels, ARKit weights, visemes, and gaze into 2D SDF mouth shader uniforms and googly-eye/hemisphere-eyelid/floating-brow transforms)
+
+The corresponding Three.js procedural assembly (`CapsuleCharacterActor`, `buildCapsuleBodyMesh`, `buildCapsuleFaceRig`, `RubberHoseLimbMesh`, `buildCapsuleHairKit`, `buildCapsuleSpaceGear`) lives in `triangular-engine/procedural`.

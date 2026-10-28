@@ -577,3 +577,19 @@ Also confirm:
   - All existing semantic controls (expression presets, independent brow raise, blinks,
     channel sliders, viseme playback sequence, and gaze tracking) drive both models seamlessly.
 - Verified: 104 character specs pass; library and demo app build clean with 0 errors.
+
+### 2026-10-28 — Parametric Procedural "Capsule Doodle" Space Character System
+
+- Added framework-free Capsule Doodle modules to `triangular-engine/characters`:
+  - `core/capsule-dna.ts`: `CapsuleCharacterDNA` schema, 10 preset variants (`CAPSULE_CHARACTER_PRESETS`), bounds normalization, and deterministic seed generator (`generateCapsuleCharacterDNA`).
+  - `core/capsule-locomotion.ts`: 3-point Quadratic Bezier limb solver (`solveRubberHoseLimb`), Bezier evaluation helpers, anti-phase foot-arc gait generator (`sampleCapsuleLocomotion` supporting `idle`, `walk`, `run`, and `float`), hand action targeting (`wave`, `point`, `hold_gadget`, `salute`, `reach`), and 3D second-order spring-damper secondary motion (`stepSpringDamper3D`).
+  - `core/capsule-face-projection.ts`: `projectCapsuleFaceState` mapping `FacialFrameState` (from `FacialAnimationController`) into 2D SDF mouth uniforms (`mouthOpen`, `mouthWidth`, `mouthCurve`, `mouthWave`, `buckTeeth`, `tongueVisible`), pupil dilation, hemisphere eyelid angles, and floating eyebrow offsets.
+- Added Three.js Capsule Doodle assembly under `triangular-engine/procedural/characters/capsule/`:
+  - `capsule-body-material.ts`: Single-mesh `CapsuleGeometry` + custom `MeshStandardMaterial` (`onBeforeCompile`) implementing the vertical skin/spacesuit seam split and front-projected 2D SDF mouth with dark cavity, upper teeth bar / split buck teeth, and pink tongue.
+  - `capsule-face-rig.ts`: Bulging Z-flattened googly eyes, gaze-pivoted pupils with catchlights, skin-toned upper/lower hemisphere eyelids, optional female eyelashes, and floating curved capsule eyebrows.
+  - `capsule-rubber-hose-limb.ts`: `RubberHoseLimbMesh` pre-allocating a tubular `BufferGeometry` once and updating vertex positions/normals in-place via twist-free parallel transport (Bishop frames) along $[P_0, P_1, P_2]$ with zero per-frame allocations.
+  - `capsule-hands-and-boots.ts`: Puffy gloved hands supporting `open`, `fist`, `point`, `grip`, and `wave` poses, plus chunky rounded space boots.
+  - `capsule-hair-kit.ts`: Procedural modular hair & facial-hair attachments (`ponytail`, `pigtails`, `buns`, `top_bun`, `spiky`, `wacky`, `mullet`, `swept`, `receding`, `mohawk`, `bald`, `mustache_handlebar`, `full_beard`) + `attachExternalHairGltf` socket helper.
+  - `capsule-space-gear.ts`: Modular space gear (`helmet` glass bubble dome + neck ring, twin-tank orange `jetpack`, comms `headset`, `walkie_talkie`, `flag`, and chest badges).
+  - `capsule-character-actor.ts`: Unified `CapsuleCharacterActor` controller driving the full rig, SDF shader, and spring-damped secondary motion.
+- Updated `/characters-lab` with the **Capsule Doodle Kit** studio mode featuring both an interactive Hero Customizer and a 10-character Concept Sheet Lineup.

@@ -1,9 +1,11 @@
 <header class="page-header">
   <div>
-    <p class="eyebrow">Characters · Facial Functionality &amp; Semantic Controls</p>
-    <h1>Reference Face Studio &amp; Articulation</h1>
+    <p class="eyebrow">Characters · Parametric Procedural Rig &amp; Semantic Facial Controls</p>
+    <h1>Capsule Doodle Space Kit &amp; Face Studio</h1>
     <p class="claim">
-      @if (viewMode === 'face-studio' && faceModelSource === 'reference-model') {
+      @if (viewMode === 'capsule-doodle') {
+        Active Mode: <strong>Capsule Doodle Procedural Rig</strong>. Single-mesh capsule skin/suit shader + 2D SDF mouth (teeth, buck-teeth &amp; tongue), bulging googly eyes with hemisphere eyelids, zero-alloc Quadratic Bezier rubber-hose limbs, spring-damped jetpack/hair, and modular space gear.
+      } @else if (viewMode === 'face-studio' && faceModelSource === 'reference-model') {
         Active Baseline: <strong>FaceCap ARKit 52 Model</strong> ({{ recognizedMorphCount }} recognized morph targets). Realistic facial deformation, eyelid sliding, and viseme articulation.
       } @else if (viewMode === 'face-studio' && faceModelSource === 'procedural') {
         Active Baseline: <strong>Procedural Parametric Head</strong>. Parametric geometry deformation with socket eyes and mouth shape keys.
@@ -18,9 +20,35 @@
 <section class="controls">
   <div class="control-group">
     <span>View Mode</span>
-    <button type="button" [class.active]="viewMode === 'face-studio'" (click)="setViewMode('face-studio')">Face Studio (Close-Up)</button>
-    <button type="button" [class.active]="viewMode === 'full-body'" (click)="setViewMode('full-body')">Full Body Scene</button>
+    <button type="button" [class.active]="viewMode === 'capsule-doodle'" (click)="setViewMode('capsule-doodle')">Capsule Doodle Kit</button>
+    <button type="button" [class.active]="viewMode === 'face-studio'" (click)="setViewMode('face-studio')">Face Studio (ARKit)</button>
+    <button type="button" [class.active]="viewMode === 'full-body'" (click)="setViewMode('full-body')">Humanoid Scene</button>
   </div>
+
+  @if (viewMode === 'capsule-doodle') {
+    <div class="control-group">
+      <span>Display</span>
+      <button type="button" [class.active]="capsuleLayoutMode === 'hero'" (click)="setCapsuleLayoutMode('hero')">Hero Customizer</button>
+      <button type="button" [class.active]="capsuleLayoutMode === 'lineup'" (click)="setCapsuleLayoutMode('lineup')">Concept Sheet Lineup (10)</button>
+    </div>
+
+    @if (capsuleLayoutMode === 'hero') {
+      <div class="control-group">
+        <span>Camera</span>
+        <button type="button" [class.active]="cameraFraming === 'full-shot'" (click)="setCameraFraming('full-shot')">Full Body</button>
+        <button type="button" [class.active]="cameraFraming === 'front'" (click)="setCameraFraming('front')">Face Close-Up</button>
+        <button type="button" [class.active]="cameraFraming === 'three-quarter'" (click)="setCameraFraming('three-quarter')">3/4 Portrait</button>
+        <button type="button" [class.active]="cameraFraming === 'profile'" (click)="setCameraFraming('profile')">Profile</button>
+      </div>
+    }
+
+    <div class="control-group control-group--highlight">
+      <span>Performance</span>
+      <button type="button" class="primary" (click)="playArticulationSequence()">Play Viseme Sequence</button>
+      <button type="button" class="action" (click)="playCombinedPerformance()">Combined Performance</button>
+      <button type="button" (click)="resetFaceToNeutral()">Reset Face</button>
+    </div>
+  }
 
   @if (viewMode === 'face-studio') {
     <div class="control-group">
@@ -57,6 +85,188 @@
     </div>
   }
 </section>
+
+<!-- CAPSULE DOODLE KIT PANELS -->
+@if (viewMode === 'capsule-doodle' && capsuleLayoutMode === 'hero') {
+  <section class="controls">
+    <div class="control-group">
+      <span>Concept Preset</span>
+      <select (change)="selectCapsulePreset($any($event.target).value)">
+        @for (p of capsulePresets; track p.id) {
+          <option [value]="p.id" [selected]="p.id === selectedPresetId">{{ p.label }}</option>
+        }
+      </select>
+      <button type="button" class="primary" (click)="randomizeCapsuleDna()">Random Seed</button>
+    </div>
+
+    <div class="control-group">
+      <span>Gait Cycle</span>
+      <button type="button" [class.active]="capsuleLocomotion === 'idle'" (click)="setCapsuleLocomotion('idle')">Idle</button>
+      <button type="button" [class.active]="capsuleLocomotion === 'walk'" (click)="setCapsuleLocomotion('walk')">Walk</button>
+      <button type="button" [class.active]="capsuleLocomotion === 'run'" (click)="setCapsuleLocomotion('run')">Run</button>
+      <button type="button" [class.active]="capsuleLocomotion === 'float'" (click)="setCapsuleLocomotion('float')">0-G Float</button>
+    </div>
+
+    <div class="control-group">
+      <span>Right Hand</span>
+      <button type="button" [class.active]="capsuleRightHandAction === 'none'" (click)="setCapsuleRightHand('none')">Swing</button>
+      <button type="button" [class.active]="capsuleRightHandAction === 'wave'" (click)="setCapsuleRightHand('wave')">Wave</button>
+      <button type="button" [class.active]="capsuleRightHandAction === 'point'" (click)="setCapsuleRightHand('point')">Point</button>
+      <button type="button" [class.active]="capsuleRightHandAction === 'salute'" (click)="setCapsuleRightHand('salute')">Salute</button>
+    </div>
+
+    <div class="control-group control-group--grow">
+      <span>Speech</span>
+      <input type="text" [value]="speechText" (input)="speechText = $any($event.target).value" />
+      <button type="button" class="action" (click)="speak()">Speak (SDF Lip-Sync)</button>
+    </div>
+  </section>
+
+  <!-- DNA MODULAR KIT & FACIAL EXPRESSIONS -->
+  <section class="face-panels">
+    <div class="channel-section">
+      <h4>Modular Hair &amp; Beard</h4>
+      <div class="control-group">
+        <span>Hair</span>
+        <select (change)="setCapsuleHairStyle($any($event.target).value)">
+          @for (h of capsuleHairStyles; track h) {
+            <option [value]="h" [selected]="h === capsuleHeroActor.dna.hairStyleId">{{ h }}</option>
+          }
+        </select>
+      </div>
+      <div class="control-group">
+        <span>Beard</span>
+        <select (change)="setCapsuleFacialHair($any($event.target).value)">
+          @for (f of capsuleFacialHairStyles; track f) {
+            <option [value]="f" [selected]="f === capsuleHeroActor.dna.facialHairId">{{ f }}</option>
+          }
+        </select>
+      </div>
+      <div class="control-group">
+        <span>Hair Color</span>
+        @for (hc of capsuleHairColors; track hc) {
+          <button
+            type="button"
+            [style.background]="hc"
+            [style.width.rem]="1.4"
+            [style.height.rem]="1.4"
+            [style.padding]="'0'"
+            [class.active]="capsuleHeroActor.dna.hairColor === hc"
+            (click)="updateCapsuleDna({ hairColor: hc })"
+          ></button>
+        }
+      </div>
+    </div>
+
+    <div class="channel-section">
+      <h4>Space Gear &amp; Boots</h4>
+      <button
+        type="button"
+        [class.active]="capsuleHeroActor.dna.helmet"
+        (click)="updateCapsuleDna({ helmet: !capsuleHeroActor.dna.helmet })"
+      >
+        Bubble Helmet
+      </button>
+      <button
+        type="button"
+        [class.active]="capsuleHeroActor.dna.jetpack"
+        (click)="updateCapsuleDna({ jetpack: !capsuleHeroActor.dna.jetpack })"
+      >
+        Twin Jetpack
+      </button>
+      <div class="control-group">
+        <span>Gadget</span>
+        <select (change)="setCapsuleAccessory($any($event.target).value)">
+          @for (acc of capsuleAccessories; track acc) {
+            <option [value]="acc" [selected]="acc === capsuleHeroActor.dna.accessory">{{ acc }}</option>
+          }
+        </select>
+      </div>
+      <div class="control-group">
+        <span>Chest</span>
+        <select (change)="setCapsuleChestPatch($any($event.target).value)">
+          @for (cp of capsuleChestPatches; track cp) {
+            <option [value]="cp" [selected]="cp === capsuleHeroActor.dna.chestPatch">{{ cp }}</option>
+          }
+        </select>
+      </div>
+      <div class="control-group">
+        <span>Boots</span>
+        @for (bc of capsuleBootColors; track bc) {
+          <button
+            type="button"
+            [style.background]="bc"
+            [style.width.rem]="1.4"
+            [style.height.rem]="1.4"
+            [style.padding]="'0'"
+            [class.active]="capsuleHeroActor.dna.bootColor === bc"
+            (click)="updateCapsuleDna({ bootColor: bc })"
+          ></button>
+        }
+      </div>
+    </div>
+
+    <div class="channel-section">
+      <h4>DNA Proportions &amp; Traits</h4>
+      <button
+        type="button"
+        [class.active]="capsuleHeroActor.dna.buckTeeth"
+        (click)="updateCapsuleDna({ buckTeeth: !capsuleHeroActor.dna.buckTeeth })"
+      >
+        Buck Teeth
+      </button>
+      <button
+        type="button"
+        [class.active]="capsuleHeroActor.dna.eyelashes"
+        (click)="updateCapsuleDna({ eyelashes: !capsuleHeroActor.dna.eyelashes })"
+      >
+        Female Lashes
+      </button>
+      <div class="slider-group">
+        <label>Radius</label>
+        <input
+          type="range" min="0.28" max="0.46" step="0.01"
+          [value]="capsuleHeroActor.dna.bodyRadius"
+          (input)="updateCapsuleDna({ bodyRadius: +$any($event.target).value })"
+        />
+        <span class="val">{{ capsuleHeroActor.dna.bodyRadius | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Height</label>
+        <input
+          type="range" min="0.65" max="1.15" step="0.02"
+          [value]="capsuleHeroActor.dna.bodyHeight"
+          (input)="updateCapsuleDna({ bodyHeight: +$any($event.target).value })"
+        />
+        <span class="val">{{ capsuleHeroActor.dna.bodyHeight | number:'1.2-2' }}</span>
+      </div>
+    </div>
+
+    <div class="channel-section">
+      <h4>2D SDF Mouth &amp; Googly Eyes</h4>
+      @for (e of extendedEmotions; track e) {
+        <button
+          type="button"
+          [class.active]="activeEmotion === e"
+          (click)="setFaceExpression(e)"
+        >
+          {{ e }}
+        </button>
+      }
+      <button
+        type="button"
+        [class.active]="capsuleWavyMouth"
+        (click)="toggleCapsuleWavyMouth()"
+      >
+        Wavy Mouth (~~~)
+      </button>
+      <button type="button" (click)="triggerBlink()">Blink</button>
+      <button type="button" [class.active]="wanderGaze" (click)="toggleWanderGaze()">
+        {{ wanderGaze ? 'Gaze Wander: ON' : 'Gaze Wander: OFF' }}
+      </button>
+    </div>
+  </section>
+}
 
 <!-- FACE STUDIO PANELS: PRESETS, GAZE, CHANNELS, SPEECH -->
 @if (viewMode === 'face-studio') {
@@ -302,21 +512,21 @@
 }
 
 <section class="scope-note">
-  <b>Reference Face Capabilities</b>
-  <span>Seated eyeball rotation with physical limits (±30° yaw, ±20° pitch); independent left/right eyelid blinking &amp; squinting; independent brow raising (including single right brow raise); smile, frown, jaw open, sealed lip closure, rounding (O/U), and widening (E/I); smooth viseme sequences with rest return.</span>
+  <b>Capsule Doodle Procedural Architecture</b>
+  <span>Single-mesh <code>CapsuleGeometry</code> with skin/suit split &amp; 2D SDF mouth shader; 3-point Quadratic Bezier rubber-hose limbs updated in-place with zero per-frame allocation; analytical foot-arc gait + spring-damped secondary motion on jetpack &amp; hair.</span>
   <b>Semantic Control API</b>
-  <span>Framework-free typed intentions (<code>lookAt</code>, <code>setExpression</code>, <code>setFaceChannel</code>, <code>playVisemes</code>, <code>blink</code>, <code>reset</code>) decoupled from geometry for script, game, and AI agent control.</span>
+  <span>Driven by the same framework-free <code>FacialAnimationController</code> (<code>lookAt</code>, <code>setExpression</code>, <code>setFaceChannel</code>, <code>playVisemes</code>, <code>blink</code>) as ARKit 52 and humanoid rigs.</span>
 </section>
 
 <!-- 3D VIEWPORT WITH DEDICATED LIGHTING -->
 <scene>
   <orbitControls [cameraPosition]="cameraPosition()" [target]="cameraTarget()" />
-  @if (viewMode === 'face-studio') {
-    <!-- Three-point portrait lighting -->
-    <ambientLight [intensity]="1.1" />
-    <directionalLight [position]="[1.2, 2.2, 1.2]" [intensity]="2.2" />
-    <directionalLight [position]="[-1.2, 1.8, 0.8]" [intensity]="1.2" />
-    <directionalLight [position]="[0, 2.4, -1.2]" [intensity]="1.6" />
+  @if (viewMode === 'face-studio' || viewMode === 'capsule-doodle') {
+    <!-- Warm studio key + rim lighting -->
+    <ambientLight [intensity]="1.25" />
+    <directionalLight [position]="[2.2, 3.6, 2.8]" [intensity]="2.1" />
+    <directionalLight [position]="[-2.4, 2.2, 1.4]" [intensity]="1.1" />
+    <directionalLight [position]="[0, 3.0, -2.5]" [intensity]="1.4" />
   } @else {
     <ambientLight [intensity]="1.3" />
     <directionalLight [position]="[6, 9, 5]" [intensity]="2.4" />
