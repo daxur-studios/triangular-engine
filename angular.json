@@ -219,11 +219,6 @@
                 "glob": "**/*",
                 "input": "projects/triangular-engine/assets",
                 "output": "/triangular-engine"
-              },
-              {
-                "glob": "**/*",
-                "input": "node_modules/@takram/three-clouds/assets",
-                "output": "/takram-clouds"
               }
             ],
             "styles": [

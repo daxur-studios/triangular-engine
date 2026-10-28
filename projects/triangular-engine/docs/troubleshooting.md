@@ -30,7 +30,7 @@ Fix: Provide `EngineService.provide(...)` in every component that hosts a `<scen
 ### Web Worker importing an engine entry point is silently empty
 
 **Symptom**: A worker that imports `triangular-engine/terrain`, `.../worldgen/render`,
-`.../jolt`, `.../takram`, etc. throws on load (`ɵɵngDeclareComponent` →
+`.../jolt`, `.../terrain`, etc. throws on load (`ɵɵngDeclareComponent` →
 "The injectable ... needs to be compiled using the JIT compiler") and produces nothing. The
 same import works on the main thread.
 

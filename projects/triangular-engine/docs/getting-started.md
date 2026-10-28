@@ -80,7 +80,6 @@ Optional integrations are installed only when used:
 | `triangular-engine/rapier` | `@dimforge/rapier3d-compat` |
 | `triangular-engine/pmndrs` | `@pmndrs/vanilla` |
 | `triangular-engine/postprocessing` | `postprocessing` |
-| `triangular-engine/takram` | `@takram/three-atmosphere`, `@takram/three-clouds`, `@takram/three-geospatial` |
 | `triangular-engine/meshoptimizer` | `meshoptimizer` |
 | `triangular-engine/image-compression` | `browser-image-compression` |
 

@@ -12,7 +12,6 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/jolt` | Jolt physics, rigid bodies, constraints, debug rendering, terrain/scatter adapters, and high-precision workflows. | `jolt-physics` |
 | `triangular-engine/pmndrs` | Angular components for PMNDRS billboard and sparkles helpers. | `@pmndrs/vanilla` |
 | `triangular-engine/postprocessing` | Declarative effect composer and post-processing effects. | `postprocessing` |
-| `triangular-engine/takram` | Atmosphere, aerial perspective, sky/sun lighting, and cloud components. | `@takram/three-atmosphere`, `@takram/three-clouds`, `@takram/three-geospatial` |
 | `triangular-engine/water` | Plane, sphere, and cylinder water surfaces, LOD, quality/motion presets, underwater effects, and surface sampling. | `three` |
 | `triangular-engine/water/jolt` | Water buoyancy integration with Jolt. | `jolt-physics` |
 | `triangular-engine/water/postprocessing` | Water-specific post-processing effects. | `postprocessing` |

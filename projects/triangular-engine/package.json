@@ -39,9 +39,6 @@
     "@dimforge/rapier3d-compat": "^0.18.0",
     "jolt-physics": "^1.0.1",
     "@pmndrs/vanilla": "^1.24.0",
-    "@takram/three-atmosphere": "^0.19.1",
-    "@takram/three-clouds": "^0.7.6",
-    "@takram/three-geospatial": "^0.9.1",
     "postprocessing": "^6.39.5",
     "browser-image-compression": "^2.0.2",
     "meshoptimizer": "^1.0.1"
@@ -60,15 +57,6 @@
       "optional": true
     },
     "@pmndrs/vanilla": {
-      "optional": true
-    },
-    "@takram/three-atmosphere": {
-      "optional": true
-    },
-    "@takram/three-clouds": {
-      "optional": true
-    },
-    "@takram/three-geospatial": {
       "optional": true
     },
     "postprocessing": {

@@ -34,6 +34,8 @@ export interface DemoItem {
   readonly package: string;
   readonly description: string;
   readonly requiresJolt?: boolean;
+  /** Set when the demo depends on code removed from the engine. */
+  readonly deprecated?: boolean;
 }
 
 export const CATEGORIES: readonly DemoCategory[] = [
@@ -357,8 +359,9 @@ export const DEMOS: readonly DemoItem[] = [
     categoryId: 'atmosphere',
     tier: 'gem',
     createdAt: '2026-07-14',
-    entryPoints: ['takram'],
-    package: 'triangular-engine/takram',
+    entryPoints: [],
+    deprecated: true,
+    package: 'deprecated (was triangular-engine/takram)',
     description:
       'Declarative volumetric clouds and physical atmospheric haze with smooth daylight cycle transitions.',
   },
@@ -743,8 +746,9 @@ export const DEMOS: readonly DemoItem[] = [
     categoryId: 'atmosphere',
     tier: 'lab',
     createdAt: '2026-07-16',
-    entryPoints: ['takram'],
-    package: 'triangular-engine/takram',
+    entryPoints: [],
+    deprecated: true,
+    package: 'deprecated (was triangular-engine/takram)',
     description:
       'Small-planet scale and volumetric-to-texture cloud handoff for celestial rendering.',
   },
@@ -756,8 +760,9 @@ export const DEMOS: readonly DemoItem[] = [
     categoryId: 'atmosphere',
     tier: 'lab',
     createdAt: '2026-07-21',
-    entryPoints: ['takram'],
-    package: 'triangular-engine/takram',
+    entryPoints: [],
+    deprecated: true,
+    package: 'deprecated (was triangular-engine/takram)',
     description:
       'Cylindrical volumetric clouds and internal atmospheric haze inside an O\'Neill habitat.',
   },
@@ -771,8 +776,9 @@ export const DEMOS: readonly DemoItem[] = [
     categoryId: 'atmosphere',
     tier: 'archived',
     createdAt: '2026-07-13',
-    entryPoints: ['takram'],
-    package: 'triangular-engine/takram',
+    entryPoints: [],
+    deprecated: true,
+    package: 'deprecated (was triangular-engine/takram)',
     description:
       'Frozen plain Three.js reference spike for early Takram atmosphere port.',
   },

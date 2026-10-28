@@ -28,7 +28,6 @@ Each secondary entry point has its guide in `<entry>/README.md`, next to its cod
 - [Procedural](../procedural/README.md) and [characters](../characters/README.md), including facial animation
 - [Water](../water/README.md), [terrain](../terrain/README.md) and [scatter](../scatter/README.md)
 - [Testing](../testing/README.md) and [Scene Tree](../scene-tree/README.md)
-- [Takram clouds and atmosphere](../takram/README.md)
 
 ## Rules for new entry points and public API
 

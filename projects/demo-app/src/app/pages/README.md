@@ -25,7 +25,7 @@ Houses the interactive feature showcases, proof-of-concept (POC) spikes, and eng
 - **Procedural Generation & Ecology**:
   - `animals-lab`, `animals-herd-worlds-lab`, `flora-lab`, `structures-lab`, `cities-lab`, `life-lab`: Generative ecosystems, flocking behaviours, and procedural asset synthesis.
 - **Atmosphere & Physics**:
-  - `takram-clouds`, `takram-mini-planet`, `cloud-puffs-lab`, `planet-physics-lab`, `soft-body-poc`: Volumetric cloud shaders, gravity fields, and constraint solvers.
+  - `cloud-puffs-lab`, `planet-physics-lab`, `soft-body-poc`: Volumetric cloud shaders, gravity fields, and constraint solvers.
 
 ### Architectural Rules
 

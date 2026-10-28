@@ -27,7 +27,6 @@ Use public package entry points in consumer apps; do not import internal source 
 - Jolt physics: `triangular-engine/jolt`
 - PMNDRS helpers: `triangular-engine/pmndrs`
 - Post-processing: `triangular-engine/postprocessing`
-- Takram atmosphere/clouds: `triangular-engine/takram`
 - Image compression adapter: `triangular-engine/image-compression`
 - TSL cell-planet surface material (WebGPURenderer): `triangular-engine/planet-material`
 - Reusable browser test runner and contracts: `triangular-engine/testing`

@@ -5,16 +5,16 @@ import {
 } from '@takram/three-atmosphere';
 import { Ellipsoid } from '@takram/three-geospatial';
 import type { CloudsEffect } from '@takram/three-clouds';
-import { TakramAerialPerspectiveComponent } from '../takram/atmosphere/takram-aerial-perspective.component';
-import { applyTakramAerialCameraHeightFix } from '../takram/atmosphere/takram-aerial-perspective-compat';
+import { TakramAerialPerspectiveComponent } from './atmosphere/takram-aerial-perspective.component';
+import { applyTakramAerialCameraHeightFix } from './atmosphere/takram-aerial-perspective-compat';
 import {
   applyTakramAtmosphereParameters,
   computeAtmosphereBottomRadius,
   routeTakramCloudBuffers,
   TakramAtmosphereService,
-} from '../takram/atmosphere/takram-atmosphere.service';
-import { TakramCloudLayerComponent } from '../takram/clouds/takram-cloud-layer.component';
-import { applyTakramCloudCameraHeightFix } from '../takram/clouds/takram-clouds-compat';
+} from './atmosphere/takram-atmosphere.service';
+import { TakramCloudLayerComponent } from './clouds/takram-cloud-layer.component';
+import { applyTakramCloudCameraHeightFix } from './clouds/takram-clouds-compat';
 import {
   Color,
   Matrix4,

@@ -35,5 +35,6 @@ tags: [plans, index]
 | [Engineering Records and Development Map](/docs/plans/066_engineering_records_and_development_map.md) | M1/M2 complete; map viewer planned | [ER 066](/docs/runbook/066_engineering_records_and_development_map.md) |
 | [Test Cost Breakdown and Budget View](/docs/plans/067_test-cost-breakdown.md) | planned | [ER 067](/docs/runbook/067_test-cost-breakdown.md) |
 | [Procedural shape verification](/docs/plans/068_procedural-shape-verification.md) | planned | [ER 068](/docs/runbook/068_procedural-shape-verification.md) |
+| [Remove Takram integration from the engine](/docs/plans/069_remove-takram.md) | planned | [ER 069](/docs/runbook/069_remove-takram.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

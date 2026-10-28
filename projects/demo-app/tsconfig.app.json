@@ -19,9 +19,6 @@
       "triangular-engine/jolt": [
         "projects/triangular-engine/jolt/public-api"
       ],
-      "triangular-engine/takram": [
-        "projects/triangular-engine/takram/public-api"
-      ],
       "triangular-engine/terrain": [
         "projects/triangular-engine/terrain/public-api"
       ],

@@ -66,8 +66,8 @@ export const routes: Routes = [
   {
     path: 'takram-clouds-spike',
     loadComponent: () =>
-      import('./takram-clouds-spike/takram-clouds-spike.component').then(
-        ({ TakramCloudsSpikeComponent }) => TakramCloudsSpikeComponent,
+      import('./pages/deprecated-takram/deprecated-takram-page.component').then(
+        ({ DeprecatedTakramPageComponent }) => DeprecatedTakramPageComponent,
       ),
   },
   {
@@ -101,23 +101,22 @@ export const routes: Routes = [
   {
     path: 'takram-clouds',
     loadComponent: () =>
-      import('./pages/takram-clouds/takram-clouds-page.component').then(
-        ({ TakramCloudsPageComponent }) => TakramCloudsPageComponent,
+      import('./pages/deprecated-takram/deprecated-takram-page.component').then(
+        ({ DeprecatedTakramPageComponent }) => DeprecatedTakramPageComponent,
       ),
   },
   {
     path: 'takram-mini-planet',
     loadComponent: () =>
-      import('./pages/takram-mini-planet/takram-mini-planet-page.component').then(
-        ({ TakramMiniPlanetPageComponent }) => TakramMiniPlanetPageComponent,
+      import('./pages/deprecated-takram/deprecated-takram-page.component').then(
+        ({ DeprecatedTakramPageComponent }) => DeprecatedTakramPageComponent,
       ),
   },
   {
     path: 'takram-cylinder-clouds',
     loadComponent: () =>
-      import('./pages/takram-cylinder-clouds/takram-cylinder-clouds-page.component').then(
-        ({ TakramCylinderCloudsPageComponent }) =>
-          TakramCylinderCloudsPageComponent,
+      import('./pages/deprecated-takram/deprecated-takram-page.component').then(
+        ({ DeprecatedTakramPageComponent }) => DeprecatedTakramPageComponent,
       ),
   },
   {

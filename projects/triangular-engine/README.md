@@ -50,7 +50,6 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/jolt` | [jolt/README.md](jolt/README.md) | Jolt physics, constraints, debug rendering, high-precision workflows | `jolt-physics` |
 | `triangular-engine/pmndrs` | [pmndrs/README.md](pmndrs/README.md) | Billboard and sparkles wrappers | `@pmndrs/vanilla` |
 | `triangular-engine/postprocessing` | [postprocessing/README.md](postprocessing/README.md) | Declarative effect composer and passes | `postprocessing` |
-| `triangular-engine/takram` | [takram/README.md](takram/README.md) | Atmosphere, aerial perspective, sky and sun lights, clouds | `@takram/three-atmosphere`, `@takram/three-clouds`, `@takram/three-geospatial` |
 | `triangular-engine/atmosphere` | [atmosphere/README.md](atmosphere/README.md) | Planet atmosphere profiles, lookup tables, WebGPU sky renderer | — |
 | `triangular-engine/planet-material` | [planet-material/README.md](planet-material/README.md) | TSL cell-planet surface material for `WebGPURenderer` | `three` |
 | `triangular-engine/worldgen` | [worldgen/README.md](worldgen/README.md) | Framework-free Voronoi cell-graph planets, tectonics, ecology, samplers | — |

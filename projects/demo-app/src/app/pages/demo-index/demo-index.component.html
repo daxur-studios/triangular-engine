@@ -325,6 +325,9 @@
             <app-catalog-thumbnail [route]="demo.route" [title]="demo.title" />
             <div class="card-meta">
               <span class="demo-number">{{ demo.number }}</span>
+              @if (demo.deprecated) {
+                <span class="tier-pill archived-pill">⚠ Deprecated</span>
+              }
               @if (demo.tier === 'gem') {
                 <span class="tier-pill gem-pill">★ Shining Gem</span>
               } @else if (demo.tier === 'lab') {
@@ -386,6 +389,9 @@
               <app-catalog-thumbnail [route]="demo.route" [title]="demo.title" />
               <div class="card-meta">
                 <span class="demo-number">{{ demo.number }}</span>
+                @if (demo.deprecated) {
+                  <span class="tier-pill archived-pill">⚠ Deprecated</span>
+                }
                 @if (demo.tier === 'gem') {
                   <span class="tier-pill gem-pill">★ Shining Gem</span>
                 } @else if (demo.tier === 'lab') {

@@ -34,7 +34,7 @@ actually testing.
   `PerspectiveCamera`, `OrbitControls`, or `requestAnimationFrame` loop
   unless the spike is specifically falsifying a raw Three.js
   renderer-level integration that `<scene>` cannot host (e.g.
-  `takram-clouds-spike`'s custom `EffectComposer` pipeline with
+  a former Takram spike's custom `EffectComposer` pipeline (now under `projects/demo-app/deprecated/`) with
   atmosphere/cloud passes — a real, narrow exception; document why in a
   class-doc comment if you hit another one).
 - **Add objects via `engine.scene.add(...)`** for anything without a
