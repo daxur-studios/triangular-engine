@@ -63,6 +63,8 @@ export interface LodSurfaceTestHost {
   setZoomProgress(t: number | undefined): void;
   /** Places the camera on the scripted sweep of the case's pose, `seconds` into it; `undefined` returns to the named pose. */
   setSweepTime(seconds: number | undefined): void;
+  /** Places the camera on the scripted turn of the case's pose (heading only), `seconds` into it; `undefined` returns to the named pose. */
+  setTurnTime(seconds: number | undefined): void;
   isSampling(): boolean;
   startSampling(): void;
   gpuSamplesSoFar(): readonly number[];
@@ -197,6 +199,19 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
     }
   }
 
+  /** Swings the heading over the action time on the turn path's clock; returns the seconds it ran. */
+  async function turn(scenario: TestScenario<LodSurfaceTestSettings>, context: TestContext): Promise<number> {
+    const durationMs = modeActionMs(scenario, context.mode);
+    const began = performance.now();
+    host.setTurnTime(0);
+    while (true) {
+      const elapsed = performance.now() - began;
+      host.setTurnTime(Math.min(elapsed, durationMs) / 1000);
+      if (elapsed >= durationMs) return elapsed / 1000;
+      await context.wait(16);
+    }
+  }
+
   return {
     windowModes: true,
     capture: () => host.read(),
@@ -232,6 +247,9 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
         } else if (settings.motion === 'sweep') {
           motionSeconds = await sweep(scenario, context);
           motionMismatches = settingsMismatches(host.read(), settings);
+        } else if (settings.motion === 'turn') {
+          motionSeconds = await turn(scenario, context);
+          motionMismatches = settingsMismatches(host.read(), settings);
         } else {
           await context.measureWindow(scenario, [
             { name: 'frameInterval', samples: () => intervals, resolution: TIMER_STEP_MS },
@@ -245,6 +263,7 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
         if (host.isSampling()) host.stopSampling();
         if (settings.motion === 'zoom' || settings.motion === 'biome-sweep') host.setZoomProgress(undefined);
         if (settings.motion === 'sweep') host.setSweepTime(undefined);
+        if (settings.motion === 'turn') host.setTurnTime(undefined);
       }
       const selection = [...host.selectionSamples()];
       const selectOnly = [...(host.selectOnlySamples?.() ?? [])];
@@ -365,6 +384,7 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
     restore: async (snapshot, context) => {
       host.setZoomProgress(undefined);
       host.setSweepTime(undefined);
+      host.setTurnTime(undefined);
       host.apply(snapshot);
       await waitForFrames(host, 2, context);
     },

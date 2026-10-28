@@ -196,6 +196,22 @@ export function sweepPathView(domain: LodDomain, pose: PoseId, t: number): Camer
   return { ...from, headingRad: from.headingRad + SWEEP_YAW_RAD * swing, altitudeM: from.altitudeM * (1 + SWEEP_ALTITUDE_SHARE * swing) };
 }
 
+/** The scripted turn's period, seconds (0.25 Hz): one swing out, back, over the other side and back to the pose. */
+export const TURN_PERIOD_S = 4;
+/** Heading swing of the scripted turn, radians either side of the pose (90 degrees): wide enough that patches leave and enter the view. */
+export const TURN_YAW_RAD = 90 * DEG;
+
+/**
+ * The scripted turn: holds the pose's position and altitude exactly and swings only the heading, +-{@link TURN_YAW_RAD}
+ * once every {@link TURN_PERIOD_S} seconds. A pure function of `t` (seconds since the turn began); at t = 0 (and every
+ * whole period) it is the pose. No distance changes, so any split or merge it causes comes from what the view culls
+ * (the leaf budget and the balance rule see a different set of nodes), not from the distance criterion.
+ */
+export function turnPathView(domain: LodDomain, pose: PoseId, t: number): CameraView {
+  const from = poseView(pose, domain);
+  return { ...from, headingRad: from.headingRad + TURN_YAW_RAD * Math.sin((2 * Math.PI * t) / TURN_PERIOD_S) };
+}
+
 /** The scripted zoom: 2 m eye to orbit, altitude logarithmic, pitch from the eye pose to straight down. */
 export function zoomPathView(domain: LodDomain, t: number): CameraView {
   const from = poseView('eye-2m', domain);

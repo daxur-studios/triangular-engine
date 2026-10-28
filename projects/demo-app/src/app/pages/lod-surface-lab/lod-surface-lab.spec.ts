@@ -12,7 +12,7 @@ import { CAP_SLACK, LodSelector, PIXEL_FLOOR, maxLevelFor, type SelectorSettings
 import { createLodSurfaceTestAdapter, settingsMismatches, type LodSurfaceTestHost } from './lod-surface-test-adapter';
 import type { LodSurfaceTestSettings } from './lod-surface-tests';
 import type { TestContext, TestScenario } from 'triangular-engine/testing';
-import { DEFAULT_SETTINGS, LOD_SURFACE_TEST_HISTORY, crackExpectation } from './lod-surface-tests';
+import { DEFAULT_SETTINGS, LOD_SURFACE_TEST_HISTORY, TURN_UNCAPPED_LEAVES, crackExpectation } from './lod-surface-tests';
 
 const sphere600 = domainPreset('sphere-600km');
 const plane = domainPreset('plane-100km');
@@ -963,12 +963,12 @@ describe('Plan 059 suite', () => {
 });
 
 describe('Plan 059 suite versions and hysteresis', () => {
-  const [v1, v2, v3, v4, v5, t1, t2, t3] = LOD_SURFACE_TEST_HISTORY;
+  const [v1, v2, v3, v4, v5, v6, t1, t2, t3] = LOD_SURFACE_TEST_HISTORY;
   const idsOf = (suite: typeof v1) => suite.scenarios.map((scenario) => scenario.id);
 
   it('lists the versions oldest first with the latest terrain suite last', () => {
     expect(LOD_SURFACE_TEST_HISTORY.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
-      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-baseline@5', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4', 'lod-surface-terrain@5', 'lod-surface-terrain@6', 'lod-surface-terrain@7', 'lod-surface-terrain@8',
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-baseline@5', 'lod-surface-baseline@6', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4', 'lod-surface-terrain@5', 'lod-surface-terrain@6', 'lod-surface-terrain@7', 'lod-surface-terrain@8',
     ]);
   });
 
@@ -1013,6 +1013,71 @@ describe('Plan 059 suite versions and hysteresis', () => {
     expect(t7.scenarios.map((scenario) => scenario.id)).toEqual(t6.scenarios.map((scenario) => scenario.id));
   });
 
+  it('adds the six turn cases in baseline v6 and keeps v5 as it was', () => {
+    expect(idsOf(v6).slice(0, idsOf(v5).length)).toEqual(idsOf(v5));
+    expect(v6.scenarios.slice(0, v5.scenarios.length)).toEqual(v5.scenarios);
+    const turns = v6.scenarios.slice(v5.scenarios.length);
+    expect(turns.map((scenario) => scenario.id)).toEqual([
+      'turn-plane-100km-low-200m', 'turn-plane-100km-low-200m-cap16k', 'turn-plane-100km-low-200m-nocull',
+      'turn-sphere-600km-mid-5km', 'turn-sphere-600km-mid-5km-cap16k', 'turn-sphere-600km-mid-5km-nocull',
+    ]);
+    expect(new Set(idsOf(v6)).size).toBe(idsOf(v6).length);
+    for (const scenario of turns) {
+      expect(scenario.settings.motion).withContext(scenario.id).toBe('turn');
+      expect(scenario.settings.detailNoise).toBe(0);
+      expect(scenario.settings.patchCells).toBe(16);
+      expect(scenario.settings.hysteresis).toBe(0.15);
+      expect(scenario.durationMs).toBe(8000);
+      expect(scenario.quickMs).toBe(4000);
+    }
+  });
+
+  it('runs the turn variants as the default case with only the leaf cap or the culling changed', () => {
+    const turns = v6.scenarios.filter((scenario) => scenario.id.startsWith('turn-'));
+    for (let k = 0; k < turns.length; k += 3) {
+      const [base, cap, nocull] = turns.slice(k, k + 3);
+      expect(base.settings.leafCap).toBe(1024);
+      expect(base.settings.cull).toBeTrue();
+      expect(cap.settings).toEqual({ ...base.settings, leafCap: TURN_UNCAPPED_LEAVES });
+      expect(nocull.settings).toEqual({ ...base.settings, cull: false });
+    }
+    expect(turns.map((scenario) => `${scenario.settings.domain}|${scenario.settings.pose}`)).toEqual([
+      ...Array(3).fill('plane-100km|low-200m'), ...Array(3).fill('sphere-600km|mid-5km'),
+    ]);
+    expect(TURN_UNCAPPED_LEAVES).toBeGreaterThan(4096);
+  });
+
+  it('runs a turn case on the turn clock, checks its state while it runs and reports the level churn', async () => {
+    let turnAt: number | undefined;
+    const times: number[] = [];
+    let now = 0;
+    const host = {
+      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, detailNoise: 0, ...(turnAt !== undefined ? { motion: 'turn' as const } : {}) }),
+      setZoomProgress: () => undefined, setSweepTime: () => { throw new Error('a turn must not use the sweep clock'); },
+      setTurnTime: (t: number | undefined) => { turnAt = t; if (t !== undefined) times.push(t); },
+      renderedFrames: () => Math.floor(now / 16),
+      errors: () => '', resetErrors: () => undefined, backendIsWebGpu: () => true,
+      frame: () => ({ stats: { leaves: 1, drawn: 1, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0 }, instances: 1, trianglesPerLeaf: 2, drawCalls: 1, rendererTriangles: 2, drawingBuffer: [1, 1] as const }),
+      onRenderComplete: () => () => undefined,
+      selectionSamples: () => [0.1, 0.1], leafSamples: () => [1, 1], levelChangeSamples: () => [0, 4], levelChangeAllSamples: () => [0, 8], resetSamples: () => undefined,
+      isSampling: () => false, startSampling: () => undefined, gpuSamplesSoFar: () => [],
+      stopSampling: () => ({ frames: 100, cpuMedianMs: 1, cpuP95Ms: 1, wallMedianMs: 6, wallP95Ms: 6, gpuMedianMs: null, gpuSamples: 0, invalidReasons: [], verdict: 'ok' as const }),
+      crackProbe: () => Promise.resolve({ cracks: 0, masked: 0, surface: 10, background: 10, width: 4, height: 4 }),
+      environment: () => ({}),
+    } as unknown as LodSurfaceTestHost;
+    spyOn(performance, 'now').and.callFake(() => now);
+    const context = { mode: 'quick', repetition: 1, signal: new AbortController().signal, wait: (ms: number) => { now += ms; return Promise.resolve(); } } as unknown as TestContext;
+    const scenario = v6.scenarios.find((item) => item.id === 'turn-plane-100km-low-200m') as TestScenario<LodSurfaceTestSettings>;
+    turnAt = 0;
+    const observation = await createLodSurfaceTestAdapter(host).measure(scenario, context);
+    expect(observation.checks?.find((check) => check.name === 'Scenario state applied as specified')?.passed).toBeTrue();
+    expect(turnAt).toBeUndefined();
+    expect(times[0]).toBe(0);
+    expect(times[times.length - 1]).toBeCloseTo(4, 6);
+    expect(observation.metrics?.find((item) => item.name === 'levelChanges')?.samples).toEqual([0, 4]);
+    expect(observation.metrics?.find((item) => item.name === 'levelChangesPerSecond')?.samples[0]).toBeCloseTo(4 / 4.0, 1);
+  });
+
   it('runs the A/B partner of a sweep with the same settings but the hysteresis', () => {
     const a = v3.scenarios.find((scenario) => scenario.id === 'sweep-plane-100km-low-200m')!;
     const b = v3.scenarios.find((scenario) => scenario.id === 'sweep-plane-100km-low-200m-nohyst')!;
@@ -1023,6 +1088,7 @@ describe('Plan 059 suite versions and hysteresis', () => {
   it('names a hysteresis or sweep the page did not honour', () => {
     expect(settingsMismatches({ ...DEFAULT_SETTINGS, hysteresis: 0 }, DEFAULT_SETTINGS)).toEqual(['hysteresis: expected 0.15, found 0']);
     expect(settingsMismatches(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, motion: 'sweep' }).length).toBe(1);
+    expect(settingsMismatches(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, motion: 'turn' }).length).toBe(1);
   });
 });
 

@@ -30,9 +30,10 @@ export interface LodSurfaceTestSettings {
   readonly detailNoise: number;
   /**
    * A scripted camera runs during the window instead of a still pose: `zoom` flies the ground-to-orbit path once; `sweep`
-   * holds `pose` and swings the camera back and forth; `biome-sweep` traverses the five biome regions.
+   * holds `pose` and swings the camera back and forth; `turn` holds `pose` exactly and swings only the heading (+-90
+   * degrees, no distance change); `biome-sweep` traverses the five biome regions.
    */
-  readonly motion?: 'zoom' | 'sweep' | 'biome-sweep';
+  readonly motion?: 'zoom' | 'sweep' | 'turn' | 'biome-sweep';
 }
 
 /** What `lod-surface-baseline` v3–v4 and `lod-surface-terrain` v2–v6 run with: 32 cells per patch. Their definitions keep it. */
@@ -74,6 +75,28 @@ function still(
 /** A sweep case: the pose held while the camera swings for 8 s (four periods); quick mode shows two. */
 function sweep(id: string, label: string, change: Partial<LodSurfaceTestSettings>, base: LodSurfaceTestSettings = CELLS_32): TestScenario<LodSurfaceTestSettings> {
   return { id, label, settings: { ...base, ...change, motion: 'sweep' }, warmupMs: 500, durationMs: 8000, quickMs: 4000 };
+}
+
+/** A turn case: the pose held while only the heading swings for 8 s (two periods); quick mode shows one. */
+function turn(id: string, label: string, change: Partial<LodSurfaceTestSettings>, base: LodSurfaceTestSettings): TestScenario<LodSurfaceTestSettings> {
+  return { id, label, settings: { ...base, ...change, motion: 'turn' }, warmupMs: 500, durationMs: 8000, quickMs: 4000 };
+}
+
+/** Leaf cap of the turn A/B that never binds (the lab's largest button is 4096; the sweeps at 16 cells stay far below this). */
+export const TURN_UNCAPPED_LEAVES = 16_384;
+
+/**
+ * The turn cases added in baseline v6: a pure turn (position and altitude fixed) at the two sweep poses, in three variants.
+ * `-cap16k` raises the leaf cap so it never binds, and `-nocull` turns the frustum culling off, so each isolates one
+ * suspected cause of patches flickering between split and merged while the camera only turns: a leaf budget reshuffled as
+ * culled patches leave and enter the view, and a balance rule that sees different neighbours as they drop out.
+ */
+function baselineTurns(base: LodSurfaceTestSettings): TestScenario<LodSurfaceTestSettings>[] {
+  return ([['plane-100km', 'low-200m'], ['sphere-600km', 'mid-5km']] as const).flatMap(([domain, pose]) => [
+    turn(`turn-${domain}-${pose}`, `turn · ${domain} · ${pose}`, { domain, pose }, base),
+    turn(`turn-${domain}-${pose}-cap16k`, `turn · ${domain} · ${pose} · leaf cap ${TURN_UNCAPPED_LEAVES} (A/B)`, { domain, pose, leafCap: TURN_UNCAPPED_LEAVES }, base),
+    turn(`turn-${domain}-${pose}-nocull`, `turn · ${domain} · ${pose} · culling off (A/B)`, { domain, pose, cull: false }, base),
+  ]);
 }
 
 /**
@@ -264,6 +287,18 @@ const TERRAIN_V7: TestSuite<LodSurfaceTestSettings> = {
   scenarios: [...terrainScenarios(CELLS_16, true), ...biomeCases(CELLS_16), ...capAbab(CELLS_16, 16), ...CELLS_ABAB],
 };
 /**
+ * v6: v5's cases and six turn cases (see {@link baselineTurns}) at v5's settings (16 cells, detail noise off). Same ids for
+ * the earlier cases and the same numbers; the turn cases are new. Read `levelChangesPerSecond` and the visible new
+ * splits and merges of the three variants of a pose against each other: if the cap-16k variant is quiet the leaf budget
+ * flickers; if the no-cull variant is quiet the culling (the balance rule over the culled set) does.
+ */
+const BASELINE_V6: TestSuite<LodSurfaceTestSettings> = {
+  ...BASELINE_V5, version: 6,
+  title: 'LOD surface core: cost, cracks, the zoom and the sweep at 16 cells, plus a pure turn with leaf cap and culling A/B (Plan 059)',
+  scenarios: [...BASELINE_V5.scenarios, ...baselineTurns(CELLS_16)],
+};
+
+/**
  * v8: terrain v7's cases with the detail noise on (the new default): a few octaves of noise below the texel size, so the
  * ground is no longer flat between texels and the lighting shows it. Same case ids; numbers are not comparable with v7
  * (more vertex work, and the node height ranges are wider by the noise bound).
@@ -275,4 +310,4 @@ const TERRAIN_V8: TestSuite<LodSurfaceTestSettings> = {
 };
 
 /** Oldest first; the final entry is "Run latest test". Earlier versions are still run by their exact version. */
-export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, BASELINE_V5, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3, TERRAIN_V4, TERRAIN_V5, TERRAIN_V6, TERRAIN_V7, TERRAIN_V8];
+export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, BASELINE_V5, BASELINE_V6, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3, TERRAIN_V4, TERRAIN_V5, TERRAIN_V6, TERRAIN_V7, TERRAIN_V8];

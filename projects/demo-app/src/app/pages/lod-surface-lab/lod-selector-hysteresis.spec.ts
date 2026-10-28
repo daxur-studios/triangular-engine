@@ -1,4 +1,4 @@
-import { SWEEP_ALTITUDE_SHARE, SWEEP_PERIOD_S, SWEEP_YAW_RAD, frustumNormals, panView, poseView, resolveCamera, sweepPathView, type CameraView, type PoseId } from './lod-camera';
+import { SWEEP_ALTITUDE_SHARE, SWEEP_PERIOD_S, SWEEP_YAW_RAD, frustumNormals, panView, poseView, resolveCamera, sweepPathView, turnPathView, TURN_PERIOD_S, TURN_YAW_RAD, type CameraView, type PoseId } from './lod-camera';
 import { domainPreset, neighbourCell, type LodDomain, type NeighbourCell } from './lod-domain';
 import { createHeightSource } from './lod-height';
 import { CAP_SLACK, LodSelector, PIXEL_FLOOR, maxLevelFor, type SelectorSettings, type SelectorView } from './lod-selector';
@@ -358,6 +358,38 @@ describe('Plan 059 selector hysteresis', () => {
     b.select(view);
     expect(treeOf(b)).toBe(treeOf(a));
     expect(b.stats.leaves).toBe(6 * 4 ** 3);
+  });
+});
+
+describe('Plan 059 turn path', () => {
+  it('is the pose at the start and a pure function of the time', () => {
+    for (const domain of [plane, sphere600]) {
+      for (const pose of ['low-200m', 'mid-5km'] as const) {
+        expect(turnPathView(domain, pose, 0)).toEqual(poseView(pose, domain));
+        expect(turnPathView(domain, pose, 1.3)).toEqual(turnPathView(domain, pose, 1.3));
+      }
+    }
+  });
+
+  it('keeps the position, altitude and pitch fixed and swings only the heading by TURN_YAW_RAD either side', () => {
+    for (const domain of [plane, sphere600]) {
+      const pose = poseView('mid-5km', domain);
+      let low = Infinity;
+      let high = -Infinity;
+      for (let k = 0; k < 400; k++) {
+        const t = (k * TURN_PERIOD_S) / 100;
+        const view = turnPathView(domain, 'mid-5km', t);
+        expect(view.ground).toEqual(pose.ground);
+        expect(view.altitudeM).toBe(pose.altitudeM);
+        expect(view.pitchRad).toBe(pose.pitchRad);
+        expect(turnPathView(domain, 'mid-5km', t + TURN_PERIOD_S).headingRad).toBeCloseTo(view.headingRad, 9);
+        low = Math.min(low, view.headingRad - pose.headingRad);
+        high = Math.max(high, view.headingRad - pose.headingRad);
+      }
+      expect(low).toBeCloseTo(-TURN_YAW_RAD, 3);
+      expect(high).toBeCloseTo(TURN_YAW_RAD, 3);
+      expect(TURN_YAW_RAD).toBeGreaterThan(SWEEP_YAW_RAD);
+    }
   });
 });
 

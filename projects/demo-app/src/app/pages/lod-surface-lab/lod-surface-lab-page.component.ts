@@ -7,7 +7,7 @@ import { EngineModule, EngineService, ScreenshotService } from 'triangular-engin
 import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import {
-  POSES, biomePathView, frustumNormals, groundFrame, lookView, panView, poseView, resolveCamera, sweepPathView, zoomPathView, zoomView, type CameraView, type PoseId,
+  POSES, biomePathView, frustumNormals, groundFrame, lookView, panView, poseView, resolveCamera, sweepPathView, turnPathView, zoomPathView, zoomView, type CameraView, type PoseId,
   type ResolvedCamera,
 } from './lod-camera';
 import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
@@ -33,7 +33,7 @@ import { DEFAULT_SETTINGS, LOD_SURFACE_TEST_HISTORY, type LodSurfaceTestSettings
  * placed relative to the camera from doubles. Reversed float depth, so 2 cm near planes and orbit views share a buffer.
  */
 
-const LEAF_CAPS = [256, 512, 1024, 2048, 4096] as const;
+const LEAF_CAPS = [256, 512, 1024, 2048, 4096, 16_384] as const;
 const FOV_DEG = 60;
 /** Leaves shrink by this share of their size when the injected gap is on. */
 const GAP_SHARE = 0.01;
@@ -319,6 +319,8 @@ export class LodSurfaceLabPageComponent {
   private zoomProgress: number | undefined;
   /** Seconds into the scripted sweep of the named pose, or undefined when no sweep runs. */
   private sweepTime: number | undefined;
+  /** Seconds into the scripted turn (heading only) of the named pose, or undefined when no turn runs. */
+  private turnTime: number | undefined;
   private biomeMotion = false;
   private camera: ResolvedCamera | undefined;
   private drag: { pointerId: number; look: boolean } | undefined;
@@ -368,6 +370,7 @@ export class LodSurfaceLabPageComponent {
     resetSamples: () => { this.selectionSamples = []; this.selectOnlySamples = []; this.uploadOnlySamples = []; this.leafSamples = []; this.levelChangeSamples = []; this.levelChangeAllSamples = []; },
     setZoomProgress: (t) => { this.zoomProgress = t; },
     setSweepTime: (seconds) => { this.sweepTime = seconds; },
+    setTurnTime: (seconds) => { this.turnTime = seconds; },
     isSampling: () => this.engine.fpsController.frameSampler.isActive,
     startSampling: () => this.engine.fpsController.frameSampler.start(),
     gpuSamplesSoFar: () => this.engine.fpsController.frameSampler.gpuSamples,
@@ -502,7 +505,7 @@ export class LodSurfaceLabPageComponent {
       domain: this.domainId(), warp: this.warp(), source: this.sourceId(), patchCells: this.patchCells(), mode: this.mode(),
       fixedLevel: this.fixedLevel(), cellPixels: this.cellPixels(), leafCap: this.leafCap(), cull: this.cull(), hysteresis: this.hysteresis(), folding: this.folding(),
       injectedGap: this.injectedGap(), pose: this.poseId(), view: this.view(), wireframe: this.wireframe(), bounds: this.bounds(), lighting: this.lighting(), detailNoise: this.detailNoise(),
-      ...(this.zoomProgress !== undefined ? { motion: this.biomeMotion ? 'biome-sweep' as const : 'zoom' as const } : this.sweepTime !== undefined ? { motion: 'sweep' as const } : {}),
+      ...(this.zoomProgress !== undefined ? { motion: this.biomeMotion ? 'biome-sweep' as const : 'zoom' as const } : this.sweepTime !== undefined ? { motion: 'sweep' as const } : this.turnTime !== undefined ? { motion: 'turn' as const } : {}),
     };
   }
 
@@ -530,6 +533,7 @@ export class LodSurfaceLabPageComponent {
     this.biomeMotion = settings.motion === 'biome-sweep';
     this.zoomProgress = settings.motion === 'zoom' || this.biomeMotion ? 0 : undefined;
     this.sweepTime = settings.motion === 'sweep' ? 0 : undefined;
+    this.turnTime = settings.motion === 'turn' ? 0 : undefined;
   }
 
   /**
@@ -650,6 +654,7 @@ export class LodSurfaceLabPageComponent {
   private currentView(): CameraView {
     if (this.zoomProgress !== undefined) return this.biomeMotion ? biomePathView(this.domain, this.zoomProgress) : zoomPathView(this.domain, this.zoomProgress);
     if (this.sweepTime !== undefined) return sweepPathView(this.domain, this.poseId(), this.sweepTime);
+    if (this.turnTime !== undefined) return turnPathView(this.domain, this.poseId(), this.turnTime);
     return this.freeCamera() ? this.freeView : poseView(this.poseId(), this.domain);
   }
 
