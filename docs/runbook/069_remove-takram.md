@@ -50,3 +50,14 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 <!-- tri:scope-baseline state="unconfirmed" -->
 <!-- /tri:scope-baseline -->
 <!-- /tri:scope-history -->
+
+## 2026-10-28 — Verification
+
+- `npm install`: `package-lock.json` has no `takram` entry and no `react`, `@react-three/fiber`, `zustand` or `react-use-measure` package.
+- `git grep -i takram` outside `docs/`, `package-lock.json` and `projects/demo-app/deprecated/` finds only the deprecated placeholder, the deprecated index entries, the route names and the CHANGELOG entry.
+- `npm run build:triangular-engine`: built.
+- `npx ng build demo-app`: built (existing Mermaid CommonJS warnings only).
+- `npm test`: 455 to 472 of 475 passing across two runs. The failing specs are the test-link tests for planet-material-extensions and cell-planet-morph-streaming (`testMode` in the expected URL) and a timing-dependent atmosphere-lab quick-mode test, which failed with `capped` in one run and not in the other. None touch Takram code. I did not confirm these fail on the base commit; that is the next check.
+- `npm run docs:records:check`: OK.
+
+Not done: no browser check of the deprecated routes; the owner's demo server was not restarted.

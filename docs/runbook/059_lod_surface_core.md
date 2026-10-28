@@ -1050,3 +1050,48 @@ deepest level: the hotspot.
   stay exact; the CPU twin adds the same term); a smoother (bicubic) blend; a larger k (16x memory per +2); tiles
   baked at higher resolution around the camera (a clipmap). Not decided.
 - Water (M3) is ordered after M6 by D15; with cliffs parked, the owner may move it forward.
+
+## 2026-10-28: detail noise below the texel size
+
+The height texture is 1,025 texels per face side (about 98 m on the plane, 920 m on the 600 km sphere), read with a
+bilinear blend, so close up the ground is a flat facet per texel and the lighting normals (from the same texels) are
+blocky too. This adds a few octaves of noise to the height after the texture read, on the GPU and the CPU twin.
+
+### Built
+
+- `lod-detail-noise.ts`: 4 octaves of 3D value noise (quintic interpolation, 24-bit integer hash, analytic derivative),
+  first wavelength one texel, each octave half the wavelength and half the amplitude. Amplitude is the setting
+  `detailNoise`, a share of the texel size in metres (default 0.04: about 4 m on the plane, 37 m on the 600 km sphere);
+  the offset never exceeds `share * texel * 1.875`. The noise coordinate is the vertex's lattice point (plane: U, V) or
+  cube-lattice vector T (sphere), so every leaf that draws a vertex, and both faces of a cube edge, get the same bits.
+  Fade: octave `o` is weighted by `smoothstep(2, 4, wavelength / vertex spacing)`, where the vertex spacing is the
+  vertex's camera distance times the cell angle (cell pixels times pixel angle). The distance is a function of the
+  point and the per-frame anchor, not of the leaf's level, so a fine and a coarse leaf agree on a shared (folded)
+  vertex and no crack opens; the cost is that octaves fade in and out as the camera moves.
+- `lod-surface-mesh.ts`: the optional `detail` mesh option adds the noise to the height in `surfacePoint` and its
+  slopes (per lattice step, converted through the same metric as the texture's slopes) to the shading gradient, so the
+  lighting shows the detail. `setDetailNoise` and `setDetailFade` are uniforms; without the option no noise nodes exist.
+- CPU twin: `withDetailNoise` wraps a height source: `heightAt` adds the full-detail noise (no fade), `boundM` and every
+  `nodeRange` are widened by the noise bound, so culling and the split box (`hot[h+5]`, `hot[h+6]`) stay conservative.
+  The page wraps its source before building the selector; the camera and the backstop read the wrapped source.
+- `lod-surface-tests.ts`: `detailNoise` setting, `DEFAULT_SETTINGS.detailNoise` = 0.04 (on). `CELLS_32` and the new
+  `CELLS_16` (baseline v5, terrain v7) keep it 0, so every saved version (baseline v1-v5, terrain v1-v7) runs with the
+  noise off. New `lod-surface-terrain` v8 runs v7's cases with the default; numbers are not comparable with v7. The lab
+  has a "detail noise" slider.
+- Specs: `lod-detail-noise.spec.ts` (deterministic and bounded, analytic gradient against finite differences, fade
+  rule, off equals the plain source, heights within the bound, widened node ranges, shared plane edge, coarse/fine
+  shared vertices, shared cube-edge vertices from both faces, suite versions); history lists updated for v8.
+
+### Verified
+
+171 of 171 lab specs pass (`ChromeHeadless --watch=false`; 158 before, 13 new). The vertex-stage nodes are not run by
+the specs (no WebGPU in the unit run): the CPU function is tested, its TSL twin was written line by line from it.
+
+### Not done / next
+
+- The owner's visual check close up on the plane and the sphere (facets gone? normals? fade-in of octaves while moving).
+- The cost of the noise in the vertex stage (32 hashes per vertex, twice for the shading normal) is not measured in the
+  browser; terrain v8 has no saved results.
+- The GPU hash and the CPU twin are not compared by read-back; the CPU height has no fade, so on far vertices it differs
+  from the GPU by the faded octaves (at most the bound).
+

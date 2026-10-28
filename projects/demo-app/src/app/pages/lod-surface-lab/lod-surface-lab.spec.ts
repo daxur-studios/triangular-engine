@@ -873,7 +873,7 @@ describe('Plan 059 suite', () => {
     let now = 0;
     let frames = 0;
     const host = {
-      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, ...(zoom !== undefined ? { motion: 'zoom' as const } : {}) }),
+      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, detailNoise: 0, ...(zoom !== undefined ? { motion: 'zoom' as const } : {}) }),
       setZoomProgress: (t: number | undefined) => { zoom = t; },
       renderedFrames: () => frames++,
       errors: () => '', resetErrors: () => undefined, backendIsWebGpu: () => true,
@@ -927,7 +927,7 @@ describe('Plan 059 suite', () => {
     let probes = 0;
     let now = 0;
     const host = {
-      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, ...(sweepAt !== undefined ? { motion: 'sweep' as const } : {}) }),
+      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, detailNoise: 0, ...(sweepAt !== undefined ? { motion: 'sweep' as const } : {}) }),
       setZoomProgress: () => undefined,
       setSweepTime: (t: number | undefined) => { sweepAt = t; if (t !== undefined) times.push(t); },
       renderedFrames: () => Math.floor(now / 16),
@@ -968,7 +968,7 @@ describe('Plan 059 suite versions and hysteresis', () => {
 
   it('lists the versions oldest first with the latest terrain suite last', () => {
     expect(LOD_SURFACE_TEST_HISTORY.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
-      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-baseline@5', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4', 'lod-surface-terrain@5', 'lod-surface-terrain@6', 'lod-surface-terrain@7',
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-baseline@5', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4', 'lod-surface-terrain@5', 'lod-surface-terrain@6', 'lod-surface-terrain@7', 'lod-surface-terrain@8',
     ]);
   });
 

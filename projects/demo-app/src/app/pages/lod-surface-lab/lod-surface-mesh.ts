@@ -2,9 +2,10 @@
 import { BufferAttribute, Color, FrontSide, InstancedBufferAttribute, InstancedBufferGeometry, Mesh, Vector3 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
-  attribute, cos, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize, positionGeometry,
+  attribute, cos, dot, float, floor, fract, fwidth, length, max, min, mix, mod, normalize, positionGeometry,
   smoothstep, step, uniform, uniformArray, varying, vec2, vec3, vec4,
 } from 'three/tsl';
+import { detailNoiseNode, detailTexelMetres } from './lod-detail-noise';
 import { FACE_FRAMES, PLANE_FRAME, type LodDomain, type Vec3 } from './lod-domain';
 import type { HeightSource } from './lod-height';
 import { SIN_DENOMINATORS, anchorFor, latticeSteps, newAnchor } from './lod-lattice';
@@ -46,6 +47,11 @@ export interface LodSurfaceMeshOptions {
   readonly patchCells: PatchCells;
   readonly source: HeightSource;
   readonly capacity: number;
+  /**
+   * Adds detail noise below the texel size (`lod-detail-noise.ts`) to the height, sized by a height texture of this many
+   * texels per face side. Absent: no noise nodes are built. Its amplitude is set with `setDetailNoise`.
+   */
+  readonly detail?: { readonly cells: number };
 }
 
 export interface LodSurfaceMesh {
@@ -66,6 +72,10 @@ export interface LodSurfaceMesh {
   /** Shrinks every leaf toward its centre by this share of its size: a gap the crack probe must find. 0 = off. */
   setInjectedGap(share: number): void;
   setSun(direction: Vec3): void;
+  /** Detail noise amplitude as a share of the texel size (needs the `detail` option; 0 adds nothing). */
+  setDetailNoise(share: number): void;
+  /** Angle one vertex spacing subtends (cell pixels times the pixel angle): the finest noise octaves fade out below two spacings per wavelength. */
+  setDetailFade(spacingAngle: number): void;
   setLighting(on: boolean): void;
   dispose(): void;
 }
@@ -104,7 +114,7 @@ function gridGeometry(cells: number, capacity: number): InstancedBufferGeometry 
 const bit = (mask: any, e: number) => mod(floor(mask.div(2 ** e)), 2);
 
 export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurfaceMesh {
-  const { domain, patchCells, source, capacity } = options;
+  const { domain, patchCells, source, capacity, detail } = options;
   const sphere = domain.kind === 'sphere';
   const equalAngle = domain.warp === 'equal-angle';
   const maxLevel = maxLevelFor(patchCells);
@@ -116,6 +126,10 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const uLodColour = uniform(1) as any;
   const uBounds = uniform(1) as any;
   const uLighting = uniform(1) as any;
+  const uDetailAmp = uniform(0) as any;
+  const uDetailFade = uniform(0.004) as any;
+  const detailCells = detail?.cells ?? 1;
+  const detailTexelM = detailTexelMetres(domain, detailCells);
   const uSun = uniform(new Vector3(0.4, 0.8, 0.45).normalize()) as any;
   // Per-frame anchor (lod-lattice.ts): its lattice vector, cube point, rounding error, cosines, and distance to the camera.
   const uAnchorT = uniform(new Vector3()) as any;
@@ -147,7 +161,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
       const delta = lattice.sub(uAnchorT.xy).add(toCentre.mul(gap));
       const offset = axisU.mul(delta.x).add(axisV.mul(delta.y)).mul(domain.sizeM / steps);
       const global = axisU.mul(lattice.x.div(steps).sub(0.5).mul(size)).add(axisV.mul(lattice.y.div(steps).sub(0.5).mul(size)));
-      return { global, offset: uAnchorRel.add(offset), up: axisN, lattice, c: undefined as any, lc: undefined as any };
+      return { global, offset: uAnchorRel.add(offset), up: axisN, lattice, c: undefined as any, lc: undefined as any, t: undefined as any };
     }
     // Cube-lattice vector: one component is +-L; the others are 2U - L, 2V - L. Integers, exact in float32.
     const t = axisN.mul(steps).add(axisU.mul(lattice.x.mul(2).sub(steps))).add(axisV.mul(lattice.y.mul(2).sub(steps)));
@@ -162,14 +176,31 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     const lC = cA.length();
     const offset = dc.div(lc).sub(cA.mul(dot(dc, cA.mul(2).add(dc)).div(lc.mul(lC).mul(lc.add(lC))))).mul(size);
     const up = c.div(lc);
-    return { global: up.mul(size), offset: uAnchorRel.add(offset), up, lattice, c, lc };
+    return { global: up.mul(size), offset: uAnchorRel.add(offset), up, lattice, c, lc, t };
+  };
+
+  /**
+   * Detail noise at a vertex (`lod-detail-noise.ts`): height in metres and its slopes per lattice step (like a source's
+   * `slopeNode`). The noise coordinate is the vertex's lattice point (plane) or cube-lattice vector T (sphere), in texel units,
+   * so it is the same for every leaf that draws the vertex; the fade depends on the vertex's camera distance only.
+   */
+  const detailAt = (own: { lattice: any; t: any; offset: any }) => {
+    const unit = steps / detailCells;
+    const p = sphere ? own.t.div(2 * unit) : vec3(own.lattice.x, own.lattice.y, 0).div(unit);
+    const noise = detailNoiseNode(p, length(own.offset), uDetailFade, detailTexelM);
+    const gradient = noise.gradient.mul(uDetailAmp);
+    // T = n L + axisU (2U - L) + axisV (2V - L), so dp/dU = axisU / unit and dp/dV = axisV / unit.
+    const slope = sphere ? vec2(dot(gradient, axisU), dot(gradient, axisV)) : vec2(gradient.x, gradient.y);
+    return { height: noise.value.mul(uDetailAmp), slope: slope.div(unit) };
   };
 
   // Baked sources are read by (face, lattice): a function of the vertex's own integer coordinates, never of the gap or of
   // float positions, so seam vertices (including folded ones, which sit on a coarser lattice point) get the same bits.
   const surfacePoint = (g: any) => {
-    const { global, offset, up, lattice } = basePoint(g, uGap);
-    const height = source.lattice ? source.lattice.heightNode(face, lattice) : source.heightNode(global);
+    const own = basePoint(g, uGap);
+    const { global, offset, up, lattice } = own;
+    const base = source.lattice ? source.lattice.heightNode(face, lattice) : source.heightNode(global);
+    const height = detail ? base.add(detailAt(own).height) : base;
     return offset.add(up.mul(height));
   };
 
@@ -178,8 +209,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
    * (scaled by the nominal step length so the metric stays O(1) in float32) it is (G hU - F hV) eU + (E hV - F hU) eV over
    * (E G - F^2). Plane: constant tangents. Sphere: from the cube point c = n + a axisU + b axisV, d(a)/dU the warp's slope.
    */
-  const latticeGradient = (own: { lattice: any; c: any; lc: any }) => {
-    const slope = source.lattice!.slopeNode(face, own.lattice) as any;
+  const latticeGradient = (own: { lattice: any; c: any; lc: any }, slope: any) => {
     const unit = domain.sizeM / steps;
     let eU: any;
     let eV: any;
@@ -217,7 +247,10 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
 
   // Lighting normal from the height gradient at the vertex's own grid point.
   const own = basePoint(grid, float(0));
-  const gradient = (source.lattice ? latticeGradient(own) : source.gradientNode(own.global)) as any;
+  const detailSlope = detail ? detailAt(own).slope : undefined;
+  const gradient = (source.lattice
+    ? latticeGradient(own, detailSlope ? (source.lattice.slopeNode(face, own.lattice) as any).add(detailSlope) : source.lattice.slopeNode(face, own.lattice))
+    : detailSlope ? (source.gradientNode(own.global) as any).add(latticeGradient(own, detailSlope)) : source.gradientNode(own.global)) as any;
   const tangential = gradient.sub(own.up.mul(dot(gradient, own.up)));
   const shadingNormal = varying(normalize(own.up.sub(tangential)), 'vLodNormal') as any;
   const patchUv = varying(grid.mul(1 / patchCells), 'vLodPatchUv') as any;
@@ -287,6 +320,8 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     setFolding(on) { uFolding.value = on ? 1 : 0; },
     setInjectedGap(share) { uGap.value = share; },
     setLighting(on) { uLighting.value = on ? 1 : 0; },
+    setDetailNoise(share) { uDetailAmp.value = share * detailTexelM; },
+    setDetailFade(spacingAngle) { uDetailFade.value = Math.max(spacingAngle, 1e-6); },
     setSun(direction) { (uSun.value as Vector3).set(...direction).normalize(); },
     dispose() {
       geometry.dispose();

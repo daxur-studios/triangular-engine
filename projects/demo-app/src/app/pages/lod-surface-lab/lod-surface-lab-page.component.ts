@@ -12,6 +12,7 @@ import {
 } from './lod-camera';
 import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
 import { DOMAIN_PRESETS, domainPreset, type CubeWarp, type DomainPresetId, type LodDomain } from './lod-domain';
+import { withDetailNoise } from './lod-detail-noise';
 import { HEIGHT_SOURCES, HEIGHT_SOURCE_LABELS, createHeightSource, isBakedSource, sourceSupports, type HeightSource, type HeightSourceId } from './lod-height';
 import { DEFAULT_BAKE_K, textureMegabytes, percentile, twinErrors, type BakeLayout } from './lod-height-bake';
 import { bakeInWorker } from './lod-height-bake-client';
@@ -198,6 +199,10 @@ interface RendererLike {
           Inject a gap (each leaf shrinks 1%; the probe must see it)
         </label>
 
+        <p class="row">detail noise {{ detailNoise() === 0 ? 'off' : (detailNoise() * 100).toFixed(0) + '% of a texel' }}
+          <input type="range" min="0" max="0.1" step="0.01" aria-label="Detail noise below the texel size, share of the texel" [value]="detailNoise()" (input)="setDetailNoise(+$any($event.target).value)" />
+        </p>
+
         <p class="label">Debug view</p>
         <p class="row">
           <button (click)="setView('lod')" [class.active]="view() === 'lod'">LOD colours</button>
@@ -265,6 +270,7 @@ export class LodSurfaceLabPageComponent {
   readonly leafCap = signal(DEFAULT_SETTINGS.leafCap);
   readonly cull = signal(DEFAULT_SETTINGS.cull);
   readonly hysteresis = signal(DEFAULT_SETTINGS.hysteresis);
+  readonly detailNoise = signal(DEFAULT_SETTINGS.detailNoise);
   readonly folding = signal(DEFAULT_SETTINGS.folding);
   readonly injectedGap = signal(DEFAULT_SETTINGS.injectedGap);
   readonly poseId = signal<PoseId>(DEFAULT_SETTINGS.pose);
@@ -441,6 +447,7 @@ export class LodSurfaceLabPageComponent {
   setFolding(on: boolean): void { this.folding.set(on); this.surface?.setFolding(on); }
   setInjectedGap(share: number): void { this.injectedGap.set(share); this.surface?.setInjectedGap(share); }
   setView(view: LodView): void { this.view.set(view); this.surface?.setView(view); }
+  setDetailNoise(share: number): void { this.detailNoise.set(Math.max(0, share)); this.rebuild(); }
   setLighting(on: boolean): void { this.lighting.set(on); this.surface?.setLighting(on); }
   setBounds(on: boolean): void { this.bounds.set(on); this.surface?.setBounds(on); }
   setWireframe(on: boolean): void { this.wireframe.set(on); this.surface?.setWireframe(on); }
@@ -494,7 +501,7 @@ export class LodSurfaceLabPageComponent {
     return {
       domain: this.domainId(), warp: this.warp(), source: this.sourceId(), patchCells: this.patchCells(), mode: this.mode(),
       fixedLevel: this.fixedLevel(), cellPixels: this.cellPixels(), leafCap: this.leafCap(), cull: this.cull(), hysteresis: this.hysteresis(), folding: this.folding(),
-      injectedGap: this.injectedGap(), pose: this.poseId(), view: this.view(), wireframe: this.wireframe(), bounds: this.bounds(), lighting: this.lighting(),
+      injectedGap: this.injectedGap(), pose: this.poseId(), view: this.view(), wireframe: this.wireframe(), bounds: this.bounds(), lighting: this.lighting(), detailNoise: this.detailNoise(),
       ...(this.zoomProgress !== undefined ? { motion: this.biomeMotion ? 'biome-sweep' as const : 'zoom' as const } : this.sweepTime !== undefined ? { motion: 'sweep' as const } : {}),
     };
   }
@@ -504,6 +511,7 @@ export class LodSurfaceLabPageComponent {
     this.warp.set(settings.warp);
     this.sourceId.set(settings.source);
     this.setLighting(settings.lighting);
+    this.detailNoise.set(settings.detailNoise);
     this.patchCells.set(settings.patchCells);
     this.mode.set(settings.mode);
     this.fixedLevel.set(settings.fixedLevel);
@@ -536,7 +544,8 @@ export class LodSurfaceLabPageComponent {
     if (!source) return;
     const sizeChanged = domain.kind !== this.domain.kind || domain.sizeM !== this.domain.sizeM;
     this.domain = domain;
-    this.source = source;
+    // The selector and the camera see the noise through the source (heights, bound and node ranges); the mesh adds it in the vertex stage.
+    this.source = withDetailNoise(source, { domain, cells: 2 ** this.bakeK(), share: this.detailNoise() });
     if (sizeChanged) this.freeView = poseView(this.poseId(), this.domain);
     this.selector = new LodSelector({
       domain: this.domain, patchCells: this.patchCells(), mode: this.mode(), fixedLevel: this.fixedLevel(), cellPixels: this.cellPixels(),
@@ -544,18 +553,22 @@ export class LodSurfaceLabPageComponent {
       ...(this.source.nodeRange ? { heightRanges: { nodeRange: this.source.nodeRange.bind(this.source) } } : {}),
     });
     const capacity = this.leafCap() + CAP_SLACK + 6;
-    const key = [this.domainId(), this.warp(), this.sourceId(), this.activeBake, this.patchCells(), capacity].join('|');
-    if (key === this.builtKey && this.surface) return;
+    const key = [this.domainId(), this.warp(), this.sourceId(), this.activeBake, this.patchCells(), capacity, this.detailNoise() > 0, this.bakeK()].join('|');
+    if (key === this.builtKey && this.surface) {
+      this.surface.setDetailNoise(this.detailNoise());
+      return;
+    }
     if (this.surface) {
       this.engine.scene.remove(this.surface.mesh);
       this.surface.dispose();
     }
-    this.surface = createLodSurfaceMesh({ domain: this.domain, patchCells: this.patchCells(), source: this.source, capacity });
+    this.surface = createLodSurfaceMesh({ domain: this.domain, patchCells: this.patchCells(), source: this.source, capacity, ...(this.detailNoise() > 0 ? { detail: { cells: 2 ** this.bakeK() } } : {}) });
     this.surface.setFolding(this.folding());
     this.surface.setInjectedGap(this.injectedGap());
     this.surface.setView(this.view());
     this.surface.setBounds(this.bounds());
     this.surface.setLighting(this.lighting());
+    this.surface.setDetailNoise(this.detailNoise());
     this.surface.setWireframe(this.wireframe());
     this.engine.scene.add(this.surface.mesh);
     this.builtKey = key;
@@ -687,6 +700,7 @@ export class LodSurfaceLabPageComponent {
       levelChangesAll = selector.stats.newSplits + selector.stats.merges;
     }
     const selectedAt = performance.now();
+    surface.setDetailFade(Math.max(this.cellPixels(), PIXEL_FLOOR) * this.selectorView.pixelAngle);
     surface.upload(selector, camera.position);
     const uploadedAt = performance.now();
     this.selectOnlySamples.push(selectedAt - began);

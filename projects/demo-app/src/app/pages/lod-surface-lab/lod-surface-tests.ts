@@ -26,6 +26,8 @@ export interface LodSurfaceTestSettings {
   readonly wireframe: boolean;
   readonly bounds: boolean;
   readonly lighting: boolean;
+  /** Detail noise below the texel size (`lod-detail-noise.ts`): amplitude of its first octave as a share of the texel size; 0 is off. */
+  readonly detailNoise: number;
   /**
    * A scripted camera runs during the window instead of a still pose: `zoom` flies the ground-to-orbit path once; `sweep`
    * holds `pose` and swings the camera back and forth; `biome-sweep` traverses the five biome regions.
@@ -37,11 +39,17 @@ export interface LodSurfaceTestSettings {
 const CELLS_32: LodSurfaceTestSettings = {
   domain: 'sphere-600km', warp: 'equal-angle', source: 'bumps', patchCells: 32, mode: 'distance', fixedLevel: 5,
   cellPixels: 4, leafCap: 1024, cull: true, hysteresis: 0.15, folding: true, injectedGap: 0, pose: 'eye-2m', view: 'lod', wireframe: false,
-  bounds: true, lighting: true,
+  bounds: true, lighting: true, detailNoise: 0,
 };
 
-/** The lab's defaults, and what `lod-surface-baseline` v5 / `lod-surface-terrain` v7 on run with: 16 cells (owner's visual check, 2026-10-27). */
-export const DEFAULT_SETTINGS: LodSurfaceTestSettings = { ...CELLS_32, patchCells: 16 };
+/** What `lod-surface-baseline` v5 and `lod-surface-terrain` v7 run with: 16 cells (owner's visual check, 2026-10-27), no detail noise. Their definitions keep it. */
+const CELLS_16: LodSurfaceTestSettings = { ...CELLS_32, patchCells: 16 };
+
+/** Default detail noise amplitude, a share of the texel size (about 4 m on the plane's 98 m texel, 37 m on the 600 km sphere's 920 m one). */
+export const DEFAULT_DETAIL_SHARE = 0.04;
+
+/** The lab's defaults, and what `lod-surface-terrain` v8 runs with: 16 cells and the detail noise on. */
+export const DEFAULT_SETTINGS: LodSurfaceTestSettings = { ...CELLS_16, detailNoise: DEFAULT_DETAIL_SHARE };
 
 /** What suites before the hysteresis existed were measured with: the single threshold. Their definitions keep it. */
 const NO_HYSTERESIS: LodSurfaceTestSettings = { ...CELLS_32, hysteresis: 0 };
@@ -248,13 +256,23 @@ const TERRAIN_V6: TestSuite<LodSurfaceTestSettings> = { ...TERRAIN_V5, version: 
 const BASELINE_V5: TestSuite<LodSurfaceTestSettings> = {
   ...BASELINE_V4, version: 5,
   title: 'LOD surface core: cost, cracks, the zoom and the sweep at 16 cells, box split distance (Plan 059)',
-  scenarios: [...baselineScenarios(DEFAULT_SETTINGS), ...baselineSweeps(DEFAULT_SETTINGS)],
+  scenarios: [...baselineScenarios(CELLS_16), ...baselineSweeps(CELLS_16)],
 };
 const TERRAIN_V7: TestSuite<LodSurfaceTestSettings> = {
   ...TERRAIN_V6, version: 7,
   title: 'LOD surface core: terrain at 16 cells with the box split distance (Plan 059)',
-  scenarios: [...terrainScenarios(DEFAULT_SETTINGS, true), ...biomeCases(DEFAULT_SETTINGS), ...capAbab(DEFAULT_SETTINGS, 16), ...CELLS_ABAB],
+  scenarios: [...terrainScenarios(CELLS_16, true), ...biomeCases(CELLS_16), ...capAbab(CELLS_16, 16), ...CELLS_ABAB],
+};
+/**
+ * v8: terrain v7's cases with the detail noise on (the new default): a few octaves of noise below the texel size, so the
+ * ground is no longer flat between texels and the lighting shows it. Same case ids; numbers are not comparable with v7
+ * (more vertex work, and the node height ranges are wider by the noise bound).
+ */
+const TERRAIN_V8: TestSuite<LodSurfaceTestSettings> = {
+  ...TERRAIN_V7, version: 8,
+  title: 'LOD surface core: terrain at 16 cells with detail noise below the texel size (Plan 059)',
+  scenarios: [...terrainScenarios(DEFAULT_SETTINGS, true), ...biomeCases(DEFAULT_SETTINGS), ...capAbab(DEFAULT_SETTINGS, 16), ...CELLS_ABAB.map((scenario) => ({ ...scenario, settings: { ...scenario.settings, detailNoise: DEFAULT_SETTINGS.detailNoise } }))],
 };
 
 /** Oldest first; the final entry is "Run latest test". Earlier versions are still run by their exact version. */
-export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, BASELINE_V5, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3, TERRAIN_V4, TERRAIN_V5, TERRAIN_V6, TERRAIN_V7];
+export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, BASELINE_V5, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3, TERRAIN_V4, TERRAIN_V5, TERRAIN_V6, TERRAIN_V7, TERRAIN_V8];
