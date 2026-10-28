@@ -24,4 +24,11 @@ Deterministic procedural generation sublibrary for synthetic 3D assets, macro-sc
 
 1. **Determinism**: Identical seeds must produce identical geometry and topology across platforms and runs.
 2. **BufferGeometry Output**: Output clean, indexed `BufferGeometry` structures ready for instancing or batching to minimize WebGL draw calls.
+
+### Capsule Doodle characters and space cats
+
+`triangular-engine/procedural` assembles the Capsule Doodle characters from the framework-free contracts in `triangular-engine/characters`:
+
+- **Humanoid capsule** (`procedural/characters/capsule`): `CapsuleCharacterActor`, `buildCapsuleBodyMesh`, `buildCapsuleFaceRig`, `RubberHoseLimbMesh`, `buildCapsuleGlovedHand`, `buildCapsuleSpaceBoot`, `buildCapsuleHairKit`, `buildCapsuleSpaceGear`.
+- **Four-legged space cats**: `CapsuleCatActor`, `buildCapsuleCatBodyMesh` (horizontal capsule with three suit/fur patterns and the projected `:3` / `MEOW` mouth), `buildCapsuleCatFaceRig` (ears, tuft, googly eyes, eyelids, nose, whiskers), `CapsuleCatTailMesh` (zero-allocation tapered S-curve), `buildCapsuleCatPaw` (fur or space-bootie paws), and `buildCapsuleCatSpaceGear` (angled bubble helmet, dorsal pet jetpack with harness, brown/blue mini saddle packs).
 <!-- /doc-section -->

@@ -212,3 +212,16 @@ Open `/characters-lab` in the demo application:
 - `projectCapsuleFaceState` (maps `FacialFrameState` semantic channels, ARKit weights, visemes, and gaze into 2D SDF mouth shader uniforms and googly-eye/hemisphere-eyelid/floating-brow transforms)
 
 The corresponding Three.js procedural assembly (`CapsuleCharacterActor`, `buildCapsuleBodyMesh`, `buildCapsuleFaceRig`, `RubberHoseLimbMesh`, `buildCapsuleHairKit`, `buildCapsuleSpaceGear`) lives in `triangular-engine/procedural`.
+
+### Capsule Space Cats (four-legged)
+
+The same entry also exports the framework-free cat contract and locomotion for the horizontal four-legged Capsule Doodle Space Cats:
+
+- `CapsuleCatCharacterDNA`, `CAPSULE_CAT_PRESETS` (the seven cats from the concept sheet), `normalizeCapsuleCatCharacterDNA`, `generateCapsuleCatCharacterDNA`
+  - Three body patterns: `front_suit`, `full_suit`, `natural_two_tone`
+  - Packs: `jetpack`, `mini_pack_brown`, `mini_pack_blue`
+  - Gaits: `idle`, `goofy_walk`, `bound_run`, `float`
+- `sampleCapsuleCatLocomotion` (diagonal four-beat trot, galloping bound, zero-G paddle float, four rubber-hose legs, and an S-curved tail)
+- `projectCapsuleCatFaceState` (maps `FacialFrameState` into the cat `:3` / `MEOW` SDF mouth, googly-eye/eyelid poses, ear perk, and whisker spread)
+
+The Three.js assembly (`CapsuleCatActor`, `buildCapsuleCatBodyMesh`, `buildCapsuleCatFaceRig`, `CapsuleCatTailMesh`, `buildCapsuleCatPaw`, `buildCapsuleCatSpaceGear`) lives in `triangular-engine/procedural`.

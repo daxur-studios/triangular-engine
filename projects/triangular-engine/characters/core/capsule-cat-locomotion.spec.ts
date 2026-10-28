@@ -1,0 +1,67 @@
+import { DEFAULT_CAPSULE_CAT_DNA } from './capsule-cat-dna';
+import { sampleCapsuleCatLocomotion } from './capsule-cat-locomotion';
+import { characterVectorDistance, characterVectorLength } from './character-vector';
+
+describe('capsule-cat-locomotion', () => {
+  it('drives a diagonal goofy trot with opposite front paw strides', () => {
+    const sample = sampleCapsuleCatLocomotion({
+      mode: 'goofy_walk',
+      elapsedSeconds: 0.32,
+      dna: DEFAULT_CAPSULE_CAT_DNA,
+    });
+
+    const leftStride = sample.frontLeft.p2.z - sample.frontLeft.p0.z;
+    const rightStride = sample.frontRight.p2.z - sample.frontRight.p0.z;
+
+    expect(sample.frontLeftPawPitch).not.toBe(sample.frontRightPawPitch);
+    expect(Math.sign(leftStride)).toBe(-Math.sign(rightStride));
+    expect(sample.tail.tip.y).toBeGreaterThan(sample.tail.base.y);
+    expect(sample.tail.radius).toBeGreaterThan(0);
+  });
+
+  it('pitches the torso more and bounces higher during a bound than during a walk', () => {
+    const walk = sampleSuspension('goofy_walk');
+    const bound = sampleSuspension('bound_run');
+
+    expect(bound.bodyTiltX).toBeGreaterThan(walk.bodyTiltX);
+    expect(bound.bodyBounceY).toBeGreaterThan(walk.bodyBounceY);
+    for (const leg of [bound.frontLeft, bound.frontRight, bound.backLeft, bound.backRight]) {
+      expect(leg.reached).toBeTrue();
+      expect(characterVectorLength(leg.endTangent)).toBeCloseTo(1, 4);
+    }
+  });
+
+  it('hovers and paddles the paws in zero-G float', () => {
+    const float = sampleSuspension('float');
+    expect(float.bodyBounceY).toBeGreaterThan(0.15);
+    // Paws lift off the ground plane while the body floats.
+    expect(float.frontLeft.p2.y).toBeGreaterThan(0.1);
+    expect(float.backRight.p2.y).toBeGreaterThan(0.1);
+  });
+
+  it('keeps an idle cat nearly grounded with a gentle breathing bob', () => {
+    const idle = sampleSuspension('idle');
+    expect(Math.abs(idle.bodyBounceY)).toBeLessThan(0.01);
+    expect(idle.frontLeft.p2.y).toBeLessThan(0.09);
+    expect(characterVectorDistance(idle.tail.base, idle.tail.tip)).toBeGreaterThan(0.1);
+  });
+
+  it('scales the gait phase with the speed multiplier', () => {
+    const slow = sampleSuspension('goofy_walk', 0.4, 0.5);
+    const fast = sampleSuspension('goofy_walk', 0.4, 2);
+    expect(Math.abs(fast.phase)).toBeGreaterThan(Math.abs(slow.phase));
+  });
+});
+
+function sampleSuspension(
+  mode: 'idle' | 'goofy_walk' | 'bound_run' | 'float',
+  elapsedSeconds = 0.3,
+  speedMultiplier = 1,
+) {
+  return sampleCapsuleCatLocomotion({
+    mode,
+    elapsedSeconds,
+    dna: DEFAULT_CAPSULE_CAT_DNA,
+    speedMultiplier,
+  });
+}

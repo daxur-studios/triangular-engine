@@ -35,5 +35,6 @@ tags: [runbook, index]
 | [Test Cost Breakdown and Budget View](/docs/runbook/067_test-cost-breakdown.md) | [PLAN-067](/docs/plans/067_test-cost-breakdown.md) |
 | [Procedural shape verification](/docs/runbook/068_procedural-shape-verification.md) | [PLAN-068](/docs/plans/068_procedural-shape-verification.md) |
 | [Remove Takram integration from the engine](/docs/runbook/069_remove-takram.md) | [PLAN-069](/docs/plans/069_remove-takram.md) |
+| [Capsule Doodle Space Cats](/docs/runbook/070_capsule-doodle-space-cats.md) | [PLAN-070](/docs/plans/070_capsule-doodle-space-cats.md) |
 
 Existing records retain their `docs/runbook/` paths. Legacy runbooks `001`–`042` retain their historical formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

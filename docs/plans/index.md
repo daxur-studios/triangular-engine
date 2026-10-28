@@ -36,5 +36,6 @@ tags: [plans, index]
 | [Test Cost Breakdown and Budget View](/docs/plans/067_test-cost-breakdown.md) | planned | [ER 067](/docs/runbook/067_test-cost-breakdown.md) |
 | [Procedural shape verification](/docs/plans/068_procedural-shape-verification.md) | planned | [ER 068](/docs/runbook/068_procedural-shape-verification.md) |
 | [Remove Takram integration from the engine](/docs/plans/069_remove-takram.md) | planned | [ER 069](/docs/runbook/069_remove-takram.md) |
+| [Capsule Doodle Space Cats](/docs/plans/070_capsule-doodle-space-cats.md) | planned | [ER 070](/docs/runbook/070_capsule-doodle-space-cats.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

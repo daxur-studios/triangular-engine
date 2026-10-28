@@ -1,10 +1,12 @@
 <header class="page-header">
   <div>
     <p class="eyebrow">Characters · Parametric Procedural Rig &amp; Semantic Facial Controls</p>
-    <h1>Capsule Doodle Space Kit &amp; Face Studio</h1>
+    <h1>Capsule Doodle Space Kit, Cats &amp; Face Studio</h1>
     <p class="claim">
       @if (viewMode === 'capsule-doodle') {
         Active Mode: <strong>Capsule Doodle Procedural Rig</strong>. Single-mesh capsule skin/suit shader + 2D SDF mouth (teeth, buck-teeth &amp; tongue), bulging googly eyes with hemisphere eyelids, zero-alloc Quadratic Bezier rubber-hose limbs, spring-damped jetpack/hair, and modular space gear.
+      } @else if (viewMode === 'capsule-cats') {
+        Active Mode: <strong>Capsule Space Cats</strong>. Four-legged horizontal capsule with three suit/fur shader patterns, twin-arch <code>:3</code>/<code>MEOW</code> SDF mouth, pointed ears, whiskers, four rubber-hose legs with paws, an S-curved tail, and modular cat space gear.
       } @else if (viewMode === 'face-studio' && faceModelSource === 'reference-model') {
         Active Baseline: <strong>FaceCap ARKit 52 Model</strong> ({{ recognizedMorphCount }} recognized morph targets). Realistic facial deformation, eyelid sliding, and viseme articulation.
       } @else if (viewMode === 'face-studio' && faceModelSource === 'procedural') {
@@ -21,6 +23,7 @@
   <div class="control-group">
     <span>View Mode</span>
     <button type="button" [class.active]="viewMode === 'capsule-doodle'" (click)="setViewMode('capsule-doodle')">Capsule Doodle Kit</button>
+    <button type="button" [class.active]="viewMode === 'capsule-cats'" (click)="setViewMode('capsule-cats')">Capsule Space Cats</button>
     <button type="button" [class.active]="viewMode === 'face-studio'" (click)="setViewMode('face-studio')">Face Studio (ARKit)</button>
     <button type="button" [class.active]="viewMode === 'full-body'" (click)="setViewMode('full-body')">Humanoid Scene</button>
   </div>
@@ -33,6 +36,31 @@
     </div>
 
     @if (capsuleLayoutMode === 'hero') {
+      <div class="control-group">
+        <span>Camera</span>
+        <button type="button" [class.active]="cameraFraming === 'full-shot'" (click)="setCameraFraming('full-shot')">Full Body</button>
+        <button type="button" [class.active]="cameraFraming === 'front'" (click)="setCameraFraming('front')">Face Close-Up</button>
+        <button type="button" [class.active]="cameraFraming === 'three-quarter'" (click)="setCameraFraming('three-quarter')">3/4 Portrait</button>
+        <button type="button" [class.active]="cameraFraming === 'profile'" (click)="setCameraFraming('profile')">Profile</button>
+      </div>
+    }
+
+    <div class="control-group control-group--highlight">
+      <span>Performance</span>
+      <button type="button" class="primary" (click)="playArticulationSequence()">Play Viseme Sequence</button>
+      <button type="button" class="action" (click)="playCombinedPerformance()">Combined Performance</button>
+      <button type="button" (click)="resetFaceToNeutral()">Reset Face</button>
+    </div>
+  }
+
+  @if (viewMode === 'capsule-cats') {
+    <div class="control-group">
+      <span>Display</span>
+      <button type="button" [class.active]="capsuleCatLayoutMode === 'hero'" (click)="setCapsuleCatLayoutMode('hero')">Hero Customizer</button>
+      <button type="button" [class.active]="capsuleCatLayoutMode === 'lineup'" (click)="setCapsuleCatLayoutMode('lineup')">7-Cat Concept Sheet</button>
+    </div>
+
+    @if (capsuleCatLayoutMode === 'hero') {
       <div class="control-group">
         <span>Camera</span>
         <button type="button" [class.active]="cameraFraming === 'full-shot'" (click)="setCameraFraming('full-shot')">Full Body</button>
@@ -264,6 +292,160 @@
       <button type="button" [class.active]="wanderGaze" (click)="toggleWanderGaze()">
         {{ wanderGaze ? 'Gaze Wander: ON' : 'Gaze Wander: OFF' }}
       </button>
+    </div>
+  </section>
+}
+
+<!-- CAPSULE SPACE CATS PANELS -->
+@if (viewMode === 'capsule-cats' && capsuleCatLayoutMode === 'hero') {
+  <section class="controls">
+    <div class="control-group">
+      <span>Cat Preset</span>
+      <select (change)="selectCapsuleCatPreset($any($event.target).value)">
+        @for (p of capsuleCatPresets; track p.id) {
+          <option [value]="p.id" [selected]="p.id === selectedCatPresetId">{{ p.label }}</option>
+        }
+      </select>
+      <button type="button" class="primary" (click)="randomizeCapsuleCatDna()">Random Seed</button>
+    </div>
+
+    <div class="control-group">
+      <span>Gait Cycle</span>
+      <button type="button" [class.active]="capsuleCatLocomotion === 'idle'" (click)="setCapsuleCatLocomotion('idle')">Idle</button>
+      <button type="button" [class.active]="capsuleCatLocomotion === 'goofy_walk'" (click)="setCapsuleCatLocomotion('goofy_walk')">Goofy Walk</button>
+      <button type="button" [class.active]="capsuleCatLocomotion === 'bound_run'" (click)="setCapsuleCatLocomotion('bound_run')">Bound Run</button>
+      <button type="button" [class.active]="capsuleCatLocomotion === 'float'" (click)="setCapsuleCatLocomotion('float')">0-G Float</button>
+    </div>
+  </section>
+
+  <section class="face-panels">
+    <div class="channel-section">
+      <h4>Suit, Fur &amp; Paws</h4>
+      <div class="control-group">
+        <span>Pattern</span>
+        <select (change)="setCapsuleCatPattern($any($event.target).value)">
+          @for (pattern of capsuleCatPatterns; track pattern) {
+            <option [value]="pattern" [selected]="pattern === capsuleCatHeroActor.dna.bodyPattern">{{ pattern }}</option>
+          }
+        </select>
+      </div>
+      <div class="control-group">
+        <span>Pack</span>
+        <select (change)="setCapsuleCatPack($any($event.target).value)">
+          @for (pack of capsuleCatPacks; track pack) {
+            <option [value]="pack" [selected]="pack === capsuleCatHeroActor.dna.pack">{{ pack }}</option>
+          }
+        </select>
+      </div>
+      <button type="button" [class.active]="capsuleCatHeroActor.dna.helmet" (click)="toggleCapsuleCatHelmet()">Bubble Helmet</button>
+      <button
+        type="button"
+        [class.active]="capsuleCatHeroActor.dna.harness"
+        [disabled]="capsuleCatHeroActor.dna.pack !== 'jetpack'"
+        (click)="toggleCapsuleCatHarness()"
+      >
+        Harness Straps
+      </button>
+      <button
+        type="button"
+        [class.active]="capsuleCatHeroActor.dna.suitBooties"
+        [disabled]="capsuleCatHeroActor.dna.bodyPattern === 'natural_two_tone'"
+        (click)="toggleCapsuleCatBooties()"
+      >
+        Space Booties
+      </button>
+      <div class="control-group">
+        <span>Fur</span>
+        @for (fc of capsuleCatFurColors; track fc) {
+          <button
+            type="button"
+            [style.background]="fc"
+            [style.width.rem]="1.4"
+            [style.height.rem]="1.4"
+            [style.padding]="'0'"
+            [class.active]="capsuleCatHeroActor.dna.furColor === fc"
+            (click)="setCapsuleCatFurColor(fc)"
+          ></button>
+        }
+      </div>
+      <div class="control-group">
+        <span>Accent</span>
+        @for (ac of capsuleCatAccentColors; track ac) {
+          <button
+            type="button"
+            [style.background]="ac"
+            [style.width.rem]="1.4"
+            [style.height.rem]="1.4"
+            [style.padding]="'0'"
+            [class.active]="capsuleCatHeroActor.dna.furAccentColor === ac"
+            (click)="setCapsuleCatAccentColor(ac)"
+          ></button>
+        }
+      </div>
+    </div>
+
+    <div class="channel-section">
+      <h4>Cat Head &amp; Mouth</h4>
+      <button type="button" [class.active]="capsuleCatHeroActor.dna.tuft" (click)="toggleCapsuleCatTuft()">Scruffy Crown Tuft</button>
+      <button type="button" [class.active]="capsuleCatHeroActor.dna.panicked" (click)="toggleCapsuleCatPanic()">Panic Eyes</button>
+      <div class="control-group">
+        <span>Rest Mouth</span>
+        <select (change)="setCapsuleCatMouthPose($any($event.target).value)">
+          <option value="cat_smile" [selected]="capsuleCatHeroActor.dna.restMouthPose === 'cat_smile'">:3 Smile</option>
+          <option value="meow" [selected]="capsuleCatHeroActor.dna.restMouthPose === 'meow'">MEOW :O</option>
+          <option value="open_happy" [selected]="capsuleCatHeroActor.dna.restMouthPose === 'open_happy'">Happy :D</option>
+        </select>
+      </div>
+      @for (e of extendedEmotions; track e) {
+        <button
+          type="button"
+          [class.active]="activeEmotion === e"
+          (click)="setFaceExpression(e)"
+        >
+          {{ e }}
+        </button>
+      }
+      <button type="button" (click)="triggerBlink()">Blink</button>
+    </div>
+
+    <div class="channel-section">
+      <h4>Cat Proportions</h4>
+      <div class="slider-group">
+        <label>Body Radius</label>
+        <input
+          type="range" min="0.16" max="0.4" step="0.01"
+          [value]="capsuleCatHeroActor.dna.bodyRadius"
+          (input)="updateCapsuleCatDna({ bodyRadius: +$any($event.target).value })"
+        />
+        <span class="val">{{ capsuleCatHeroActor.dna.bodyRadius | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Body Length</label>
+        <input
+          type="range" min="0.24" max="0.9" step="0.02"
+          [value]="capsuleCatHeroActor.dna.bodyLength"
+          (input)="updateCapsuleCatDna({ bodyLength: +$any($event.target).value })"
+        />
+        <span class="val">{{ capsuleCatHeroActor.dna.bodyLength | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Eye Scale</label>
+        <input
+          type="range" min="0.75" max="1.35" step="0.02"
+          [value]="capsuleCatHeroActor.dna.eyeScale"
+          (input)="updateCapsuleCatDna({ eyeScale: +$any($event.target).value })"
+        />
+        <span class="val">{{ capsuleCatHeroActor.dna.eyeScale | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Tail Curl</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="capsuleCatHeroActor.dna.tailCurl"
+          (input)="updateCapsuleCatDna({ tailCurl: +$any($event.target).value })"
+        />
+        <span class="val">{{ capsuleCatHeroActor.dna.tailCurl | number:'1.2-2' }}</span>
+      </div>
     </div>
   </section>
 }
@@ -516,12 +698,14 @@
   <span>Single-mesh <code>CapsuleGeometry</code> with skin/suit split &amp; 2D SDF mouth shader; 3-point Quadratic Bezier rubber-hose limbs updated in-place with zero per-frame allocation; analytical foot-arc gait + spring-damped secondary motion on jetpack &amp; hair.</span>
   <b>Semantic Control API</b>
   <span>Driven by the same framework-free <code>FacialAnimationController</code> (<code>lookAt</code>, <code>setExpression</code>, <code>setFaceChannel</code>, <code>playVisemes</code>, <code>blink</code>) as ARKit 52 and humanoid rigs.</span>
+  <b>Capsule Space Cats Architecture</b>
+  <span>Horizontal <code>CapsuleGeometry</code> with three shader suit/fur patterns and a projected twin-arch <code>:3</code>/<code>MEOW</code> mouth; four zero-allocation Quadratic Bezier rubber-hose legs, a tapered S-curve tail with spring-damper lag, and the same modular cat space gear across the seven concept presets.</span>
 </section>
 
 <!-- 3D VIEWPORT WITH DEDICATED LIGHTING -->
 <scene>
   <orbitControls [cameraPosition]="cameraPosition()" [target]="cameraTarget()" />
-  @if (viewMode === 'face-studio' || viewMode === 'capsule-doodle') {
+  @if (viewMode === 'face-studio' || viewMode === 'capsule-doodle' || viewMode === 'capsule-cats') {
     <!-- Warm studio key + rim lighting -->
     <ambientLight [intensity]="1.25" />
     <directionalLight [position]="[2.2, 3.6, 2.8]" [intensity]="2.1" />

@@ -15,3 +15,6 @@ export * from './core/face-controller';
 export * from './core/capsule-dna';
 export * from './core/capsule-locomotion';
 export * from './core/capsule-face-projection';
+export * from './core/capsule-cat-dna';
+export * from './core/capsule-cat-locomotion';
+export * from './core/capsule-cat-face-projection';

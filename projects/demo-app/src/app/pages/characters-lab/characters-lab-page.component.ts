@@ -26,12 +26,17 @@ import {
   applyLookAt,
   blendPoses,
   CAPSULE_ACCESSORY_IDS,
+  CAPSULE_CAT_BODY_PATTERN_IDS,
+  CAPSULE_CAT_PACK_IDS,
+  CAPSULE_CAT_PRESETS,
   CAPSULE_CHARACTER_PRESETS,
   CAPSULE_CHEST_PATCH_IDS,
   CAPSULE_FACIAL_HAIR_IDS,
   CAPSULE_HAIR_STYLE_IDS,
   createHumanoidRig,
   DEFAULT_CAPSULE_BOOT_COLORS,
+  DEFAULT_CAPSULE_CAT_ACCENT_COLORS,
+  DEFAULT_CAPSULE_CAT_FUR_COLORS,
   DEFAULT_CAPSULE_HAIR_COLORS,
   DEFAULT_CAPSULE_SKIN_TONES,
   EMOTION_NAMES,
@@ -44,6 +49,11 @@ import {
   solveTwoBoneIk,
   wordsToVisemes,
   type CapsuleAccessoryId,
+  type CapsuleCatBodyPatternId,
+  type CapsuleCatCharacterDNA,
+  type CapsuleCatGaitMode,
+  type CapsuleCatMouthPose,
+  type CapsuleCatPackId,
   type CapsuleCharacterDNA,
   type CapsuleChestPatchId,
   type CapsuleFacialHairId,
@@ -71,6 +81,7 @@ import {
   buildProceduralChair,
   buildProceduralDoor,
   buildReferenceFaceMesh,
+  CapsuleCatActor,
   CapsuleCharacterActor,
   CHARACTER_BODY_STYLES,
   type CharacterBodyStyle,
@@ -80,7 +91,7 @@ import {
 } from 'triangular-engine/procedural';
 
 export type TargetSourceMode = 'door-knob' | 'chair' | 'manual';
-export type CharactersLabViewMode = 'capsule-doodle' | 'face-studio' | 'full-body';
+export type CharactersLabViewMode = 'capsule-doodle' | 'capsule-cats' | 'face-studio' | 'full-body';
 export type CameraFramingPreset = 'front' | 'three-quarter' | 'profile' | 'full-shot';
 export type CapsuleLayoutMode = 'hero' | 'lineup';
 
@@ -137,6 +148,23 @@ export class CharactersLabPageComponent {
   private readonly capsuleLineupGroup = new Group();
   protected readonly capsuleHeroActor: CapsuleCharacterActor;
   private readonly capsuleLineupActors: CapsuleCharacterActor[] = [];
+
+  // Capsule Space Cats Studio state
+  protected capsuleCatLayoutMode: CapsuleLayoutMode = 'hero';
+  protected readonly capsuleCatPresets = CAPSULE_CAT_PRESETS;
+  protected readonly capsuleCatPatterns = CAPSULE_CAT_BODY_PATTERN_IDS;
+  protected readonly capsuleCatPacks = CAPSULE_CAT_PACK_IDS;
+  protected readonly capsuleCatFurColors = DEFAULT_CAPSULE_CAT_FUR_COLORS;
+  protected readonly capsuleCatAccentColors = DEFAULT_CAPSULE_CAT_ACCENT_COLORS;
+  protected selectedCatPresetId = CAPSULE_CAT_PRESETS[0].id!;
+  protected capsuleCatLocomotion: CapsuleCatGaitMode = 'goofy_walk';
+  protected catSeedCounter = 1;
+
+  private readonly capsuleCatStudioGroup = new Group();
+  private readonly capsuleCatHeroGroup = new Group();
+  private readonly capsuleCatLineupGroup = new Group();
+  protected readonly capsuleCatHeroActor: CapsuleCatActor;
+  private readonly capsuleCatLineupActors: CapsuleCatActor[] = [];
 
   // Face Studio model selection & binding
   protected faceModelSource: 'reference-model' | 'procedural' = 'reference-model';
@@ -246,6 +274,19 @@ export class CharactersLabPageComponent {
     this.buildCapsuleLineup();
     this.capsuleStudioGroup.add(this.capsuleHeroGroup, this.capsuleLineupGroup);
 
+    // Capsule Space Cats Hero & 7-Cat Concept Sheet Lineup
+    this.capsuleCatHeroActor = new CapsuleCatActor({
+      dna: CAPSULE_CAT_PRESETS[0],
+      facialController: this.facialController,
+    });
+    this.capsuleCatHeroActor.setLocomotion('goofy_walk');
+    this.capsuleCatHeroGroup.add(
+      this.capsuleCatHeroActor.root,
+      this.createPedestalMesh(0.55),
+    );
+    this.buildCapsuleCatLineup();
+    this.capsuleCatStudioGroup.add(this.capsuleCatHeroGroup, this.capsuleCatLineupGroup);
+
     // 2. Procedural chair at X = 1.5, facing -X towards room center
     this.chair = buildProceduralChair({
       style: 'dining',
@@ -289,6 +330,7 @@ export class CharactersLabPageComponent {
     this.character.add(this.visualization.group);
     this.engine.scene.add(
       this.capsuleStudioGroup,
+      this.capsuleCatStudioGroup,
       this.character,
       this.referenceFace.root,
       this.referenceModelGroup,
@@ -363,6 +405,39 @@ export class CharactersLabPageComponent {
     });
   }
 
+  private buildCapsuleCatLineup(): void {
+    const cols = 4;
+    const spacingX = 1.45;
+    const rowZ = [-0.45, 0.75];
+    const emotions: readonly ExtendedEmotionName[] = [
+      'happy',
+      'happy',
+      'happy',
+      'happy',
+      'happy',
+      'fearful',
+      'neutral',
+    ];
+
+    CAPSULE_CAT_PRESETS.forEach((preset, idx) => {
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+      const x = (col - (cols - 1) * 0.5) * spacingX;
+      const z = rowZ[row] ?? 0;
+
+      const actor = new CapsuleCatActor({ dna: preset, autoBlink: true });
+      actor.facialController.setExpression(emotions[idx] ?? 'happy', 1, 0);
+      actor.setLocomotion(preset.gait, 0.9 + idx * 0.02);
+      actor.update(idx * 0.19);
+
+      const slot = new Group();
+      slot.position.set(x, 0, z);
+      slot.add(actor.root, this.createPedestalMesh(0.5));
+      this.capsuleCatLineupGroup.add(slot);
+      this.capsuleCatLineupActors.push(actor);
+    });
+  }
+
   // ===========================================================================
   // CAPSULE DOODLE STUDIO CONTROLS
   // ===========================================================================
@@ -383,6 +458,11 @@ export class CharactersLabPageComponent {
     this.capsuleStudioGroup.visible = isCapsule;
     this.capsuleHeroGroup.visible = isCapsule && this.capsuleLayoutMode === 'hero';
     this.capsuleLineupGroup.visible = isCapsule && this.capsuleLayoutMode === 'lineup';
+
+    const isCats = this.viewMode === 'capsule-cats';
+    this.capsuleCatStudioGroup.visible = isCats;
+    this.capsuleCatHeroGroup.visible = isCats && this.capsuleCatLayoutMode === 'hero';
+    this.capsuleCatLineupGroup.visible = isCats && this.capsuleCatLayoutMode === 'lineup';
   }
 
   protected selectCapsulePreset(presetId: string): void {
@@ -437,6 +517,87 @@ export class CharactersLabPageComponent {
   protected toggleCapsuleWavyMouth(): void {
     this.capsuleWavyMouth = !this.capsuleWavyMouth;
     this.capsuleHeroActor.setWavyMouthOverride(this.capsuleWavyMouth ? 0.85 : undefined);
+  }
+
+  // ===========================================================================
+  // CAPSULE SPACE CATS STUDIO CONTROLS
+  // ===========================================================================
+
+  protected setCapsuleCatLayoutMode(mode: CapsuleLayoutMode): void {
+    this.capsuleCatLayoutMode = mode;
+    this.applyCapsuleLayoutVisibility();
+    if (mode === 'lineup') {
+      this.cameraPosition.set([0, 2.35, 4.4]);
+      this.cameraTarget.set([0, 0.55, 0.2]);
+    } else {
+      this.setCameraFraming(this.cameraFraming);
+    }
+  }
+
+  protected selectCapsuleCatPreset(presetId: string): void {
+    const found = CAPSULE_CAT_PRESETS.find((preset) => preset.id === presetId);
+    if (!found) return;
+    this.selectedCatPresetId = presetId;
+    this.capsuleCatHeroActor.setDna(found);
+    this.capsuleCatLocomotion = this.capsuleCatHeroActor.locomotion;
+  }
+
+  protected randomizeCapsuleCatDna(): void {
+    this.catSeedCounter += 1;
+    this.selectedCatPresetId = 'custom';
+    this.capsuleCatHeroActor.setSeed(`space-cat-${this.catSeedCounter}`);
+    this.capsuleCatLocomotion = this.capsuleCatHeroActor.locomotion;
+  }
+
+  protected updateCapsuleCatDna(partial: Partial<CapsuleCatCharacterDNA>): void {
+    this.selectedCatPresetId = 'custom';
+    this.capsuleCatHeroActor.setDna(partial);
+    this.capsuleCatLocomotion = this.capsuleCatHeroActor.locomotion;
+  }
+
+  protected setCapsuleCatLocomotion(mode: CapsuleCatGaitMode): void {
+    this.capsuleCatLocomotion = mode;
+    this.capsuleCatHeroActor.setLocomotion(mode);
+  }
+
+  protected setCapsuleCatPattern(pattern: CapsuleCatBodyPatternId): void {
+    this.updateCapsuleCatDna({ bodyPattern: pattern });
+  }
+
+  protected setCapsuleCatPack(pack: CapsuleCatPackId): void {
+    this.updateCapsuleCatDna({ pack });
+  }
+
+  protected setCapsuleCatMouthPose(restMouthPose: CapsuleCatMouthPose): void {
+    this.updateCapsuleCatDna({ restMouthPose });
+  }
+
+  protected setCapsuleCatFurColor(furColor: string): void {
+    this.updateCapsuleCatDna({ furColor });
+  }
+
+  protected setCapsuleCatAccentColor(furAccentColor: string): void {
+    this.updateCapsuleCatDna({ furAccentColor });
+  }
+
+  protected toggleCapsuleCatHelmet(): void {
+    this.updateCapsuleCatDna({ helmet: !this.capsuleCatHeroActor.dna.helmet });
+  }
+
+  protected toggleCapsuleCatHarness(): void {
+    this.updateCapsuleCatDna({ harness: !this.capsuleCatHeroActor.dna.harness });
+  }
+
+  protected toggleCapsuleCatBooties(): void {
+    this.updateCapsuleCatDna({ suitBooties: !this.capsuleCatHeroActor.dna.suitBooties });
+  }
+
+  protected toggleCapsuleCatTuft(): void {
+    this.updateCapsuleCatDna({ tuft: !this.capsuleCatHeroActor.dna.tuft });
+  }
+
+  protected toggleCapsuleCatPanic(): void {
+    this.updateCapsuleCatDna({ panicked: !this.capsuleCatHeroActor.dna.panicked });
   }
 
   // ===========================================================================
@@ -535,12 +696,13 @@ export class CharactersLabPageComponent {
     const isFaceStudio = mode === 'face-studio';
     const isFullBody = mode === 'full-body';
     const isCapsule = mode === 'capsule-doodle';
+    const isCats = mode === 'capsule-cats';
 
     this.applyFaceModelVisibility();
     this.applyCapsuleLayoutVisibility();
 
     this.character.visible = isFullBody;
-    this.ground.visible = isFullBody || isCapsule;
+    this.ground.visible = isFullBody || isCapsule || isCats;
     this.target.visible = isFullBody;
     this.chair.group.visible = isFullBody;
     this.door.group.visible = isFullBody;
@@ -549,6 +711,13 @@ export class CharactersLabPageComponent {
       if (this.capsuleLayoutMode === 'lineup') {
         this.cameraPosition.set([0, 2.55, 5.4]);
         this.cameraTarget.set([0, 0.95, 0.1]);
+      } else {
+        this.setCameraFraming(this.cameraFraming);
+      }
+    } else if (isCats) {
+      if (this.capsuleCatLayoutMode === 'lineup') {
+        this.cameraPosition.set([0, 2.35, 4.4]);
+        this.cameraTarget.set([0, 0.55, 0.2]);
       } else {
         this.setCameraFraming(this.cameraFraming);
       }
@@ -565,6 +734,25 @@ export class CharactersLabPageComponent {
 
   protected setCameraFraming(framing: CameraFramingPreset): void {
     this.cameraFraming = framing;
+    if (this.viewMode === 'capsule-cats') {
+      if (this.capsuleCatLayoutMode === 'lineup') {
+        this.cameraPosition.set([0, 2.35, 4.4]);
+        this.cameraTarget.set([0, 0.55, 0.2]);
+      } else if (framing === 'full-shot') {
+        this.cameraPosition.set([1.05, 0.88, 1.95]);
+        this.cameraTarget.set([0, 0.46, 0]);
+      } else if (framing === 'front') {
+        this.cameraPosition.set([0, 0.64, 1.42]);
+        this.cameraTarget.set([0, 0.44, 0]);
+      } else if (framing === 'three-quarter') {
+        this.cameraPosition.set([0.72, 0.74, 1.3]);
+        this.cameraTarget.set([0, 0.44, 0]);
+      } else {
+        this.cameraPosition.set([1.6, 0.58, 0.05]);
+        this.cameraTarget.set([0, 0.44, 0]);
+      }
+      return;
+    }
     if (this.viewMode === 'capsule-doodle') {
       if (framing === 'full-shot') {
         this.cameraPosition.set([0.75, 1.38, 2.45]);
@@ -915,6 +1103,18 @@ export class CharactersLabPageComponent {
       return;
     }
 
+    // 2b. Capsule Space Cats Studio Update
+    if (this.viewMode === 'capsule-cats') {
+      if (this.capsuleCatLayoutMode === 'hero') {
+        this.capsuleCatHeroActor.update(deltaSeconds, frame);
+      } else {
+        for (const actor of this.capsuleCatLineupActors) {
+          actor.update(deltaSeconds);
+        }
+      }
+      return;
+    }
+
     // 3. Apply to active Face model in Face Studio
     if (this.viewMode === 'face-studio') {
       if (this.faceModelSource === 'reference-model' && this.referenceModelBinding) {
@@ -1059,7 +1259,12 @@ export class CharactersLabPageComponent {
     for (const actor of this.capsuleLineupActors) {
       actor.dispose();
     }
+    this.capsuleCatHeroActor.dispose();
+    for (const actor of this.capsuleCatLineupActors) {
+      actor.dispose();
+    }
     this.capsuleStudioGroup.removeFromParent();
+    this.capsuleCatStudioGroup.removeFromParent();
     this.character.removeFromParent();
     this.referenceModelBinding?.dispose();
     this.referenceModelGroup.removeFromParent();
