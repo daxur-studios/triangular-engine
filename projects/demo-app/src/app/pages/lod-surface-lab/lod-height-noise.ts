@@ -1,5 +1,6 @@
 import { bakeHeights, sampleProbes, type BakeLayout, type BakeProbes, type BakedHeights, type HeightSampler } from './lod-height-bake';
 import { bumpsFor } from './lod-height';
+import { CANYON_DEPTH_SHARE, CANYON_FLOOR_HALF, CANYON_WALL, canyonCentreV } from './lod-canyon';
 import { cellPlanetFor, cellPlanetSampler, cellPlanetWorld, cliffSampler, type CellPlanetDescription } from './lod-height-terrain';
 
 /**
@@ -141,8 +142,10 @@ export function biomeMixSampler(layout: BakeLayout): HeightSampler {
     const cone = Math.max(0, 1 - radius);
     const crater = 1 - smooth(0.18, 0.30, radius);
     const volcano = amplitude * Math.max(0, cone - 0.48 * crater);
-    const canyonDistance = Math.abs(v - 0.055 * Math.sin(24 * u));
-    const canyon = amplitude * 0.23 * smooth(0.015, 0.037, canyonDistance);
+    const canyonDistance = Math.abs(v - canyonCentreV(u));
+    const wall = smooth(CANYON_FLOOR_HALF, CANYON_FLOOR_HALF + CANYON_WALL, canyonDistance);
+    // A sheer-walled cut with a flat floor; the plateau carries a little broken terracing so the rim is not a ruler line.
+    const canyon = amplitude * CANYON_DEPTH_SHARE * wall + wall * amplitude * 0.025 * (1 + valueNoise3(u * 40, v * 40, 0, 61));
     let h = meadow;
     h += (hills - h) * smooth(-0.34, -0.26, u);
     h += (mountain - h) * smooth(-0.14, -0.06, u);

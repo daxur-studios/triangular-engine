@@ -34,5 +34,6 @@ tags: [plans, index]
 | [Composite Cell Planet on WebGPURenderer](/docs/plans/065_composite_cell_planet.md) | draft, nothing built; owner review of D1–D7 | [Evidence](/docs/runbook/065_composite_cell_planet.md) |
 | [Engineering Records and Development Map](/docs/plans/066_engineering_records_and_development_map.md) | M1/M2 complete; map viewer planned | [ER 066](/docs/runbook/066_engineering_records_and_development_map.md) |
 | [Test Cost Breakdown and Budget View](/docs/plans/067_test-cost-breakdown.md) | planned | [ER 067](/docs/runbook/067_test-cost-breakdown.md) |
+| [Procedural shape verification](/docs/plans/068_procedural-shape-verification.md) | planned | [ER 068](/docs/runbook/068_procedural-shape-verification.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

@@ -667,7 +667,9 @@ export class LodSurfaceLabPageComponent {
     }
     engineCamera.updateMatrixWorld();
     const { up: groundUp, east, north } = groundFrame(this.domain.kind, view.ground);
-    surface.setSun([0, 1, 2].map((k) => groundUp[k] + 0.6 * east[k] + 0.4 * north[k]) as [number, number, number]);
+    // A low light across the cut (from the camera's right) throws one wall into shade and lights the other.
+    const canyonLight = this.poseId() === 'biome-canyon' && this.zoomProgress === undefined;
+    surface.setSun([0, 1, 2].map((k) => canyonLight ? 0.35 * groundUp[k] + (Math.cos(view.headingRad) * east[k] - Math.sin(view.headingRad) * north[k]) + 0.25 * (Math.cos(view.headingRad) * north[k] + Math.sin(view.headingRad) * east[k]) : groundUp[k] + 0.6 * east[k] + 0.4 * north[k]) as [number, number, number]);
 
     const began = performance.now();
     let levelChanges = 0;

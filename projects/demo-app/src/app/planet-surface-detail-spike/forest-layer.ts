@@ -26,7 +26,6 @@ import {
   storage,
   uint,
   uniform,
-  uvec3,
   vec2,
   vec3,
   vec4,
@@ -62,6 +61,7 @@ import {
   SHADOW_STRETCH,
   SHADOW_WIDTH_SHARE,
   TREE_HUE_RANGE,
+  TREE_SCALE_DRAW,
   TREE_SCALE_RANGE,
   TREE_TONE_DRAW,
   TREE_TONE_RANGE,
@@ -149,12 +149,16 @@ export function fieldDensityNode(p: any, heightM: any): any {
   return smooth(FOREST_EDGE[0], FOREST_EDGE[1], n).mul(land);
 }
 
-/** `cellHash` of `forest-field.ts` in TSL, on a body-order cell (`uvec3`, the i32 bits): same constants, same wrap-around. */
+/**
+ * `cellHash` of `forest-field.ts` in TSL, on a body-order cell (`ivec3` or `uvec3`): same constants, same wrap-around.
+ * Each component is cast with `uint()` on its own: TSL folds swizzles of a `uvec3(ivec3)` back onto the i32 vector,
+ * which WGSL rejects as `i32 * u32`.
+ */
 export function cellHashNode(cell: any, salt: number): any {
-  let h: any = cell.x
+  let h: any = uint(cell.x)
     .mul(uint(0x8da6b343))
-    .bitXor(cell.y.mul(uint(0xd8163841)))
-    .bitXor(cell.z.mul(uint(0xcb1ab31f)))
+    .bitXor(uint(cell.y).mul(uint(0xd8163841)))
+    .bitXor(uint(cell.z).mul(uint(0xcb1ab31f)))
     .bitXor(uint(Math.imul(salt + 1, 0x27d4eb2f) >>> 0));
   h = h.bitXor(h.shiftRight(uint(15)));
   h = h.mul(uint(0x85ebca6b));
@@ -217,7 +221,7 @@ function eachTreeNear(point: any, radiusM: number, density: any, prefix: string,
       const kColumn = local.z.add(Q.x.mul(du).add(Q.y.mul(dv)).div(Q.z));
       const dk = int(floor(kColumn.div(S).sub(2))).add(vars[names.j]);
       const offsetCells = ivec3(vars[names.u], vars[names.v], dk);
-      const cell = uvec3(unperm(base.add(offsetCells)));
+      const cell = unperm(base.add(offsetCells)).toVar();
       const jitter = perm(vec3(cellHashNode(cell, seed), cellHashNode(cell, seed + 1), cellHashNode(cell, seed + 2)));
       const rel = vec3(offsetCells).add(jitter).mul(S).sub(local);
       const up = dot(rel, N);
@@ -225,7 +229,7 @@ function eachTreeNear(point: any, radiusM: number, density: any, prefix: string,
       const radial = up.add(dot(tangent, tangent).div(rho.mul(2)));
       const kept = radial.greaterThanEqual(-S / 2).and(radial.lessThan(S / 2)).and(cellHashNode(cell, seed + 3).lessThan(density));
       If(kept, () => {
-        const scale = float(TREE_SCALE_RANGE[0]).add(cellHashNode(cell, seed + 4).mul(TREE_SCALE_RANGE[1] - TREE_SCALE_RANGE[0]));
+        const scale = float(TREE_SCALE_RANGE[0]).add(cellHashNode(cell, seed + TREE_SCALE_DRAW).mul(TREE_SCALE_RANGE[1] - TREE_SCALE_RANGE[0]));
         visit(unperm(tangent), scale, cellHashNode(cell, seed + TREE_TONE_DRAW));
       });
     },

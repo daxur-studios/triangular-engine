@@ -688,3 +688,45 @@ Panel: **go to forest**, then the presets; wait for terrain to settle. Sun butto
 6. Buildings, **back to runway**: at 250 m and 1.5 km boxes stand on the ground with lit and dark walls and a ground
    shadow on the side away from the sun; no trees or rocks inside them. At 6 km and 25 km roof footprints and swept
    shadows, no pop around 3–4 km; at low sun the shadows are long but stay on the ground. Try the three view modes.
+
+## 2026-10-27 — Combining the four parts in the main checkout
+
+The lighting inputs, planet scatter, flat features and per-tree shading with buildings were built in four parallel
+worktrees from the same base. This entry records how they were joined (uncommitted, in the main checkout) and what the
+combination changed on the spike page.
+
+### Conflicts and how they were resolved
+
+- **Docs.** Runbook 063, `CHANGELOG.md` and Plan 063 hold every session's dated section, in the order lighting, scatter,
+  flat features, shading. The Plan status line and the Scope table (rows 3 and 4) name all four parts.
+- **`forest-field.ts`, `rock-field.ts`.** The shading session's own lattice (`scatterCells`) is gone; trees and rocks come
+  from `scatterPlanetLattice`. The building clearance moved into the layer definitions (`treeScatterLayer` and
+  `rockScatterLayer` take an optional `clearanceAt`), so the buildings keep trees and rocks off their footprints through
+  the library lattice. `cellHash` stays as an alias of `hashScatterLatticeCell01` (bit-identical to the old function), so
+  `forest-layer.ts` and `forest-shading.ts` still find the same trees as the instances. `PIXEL_PER_DISTANCE` is re-exported
+  from the library's default fade rule.
+- **Draw salts.** The library lattice spends salt 4 on the yaw and 5 on the size; the shading session used 4 for the size
+  and 5 for the tone. The far form now reads the size at salt 5 (`TREE_SCALE_DRAW`) and the tone at salt 6
+  (`TREE_TONE_SALT`, the first free one); the instances compute the same tone from the result's `cells`.
+- **`forest-instances.ts`.** `SurfaceInstances.setInstances` takes an `IInstanceBatch` (the lattice result, or the same
+  shape built by `buildingBatch` for the buildings, with per-instance size and tone). The shading session's interleaved
+  record format is gone for trees and rocks; the buildings keep their worker record and are converted on the page.
+- **Worker and page.** One worker handles both the `flatFeatures` request and the `buildings` request. Building ground
+  height uses the flat-feature stamp (`groundHeight`), so the boxes stand on the airfield plateau the paint is drawn on.
+  The page requests the flat features and sets the building site when the runway site arrives.
+- **Specs.** `forest-shading.spec.ts` and `building-field.spec.ts` build their scatter with `scatterPlanetLattice`.
+
+### Left as written
+
+- The shading is still baked into the albedo (a fixed sky share). Switching the forest layer and the instances to the
+  library's `normal` and `directShadow` inputs is a follow-up; the steps are in the "Switching the spike from colour-baked
+  shading" section above.
+- `forest-layer.ts` and `rock-layer.ts` still evaluate the density with their own hash and noise nodes. Switching them
+  to `scatterDensityFieldNode` (see the scatter entry) is a follow-up.
+- The buildings keep their own placement and clearance; they do not use the flat-feature list.
+
+### Owner checklist
+
+Open `http://triangular-demo.localhost:4200/planet-surface-detail-spike` and run, in order, the checklists of the
+lighting, scatter, flat-feature and per-tree shading and buildings entries above. In addition: trees stay off the
+buildings and the airfield; building meshes sit on the flat ground; the far-form tree tones match the mesh trees.

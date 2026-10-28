@@ -1,6 +1,7 @@
 import { validateTestHistory } from 'triangular-engine/testing';
 import { buildCellPlanetWorld } from 'triangular-engine/worldgen';
-import { biomePathView, poseView, resolveCamera, type PoseId } from './lod-camera';
+import { CANYON_FLOOR_HALF, CANYON_WALL, canyonCentreSlope, canyonCentreV } from './lod-canyon';
+import { biomePathView, canyonView, poseView, resolveCamera, type PoseId } from './lod-camera';
 import { domainPreset, type CubeWarp, type DomainKind, type DomainPresetId } from './lod-domain';
 import { sourceSupports, type HeightSource, type HeightSourceId } from './lod-height';
 import {
@@ -357,6 +358,57 @@ describe('Plan 059 biome mix', () => {
     });
   }
 
+  it('cuts a canyon about 900 m deep (plane) with a flat floor and walls a few texels wide', () => {
+    const layout = layoutFor('plane', 10);
+    const sample = samplerFor('biome-mix', layout);
+    const size = layout.sizeM;
+    const u = 0.42;
+    const at = (offset: number) => sample(u * size, 0, (canyonCentreV(u) + offset) * size);
+    const floor = at(0);
+    expect(floor).toBeCloseTo(0, 6);
+    expect(at(CANYON_FLOOR_HALF * 0.9)).toBeCloseTo(0, 6);
+    const rim = at(CANYON_FLOOR_HALF + CANYON_WALL + 0.002);
+    expect(rim).toBeGreaterThan(880);
+    expect(rim).toBeLessThan(1000);
+    // The wall climbs the full depth within about 400 m of the floor edge: a steep face, not a 12 degree ramp.
+    const wallM = CANYON_WALL * size;
+    expect(wallM).toBeLessThanOrEqual(500);
+    expect(Math.atan2(rim, wallM) * 180 / Math.PI).toBeGreaterThan(55);
+    expect(at(-CANYON_FLOOR_HALF - CANYON_WALL - 0.002)).toBeGreaterThan(880);
+  });
+
+  it('keeps the sphere canyon cut inside the sphere strip, shallower in step with its amplitude', () => {
+    const layout = layoutFor('sphere', 10);
+    const sample = samplerFor('biome-mix', layout);
+    const at = (u: number, v: number) => sample(layout.sizeM * Math.cos(1.8 * v) * Math.sin(1.8 * u), layout.sizeM * Math.sin(1.8 * v), layout.sizeM * Math.cos(1.8 * v) * Math.cos(1.8 * u));
+    const u = 0.42;
+    expect(at(u, canyonCentreV(u))).toBeCloseTo(0, 5);
+    const rim = at(u, canyonCentreV(u) + CANYON_FLOOR_HALF + CANYON_WALL + 0.002);
+    expect(rim).toBeGreaterThan(0.4 * 600);
+    expect(rim).toBeLessThan(0.55 * 600);
+  });
+
+  it('frames the canyon pose obliquely down the cut on both domains', () => {
+    for (const id of ['plane-100km', 'sphere-10km'] as const) {
+      const domain = domainPreset(id);
+      const view = poseView('biome-canyon', domain);
+      expect(view).toEqual(canyonView(domain));
+      expect(view.pitchRad).toBeCloseTo(-30 * Math.PI / 180, 10);
+      expect(view.altitudeM).toBe(domain.kind === 'plane' ? 1500 : 500);
+    }
+    const plane = domainPreset('plane-100km');
+    const view = poseView('biome-canyon', plane);
+    const u = view.ground[0] / plane.sizeM;
+    expect(u).toBeGreaterThan(0.34);
+    expect(view.ground[2] / plane.sizeM).toBeCloseTo(canyonCentreV(u), 10);
+    // The heading follows the centreline: forward (sin h, -cos h) in (x, z) has the centreline's slope.
+    expect(-Math.cos(view.headingRad) / Math.sin(view.headingRad)).toBeCloseTo(canyonCentreSlope(u), 10);
+    const camera = resolveCamera(view, plane, { id: 'biome-mix', boundM: 0, heightAt: samplerFor('biome-mix', layoutFor('plane', 9)) } as unknown as HeightSource);
+    // On the floor, the camera sits 1,500 m up: above the plateau rim and with the cut ahead.
+    expect(camera.position[1]).toBeGreaterThan(1000);
+    expect(camera.forward[1]).toBeLessThan(-0.45);
+  });
+
   it('traverses all five region centres on both domains', () => {
     for (const id of ['plane-100km', 'sphere-10km'] as const) {
       const domain = domainPreset(id);
@@ -472,7 +524,7 @@ describe('Plan 059 suite lod-surface-terrain', () => {
 
   it('is the last entry after the untouched baseline versions, and a valid history', () => {
     expect(history.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
-      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4', 'lod-surface-terrain@5',
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-baseline@5', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4', 'lod-surface-terrain@5', 'lod-surface-terrain@6', 'lod-surface-terrain@7',
     ]);
     expect(() => validateTestHistory(history)).not.toThrow();
     expect(terrain.purpose).toBe('performance');

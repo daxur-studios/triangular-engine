@@ -1,4 +1,5 @@
 import type { DomainKind, LodDomain, Vec3 } from './lod-domain';
+import { canyonCentreSlope, canyonCentreV } from './lod-canyon';
 import type { HeightSource } from './lod-height';
 
 /**
@@ -33,8 +34,8 @@ const SPHERE_GROUND: Vec3 = [0.9, 0.85, 1];
 export function poseView(id: PoseId, domain: LodDomain): CameraView {
   const ground = domain.kind === 'plane' ? PLANE_GROUND : SPHERE_GROUND;
   const headingRad = domain.kind === 'plane' ? 0.6 : -0.75;
-  if (id === 'biome-canyon' && domain.kind === 'plane') return { ground: [34_000, 0, -4_000], altitudeM: 5500, headingRad: 0, pitchRad: -65 * DEG };
-  if (id === 'biome-mountain' || id === 'biome-canyon') return biomeView(domain, id === 'biome-mountain' ? -0.04 : 0.36);
+  if (id === 'biome-canyon') return canyonView(domain);
+  if (id === 'biome-mountain') return biomeView(domain, -0.04);
   switch (id) {
     case 'eye-2m': return { ground, altitudeM: 2, headingRad, pitchRad: -8 * DEG };
     case 'low-200m': return { ground, altitudeM: 200, headingRad, pitchRad: -15 * DEG };
@@ -52,6 +53,34 @@ export function biomeView(domain: LodDomain, u: number): CameraView {
     altitudeM: domain.kind === 'plane' ? 3000 : 900,
     headingRad: Math.PI / 2,
     pitchRad: -35 * DEG,
+  };
+}
+
+/** Plane u of the canyon pose: past the blend (u > 0.34), with the bend at u = 0.458 ahead and the one at 0.327 behind. */
+export const CANYON_POSE_U = 0.37;
+
+/**
+ * An oblique view down the cut: on the canyon centreline at u = {@link CANYON_POSE_U}, 1,500 m above the floor (600 m above
+ * the rim), heading along the centreline's tangent and pitched 30 degrees down, so both walls and the next bend are in frame.
+ */
+export function canyonView(domain: LodDomain): CameraView {
+  const u = CANYON_POSE_U;
+  if (domain.kind === 'sphere') {
+    // Strip units are 1.8 radians on the sphere and v is latitude (north), so the heading follows the slope the other way round.
+    const lon = 1.8 * u;
+    const lat = 1.8 * canyonCentreV(u);
+    return {
+      ground: [Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon)],
+      altitudeM: 500,
+      headingRad: Math.atan2(1, canyonCentreSlope(u)),
+      pitchRad: -30 * DEG,
+    };
+  }
+  return {
+    ground: [u * domain.sizeM, 0, canyonCentreV(u) * domain.sizeM],
+    altitudeM: 1500,
+    headingRad: Math.atan2(1, -canyonCentreSlope(u)),
+    pitchRad: -30 * DEG,
   };
 }
 

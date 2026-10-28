@@ -183,7 +183,7 @@ measured on the RTX 3080 before the next starts:
    cap unculled sweep churn falls to 0, culled by about a quarter. RTX 3080 rerun 2026-10-26: on-screen changes fall
    21–32% (plane 110 to 83 against its no-hysteresis partner), 0 crack px; about 80 a second remain, see the runbook.*
    **3b. Biome-mix source and a triangle budget** (added 2026-10-26 by the owner, ahead of the slope criterion;
-   proposal). Details below the list. *Built 2026-10-26: terrain v4 adds the biome source, traversals, target views and 2/4 px ABAB; 149 lab specs green and 20 headless cases have 0 crack px. The cap masks the floor comparison and canyon appearance needs review; see the runbook.*
+   proposal). Details below the list. *Built 2026-10-26: terrain v4 adds the biome source, traversals, target views and 2/4 px ABAB; 149 lab specs green and 20 headless cases have 0 crack px. The cap masked the floor comparison; terrain v5 replaces it with cap and patch-cell ABAB cases, adds a lighting toggle and traversal-position probes, and reframes the plane canyon. **2026-10-27 follow-up:** terrain v6 makes the canyon a 900 m deep cut with walls of about 400 m and an oblique 1,500 m pose down the cut (sphere likewise), with a thumbnail that reads as a canyon; 154 lab specs green, 0 crack px on both canyon cases. See the runbook for measurements and remaining review.*
 4. **Slope criterion** (from M2), measured ABAB in the terrain suite, on the biome-mix source among others.
 5. **M5:** edits and the collider patch.
 6. **M6:** cliffs.
@@ -272,6 +272,12 @@ triangles, so inward and outward detail both collide. **Queries:** under an over
 unique, so the CPU twin adds a ray-hit query next to the height lookup.
 
 **Cost:** three or four texture channels instead of one; more triangles only where cliffs are near; still one draw.
+
+**2026-10-27: reopened and parked, no preferred solution.** The owner wants overhangs, thin-base towers and tunnels,
+and found the slope criterion's isotropic splits too costly for rows up a wall. Options (vertex bunching, hybrid
+volume regions meshed from 3D density, a depth cap) and the hotspot suspicion are in the
+[runbook entry](../runbook/059_lod_surface_core.md#2026-10-27--cliff-detail-reopened-then-parked-nothing-built-no-decision).
+D14 stands as written until this is decided; a multi-agent consensus review may come first.
 
 ## Suite (proposed): `lod-surface-baseline` v1
 

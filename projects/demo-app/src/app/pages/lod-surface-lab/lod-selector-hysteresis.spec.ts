@@ -40,11 +40,9 @@ function treeOf(selector: LodSelector): string {
   return keys.sort().join(' ');
 }
 
-/** The node's value the way the selector computes it (no height ranges). */
+/** The node's value the way the selector computes it. */
 function valueOf(selector: LodSelector, node: number, view: SelectorView, settings: SelectorSettings): number {
-  const c = node * 3;
-  const gap = Math.max(Math.hypot(selector.center[c] - view.camera[0], selector.center[c + 1] - view.camera[1], selector.center[c + 2] - view.camera[2]) - selector.radius[node], 1e-3);
-  return selector.edge[node] / settings.patchCells / (Math.max(settings.cellPixels, PIXEL_FLOOR) * view.pixelAngle * gap);
+  return selector.edge[node] / settings.patchCells / (Math.max(settings.cellPixels, PIXEL_FLOOR) * view.pixelAngle * selector.gap(node, view.camera));
 }
 
 interface Cell { root: number; level: number; i: number; j: number }
@@ -278,7 +276,9 @@ describe('Plan 059 selector hysteresis', () => {
     const churnOf = (selector: LodSelector) => selector.stats.newSplits + selector.stats.merges;
 
     it('does not let a new request displace a kept split that it beats by less than the margin', () => {
-      for (const metres of [5, 8, 12, 20, 30]) {
+      // Up to 20 m: since the split distance is measured to the node's box rather than its sphere, a 30 m move already
+      // re-ranks a few nodes past the margin (the next case covers that).
+      for (const metres of [5, 8, 12, 20]) {
         const plain = afterMove(0, metres);
         const hysteretic = afterMove(0.15, metres);
         expect(plain.stats.capHit).withContext(`${metres} m`).toBeTrue();

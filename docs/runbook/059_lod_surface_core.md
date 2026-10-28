@@ -966,3 +966,87 @@ The crests remain narrow and jagged in the 240 px thumbnails; these do not estab
 The initial revised canyon case was pale, and a later run timed out reading GPU timestamps while specs were running; it was rerun after the specs. The final overhead camera and lower side light passed the probe (0 px), but the winding cut remains too faint in the 240 px thumbnail; readable canyon appearance and visual acceptance remain open. The last successful canyon case drew 675,840 triangles. The earlier biome floor comparison remains in historical v4 only.
 
 Verification: 149 specs before and 151 after, all green under the prescribed headless command; `npm run docs:records:check` passed.
+
+## 2026-10-27 — Canyon rework: a cut, not a ramp (terrain v6)
+
+Diagnosis. The v5 canyon was `amplitude * 0.23 * smooth(0.015, 0.037, distance)` with a 2,000 m amplitude on the 100 km plane: a 460 m step spread over walls about 2.2 km wide (about 12 degrees), a 3 km floor, and a camera looking straight down from 6 km at a nearly straight stretch (bends are about 26 km apart). Seen from above, with slopes that gentle, it was a faint grey diagonal. The texture (about 98 m per texel) was not the cause: the walls were 20 or more texels wide.
+
+New shape (`lod-canyon.ts`, shared by the sampler and the pose). Depth is `0.45 * amplitude` (900 m on the plane, 270 m on the 10 km sphere, whose amplitude is 600 m). Floor half-width stays 0.015 strip units (3 km on the plane); the wall is `smooth(0.015, 0.019)`, 0.004 units: 400 m on the plane (about 4 texels, about 66 degrees), 72 m on the sphere. A broken terrace term, `wall * amplitude * 0.025 * (1 + noise(40u, 40v))`, rides the plateau (up to 100 m on the plane), so the rim is not a ruler line; the plateau tops out near 1,000 m, inside the bake's bound (the texture source takes its bound from the baked min/max). The sphere keeps the latitude and longitude fades, so it is continuous at the strip ends. Terrain v6 (a new suite version) records that the canyon cases now measure a different surface.
+
+Pose. The plane pose now sits on the centreline at u = 0.37 (past the blend at 0.34), 1,500 m above the floor (600 m above the rim), heading along the centreline tangent at that point, pitched -30 degrees; the bend at u = 0.458 is ahead and the one at 0.327 behind. The sphere pose uses the same u and centreline, 500 m up, pitched -30 degrees, and now looks along the cut too. The canyon sun comes from the camera's right at low elevation so one wall is lit and the other shaded.
+
+Result (headless-hardware, noisy, inconclusive by design, load line in the summary). Plane canyon: 1,507,328 triangles, 736 of 1,024 leaves drawn, 0 crack px, GPU scene p95 0.23 ms, selector p95 0.1 ms. Sphere canyon: 1,490,944 triangles, 0 crack px, GPU scene p95 0.21 ms. Automated checks passed on both. Thumbnails: `artifacts/test-runs/lod-surface-terrain@v6/2026-10-27T14-13-11-050Z_headless-hardware_42a9d2f1-f8ba5a90/biome-mix-plane-100km-biome-canyon-r1-0.webp` and the `...14-13-38-869Z...` sibling for the sphere. Both read as a canyon: a lit wall, a shaded wall, a floor, and the cut bending away. Counts rose against v5 (675,840 triangles) because the new walls are seen at an oblique angle; timings are not comparable with v5. Visual acceptance remains the owner's; the mountain crest review and the inverted-triangle check remain open. The 154 lab specs pass.
+
+## 2026-10-27 — Cliff detail reopened, then parked (nothing built, no decision)
+
+The owner froze the LOD near a canyon wall at 16 patch cells (accepted as the visual default; not yet made the
+default in code) and zoomed out. Two problems were visible:
+
+1. **A hotspot.** Where the camera had been close, the wall was split to great depth in every direction. A
+   suspected cause, not confirmed: distance is measured to a bounding sphere that the height range inflates, so a
+   camera near a tall wall is "inside" spheres whose surface is farther away, and those nodes split to the
+   maximum level.
+2. **One quad up the face.** Each wall strip is one cell wide along the wall (right) but one quad tall. The owner
+   expected rows up the face, about one per cell of height, at any distance.
+
+Options discussed:
+
+- **Slope term in the split test** (the M2 slope criterion, effective cell = flat cell × sqrt(1 + slope²)). Dropped
+  for this: quadtree splits are isotropic, so rows up the face also bring columns along it (about 100× the
+  triangles for 10 rows), which spreads the hotspot along the wall.
+- **One-direction splits.** Workable for walls aligned with the grid, not for walls at 45°.
+- **A: move vertices, not add them** (bunch grid lines toward steep ground at 16 cells). Rows without more
+  triangles; clean for aligned walls, partial at 45°. Still one height per ground point: no overhangs.
+- **B: hybrid volume regions.** The height map stays the base; arches, overhangs, eroded towers (thin base, wide
+  top) and tunnel mouths come from a 3D density function (as in the raymarch PoC), meshed once per region and level
+  (marching cubes or dual contouring) instead of raymarched each frame; the height map cuts holes where a region
+  takes over. Seen as the only option here that gives all three of the owner's wanted shapes; §Cliff detail option
+  3 had set it aside over seams.
+- **C: cap slope-driven depth.** Removes the overkill; no rows.
+
+Owner notes: overhangs, thin-base towers and tunnels are nice to have, but they affect the architecture, so they
+should be thought through early. Rows on a flat height-map face change nothing visible on their own, so texturing
+(triplanar on steep ground) and normals from the height data matter more than rows for the current terrain.
+
+Architecture points that keep B open: height-map cells that can be holes; one shared height/density function so
+regions meet the height map without seams; a feature layer with its own bounds and LOD beside the quadtree;
+materials and lighting independent of the triangle layout.
+
+**Status: parked, no preferred solution.** D14 (vector displacement, M6) stands as written until this is decided;
+the owner may run a multi-agent consensus review first. The hotspot and the 16-cell default were handled the same day (next entry).
+
+## 2026-10-27 — 16 cells default; split distance to the node's box (baseline v5, terrain v7)
+
+The owner asked for the over-splitting near cliffs to be removed rather than investigated. There was no
+cliff-specific split code: the cause was the split distance itself. It was "distance to the centre minus the bounding
+radius", and with per-node height ranges that radius adds half the range in every direction. On a wall several hundred
+metres tall, a camera beside it was "inside" the spheres of nodes whose surface was far off, so they split to the
+deepest level: the hotspot.
+
+### Built
+
+- `lod-selector.ts`: the distance criterion measures to each node's split box (a cylinder: ground radius across, the
+  height range along the normal) via `boxGap`; `LodSelector.gap(node, camera)` exposes it. The bounding sphere is
+  unchanged and still used for culling. No extra per-frame work beyond a dot product.
+- `lod-surface-tests.ts`: `DEFAULT_SETTINGS.patchCells` is 16 (owner's visual check). Earlier versions keep 32 cells
+  through `CELLS_32`. New `lod-surface-baseline` v5 and `lod-surface-terrain` v7 run the same case ids at 16 cells with
+  the box distance; their numbers are not comparable with v4 / v6.
+- Specs: `lod-selector-gap.spec.ts` (a camera inside a 1 km range gets the flat-ground tree; above the range it splits
+  like the same height over flat ground; the sphere distance would have split more). The plain reference selector in
+  `lod-surface-lab.spec.ts` uses the box distance; the hysteresis "below the margin" moves stop at 20 m (30 m now
+  re-ranks a few nodes past 15%); version specs cover v5 and v7.
+
+### Verified
+
+158 of 158 lab specs pass (`ChromeHeadless --watch=false`). No browser run yet; v5 and v7 have no saved results.
+
+### Not done / next
+
+- The owner's visual check of a cliff close up at 16 cells with the box distance.
+- Height-map resolution is the main visual limit close up: k = 10 gives 1,025 texels per face, about 98 m per texel on
+  the 100 km plane (about 920 m on the 600 km sphere, 15 m on the 10 km sphere). The bilinear blend between texels
+  makes flat facets that large however many vertices draw them, and normals come from the same texels. Options, in
+  order of cost: detail noise in the vertex stage below the texel size (a function of the lattice point, so seams
+  stay exact; the CPU twin adds the same term); a smoother (bicubic) blend; a larger k (16x memory per +2); tiles
+  baked at higher resolution around the camera (a clipmap). Not decided.
+- Water (M3) is ordered after M6 by D15; with cliffs parked, the owner may move it forward.

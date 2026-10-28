@@ -121,7 +121,10 @@ const POOL_TREES = 4;
 /** {@link LodSelector.neighbourRoot} value for an edge on the plane's border. */
 export const NO_NEIGHBOUR = 255;
 
-/** Doubles per node in the packed geometry the per-view loop reads: centre x y z, bounding radius, longest edge per cell. */
+/**
+ * Doubles per node in the packed geometry the per-view loop reads: centre x y z, bounding radius, longest edge per cell,
+ * then the split test's box: radius across the ground and half the height range along the normal.
+ */
 const HOT = 8;
 /** {@link LodSelector.select} remembers the last view as camera (3), frustum (12) and pixel angle. */
 const VIEW_KEY = 16;
@@ -192,7 +195,7 @@ export class LodSelector {
   private readonly heapKey: Float64Array;
   private heapSize = 0;
   private frame = 0;
-  /** Packed centre, radius and edge per cell, {@link HOT} doubles per node. */
+  /** Packed centre, radius, edge per cell and split box, {@link HOT} doubles per node. */
   private readonly hot: Float64Array;
   private readonly capacity: number;
   private readonly culledLeaves: Int32Array;
@@ -345,6 +348,19 @@ export class LodSelector {
   }
 
   /** Index of the deepest node at or above `level` covering cell (i, j) of `level` on `root`. */
+  /**
+   * Distance from `camera` to the node's split box, metres (at least 1e-3), which the distance criterion divides the cell
+   * size by: a cylinder around the node's normal, its ground radius wide and its height range tall. The bounding sphere
+   * (used for culling) holds the same box, but its radius adds half the height range in every direction, so on tall
+   * ranges such as cliff walls it put the camera "inside" nodes whose surface was far off, and those split to the deepest
+   * level.
+   */
+  gap(node: number, camera: Vec3): number {
+    const h = node * HOT;
+    const c = node * 3;
+    return boxGap(camera[0] - this.hot[h], camera[1] - this.hot[h + 1], camera[2] - this.hot[h + 2], this.normal[c], this.normal[c + 1], this.normal[c + 2], this.hot[h + 5], this.hot[h + 6]);
+  }
+
   findCovering(root: number, level: number, i: number, j: number): number {
     return this.descend(root, level, i, j);
   }
@@ -522,7 +538,7 @@ export class LodSelector {
    * ones that ask for a split.
    */
   private activateRange(first: number, count: number): void {
-    const { active, stamp, visible, priority, hot, level, wasOpen, wasVisible, viewKey: key } = this;
+    const { active, stamp, visible, priority, hot, normal, level, wasOpen, wasVisible, viewKey: key } = this;
     const { cull, mode, fixedLevel } = this.settings;
     const frame = this.frame;
     const keepValue = this.keepValue;
@@ -554,7 +570,8 @@ export class LodSelector {
         if (nodeLevel < maxLevel && nodeLevel < fixedLevel) value = 1 + fixedLevel - nodeLevel;
       } else {
         // Cells per target size; the deepest level has edge 0, so it never asks. The division only runs when the cell is too big.
-        const target = pixelScale * Math.max(Math.sqrt(x * x + y * y + z * z) - r, 1e-3);
+        const c = node * 3;
+        const target = pixelScale * boxGap(x, y, z, normal[c], normal[c + 1], normal[c + 2], hot[h + 5], hot[h + 6]);
         const edge = hot[h + 4];
         // A node split in the last tree keeps its split down to keepValue (1 without hysteresis: the single threshold).
         if (edge > (kept ? target * keepValue : target)) value = edge / target;
@@ -627,11 +644,15 @@ export class LodSelector {
       const tilt = domain.kind === 'sphere' ? Math.abs(mid) / domain.sizeM : 0;
       this.radius[node] = radius * (1 + tilt) + (this.range[1] - this.range[0]) / 2;
       for (let k = 0; k < 3; k++) this.hot[h + k] = point[k] + this.normal[c + k] * mid;
+      this.hot[h + 5] = radius * (1 + tilt);
+      this.hot[h + 6] = (this.range[1] - this.range[0]) / 2;
     } else {
       this.radius[node] = radius + this.settings.heightBoundM;
       this.hot[h] = point[0];
       this.hot[h + 1] = point[1];
       this.hot[h + 2] = point[2];
+      this.hot[h + 5] = radius;
+      this.hot[h + 6] = this.settings.heightBoundM;
     }
     this.edge[node] = edge;
     this.hot[h + 3] = this.radius[node];
@@ -684,4 +705,15 @@ export class LodSelector {
     keys[k] = value;
     return top;
   }
+}
+
+/**
+ * Distance from a point at offset (x, y, z) from a box's centre to a cylinder around the unit axis (nx, ny, nz), `across`
+ * in radius and `along` in half height; at least 1e-3, so a camera inside the box gets the deepest cells, not a division by 0.
+ */
+function boxGap(x: number, y: number, z: number, nx: number, ny: number, nz: number, across: number, along: number): number {
+  const up = x * nx + y * ny + z * nz;
+  const side = Math.max(Math.sqrt(Math.max(x * x + y * y + z * z - up * up, 0)) - across, 0);
+  const above = Math.max(Math.abs(up) - along, 0);
+  return Math.max(Math.sqrt(side * side + above * above), 1e-3);
 }

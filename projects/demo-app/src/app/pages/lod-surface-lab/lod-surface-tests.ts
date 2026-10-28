@@ -33,15 +33,18 @@ export interface LodSurfaceTestSettings {
   readonly motion?: 'zoom' | 'sweep' | 'biome-sweep';
 }
 
-/** The lab's defaults, and what suites from `lod-surface-baseline` v3 / `lod-surface-terrain` v2 on run with. */
-export const DEFAULT_SETTINGS: LodSurfaceTestSettings = {
+/** What `lod-surface-baseline` v3–v4 and `lod-surface-terrain` v2–v6 run with: 32 cells per patch. Their definitions keep it. */
+const CELLS_32: LodSurfaceTestSettings = {
   domain: 'sphere-600km', warp: 'equal-angle', source: 'bumps', patchCells: 32, mode: 'distance', fixedLevel: 5,
   cellPixels: 4, leafCap: 1024, cull: true, hysteresis: 0.15, folding: true, injectedGap: 0, pose: 'eye-2m', view: 'lod', wireframe: false,
   bounds: true, lighting: true,
 };
 
+/** The lab's defaults, and what `lod-surface-baseline` v5 / `lod-surface-terrain` v7 on run with: 16 cells (owner's visual check, 2026-10-27). */
+export const DEFAULT_SETTINGS: LodSurfaceTestSettings = { ...CELLS_32, patchCells: 16 };
+
 /** What suites before the hysteresis existed were measured with: the single threshold. Their definitions keep it. */
-const NO_HYSTERESIS: LodSurfaceTestSettings = { ...DEFAULT_SETTINGS, hysteresis: 0 };
+const NO_HYSTERESIS: LodSurfaceTestSettings = { ...CELLS_32, hysteresis: 0 };
 
 /** What a case expects of the crack probe. */
 export type CrackExpectation = 'none' | 'some';
@@ -55,14 +58,14 @@ const POSES: readonly PoseId[] = ['eye-2m', 'low-200m', 'mid-5km', 'horizon', 'o
 
 /** A still case; `quickMs`, when given, caps its quick window below the full 4 s. */
 function still(
-  id: string, label: string, change: Partial<LodSurfaceTestSettings>, quickMs?: number, base: LodSurfaceTestSettings = DEFAULT_SETTINGS,
+  id: string, label: string, change: Partial<LodSurfaceTestSettings>, quickMs?: number, base: LodSurfaceTestSettings = CELLS_32,
 ): TestScenario<LodSurfaceTestSettings> {
   return { id, label, settings: { ...base, ...change }, warmupMs: 500, durationMs: 4000, ...(quickMs ? { quickMs } : {}) };
 }
 
 /** A sweep case: the pose held while the camera swings for 8 s (four periods); quick mode shows two. */
-function sweep(id: string, label: string, change: Partial<LodSurfaceTestSettings>): TestScenario<LodSurfaceTestSettings> {
-  return { id, label, settings: { ...DEFAULT_SETTINGS, ...change, motion: 'sweep' }, warmupMs: 500, durationMs: 8000, quickMs: 4000 };
+function sweep(id: string, label: string, change: Partial<LodSurfaceTestSettings>, base: LodSurfaceTestSettings = CELLS_32): TestScenario<LodSurfaceTestSettings> {
+  return { id, label, settings: { ...base, ...change, motion: 'sweep' }, warmupMs: 500, durationMs: 8000, quickMs: 4000 };
 }
 
 /**
@@ -90,14 +93,14 @@ function baselineScenarios(base: LodSurfaceTestSettings, stillQuickMs?: number):
  * The sweep cases added in baseline v3 and terrain v2. The `-nohyst` case is the A/B partner of the one before it: the same
  * sweep with the single threshold, so `levelChangesPerSecond` shows what the hysteresis removes.
  */
-function baselineSweeps(): TestScenario<LodSurfaceTestSettings>[] {
+function baselineSweeps(base: LodSurfaceTestSettings = CELLS_32): TestScenario<LodSurfaceTestSettings>[] {
   return [
-    sweep('sweep-sphere-600km-eye-2m', 'sweep · sphere-600km · eye-2m', { domain: 'sphere-600km', pose: 'eye-2m' }),
-    sweep('sweep-plane-100km-low-200m', 'sweep · plane-100km · low-200m', { domain: 'plane-100km', pose: 'low-200m' }),
-    sweep('sweep-plane-100km-low-200m-nohyst', 'sweep · plane-100km · low-200m · no hysteresis (A/B)', { domain: 'plane-100km', pose: 'low-200m', hysteresis: 0 }),
+    sweep('sweep-sphere-600km-eye-2m', 'sweep · sphere-600km · eye-2m', { domain: 'sphere-600km', pose: 'eye-2m' }, base),
+    sweep('sweep-plane-100km-low-200m', 'sweep · plane-100km · low-200m', { domain: 'plane-100km', pose: 'low-200m' }, base),
+    sweep('sweep-plane-100km-low-200m-nohyst', 'sweep · plane-100km · low-200m · no hysteresis (A/B)', { domain: 'plane-100km', pose: 'low-200m', hysteresis: 0 }, base),
     // The eye-2m sweep never crosses a threshold on the sphere (the tree is at its deepest level); 5 km does, so it carries the sphere A/B.
-    sweep('sweep-sphere-600km-mid-5km', 'sweep · sphere-600km · mid-5km', { domain: 'sphere-600km', pose: 'mid-5km' }),
-    sweep('sweep-sphere-600km-mid-5km-nohyst', 'sweep · sphere-600km · mid-5km · no hysteresis (A/B)', { domain: 'sphere-600km', pose: 'mid-5km', hysteresis: 0 }),
+    sweep('sweep-sphere-600km-mid-5km', 'sweep · sphere-600km · mid-5km', { domain: 'sphere-600km', pose: 'mid-5km' }, base),
+    sweep('sweep-sphere-600km-mid-5km-nohyst', 'sweep · sphere-600km · mid-5km · no hysteresis (A/B)', { domain: 'sphere-600km', pose: 'mid-5km', hysteresis: 0 }, base),
   ];
 }
 
@@ -126,7 +129,7 @@ const BASELINE_V3: TestSuite<LodSurfaceTestSettings> = {
   ...BASELINE_V1,
   version: 3,
   title: 'LOD surface core: cost, cracks, the zoom and the back-and-forth sweep, with split/merge hysteresis (Plan 059)',
-  scenarios: [...baselineScenarios(DEFAULT_SETTINGS), ...baselineSweeps()],
+  scenarios: [...baselineScenarios(CELLS_32), ...baselineSweeps()],
 };
 
 /**
@@ -169,7 +172,7 @@ function terrainScenarios(base: LodSurfaceTestSettings, sweeps: boolean): TestSc
         out.push(still('control-injected-gap', 'control: injected gap over baked noise (probe must find cracks)', { ...settings(source, domain, 'low-200m'), injectedGap: 0.01 }, undefined, base));
       }
       const sweepPose = sweeps ? TERRAIN_SWEEPS[`${source}|${domain}`] : undefined;
-      if (sweepPose) out.push(sweep(`sweep-${source}-${domain}-${sweepPose}`, `sweep · ${source} · ${domain} · ${sweepPose}`, settings(source, domain, sweepPose)));
+      if (sweepPose) out.push(sweep(`sweep-${source}-${domain}-${sweepPose}`, `sweep · ${source} · ${domain} · ${sweepPose}`, settings(source, domain, sweepPose), base));
     }
   }
   return out;
@@ -198,7 +201,7 @@ const TERRAIN_V2: TestSuite<LodSurfaceTestSettings> = {
   ...TERRAIN_V1,
   version: 2,
   title: 'LOD surface core: baked terrain sources at the baseline poses and a back-and-forth sweep, with split/merge hysteresis (Plan 059)',
-  scenarios: terrainScenarios(DEFAULT_SETTINGS, true),
+  scenarios: terrainScenarios(CELLS_32, true),
 };
 
 /** v3: the same cases; the hysteresis also ranks the leaf budget (see {@link BASELINE_V4}), so v2's sweep numbers are not comparable. */
@@ -209,14 +212,15 @@ const TERRAIN_V3: TestSuite<LodSurfaceTestSettings> = {
 };
 
 /** v4 adds the biome source without changing the historical suite definitions. */
-const BIOME_CASES: TestScenario<LodSurfaceTestSettings>[] = TERRAIN_CASES.find((entry) => entry.source === 'biome-mix')!.domains.flatMap((domain) => {
+const biomeCases = (base: LodSurfaceTestSettings): TestScenario<LodSurfaceTestSettings>[] => TERRAIN_CASES.find((entry) => entry.source === 'biome-mix')!.domains.flatMap((domain) => {
   const common: Partial<LodSurfaceTestSettings> = { source: 'biome-mix', domain, view: 'shaded', bounds: false };
   return [
-    ...POSES.map((pose) => still(`biome-mix-${domain}-${pose}`, `biome mix · ${domain} · ${pose}`, { ...common, pose })),
-    ...(['biome-mountain', 'biome-canyon'] as const).map((pose) => still(`biome-mix-${domain}-${pose}`, `biome mix · ${domain} · ${pose}`, { ...common, pose })),
-    { id: `biome-mix-${domain}-traverse`, label: `biome mix · ${domain} · traversal`, settings: { ...DEFAULT_SETTINGS, ...common, motion: 'biome-sweep' as const }, warmupMs: 500, durationMs: 8000, quickMs: 4000 },
+    ...POSES.map((pose) => still(`biome-mix-${domain}-${pose}`, `biome mix · ${domain} · ${pose}`, { ...common, pose }, undefined, base)),
+    ...(['biome-mountain', 'biome-canyon'] as const).map((pose) => still(`biome-mix-${domain}-${pose}`, `biome mix · ${domain} · ${pose}`, { ...common, pose }, undefined, base)),
+    { id: `biome-mix-${domain}-traverse`, label: `biome mix · ${domain} · traversal`, settings: { ...base, ...common, motion: 'biome-sweep' as const }, warmupMs: 500, durationMs: 8000, quickMs: 4000 },
   ];
 });
+const BIOME_CASES = biomeCases(CELLS_32);
 const FLOOR_CASES = [2, 4, 2, 4].map((cellPixels, index) => still(
   `biome-mix-floor-${cellPixels}-${index + 1}`, `biome mix · mountain · ${cellPixels} px · round ${index + 1}`,
   { source: 'biome-mix', domain: 'plane-100km', pose: 'biome-mountain', view: 'shaded', bounds: false, cellPixels },
@@ -228,9 +232,29 @@ const TERRAIN_V4: TestSuite<LodSurfaceTestSettings> = {
 };
 
 const ABAB_COMMON: Partial<LodSurfaceTestSettings> = { source: 'biome-mix', domain: 'plane-100km', pose: 'biome-mountain', view: 'shaded', bounds: false };
-const CAP_ABAB = [1024, 512, 1024, 512].map((leafCap, index) => still(`biome-cap-${leafCap}-${index + 1}`, `biome mountain cap ${leafCap} round ${index + 1}`, { ...ABAB_COMMON, leafCap, patchCells: 32 }));
+const capAbab = (base: LodSurfaceTestSettings, patchCells: PatchCells) => [1024, 512, 1024, 512].map((leafCap, index) => still(`biome-cap-${leafCap}-${index + 1}`, `biome mountain cap ${leafCap} round ${index + 1}`, { ...ABAB_COMMON, leafCap, patchCells }, undefined, base));
+const CAP_ABAB = capAbab(CELLS_32, 32);
 const CELLS_ABAB = [32, 16, 32, 16].map((patchCells, index) => still(`biome-cells-${patchCells}-${index + 1}`, `biome mountain cells ${patchCells} round ${index + 1}`, { ...ABAB_COMMON, leafCap: 1024, patchCells: patchCells as PatchCells }));
 const TERRAIN_V5: TestSuite<LodSurfaceTestSettings> = { ...TERRAIN_V4, version: 5, title: 'LOD surface core: biome lighting, traversal probes and geometry comparisons (Plan 059)', scenarios: [...TERRAIN_V3.scenarios, ...BIOME_CASES, ...CAP_ABAB, ...CELLS_ABAB] };
 
+/** v6: the canyon is a 900 m deep cut with about 400 m walls and an oblique 1,500 m pose, so the canyon cases measure another surface. */
+const TERRAIN_V6: TestSuite<LodSurfaceTestSettings> = { ...TERRAIN_V5, version: 6, title: 'LOD surface core: biome canyon cut and oblique canyon pose (Plan 059)' };
+
+/**
+ * Baseline v5 and terrain v7: 16 cells per patch (the new lab default), and the split distance is measured to each node's
+ * box (ground radius by height range) instead of its bounding sphere, which over-split nodes near tall walls. Same case ids;
+ * numbers are not comparable with v4 / v6. The cap A/B now runs at 16 cells; the cells A/B keeps both sizes.
+ */
+const BASELINE_V5: TestSuite<LodSurfaceTestSettings> = {
+  ...BASELINE_V4, version: 5,
+  title: 'LOD surface core: cost, cracks, the zoom and the sweep at 16 cells, box split distance (Plan 059)',
+  scenarios: [...baselineScenarios(DEFAULT_SETTINGS), ...baselineSweeps(DEFAULT_SETTINGS)],
+};
+const TERRAIN_V7: TestSuite<LodSurfaceTestSettings> = {
+  ...TERRAIN_V6, version: 7,
+  title: 'LOD surface core: terrain at 16 cells with the box split distance (Plan 059)',
+  scenarios: [...terrainScenarios(DEFAULT_SETTINGS, true), ...biomeCases(DEFAULT_SETTINGS), ...capAbab(DEFAULT_SETTINGS, 16), ...CELLS_ABAB],
+};
+
 /** Oldest first; the final entry is "Run latest test". Earlier versions are still run by their exact version. */
-export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3, TERRAIN_V4, TERRAIN_V5];
+export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, BASELINE_V5, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3, TERRAIN_V4, TERRAIN_V5, TERRAIN_V6, TERRAIN_V7];

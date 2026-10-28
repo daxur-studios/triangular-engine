@@ -253,7 +253,7 @@ interface ReferenceStats { leaves: number; drawn: number; splits: number; forced
  * original swap-based binary heap, so ties pop in the same order as in the selector.
  */
 class ReferenceSelector {
-  private readonly geometry = new Map<string, { centre: Vec3; radius: number; edge: number }>();
+  private readonly geometry = new Map<string, { centre: Vec3; up: Vec3; ground: number; radius: number; edge: number }>();
   leaves: string[] = [];
   stats!: ReferenceStats;
 
@@ -281,6 +281,7 @@ class ReferenceSelector {
         const centre: Vec3 = [0, 0, 0];
         const normal: Vec3 = [0, 0, 0];
         domainPoint(domain, n.root, (n.i + 0.5) * size, (n.j + 0.5) * size, centre, normal);
+        const up: Vec3 = [normal[0], normal[1], normal[2]];
         const corners = [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]].map(([di, dj]) => {
           const p: Vec3 = [0, 0, 0];
           domainPoint(domain, n.root, (n.i + di) * size, (n.j + dj) * size, p, normal);
@@ -292,7 +293,7 @@ class ReferenceSelector {
           if (c < 4) radius = Math.max(radius, Math.hypot(p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]));
           if (c > 0) edge = Math.max(edge, Math.hypot(p[0] - corners[c - 1][0], p[1] - corners[c - 1][1], p[2] - corners[c - 1][2]));
         });
-        g = { centre, radius: radius + this.settings.heightBoundM, edge };
+        g = { centre, up, ground: radius, radius: radius + this.settings.heightBoundM, edge };
         this.geometry.set(k, g);
       }
       return g;
@@ -304,7 +305,10 @@ class ReferenceSelector {
       const x = g.centre[0] - view.camera[0];
       const y = g.centre[1] - view.camera[1];
       const z = g.centre[2] - view.camera[2];
-      const gap = Math.max(Math.sqrt(x * x + y * y + z * z) - g.radius, 1e-3);
+      // Distance to the node's split box: `ground` across, the height bound up and down along the normal.
+      const along = Math.abs(x * g.up[0] + y * g.up[1] + z * g.up[2]);
+      const across = Math.sqrt(Math.max(x * x + y * y + z * z - along * along, 0));
+      const gap = Math.max(Math.hypot(Math.max(across - g.ground, 0), Math.max(along - this.settings.heightBoundM, 0)), 1e-3);
       const target = Math.max(this.settings.cellPixels, PIXEL_FLOOR) * view.pixelAngle * gap;
       return g.edge / patchCells / target;
     };
@@ -853,7 +857,7 @@ describe('Plan 059 suite', () => {
 
   it('names every setting the page did not honour', () => {
     expect(settingsMismatches(DEFAULT_SETTINGS, DEFAULT_SETTINGS)).toEqual([]);
-    expect(settingsMismatches({ ...DEFAULT_SETTINGS, patchCells: 16 }, DEFAULT_SETTINGS)).toEqual(['patchCells: expected 32, found 16']);
+    expect(settingsMismatches({ ...DEFAULT_SETTINGS, patchCells: 32 }, DEFAULT_SETTINGS)).toEqual(['patchCells: expected 16, found 32']);
     expect(settingsMismatches(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, motion: 'zoom' }).length).toBe(1);
   });
 
@@ -886,7 +890,7 @@ describe('Plan 059 suite', () => {
       mode: 'quick', repetition: 1, signal: new AbortController().signal,
       wait: (ms: number) => { now += ms; return Promise.resolve(); },
     } as unknown as TestContext;
-    const scenario = LOD_SURFACE_TEST_HISTORY[2].scenarios.find((item) => item.id === 'zoom-sphere-600km') as TestScenario<LodSurfaceTestSettings>;
+    const scenario = LOD_SURFACE_TEST_HISTORY[4].scenarios.find((item) => item.id === 'zoom-sphere-600km') as TestScenario<LodSurfaceTestSettings>;
     zoom = 0;
     const observation = await createLodSurfaceTestAdapter(host).measure(scenario, context);
     expect(observation.checks?.find((check) => check.name === 'Scenario state applied as specified')?.passed).toBeTrue();
@@ -938,7 +942,7 @@ describe('Plan 059 suite', () => {
     } as unknown as LodSurfaceTestHost;
     spyOn(performance, 'now').and.callFake(() => now);
     const context = { mode: 'quick', repetition: 1, signal: new AbortController().signal, wait: (ms: number) => { now += ms; return Promise.resolve(); } } as unknown as TestContext;
-    const scenario = LOD_SURFACE_TEST_HISTORY[2].scenarios.find((item) => item.id === 'sweep-sphere-600km-eye-2m') as TestScenario<LodSurfaceTestSettings>;
+    const scenario = LOD_SURFACE_TEST_HISTORY[4].scenarios.find((item) => item.id === 'sweep-sphere-600km-eye-2m') as TestScenario<LodSurfaceTestSettings>;
     sweepAt = 0;
     const observation = await createLodSurfaceTestAdapter(host).measure(scenario, context);
     expect(observation.checks?.find((check) => check.name === 'Scenario state applied as specified')?.passed).toBeTrue();
@@ -959,19 +963,19 @@ describe('Plan 059 suite', () => {
 });
 
 describe('Plan 059 suite versions and hysteresis', () => {
-  const [v1, v2, v3, v4, t1, t2, t3] = LOD_SURFACE_TEST_HISTORY;
+  const [v1, v2, v3, v4, v5, t1, t2, t3] = LOD_SURFACE_TEST_HISTORY;
   const idsOf = (suite: typeof v1) => suite.scenarios.map((scenario) => scenario.id);
 
   it('lists the versions oldest first with the latest terrain suite last', () => {
     expect(LOD_SURFACE_TEST_HISTORY.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
-      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4', 'lod-surface-terrain@5',
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-baseline@5', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4', 'lod-surface-terrain@5', 'lod-surface-terrain@6', 'lod-surface-terrain@7',
     ]);
   });
 
   it('keeps v1, v2 and terrain v1 at the single threshold they were measured with, and gives the later versions the lab default', () => {
     for (const suite of [v1, v2, t1]) for (const scenario of suite.scenarios) expect(scenario.settings.hysteresis).withContext(`${suite.id}@${suite.version} ${scenario.id}`).toBe(0);
     expect(DEFAULT_SETTINGS.hysteresis).toBe(0.15);
-    for (const suite of [v3, v4, t2, t3]) {
+    for (const suite of [v3, v4, v5, t2, t3]) {
       for (const scenario of suite.scenarios) {
         expect(scenario.settings.hysteresis).withContext(`${suite.id}@${suite.version} ${scenario.id}`).toBe(scenario.id.endsWith('-nohyst') ? 0 : 0.15);
       }
@@ -986,7 +990,8 @@ describe('Plan 059 suite versions and hysteresis', () => {
     expect(idsOf(t2).filter((id) => idsOf(t1).includes(id))).toEqual(idsOf(t1));
     expect(idsOf(v4)).toEqual(idsOf(v3));
     expect(idsOf(t3)).toEqual(idsOf(t2));
-    for (const suite of [v3, v4, t2, t3]) {
+    expect(idsOf(v5)).toEqual(idsOf(v4));
+    for (const suite of [v3, v4, v5, t2, t3]) {
       const ids = idsOf(suite);
       expect(new Set(ids).size).toBe(ids.length);
       for (const scenario of suite.scenarios.filter((item) => item.id.startsWith('sweep-'))) {
@@ -995,6 +1000,17 @@ describe('Plan 059 suite versions and hysteresis', () => {
         expect(scenario.quickMs).toBe(4000);
       }
     }
+  });
+
+  it('runs baseline v5 and terrain v7 at the 16-cell default and keeps the earlier versions at 32 cells', () => {
+    expect(DEFAULT_SETTINGS.patchCells).toBe(16);
+    const t7 = LOD_SURFACE_TEST_HISTORY.find((suite) => suite.id === 'lod-surface-terrain' && suite.version === 7)!;
+    const t6 = LOD_SURFACE_TEST_HISTORY.find((suite) => suite.id === 'lod-surface-terrain' && suite.version === 6)!;
+    // Cases that name their own cell count keep it: the 16 and 64 cell baseline cases and the cells A/B.
+    const named = (id: string) => /cells/.test(id);
+    for (const scenario of [...v5.scenarios, ...t7.scenarios].filter((item) => !named(item.id))) expect(scenario.settings.patchCells).withContext(scenario.id).toBe(16);
+    for (const scenario of [...v4.scenarios, ...t6.scenarios].filter((item) => !named(item.id))) expect(scenario.settings.patchCells).withContext(scenario.id).toBe(32);
+    expect(t7.scenarios.map((scenario) => scenario.id)).toEqual(t6.scenarios.map((scenario) => scenario.id));
   });
 
   it('runs the A/B partner of a sweep with the same settings but the hysteresis', () => {

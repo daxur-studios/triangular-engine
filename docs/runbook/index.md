@@ -33,5 +33,6 @@ tags: [runbook, index]
 | [Composite Cell Planet on WebGPURenderer](/docs/runbook/065_composite_cell_planet.md) | [Implementation plan](/docs/plans/065_composite_cell_planet.md) |
 | [Engineering Records and Development Map](/docs/runbook/066_engineering_records_and_development_map.md) | [PLAN-066](/docs/plans/066_engineering_records_and_development_map.md) |
 | [Test Cost Breakdown and Budget View](/docs/runbook/067_test-cost-breakdown.md) | [PLAN-067](/docs/plans/067_test-cost-breakdown.md) |
+| [Procedural shape verification](/docs/runbook/068_procedural-shape-verification.md) | [PLAN-068](/docs/plans/068_procedural-shape-verification.md) |
 
 Existing records retain their `docs/runbook/` paths. Legacy runbooks `001`–`042` retain their historical formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

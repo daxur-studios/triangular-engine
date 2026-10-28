@@ -484,7 +484,6 @@ export class JoltRigidBodyComponent extends GroupComponent {
         liveShapes.splice(index, 1);
       }
 
-      let modifiedShape = false;
       for (let index = 0; index < liveShapes.length; index++) {
         const live = liveShapes[index];
         if (!reconciliation.modifiedKeys.has(live.key)) continue;
@@ -494,7 +493,6 @@ export class JoltRigidBodyComponent extends GroupComponent {
           compound.ModifyShape(index, position, rotation, next.shape);
         });
         liveShapes[index] = next;
-        modifiedShape = true;
       }
 
       for (const added of reconciliation.addedShapes) {
@@ -504,7 +502,9 @@ export class JoltRigidBodyComponent extends GroupComponent {
         });
       }
 
-      if (modifiedShape) compound.AdjustCenterOfMass();
+      // Removing or adding children also changes the mass centroid; update it
+      // before notifying the body even when no existing child was modified.
+      compound.AdjustCenterOfMass();
       metadata.bodyInterface.NotifyShapeChanged(
         body.GetID(),
         previousCenterOfMass,
