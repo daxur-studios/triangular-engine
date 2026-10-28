@@ -49,6 +49,13 @@ export const LOOKUP_CELLS_PER_COLUMN = 5;
 export const LOOKUP_RADIUS_M = FOREST_SPACING_M * (1 - Math.SQRT1_2 / 2);
 /** Longest semi-axis of a shadow ellipse: inside {@link LOOKUP_RADIUS_M} with room for the soft edge. */
 export const SHADOW_MAX_M = 7.25;
+/**
+ * Farthest a shadow's centre is drawn from its tree's foot. Equal to {@link SHADOW_MAX_M}: the ellipse's near end
+ * (`x = a` from the centre, toward the sun) then reaches the foot at the longest, so the shadow stays attached to its
+ * tree. Uncapped, the shift (`CROWN_CENTRE_SHARE x H / tan`) reaches 100+ m at low sun while the ellipse stops at
+ * {@link SHADOW_MAX_M}, and a short blob slides away from its tree (long attached shadows are a follow-up).
+ */
+export const SHADOW_OFFSET_MAX_M = SHADOW_MAX_M;
 /** `cellHash` draws (offsets from `seed * 8`) of a tree: 5 is its size (the library lattice's), 6 its tone. 0 to 2 jitter, 3 keep, 4 yaw. */
 export const TREE_SCALE_DRAW = 5;
 export const TREE_TONE_DRAW = TREE_TONE_SALT;
@@ -77,6 +84,14 @@ export function treeTone(draw: number): Vec3 {
 /** How far a shadow falls from the foot of what casts it: `heightM / tan(elevation)`, with the elevation floored at about 2°. */
 export function crownShadowOffsetM(heightM: number, tanElevation: number): number {
   return heightM / Math.max(tanElevation, MIN_SUN_TAN);
+}
+
+/**
+ * Where a tree's shadow centre is drawn: {@link crownShadowOffsetM} of the crown centre, capped at
+ * {@link SHADOW_OFFSET_MAX_M} so the ellipse (itself capped at {@link SHADOW_MAX_M}) stays attached to its tree.
+ */
+export function crownShadowShiftM(heightM: number, tanElevation: number): number {
+  return Math.min(crownShadowOffsetM(heightM, tanElevation), SHADOW_OFFSET_MAX_M);
 }
 
 /**
@@ -202,7 +217,8 @@ export interface IForestSample {
 /**
  * The per-tree pattern at a body-fixed point: what `forest-layer.ts` draws before the average takes over.
  *
- * 1. Ground shadows. A tree's shadow centre lies `crown centre height / tan(elevation)` (of the mean tree) away from the sun, so the trees
+ * 1. Ground shadows. A tree's shadow centre lies `crown centre height / tan(elevation)` (of the mean tree, capped at
+ *    {@link SHADOW_OFFSET_MAX_M}) away from the sun, so the trees
  *    that can shade this pixel stand near the point that far toward the sun: a second {@link treesNear} there. Each
  *    shadow is a soft ellipse (across: 0.85 crown radius; along: crown radius plus the crown's length over
  *    tan(elevation), capped at {@link SHADOW_MAX_M}) and darkens the ground to {@link shadowFactor}.
@@ -217,9 +233,10 @@ export function forestPattern(point: Vec3, radiusM: number, sun: Vec3, density: 
   const H = FOREST_TREE_HEIGHT_M;
   const crownRadius = FOREST_CROWN_WIDTH_M / 2;
 
-  // Every shadow falls the mean tree's offset from its foot (a tree's size scales its ellipse, not the offset), so the
-  // casters of this pixel stand within the lookup radius of the point that far toward the sun.
-  const offset = crownShadowOffsetM(CROWN_CENTRE_SHARE * H, tanElevation);
+  // Every shadow falls the mean tree's offset from its foot (a tree's size scales its ellipse, not the offset), capped at
+  // SHADOW_OFFSET_MAX_M so it stays attached; the casters of this pixel stand within the lookup radius of the point
+  // that far toward the sun.
+  const offset = crownShadowShiftM(CROWN_CENTRE_SHARE * H, tanElevation);
   const sunward = add(point, scaleV(toSun, offset));
   let shade = 0;
   for (const tree of treesNear(sunward, radiusM, density)) {
@@ -268,7 +285,7 @@ export function forestAverageParts(sinElevation: number, density: number): { cov
   const cover = COVER_FIT[0] * d + COVER_FIT[1] * d * d;
   const light = CROWN_LIGHT_FIT[0] + CROWN_LIGHT_FIT[1] * Math.exp(-s / CROWN_LIGHT_FIT[2]);
   const tanElevation = Math.max(s / Math.max(Math.sqrt(1 - Math.min(s * s, 1)), 1e-4), MIN_SUN_TAN);
-  const shade = d * GROUND_SHADE_FIT[0] * smooth(0, GROUND_SHADE_FIT[1], crownShadowOffsetM(CROWN_CENTRE_SHARE * FOREST_TREE_HEIGHT_M, tanElevation));
+  const shade = d * GROUND_SHADE_FIT[0] * smooth(0, GROUND_SHADE_FIT[1], crownShadowShiftM(CROWN_CENTRE_SHARE * FOREST_TREE_HEIGHT_M, tanElevation));
   return { cover, light: 1 + (light - 1) * Math.min(Math.max(sinElevation / 0.05, 0), 1), shade };
 }
 

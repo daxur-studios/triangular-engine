@@ -4,9 +4,13 @@ import {
   CROWN_CENTRE_SHARE,
   LOOKUP_RADIUS_M,
   MIN_SUN_TAN,
+  SHADOW_MAX_M,
+  SHADOW_OFFSET_MAX_M,
   TREE_TONE_RANGE,
   crownLight,
   crownShadowOffsetM,
+  crownShadowShiftM,
+  forestPattern,
   forestAverage,
   forestAverageParts,
   forestPatternMean,
@@ -31,6 +35,45 @@ describe('forest shading: crown shadows', () => {
     expect(crownShadowOffsetM(22, 0.001)).toBeCloseTo(22 / MIN_SUN_TAN, 6);
     // The mean crown's shadow centre at 30 degrees: 0.56 x 22 m / tan 30.
     expect(crownShadowOffsetM(CROWN_CENTRE_SHARE * FOREST_TREE_HEIGHT_M, Math.tan(deg(30)))).toBeCloseTo(21.34, 1);
+  });
+
+  it('draws the shadow centre at most SHADOW_OFFSET_MAX_M from the foot, so the ellipse stays attached', () => {
+    const centre = CROWN_CENTRE_SHARE * FOREST_TREE_HEIGHT_M;
+    expect(SHADOW_OFFSET_MAX_M).toBe(SHADOW_MAX_M);
+    // High sun: the raw offset is under the cap and is kept.
+    expect(crownShadowShiftM(centre, Math.tan(deg(80)))).toBeCloseTo(crownShadowOffsetM(centre, Math.tan(deg(80))), 9);
+    // Low sun: the raw offset (350 m at the floor) is cut to the cap.
+    expect(crownShadowShiftM(centre, Math.tan(deg(30)))).toBe(SHADOW_OFFSET_MAX_M);
+    expect(crownShadowShiftM(centre, 0.001)).toBe(SHADOW_OFFSET_MAX_M);
+  });
+
+  it('keeps a tree shadow beside its tree at very low sun, and does not smear it far away', () => {
+    // Tangent plane at (0, 0, R): z up, x toward the sun, 1 degree above the horizon (under the 2 degree floor).
+    const toSun: Vec3 = [1, 0, 0];
+    const sun = norm([Math.cos(deg(1)), 0, Math.sin(deg(1))]);
+    const at = (x: number, y: number): Vec3 => [x, y, RADIUS_M + 1];
+    const density = 0.004;
+    // A tree of the sparse forest with no other tree within 130 m.
+    const seen = new Map<string, { x: number; y: number }>();
+    for (let px = -400; px <= 400; px += 6) {
+      for (let py = -400; py <= 400; py += 6) {
+        for (const t of treesNear(at(px, py), RADIUS_M, density)) {
+          const x = px + t.offset[0];
+          const y = py + t.offset[1];
+          seen.set(`${Math.round(x)},${Math.round(y)}`, { x, y });
+        }
+      }
+    }
+    const trees = [...seen.values()];
+    const tree = trees.find((t) => Math.abs(t.x) < 100 && Math.abs(t.y) < 100 && trees.every((o) => o === t || Math.hypot(o.x - t.x, o.y - t.y) > 130));
+    expect(tree).toBeDefined();
+    const ground = (dx: number, dy: number): number => forestPattern(at(tree!.x + dx, tree!.y + dy), RADIUS_M, sun, density, 0.1, 0).ground;
+    // Just beside the foot on the side away from the sun: inside the (attached) shadow.
+    // (At 1 degree the shadow only removes the little direct light there is: shadowFactor is about 0.95.)
+    expect(ground(-toSun[0] * 3, 0)).toBeCloseTo(shadowFactor(sun[2]), 2);
+    // 100 m away along the old, uncapped offset: no shadow.
+    expect(ground(-toSun[0] * 100, 0)).toBe(1);
+    expect(ground(-toSun[0] * 40, 0)).toBe(1);
   });
 
   it('darkens shaded ground to the sky share, and not at all once the sun is down', () => {

@@ -1051,8 +1051,9 @@ describe('Plan 059 suite versions and hysteresis', () => {
     let turnAt: number | undefined;
     const times: number[] = [];
     let now = 0;
+    const scenario = v6.scenarios.find((item) => item.id === 'turn-plane-100km-low-200m') as TestScenario<LodSurfaceTestSettings>;
     const host = {
-      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, detailNoise: 0, ...(turnAt !== undefined ? { motion: 'turn' as const } : {}) }),
+      read: (): LodSurfaceTestSettings => ({ ...scenario.settings, motion: undefined, ...(turnAt !== undefined ? { motion: 'turn' as const } : {}) }),
       setZoomProgress: () => undefined, setSweepTime: () => { throw new Error('a turn must not use the sweep clock'); },
       setTurnTime: (t: number | undefined) => { turnAt = t; if (t !== undefined) times.push(t); },
       renderedFrames: () => Math.floor(now / 16),
@@ -1067,7 +1068,6 @@ describe('Plan 059 suite versions and hysteresis', () => {
     } as unknown as LodSurfaceTestHost;
     spyOn(performance, 'now').and.callFake(() => now);
     const context = { mode: 'quick', repetition: 1, signal: new AbortController().signal, wait: (ms: number) => { now += ms; return Promise.resolve(); } } as unknown as TestContext;
-    const scenario = v6.scenarios.find((item) => item.id === 'turn-plane-100km-low-200m') as TestScenario<LodSurfaceTestSettings>;
     turnAt = 0;
     const observation = await createLodSurfaceTestAdapter(host).measure(scenario, context);
     expect(observation.checks?.find((check) => check.name === 'Scenario state applied as specified')?.passed).toBeTrue();

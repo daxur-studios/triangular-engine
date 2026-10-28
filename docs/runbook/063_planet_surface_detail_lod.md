@@ -730,3 +730,20 @@ combination changed on the spike page.
 Open `http://triangular-demo.localhost:4200/planet-surface-detail-spike` and run, in order, the checklists of the
 lighting, scatter, flat-feature and per-tree shading and buildings entries above. In addition: trees stay off the
 buildings and the airfield; building meshes sit on the flat ground; the far-form tree tones match the mesh trees.
+
+## 2026-10-28 — Spike S1: tree ground shadow shift capped
+
+Trees' ground shadows detached from their trees at low sun. The ellipse length was capped at `SHADOW_MAX_M` (7.25 m,
+bounded by the lookup radius) but the shift of its centre away from the sun, `0.56 H / tan(elevation)`, was not: at the
+2° floor it is about 350 m, so a short blob slid far from its tree.
+
+- The shift is now capped at `SHADOW_OFFSET_MAX_M` (= `SHADOW_MAX_M`, 7.25 m). With the ellipse's longest semi-axis
+  `a` = 7.25 m, its sunward end then reaches the tree's foot, so the shadow stays attached. Applied in the CPU twin
+  (`crownShadowShiftM` in `forest-shading.ts`, used by `forestPattern` and `forestAverageParts`) and the TSL layer
+  (`forest-layer.ts`, the `sunward` lookup point and the `average` shade term), which stay identical.
+  `crownShadowOffsetM` still returns the raw geometry.
+- The far-form average uses the capped shift as well, since the pattern's mean now follows the capped shadows; the fit
+  specs against the pattern's Monte Carlo mean still pass with the existing fit constants.
+- Spec: a tree at 1° sun shades the ground just behind its foot and leaves ground 40 m and 100 m away unshaded.
+- **Follow-up:** long attached shadows at low sun (the true length is far past 7.25 m) need a `directShadow` input to
+  the lighting stage or a march along the sun direction; the lookup radius bounds what this per-tree form can draw.

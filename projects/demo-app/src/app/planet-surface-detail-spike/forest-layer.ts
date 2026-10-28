@@ -57,6 +57,7 @@ import {
   LOOKUP_RADIUS_M,
   MIN_SUN_TAN,
   SHADOW_MAX_M,
+  SHADOW_OFFSET_MAX_M,
   SHADOW_SOFTNESS,
   SHADOW_STRETCH,
   SHADOW_WIDTH_SHARE,
@@ -305,7 +306,7 @@ export function forestLayer(radiusM: number): IForestLayer {
     const cover = d.mul(COVER_FIT[0]).add(d.mul(d).mul(COVER_FIT[1])).mul(crownWeight);
     const fitted = float(CROWN_LIGHT_FIT[0]).add(exp(max(sinElevation, 0).negate().div(CROWN_LIGHT_FIT[2])).mul(CROWN_LIGHT_FIT[1]));
     const light = mix(float(1), fitted, sunUpRamp(sinElevation));
-    const shade = d.mul(GROUND_SHADE_FIT[0]).mul(smooth(0, GROUND_SHADE_FIT[1], float(CROWN_CENTRE_SHARE * H).div(tanElevation)));
+    const shade = d.mul(GROUND_SHADE_FIT[0]).mul(smooth(0, GROUND_SHADE_FIT[1], min(float(CROWN_CENTRE_SHARE * H).div(tanElevation), SHADOW_OFFSET_MAX_M)));
     const ground = float(1).sub(cover).mul(float(1).add(shadowFactorNode(sinElevation).sub(1).mul(shade)));
     return (vec4 as any)(vec3(cover.mul(light)), ground);
   };
@@ -330,9 +331,9 @@ export function forestLayer(radiusM: number): IForestLayer {
       const ground: any = float(1).toVar();
       const tree: any = vec3(0).toVar();
       If(toAverage.lessThan(1).and(dens.greaterThan(0)).and(enabled.greaterThan(0)), () => {
-        // Ground shadows: the casters stand near the point one shadow offset toward the sun.
+        // Ground shadows: the casters stand near the point one shadow offset (capped at SHADOW_OFFSET_MAX_M) toward the sun.
         const shade: any = float(0).toVar();
-        const sunward = p.add(toSun.mul(float(CROWN_CENTRE_SHARE * H).div(tanElevation)));
+        const sunward = p.add(toSun.mul(min(float(CROWN_CENTRE_SHARE * H).div(tanElevation), SHADOW_OFFSET_MAX_M)));
         eachTreeNear(sunward, radiusM, dens, 's', (offset, scale) => {
           const r = offset.negate();
           const x = dot(r, toSun);

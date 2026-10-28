@@ -1097,3 +1097,50 @@ the specs (no WebGPU in the unit run): the CPU function is tested, its TSL twin 
 - The GPU hash and the CPU twin are not compared by read-back; the CPU height has no fade, so on far vertices it differs
   from the GPU by the faded octaves (at most the bound).
 
+
+## 2026-10-28: patches flicker on a pure turn (baseline v6 turn cases)
+
+The owner sees patches flicker between split and merged while the camera only turns in place. The position does not
+change, so no distance changes and the hysteresis of the distance criterion cannot see the turn. Two suspects, both
+about what the frustum culls: (a) the leaf budget (cap 1,024) is re-ranked as culled patches leave and enter the view,
+so a node can lose its place to one that just came in; (b) the balance rule (neighbours at most one level apart) sees a
+different set of nodes as culled patches drop out, which can force or release splits. The sweep cases (+-30 degrees
+with a 2 % altitude swing) mix a turn with an altitude change, so none of them isolates this.
+
+### Built
+
+- `lod-camera.ts`: `turnPathView(domain, pose, t)` holds the pose's position, altitude and pitch exactly and swings only
+  the heading, `TURN_YAW_RAD` = 90 degrees either side, once every `TURN_PERIOD_S` = 4 s (peak about 140 degrees/s). The
+  swing is wide on purpose: patches really leave and enter the view.
+- Motion `turn` is wired like `sweep`: `LodSurfaceTestSettings.motion`, the host's `setTurnTime`, the adapter's `turn()`
+  on its own clock (`restore` clears it), the page's `turnTime` and `currentView`. It reports the same level churn
+  metrics as the sweep (`levelChanges`, `levelChangesPerSecond`, `levelChangesAll`), where `levelChanges` is the visible
+  new splits plus visible merges per frame.
+- `lod-surface-tests.ts`: `lod-surface-baseline` v6 = v5's cases unchanged (16 cells, detail noise 0, hysteresis 0.15)
+  plus six turn cases, 8 s (quick 4 s, one period), at the two sweep poses:
+  `turn-plane-100km-low-200m` and `turn-sphere-600km-mid-5km`, each with `-cap16k` (leaf cap 16,384, so the cap never
+  binds) and `-nocull` (culling off). The lab's leaf-cap buttons gain 16,384 so the A/B can be reproduced by hand.
+- Specs: the turn path (pose at t = 0, position/altitude/pitch fixed, heading +-`TURN_YAW_RAD`), the six case ids and
+  that each variant differs from its default case only in the cap or the culling, the adapter run on the turn clock,
+  and the history lists. 176 of 176 lab specs pass.
+
+### How to read them
+
+Compare the three variants of one pose on `levelChangesPerSecond` (and the visible-splits-plus-merges series).
+Each case also reports `levelChangesAll`, which counts the frustum entries and exits too and so is expected to be nonzero when culling is on.
+
+- Default quiet, so no flicker on a pure turn in this pose: the cause is elsewhere (or needs motion that changes distance).
+- Default busy, `-cap16k` quiet: the leaf budget reshuffle is the cause; the hysteretic ranking is not enough at a
+  1,024 cap, which is the number to raise or the ranking to change.
+- Default busy, `-nocull` quiet: culling is the cause through the balance rule (and the budget it frees); the cap-16k
+  variant being busy too points at the balance rule, not the budget.
+- All three busy: neither suspect explains it; look at the balance rule over the whole tree and the split distance.
+- `-nocull` is not a candidate fix (it draws everything); it is the control that removes the view dependence entirely,
+  so it should read 0 if the turn holds the distance fixed.
+
+### Not done / next
+
+- No saved results yet: the owner runs `lod-surface-baseline` v6 (the turn cases only are enough).
+- 16,384 as "the cap never binds" is assumed; a case that reports `capHit` true would invalidate its `-cap16k` reading.
+- The sweep cases at v5 and the turn cases share settings otherwise, so a quiet turn with a busy sweep means the altitude
+  swing, not the heading, drives the sweep's churn.
