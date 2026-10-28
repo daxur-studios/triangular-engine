@@ -1071,6 +1071,8 @@ blocky too. This adds a few octaves of noise to the height after the texture rea
 - `lod-surface-mesh.ts`: the optional `detail` mesh option adds the noise to the height in `surfacePoint` and its
   slopes (per lattice step, converted through the same metric as the texture's slopes) to the shading gradient, so the
   lighting shows the detail. `setDetailNoise` and `setDetailFade` are uniforms; without the option no noise nodes exist.
+  2026-10-28: the noise is now built once per vertex (in `surfacePoint`, at the folded, gapped point) and its slope is
+  reused for the shading normal; folded vertices use the coarse vertex's detail slope. Base slopes are unchanged.
 - CPU twin: `withDetailNoise` wraps a height source: `heightAt` adds the full-detail noise (no fade), `boundM` and every
   `nodeRange` are widened by the noise bound, so culling and the split box (`hot[h+5]`, `hot[h+6]`) stay conservative.
   The page wraps its source before building the selector; the camera and the backstop read the wrapped source.

@@ -200,8 +200,9 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     const own = basePoint(g, uGap);
     const { global, offset, up, lattice } = own;
     const base = source.lattice ? source.lattice.heightNode(face, lattice) : source.heightNode(global);
-    const height = detail ? base.add(detailAt(own).height) : base;
-    return offset.add(up.mul(height));
+    const noise = detail ? detailAt(own) : undefined;
+    const height = noise ? base.add(noise.height) : base;
+    return { position: offset.add(up.mul(height)), detailSlope: noise?.slope };
   };
 
   /**
@@ -243,11 +244,12 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const alongX = min(1, south.mul(bit(mask, 0)).add(north.mul(bit(mask, 2)))).mul(oddX).mul(uFolding);
   const alongY = min(1, east.mul(bit(mask, 1)).add(west.mul(bit(mask, 3)))).mul(oddY).mul(uFolding);
   const foldStep = vec2(alongX as any, alongY as any);
-  const positionNode = surfacePoint(grid.sub(foldStep));
+  const { position: positionNode, detailSlope } = surfacePoint(grid.sub(foldStep));
 
-  // Lighting normal from the height gradient at the vertex's own grid point.
+  // Lighting normal from the height gradient at the vertex's own grid point. The detail noise is built once per vertex, at
+  // the folded, gapped point: folded edge vertices take the coarse vertex's detail slope (they sit on it), and the debug
+  // gap only nudges the fade. The base source slope stays at the unfolded grid point.
   const own = basePoint(grid, float(0));
-  const detailSlope = detail ? detailAt(own).slope : undefined;
   const gradient = (source.lattice
     ? latticeGradient(own, detailSlope ? (source.lattice.slopeNode(face, own.lattice) as any).add(detailSlope) : source.lattice.slopeNode(face, own.lattice))
     : detailSlope ? (source.gradientNode(own.global) as any).add(latticeGradient(own, detailSlope)) : source.gradientNode(own.global)) as any;
