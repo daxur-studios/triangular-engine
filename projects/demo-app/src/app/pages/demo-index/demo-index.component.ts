@@ -93,6 +93,11 @@ export const DEMOS: readonly DemoItem[] = [
     description: 'Plan 059 M1: one instanced grid on a 100 km plane and 10 km / 600 km cube-spheres, a CPU quadtree with 2:1 balance, edge folding, LOD colours, a crack probe and a WebGPU-only baseline suite.',
   },
   {
+    id: 'planet-scene', number: '059', title: 'Planet Scene', route: '/planet-scene',
+    categoryId: 'terrain', tier: 'lab', createdAt: '2026-10-29', entryPoints: ['lod-surface', 'atmosphere', 'testing'], package: 'triangular-engine',
+    description: 'Plan 059 G5: <planet> with <planetTerrain> and <planetAtmosphere> as a game writes it, at orbit, 20 km and the 2 m eye, with a descent, a turn, layer toggles, the morph slider and a WebGPU-only performance suite. Clouds are a placeholder.',
+  },
+  {
     id: 'test-results', number: '058', title: 'Test Results', route: '/tests',
     categoryId: 'core', tier: 'lab', createdAt: '2026-10-20', entryPoints: ['testing'], package: 'triangular-engine',
     description: 'Browse the browser test runs the dev result receiver saved: a case thumbnail, median and p95, the change from a baseline run, and two runs side by side.',

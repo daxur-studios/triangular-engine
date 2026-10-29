@@ -1530,3 +1530,39 @@ The owner chose option B. The order is now G5 (with the morph state on `<planet>
 - **In G5 the terrain draws only the sphere.** With `morph` above 0 it reports once on `engine.error$`; the atmosphere already bends.
 - **Also proposed:** the suite name `planet-scene`, and a separate plan for `<planetClouds>`, with a labelled placeholder in G5.
 - Nothing built.
+
+## 2026-10-29: G5 built: `<planet>`, the `planet-scene` page and suite v1
+
+The owner approved the proposed `<planet>` inputs, the suite name `planet-scene` and a separate `<planetClouds>` plan.
+Coding by Sonnet subagents in two parts; the main agent reviewed both.
+
+**Library.**
+- `PLANET_CONTEXT` / `PlanetContext` in the root entry (`src/lib/engine/models/planet-context.model.ts`), so
+  `triangular-engine/atmosphere` reads the planet without depending on `lod-surface`.
+- `<planet>` (`lod-surface/components/planet.component.ts`): `radius`, `sunDirection`, `morph`, `projection`,
+  `projectionCentre`, optional `world` and `bake`. It owns one `createPlanetMorphUniforms()` set (`morphUniforms`, with
+  map extent), bakes the world's heights (stale bakes dropped, replaced textures freed after the next render, failures on
+  `engine.error$` phase `bake`), and gives `cellPlanet()` and `seaAlignedGlobeRadius()`.
+- `<planetTerrain>` and `<planetAtmosphere>`: `radius`, `sunDirection` and `morph` fall back to the planet; an own input
+  wins. Inside `<planet [world]>` the terrain takes the baked heights and makes, owns and disposes a
+  `TerrainPlanetMaterial`; `surface` exposes the material drawn, for the atmosphere's `surfaces`. With no radius the
+  terrain builds nothing and reports once (phase `config`); with morph above 0 it keeps the sphere and reports once
+  (phase `morph`) until G6. Review note: the owned material is made inside a `computed` (documented; only the terrain's
+  effect reads it and swaps the mesh in the same run).
+
+**Page and suite.** `/planet-scene` (`projects/demo-app/src/app/pages/planet-scene/`): a 600 km planet with the lab's
+cell-planet world baked in the worker, the terrain, the atmosphere lighting and hazing the terrain material, a labelled
+clouds placeholder, pose and move buttons, layer toggles and a morph slider. Suite `planet-scene` v1: `orbit`,
+`mid-20km`, `ground`, `descent`, `yaw-360`, and `orbit-atmosphere-off` / `ground-atmosphere-off` as partners, because
+the GPU timer splits by pass and the terrain and sky share the scene pass. No morph cases until G6.
+
+**Verified.** Headless: lod-surface and atmosphere specs 288/288 after part A; lod-surface 81/81 and planet-scene 26/26,
+demo-index and development-map 14/14 after part B. Library build, app `tsc` and `ngc` type-checks clean. In the agent's
+browser pane (AMD iGPU, pane hidden so about 1 fps): the page loads with no console errors, the terrain draws the cells
+with the atmosphere attached, the 20 km pose sits above the scaled air (black sky, horizon band).
+
+**Not yet known.**
+- No GPU timings: the hidden pane throttled frames and GPU timestamp readbacks timed out; the owner's visible run is next.
+- At the 2 m pose on 600 km the selector hits the 4,096-leaf cap (3,799 unmet splits), and the view is washed out
+  white (the pose lands on an ice cell; exposure not checked). Both need the owner's look.
+- Nothing is committed.

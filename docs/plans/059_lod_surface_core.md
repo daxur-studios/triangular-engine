@@ -285,7 +285,7 @@ measured on the RTX 3080 before the next starts:
     the shared morph state; §Globe-to-map morph has the contract.
 - **Order:** G1 and G2 first, so a game can start using the terrain; G3 next; the combined suite (G5) is meaningful
   once G3 is in, though it can start earlier with the lab material. Then the morph spike, then G6.
-- **G5 `<planet>` inputs (proposal, for the owner):**
+- **G5 `<planet>` inputs (approved by the owner 2026-10-29; built, see the runbook):**
   - `radius` (required, metres) and `sunDirection`, read by the children in place of their own inputs; a child's own
     input still wins, so each keeps working on its own.
   - The morph state: `morph` (0 globe, 1 map; a number, default 0), `projection` (`'equal-earth'` default, or
@@ -296,8 +296,8 @@ measured on the RTX 3080 before the next starts:
   - The centre stays the scene origin (the terrain assumes it); no `centre` input until a game needs one.
   - An optional cell-planet `world`, so the terrain's heights and material and a sea-aligned globe radius
     (`seaAlignedGlobeRadius`) come from one place.
-- **Open:** the owner's yes on the `<planet>` inputs above; the new suite's name (proposed: `planet-scene`); whether
-  `<planetClouds>` gets its own plan (proposed: yes, with a labelled placeholder in G5).
+- **Decided 2026-10-29 (owner):** the `<planet>` inputs above, the suite name `planet-scene`, and a separate plan for
+  `<planetClouds>` (a labelled placeholder in G5). **G5 built 2026-10-29, not yet run on the GPU** (runbook 059).
 
 After M6 the owner decides how water and terrain grow from here, and whether Plans 055 and
 057 adopt the core.
@@ -456,4 +456,4 @@ fine reference during a slow scripted zoom. Both are open to the review.
 | D13 | Water v0 look and motion bar (sines or Gerstner; acceptable transition motion) | **Decided** 2026-10-24 (owner): sines (Q = 0) first; the owner judges Gerstner and transition motion by eye at the M3 review; pops are fine until then |
 | D14 | Cliff detail by vector displacement of the sheet (M6, §Cliff detail), which brings sheet overhangs into scope while arches, caves and tunnels stay with Plan 055 | **Decided** 2026-10-25 (owner): accepted as M6; the slope criterion goes into M2 |
 | D15 | Milestone order | **Decided** 2026-10-25 (owner): terrain first (§Milestones, Order); water after M6 |
-| D16 | Terrain for games (step 3c): promote now, ahead of M2, which changes D8's "after M2"; components `<planet>`, `<planetTerrain>`, `<flatTerrain>`, with `<planetAtmosphere>` and clouds as siblings; entry `triangular-engine/lod-surface` | **Decided** 2026-10-29 (owner): names and the write-up approved; the parent's inputs, the suite name and clouds stay open |
+| D16 | Terrain for games (step 3c): promote now, ahead of M2, which changes D8's "after M2"; components `<planet>`, `<planetTerrain>`, `<flatTerrain>`, with `<planetAtmosphere>` and clouds as siblings; entry `triangular-engine/lod-surface` | **Decided** 2026-10-29 (owner): names and the write-up approved; the parent's inputs, the suite name `planet-scene` and a separate `<planetClouds>` plan approved 2026-10-29 |

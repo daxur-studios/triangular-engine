@@ -36,6 +36,10 @@ const PAGE_BINDINGS: Readonly<Record<string, { documentIds?: readonly string[]; 
     documentIds: ['plan-059'],
     evidence: [{ suite: 'lod-surface-baseline', scenarios: ['zoom-plane-100km'], metrics: ['frameInterval (ms)', 'gpuScenePass (ms)', 'surfaceTriangles (count)'] }],
   },
+  'planet-scene': {
+    documentIds: ['plan-059'],
+    evidence: [{ suite: 'planet-scene', metrics: ['frameInterval (ms)', 'gpuScenePass (ms)', 'selectionCpu (ms)'] }],
+  },
   'test-results': { documentIds: ['plan-058'] },
   'development-map': { documentIds: ['plan-066'] },
 };
@@ -72,7 +76,7 @@ const MAP_SOURCE: MapProjectSource = {
     {
       id: 'terrain', title: '3D Terrain and Planets',
       description: 'Compare terrain and planet approaches while preserving each experiment as history.',
-      examples: ['cdlod-planet-lab', 'planet-shape-lab', 'cell-planet-globe', 'illustrative-cell-planet', 'lod-surface-lab'],
+      examples: ['cdlod-planet-lab', 'planet-shape-lab', 'cell-planet-globe', 'illustrative-cell-planet', 'lod-surface-lab', 'planet-scene'],
     },
     {
       id: 'planning', title: 'Planning and Evidence',

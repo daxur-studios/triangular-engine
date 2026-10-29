@@ -2,7 +2,7 @@
 
 Level-of-detail terrain for games: `<planetTerrain>` for a sphere (optionally inside a `<planet>` that shares its radius, sun, morph and cell-planet world) and `<flatTerrain>` for a bounded square. Both draw a quadtree of patches in one instanced draw call, selected on the CPU every frame from the active camera, with cracks closed by edge folding. WebGPU only (`preferredRenderer: 'webgpu'`); on another renderer the terrain stays hidden and does nothing.
 
-Status: **preview** (Plan 059, step G5). Try it at `/lod-surface-lab` in the demo app.
+Status: **preview** (Plan 059, step G5). Try it at `/lod-surface-lab` in the demo app, and the whole `<planet>` scene (terrain, atmosphere, clouds placeholder) at `/planet-scene`.
 
 ## Entries
 
@@ -155,6 +155,17 @@ readonly bake = createBakeClient(() => new Worker(new URL('./height-bake.worker'
 | `bake` | inline | The `BakeClient` that bakes the world's heights. The default runs on the calling thread and blocks the page for the bake (seconds at large `cellCount`); pass `createBakeClient(() => new Worker(...))` in a real game. |
 
 - **Terrain inside it.** `<planetTerrain>` takes `radius` and `sunDirection` from the planet unless it has its own. With a `world` it also takes the planet's baked `heights` (flat until the bake lands, then the mesh is rebuilt) and, unless it has its own `material`, makes and owns a `TerrainPlanetMaterial` for that world (disposed when the world changes and on destroy). Leave `<planetTerrain [warp]>` at its default: the planet bakes with `'equal-angle'`. With no radius from either, the terrain shows nothing and reports once on `engine.error$` (phase `config`).
+- **Atmosphere on the terrain.** `<planetTerrain>.surface` is a signal of the node material the ground is drawn with when it is a planet material (your `material` input, else the `TerrainPlanetMaterial` the terrain made for the planet's `world`), and `undefined` while the terrain draws its own debug material or has no radius. A `TerrainPlanetMaterial` is a `PlanetSurfaceMaterial`, so `<planetAtmosphere>` can light and haze it: put the signal's value in the atmosphere's `[surfaces]`. Reading it never disposes anything, and the signal changes when the material is replaced, so a computed over it keeps `[surfaces]` current.
+
+  ```ts
+  readonly terrain = viewChild(PlanetTerrainComponent);
+  readonly surfaces = computed(() => {
+    const material = this.terrain()?.surface();
+    return material instanceof TerrainPlanetMaterial ? [material] : [];
+  });
+  ```
+
+  `<planetAtmosphere [enabled]="false">` then takes the sky and the lighting and haze stages off the terrain without a recompile, which is how the demo's `planet-scene` suite measures the cost of the air. The `/planet-scene` demo page is this wiring end to end.
 - **World outputs.** `heights()` (a `HeightSource`, undefined until the bake resolves; a stale bake never replaces a newer one, and a failed one is reported on `engine.error$` with phase `bake`), `cellPlanet()` (the description for `TerrainPlanetMaterial`) and `seaAlignedGlobeRadius()` (the radius for a separate morph globe so its sea meets the terrain's; reading it builds the world on the calling thread). The planet owns the baked source and frees its texture when it is replaced and on destroy.
 - **Morph.** The planet owns one `createPlanetMorphUniforms()` set (`morphUniforms`), writes `morph`, `projection`, `projectionCentre` and the map extent from `radius` into it, and exposes `morphUniform` (its `uMorph`, the same object for the planet's life). `<planetAtmosphere>` follows it every frame. **The terrain does not bend yet** (step G6): while `morph` is above 0 it keeps drawing the sphere and reports once on `engine.error$` (phase `morph`).
 

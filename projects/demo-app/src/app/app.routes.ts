@@ -586,6 +586,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'planet-scene',
+    loadComponent: () =>
+      import('./pages/planet-scene/planet-scene-page.component').then(
+        ({ PlanetScenePageComponent }) => PlanetScenePageComponent,
+      ),
+  },
+  {
     path: 'collider-blocks-bench',
     loadComponent: () =>
       import('./pages/planet-shape-lab/collider-blocks/collider-blocks-bench-page.component').then(
