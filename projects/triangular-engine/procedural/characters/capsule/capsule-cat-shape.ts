@@ -1,7 +1,7 @@
 import { CapsuleGeometry } from 'three';
 
 // Broaden the front dome and blend it into the torso, preserving one surface.
-const HEAD_SCALE = 1.23;
+const HEAD_SCALE = 1.17;
 
 export function catHeadScale(z: number, radius: number, length: number): number {
   const t = Math.max(0, Math.min(1, (z - (length * 0.5 - radius * 0.75)) / (radius * 0.75)));

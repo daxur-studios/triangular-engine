@@ -1,7 +1,7 @@
-import { Component, DestroyRef, effect, inject, input, OnInit, signal, untracked } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, OnInit, signal, untracked } from '@angular/core';
 import type { IUniform, Object3D, Vector3 } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
-import { EngineService } from 'triangular-engine';
+import { EngineService, PLANET_CONTEXT } from 'triangular-engine';
 import type { PhysicalAtmosphereProfile } from '../atmosphere-profile';
 import {
   PlanetAtmosphere,
@@ -9,6 +9,9 @@ import {
   type PlanetAtmosphereOptions,
   type PlanetAtmospherePresetId,
 } from '../planet-atmosphere';
+
+/** The sun direction used when neither the component nor a `<planet>` gives one. */
+const DEFAULT_SUN: readonly [number, number, number] = [0, 0, 1];
 
 /**
  * The Plan 049 atmosphere on a planet, declaratively: a thin wrapper around {@link PlanetAtmosphere}.
@@ -23,6 +26,11 @@ import {
  * time, so the frame always sees the camera and the morph it is drawn with. Write the morph and the planet's
  * transform by `lateUpdate$`; don't move the camera in `beforeRender$`.
  *
+ * **Inside `<planet>`** (`triangular-engine/lod-surface`) the planet's values stand in for inputs you leave out, and an
+ * input you set always wins: `radius` (required from one of the two; without either, `ngOnInit` throws), `sunDirection`,
+ * and `morph`, which then follows the planet's shared morph uniform every frame. The sun is in the planet's body frame;
+ * with the planet at the scene origin and no `planet` transform that is the scene frame, which is what `<planet>` gives.
+ *
  * Changing `preset`, `profile`, `radius` or `thickness` rebakes the tables (about 1-2 s at default sizes). Needs
  * `preferredRenderer: 'webgpu'`; on the classic WebGL renderer it does nothing.
  */
@@ -34,13 +42,14 @@ import {
 export class PlanetAtmosphereComponent implements OnInit {
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly context = inject(PLANET_CONTEXT, { optional: true });
 
   /** Air preset; ignored when `profile` is set. */
   readonly preset = input<PlanetAtmospherePresetId>('earth');
   /** A custom profile, scaled to `radius` like a preset. */
   readonly profile = input<PhysicalAtmosphereProfile | undefined>(undefined);
-  /** The planet's radius in metres. */
-  readonly radius = input.required<number>();
+  /** The planet's radius in metres. Default: the enclosing `<planet>`'s; one of the two is required. */
+  readonly radius = input<number | undefined>(undefined);
   /** The planet mesh's radius in world units. Default `radius` (one world unit is a metre). */
   readonly radiusUnits = input<number | undefined>(undefined);
   /** Air height divided by the radius. Default: the preset's own. */
@@ -53,13 +62,17 @@ export class PlanetAtmosphereComponent implements OnInit {
   readonly lighting = input(true);
   /** Aerial perspective on the surfaces (stage 6). */
   readonly haze = input(true);
-  /** Direction to the sun in the planet's body frame. */
-  readonly sunDirection = input<Vector3 | readonly [number, number, number]>([0, 0, 1]);
+  /**
+   * Direction to the sun in the planet's body frame. Default: the enclosing `<planet>`'s (the same as the scene frame when
+   * the planet is at the origin with no `planet` transform), else `[0, 0, 1]`.
+   */
+  readonly sunDirection = input<Vector3 | readonly [number, number, number] | undefined>(undefined);
   /**
    * 0 (globe) to 1 (flat map). Pass the material's `morph.uMorph` to share it (read when the component starts), or a
-   * number to set it each frame.
+   * number to set it each frame. Default: the enclosing `<planet>`'s morph uniform, which the atmosphere then follows every
+   * frame, else 0.
    */
-  readonly morph = input<number | IUniform<number>>(0);
+  readonly morph = input<number | IUniform<number> | undefined>(undefined);
   readonly exposure = input(8);
   /** Off skips the atmosphere on the surfaces (no recompile) and hides the sky. */
   readonly enabled = input(true);
@@ -74,13 +87,14 @@ export class PlanetAtmosphereComponent implements OnInit {
   readonly atmosphere = signal<PlanetAtmosphere | undefined>(undefined);
 
   private readonly attached = new Set<IAtmosphereSurface>();
+  private readonly effectiveRadius = computed(() => this.radius() ?? this.context?.radius());
 
   constructor() {
     effect(() => {
       const shape = {
         preset: this.preset(),
         profile: this.profile(),
-        radiusM: this.radius(),
+        radiusM: this.effectiveRadius(),
         radiusUnits: this.radiusUnits(),
         thickness: this.thickness(),
       };
@@ -107,11 +121,15 @@ export class PlanetAtmosphereComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    const morph = this.morph();
+    const radiusM = this.effectiveRadius();
+    if (radiusM === undefined) {
+      throw new Error('<planetAtmosphere> has no radius: set [radius] or put it inside a <planet [radius]>.');
+    }
+    const morph = this.morph() ?? this.context?.morphUniform;
     const atmosphere = new PlanetAtmosphere({
       preset: this.preset(),
       profile: this.profile(),
-      radiusM: this.radius(),
+      radiusM,
       radiusUnits: this.radiusUnits(),
       thickness: this.thickness(),
       planet: this.planet() ?? this.engine.scene,
@@ -137,11 +155,12 @@ export class PlanetAtmosphereComponent implements OnInit {
     atmosphere.sky = this.sky();
     atmosphere.stars = this.stars();
     atmosphere.exposure = this.exposure();
-    const sun = this.sunDirection();
+    const sun = this.sunDirection() ?? this.context?.sunDirection() ?? DEFAULT_SUN;
     if (Array.isArray(sun)) atmosphere.sunDirection.set(sun[0], sun[1], sun[2]);
     else atmosphere.sunDirection.copy(sun as Vector3);
     const morph = this.morph();
     if (typeof morph === 'number') atmosphere.morph = morph;
+    else if (morph === undefined && !this.context) atmosphere.morph = 0;
     atmosphere.update(renderer, this.engine.camera);
   }
 }

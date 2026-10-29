@@ -91,7 +91,7 @@ export function createCapsuleCatBodyMaterial(
     metalness: 0.02,
   });
 
-  material.customProgramCacheKey = () => 'capsule-cat-body-sdf-v4';
+  material.customProgramCacheKey = () => 'capsule-cat-body-sdf-v5';
 
   material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms) => {
     Object.assign(shader.uniforms, uniforms);
@@ -167,6 +167,20 @@ uniform float uMouthAsymmetry;`,
     float hipCrease = exp(-pow((z - uHipZ) * 160.0, 2.0));
     baseCol *= (1.0 - (neckCrease + hipCrease) * 0.14);
     baseCol += vec3(min(0.06, neckCrease * 0.04));
+  }
+
+  // A small cross on the rear cap, below the tail. Paint it into the existing
+  // material so it follows the body and adds no extra mesh or draw call.
+  if (z < -uNeckZ && vCatLocalNormal.z < -0.12) {
+    vec2 p = vec2(vCatLocalPos.x / r, vCatLocalPos.y / r + 0.25);
+    vec2 a = vec2(0.065, 0.065);
+    vec2 b = vec2(0.065, -0.065);
+    float d1 = length(p - a * clamp(dot(p, a) / dot(a, a), -1.0, 1.0));
+    float d2 = length(p - b * clamp(dot(p, b) / dot(b, b), -1.0, 1.0));
+    float dCross = min(d1, d2) - 0.012;
+    float aaCross = max(fwidth(dCross), 0.002);
+    float crossMask = 1.0 - smoothstep(-aaCross, aaCross, dCross);
+    baseCol = mix(baseCol, baseCol * 0.38, crossMask);
   }
 
   // 2D SDF Cat Mouth on the front snout cap (below the nose button)

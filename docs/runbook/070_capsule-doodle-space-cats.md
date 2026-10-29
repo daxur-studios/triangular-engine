@@ -137,9 +137,40 @@ gear. The reference sheet's dogs stay out of scope.
   smooth front widening and resized the helmet and collar. Procedural tests, the build,
   and a fresh lineup functional run passed. Visual fit and final expression review remain open.
 
+### 2026-10-29 — Helmet neck fit
+
+- Moved the helmet collar behind the ears to a centered, untilted capsule cross-section;
+  its radius follows the widened body there. Matched the bubble's open rim to the
+  collar and gave the dome room around the ears. Applied the same neck position
+  and radius to standalone collars.
+- The procedural suite passed 266 specs, including a collar and dome alignment
+  check, and the library build passed. The demo showed the collar seated on the
+  neck in a side view; its close-up clipped the top of the head, so ear clearance
+  still needs visual confirmation across views, poses and presets.
 ## Scope history
 
 <!-- tri:scope-history -->
 <!-- tri:scope-baseline state="unconfirmed" -->
 <!-- /tri:scope-baseline -->
 <!-- /tri:scope-history -->
+
+### 2026-10-29 — Head proportion and initial rendering check
+
+- Reduced front-dome widening from 23% to 17%; the existing expression rig and
+  smooth transition remain in place. Helmet sizing was retained for clearance.
+- A short exploratory headless Chrome run on the NVIDIA GeForce RTX 3080 Laptop
+  GPU counted WebGL draw commands over five seconds: about 207 per browser
+  animation frame for the default single-cat scene, and 1,651 for the seven-cat
+  lineup. These are whole-scene counts, including any shadow and other passes,
+  not isolated per-cat counts. Canvas sizes were 1440×315 and 1440×491. Observed
+  animation callback rates were approximately 150 and 64 per second respectively;
+  this instrumented, headless run is not a production performance benchmark.
+- Many small facial, paw and equipment meshes cast shadows; investigate their
+  individual contribution and batching or selective shadow casting before
+  choosing optimizations. Measure with representative scenes and target devices.
+- The procedural suite passed 265 specs and the library build passed. Visual
+  confirmation of the adjusted head and helmet fit is still needed.
+
+2026-10-29: Added a small rear cross below the tail in the existing body shader; it introduces no additional mesh or draw call. Procedural suite passed (266). The demo returned missing resources during the visual check, so rear-view placement and shader rendering still need visual confirmation when it is available.
+
+2026-10-29: Raised jetpack and mini packs to sit on the widened back, preserving a small seating overlap. Placement checks cover presets and all pack variants; procedural suite passed (268) and library build passed. Visual review in the demo remains open.

@@ -89,14 +89,23 @@ import { PlanetAtmosphereComponent } from 'triangular-engine/atmosphere';
 | Input | Meaning |
 |---|---|
 | `preset`, `profile` | `'earth'` (default) or `'mars'`, or a custom `PhysicalAtmosphereProfile` scaled to `radius` like a preset. |
-| `radius` (required), `thickness` | Planet radius in metres; air height / radius (default: the preset's). Changing either, or the preset, rebakes the tables (about 1-2 s). |
+| `radius` (required, or from a `<planet>`), `thickness` | Planet radius in metres; air height / radius (default: the preset's). Changing either, or the preset, rebakes the tables (about 1-2 s). |
 | `radiusUnits` | The planet mesh's radius in world units. Default `radius` (one unit is a metre). |
 | `planet` | The planet's root object; its transform is the body frame. Default: the scene, with the planet at its origin. |
 | `surfaces`, `lighting`, `haze` | Surfaces to light (stage 4) and haze (stage 6): any `PlanetSurfaceMaterial`, planet or ocean. Removing one from the array restores its default stages. |
-| `sunDirection` | Direction to the sun in the body frame (`Vector3` or `[x, y, z]`). |
-| `morph` | Pass the material's `morph.uMorph` to share one value (read at start), or a number. |
+| `sunDirection` | Direction to the sun in the body frame (`Vector3` or `[x, y, z]`). Default: the `<planet>`'s, else `[0, 0, 1]`. |
+| `morph` | Pass the material's `morph.uMorph` to share one value (read at start), or a number. Default: the `<planet>`'s morph uniform, else 0. |
 | `exposure`, `enabled`, `sky` | Exposure (default 8); `enabled = false` skips the atmosphere on the surfaces without a recompile and hides the sky; `sky = false` hides only the sky. |
 | `stars` | Star brightness, 0 (default) for none. See [Sky objects](#sky-objects). |
+
+**Inside `<planet>`.** `<planetAtmosphere>` reads the `PLANET_CONTEXT` that the `<planet>` component (`triangular-engine/lod-surface`) provides, for any of `radius`, `sunDirection` and `morph` you leave out; an input you set always wins. The morph is the planet's shared `uMorph` uniform, passed when the atmosphere is built, so it follows the planet every frame. With neither an own nor a planet `radius`, `ngOnInit` throws. The sun is in the planet's body frame, which equals the scene frame while the planet sits at the origin with no `planet` transform, as `<planet>` assumes. This entry imports only the root token, not `lod-surface`.
+
+```html
+<planet [radius]="600_000" [sunDirection]="sun">
+  <planetTerrain />
+  <planetAtmosphere preset="earth" [surfaces]="[surface]" />
+</planet>
+```
 
 The component's `atmosphere()` signal gives the `PlanetAtmosphere` for anything else (its `binding`, `model`, `backdrop`).
 

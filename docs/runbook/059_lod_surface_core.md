@@ -1494,7 +1494,39 @@ lod-surface specs 58 of 58; lod-surface-lab specs 197 of 197 (all ChromeHeadless
 
 ### Not done / next
 
-- The owner's visible-browser rerun is what confirms the fix: the stall was never reproduced headless.
+- ~~The owner's visible-browser rerun is what confirms the fix~~: done, below.
 - Later `setWireframe(true)` on a visible surface still compiles at its first draw (lab and library); no case uses it.
 - Scene lights added after the terrain is created make its first draw compile again (README says so). The `<planet>` parent (G5) should create lights first.
 - Morph between the globe and the 2.5D map: excluded by D11, and nothing in G1–G4 supports it. To be decided by the owner before G5.
+
+### Owner's visible-browser rerun (14:26) and a headless repeat (14:29)
+
+The stall is gone. The visible run settled, ran every check and passed them all (no engine or console error, 0 crack pixels, GPU timer self-test over 656 frames). No timer timeout was tolerated in either run. Both are invalid only because the quick window hit its 4 s cap without settling. Other apps were loading the GPU (57 % median during the visible run, 85 % during the headless one, against 42–44 % at 14:16).
+
+| Run | gpuScenePass med / p95 / max (ms) | Slow frames | GPU load (median) |
+|---|---|---|---|
+| visible, 14:26, 2538×1308 | 0.63 / 0.90 / 1.29 | 63 of 656: about 1 in 5 frames at a steady 0.90 ms until frame 266, then 7 at about 1.03 ms | 57 % |
+| headless, 14:29 | 0.57 / 1.25 / 1.47 | 121 of 661, in bursts throughout (0.85–1.47 ms) | 85 % |
+
+- The base frame is unchanged (0.57–0.63 ms). The slow frames are extra time on top of it, in steps or bursts that follow neither the camera (static), the selection (4,095 leaves, no splits or merges in the window) nor compilation (all compiled before the window). They look like GPU time-slicing with other apps. That is an inference: per-process GPU time was not recorded.
+- Their p95 differs between the window's halves by more than 10 %, so the quick window cannot settle.
+- Files: `lod-surface-terrain@v9/2026-10-29T14-26-41-908Z_visible-browser_quick_0d50724c-a8fa5de3.json`, `...T14-29-07-477Z_headless-hardware_quick_0d50724c-a8fa5de3.json`.
+- A valid planet-material number needs a run with the GPU otherwise idle.
+
+## 2026-10-29: D11 reopened: globe-to-map morph proposal written, nothing built
+
+The owner reopened D11 at the G3 check: the terrain should morph between the 3D sphere and the 2.5D map, as the cell-planet globe does. The proposal is in [plan 059, §Globe-to-map morph](../plans/059_lod_surface_core.md#globe-to-map-morph-d11-reopened-2026-10-29-proposal).
+
+- **Reused, not new:** the bend morph (`planetMorphGraph`, `planetBentSurfaceNodes`, CPU `bend()`), already shared by the cell-planet globe and `<planetAtmosphere [morph]>`, and Plan 055's morph contract (T6).
+- **Two risks for a spike:** precision (the bend works on planet-scale floats, while L7 depends on camera-relative positions; proposed: bend leaf origins on the CPU in doubles, offsets inside a leaf on the GPU) and the map's cut across cube-sphere leaves (proposed: the globe material's fragment cull first, finer leaves at the cut if the gap shows).
+- **Falsifier:** at morph 0 the terrain must draw exactly what it draws today (v9 suite and G1–G4 specs unchanged).
+- **Options:** A (out of v1 as agreed in review), B (morph state on `<planet>` in G5, build after G5; recommended), C (build before G5). Owner to decide, with the closest map zoom, the projection and map tiling.
+
+## 2026-10-29: D11 decided: option B; G5 `<planet>` inputs proposed
+
+The owner chose option B. The order is now G5 (with the morph state on `<planet>`), then a spike on precision and the map's cut, then a new step G6 that builds the morph. The closest map zoom, the projection and map tiling stay open until the spike. Plan 059 records the decision in D11, step 3c (G5, G6, order) and [§Globe-to-map morph](../plans/059_lod_surface_core.md#globe-to-map-morph-d11-reopened-2026-10-29-proposal).
+
+- **Proposed `<planet>` inputs for G5,** waiting for the owner's yes: `radius` and `sunDirection`, with a child's own input still winning; `morph`, `projection` and `projectionCentre`, written into one `createPlanetMorphUniforms()` set that the parent provides to its children; an optional cell-planet `world`. The centre stays the scene origin.
+- **In G5 the terrain draws only the sphere.** With `morph` above 0 it reports once on `engine.error$`; the atmosphere already bends.
+- **Also proposed:** the suite name `planet-scene`, and a separate plan for `<planetClouds>`, with a labelled placeholder in G5.
+- Nothing built.

@@ -25,7 +25,8 @@ interface CompilingRenderer {
 /**
  * Shared wiring of `<planetTerrain>` and `<flatTerrain>`; call it from a field initializer or constructor (it uses
  * `effect`). The body is made on the first run of the effect, when the required inputs are set, and added to the engine
- * scene. Every frame, in `beforeRender$` (after camera controls have settled in `lateUpdate$`), it selects from the
+ * scene. `read` may return `undefined` while the inputs are not enough to build the terrain (`<planetTerrain>` with no radius
+ * from itself or a `<planet>`): nothing is built or changed then, and the effect runs again when what `read` used changes. Every frame, in `beforeRender$` (after camera controls have settled in `lateUpdate$`), it selects from the
  * active camera. On a renderer that is not `WebGPURenderer` the terrain stays hidden and does nothing.
  *
  * Each surface mesh (the first, and every one {@link LodTerrainBody.configure} makes after a setting changes its shader)
@@ -33,7 +34,7 @@ interface CompilingRenderer {
  * material then costs a few hidden frames instead of one long first frame. A compile that fails or takes over a minute is
  * reported on `engine.error$` (phase `compile`) and the terrain is shown anyway.
  */
-export function attachLodTerrain(engine: EngineService, destroyRef: DestroyRef, read: () => LodTerrainInputs): Signal<LodTerrainBody | undefined> {
+export function attachLodTerrain(engine: EngineService, destroyRef: DestroyRef, read: () => LodTerrainInputs | undefined): Signal<LodTerrainBody | undefined> {
   const terrain = signal<LodTerrainBody | undefined>(undefined);
   let body: LodTerrainBody | undefined;
   /** The surface mesh whose pipeline is built (or could not be: it is shown regardless). */
@@ -45,6 +46,7 @@ export function attachLodTerrain(engine: EngineService, destroyRef: DestroyRef, 
 
   effect(() => {
     const inputs = read();
+    if (!inputs) return;
     untracked(() => {
       if (body) body.configure(inputs.settings);
       else {

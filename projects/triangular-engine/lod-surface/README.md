@@ -1,14 +1,14 @@
 # triangular-engine/lod-surface
 
-Level-of-detail terrain for games: `<planetTerrain>` for a sphere and `<flatTerrain>` for a bounded square. Both draw a quadtree of patches in one instanced draw call, selected on the CPU every frame from the active camera, with cracks closed by edge folding. WebGPU only (`preferredRenderer: 'webgpu'`); on another renderer the terrain stays hidden and does nothing.
+Level-of-detail terrain for games: `<planetTerrain>` for a sphere (optionally inside a `<planet>` that shares its radius, sun, morph and cell-planet world) and `<flatTerrain>` for a bounded square. Both draw a quadtree of patches in one instanced draw call, selected on the CPU every frame from the active camera, with cracks closed by edge folding. WebGPU only (`preferredRenderer: 'webgpu'`); on another renderer the terrain stays hidden and does nothing.
 
-Status: **preview** (Plan 059, step G3). Try it at `/lod-surface-lab` in the demo app.
+Status: **preview** (Plan 059, step G5). Try it at `/lod-surface-lab` in the demo app.
 
 ## Entries
 
 | Import | What it holds |
 |---|---|
-| `triangular-engine/lod-surface` | The two Angular components. |
+| `triangular-engine/lod-surface` | The Angular components: `<planet>`, `<planetTerrain>`, `<flatTerrain>`. |
 | `triangular-engine/lod-surface/core` | Framework-free pieces: domains, selector, mesh, height sources, baking. A worker file imports this one, because workers cannot link Angular declarations. |
 
 ## Minimal use
@@ -37,7 +37,7 @@ The component needs `EngineService` (so it lives inside a `<tri-engine>` tree), 
 
 | Input | Default | Meaning |
 |---|---|---|
-| `radius` (planet) / `size` (flat) | required | Sphere radius or square side, metres. |
+| `radius` (planet) / `size` (flat) | required (`radius`: or from a [`<planet>`](#planet-one-place-for-the-radius-sun-morph-and-world)) | Sphere radius or square side, metres. |
 | `heights` | flat | A `HeightSource`: analytic (`createHeightSource(id, kind)`) or baked (see below). |
 | `detailNoise` | 0.04 | Noise below the height texture's texel, as a share of the texel; 0 is off. |
 | `detailCells` | texture size, else 1,024 | Texels per side the noise is sized by. |
@@ -48,7 +48,7 @@ The component needs `EngineService` (so it lives inside a `<tri-engine>` tree), 
 | `cull` | true | Draw only leaves inside the frustum. |
 | `warp` (planet only) | `'equal-angle'` | Cube warp; baked heights must use the same one. |
 | `material` | debug material | A `NodeMaterial`; the terrain sets its `positionNode`. Pass a `TerrainPlanetMaterial` to draw with the planet material ([below](#planet-material)). You dispose it. |
-| `sunDirection`, `view`, `lighting`, `bounds`, `wireframe` | see TSDoc | Options of the default debug material. `sunDirection` also reaches a `TerrainPlanetMaterial`. |
+| `sunDirection`, `view`, `lighting`, `bounds`, `wireframe` | see TSDoc | Options of the default debug material. `sunDirection` also reaches a `TerrainPlanetMaterial`; inside a `<planet>` it defaults to the planet's. |
 
 ## Heights
 
@@ -120,10 +120,43 @@ Why the `material` input and not a new input or component: the terrain already h
 
 - **Colours come from the same world.** `cellPlanet` takes the built world (`ICellPlanetWorld`) or the description given to `cellPlanetHeights` (`{ seed, cellCount, relaxationIterations? }`, built on the calling thread and kept). Land and ice take their biome colour, the sea the ocean colour (lava for a lava world): the globe's `natural` colours for that world. Pass the **same** world as the heights, or ground and heights disagree. `material.cells` has `opacity` and `updatePalette(Float32Array)` to recolour cells (territory overlays) without a rebuild; `cellLookup: { atlasWidth, colours }` overrides the atlas size and the palette.
 - **Exact cell edges at any zoom.** The ground uses `cellVoronoiLayer`, not the plain atlas lookup (nearest-filtered, so an edge is a staircase of atlas texels up close). A 1,024 x 512 atlas finds a nearby cell; the shader then picks the true one, the cell centre with the largest dot product among that cell and its neighbours, so an edge is a straight Voronoi edge at 2 cm. Memory for 1,000 cells: a 2 MB atlas plus 64 KB of tables. Cost: 12 texture fetches per fragment where the plain lookup has 2. The atlas grows past about 20,000 cells to keep a texel under a quarter of a cell. Building it takes about 50 ms for 1,000 cells on the calling thread, after the world itself (about 100 ms).
-- **Sea level.** The terrain puts the sea at `radius`; the morph globe puts it `seaLevelElevation * heightScale` higher (0.3232 for the lab seed: 48 m on the 10 km sphere). Defaults are unchanged. To draw both in one scene, give the globe `seaAlignedGlobeRadius(radius, world, heightScaleM)` (from `lod-surface/core`) as its radius and keep the terrain's `radius`. The future `<planet>` parent will do it for you.
+- **Sea level.** The terrain puts the sea at `radius`; the morph globe puts it `seaLevelElevation * heightScale` higher (0.3232 for the lab seed: 48 m on the 10 km sphere). Defaults are unchanged. To draw both in one scene, give the globe `seaAlignedGlobeRadius(radius, world, heightScaleM)` (from `lod-surface/core`) as its radius and keep the terrain's `radius`. `<planet [world]>` computes it for you: `seaAlignedGlobeRadius()`.
 - **Sun.** The PBR lighting reads the scene's lights. `material.setSunDirection(dir)` (called by `<planetTerrain [sunDirection]>`) keeps `material.dayNight.uSunDirection` in step, which is where a parent's day/night lighting stage reads it; moving the scene's directional light to match is the parent's job.
 - **Without a cell planet** `new TerrainPlanetMaterial()` is a solid colour to which you add your own layers (`addSurfaceLayer`). Layers that read a vertex attribute (the vertex-colour base, the macro layer's land mask, streamed tiles) do not work here: the terrain has none.
 - **How it plugs in.** The material calls `PlanetSurfaceMaterial.setStageOverride` with the terrain's nodes (see the [planet material README](../planet-material/README.md#using-the-material-on-another-mesh)). Layers that lift `position` through the model matrix need the mesh at the camera, which `LodTerrainBody` keeps.
+
+## `<planet>`: one place for the radius, sun, morph and world
+
+`<planet>` is a light parent that holds what the layers drawn on a planet share, so a game writes it once (Plan 059, step G5; preview). It draws nothing and is not an `Object3D`; the planet's centre is the scene origin. Children read it through the `PLANET_CONTEXT` token (root entry), and a child's own input always wins, so `<planetTerrain>` and `<planetAtmosphere>` still work on their own.
+
+```html
+<planet [radius]="600_000" [sunDirection]="sun" [world]="world" [bake]="bake">
+  <planetTerrain />
+  <planetAtmosphere preset="earth" [surfaces]="surfaces" />
+</planet>
+```
+
+```ts
+import { createBakeClient } from 'triangular-engine/lod-surface/core';
+
+readonly sun = [0.4, 0.8, 0.45];
+readonly world = { seed: 7, cellCount: 1500, heightScaleM: 4_000 };   // as given to buildCellPlanetWorld
+readonly bake = createBakeClient(() => new Worker(new URL('./height-bake.worker', import.meta.url), { type: 'module' }));
+```
+
+| Input | Default | Meaning |
+|---|---|---|
+| `radius` | required | Sea-level radius, metres. |
+| `sunDirection` | `[0.4, 0.8, 0.45]` | Direction to the sun in the scene frame; any length, read back normalised. |
+| `morph` | 0 | Globe (0) to flat map (1); clamped. |
+| `projection` | `'equal-earth'` | Map projection: `'equal-earth'` or `'equirectangular'`. |
+| `projectionCentre` | `null` | `{ lonDeg, latDeg }` to centre the map on, or `null` for the baked centre. |
+| `world` | none | A cell planet `{ seed, cellCount, relaxationIterations?, heightScaleM, bakeK? }`: the `cellPlanetHeights` options without `radius` and `warp`. |
+| `bake` | inline | The `BakeClient` that bakes the world's heights. The default runs on the calling thread and blocks the page for the bake (seconds at large `cellCount`); pass `createBakeClient(() => new Worker(...))` in a real game. |
+
+- **Terrain inside it.** `<planetTerrain>` takes `radius` and `sunDirection` from the planet unless it has its own. With a `world` it also takes the planet's baked `heights` (flat until the bake lands, then the mesh is rebuilt) and, unless it has its own `material`, makes and owns a `TerrainPlanetMaterial` for that world (disposed when the world changes and on destroy). Leave `<planetTerrain [warp]>` at its default: the planet bakes with `'equal-angle'`. With no radius from either, the terrain shows nothing and reports once on `engine.error$` (phase `config`).
+- **World outputs.** `heights()` (a `HeightSource`, undefined until the bake resolves; a stale bake never replaces a newer one, and a failed one is reported on `engine.error$` with phase `bake`), `cellPlanet()` (the description for `TerrainPlanetMaterial`) and `seaAlignedGlobeRadius()` (the radius for a separate morph globe so its sea meets the terrain's; reading it builds the world on the calling thread). The planet owns the baked source and frees its texture when it is replaced and on destroy.
+- **Morph.** The planet owns one `createPlanetMorphUniforms()` set (`morphUniforms`), writes `morph`, `projection`, `projectionCentre` and the map extent from `radius` into it, and exposes `morphUniform` (its `uMorph`, the same object for the planet's life). `<planetAtmosphere>` follows it every frame. **The terrain does not bend yet** (step G6): while `morph` is above 0 it keeps drawing the sphere and reports once on `engine.error$` (phase `morph`).
 
 ## Standing on the ground
 
@@ -153,4 +186,4 @@ update(dt: number): void {
 
 ## Not included
 
-Ray hits against the ground (cliffs, overhangs), physics colliders (Plan 059 M5), atmosphere on the terrain, and a parent `<planet>` component (globe, terrain, sea alignment and sun in one place) are later steps of Plan 059. The older `triangular-engine/terrain` entry is a different system and is unchanged.
+Ray hits against the ground (cliffs, overhangs), physics colliders (Plan 059 M5), the terrain's globe-to-map bend (step G6; `<planet>` already carries the morph state) and a `<planetClouds>` wrapper are later steps or separate work. The older `triangular-engine/terrain` entry is a different system and is unchanged.

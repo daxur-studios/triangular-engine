@@ -75,7 +75,7 @@ lower-detail track that neither blocks nor depends on Plan 055.
 overhanging cliff faces come from vector displacement of the same sheet (M6, §Cliff detail).
 
 **Out for now:** caves, arches and tunnels (Plan 055 owns them; one displaced sheet cannot make them); overhangs
-other than those of a displaced sheet; the globe-to-map morph (D11); FFT and ray-marched
+other than those of a displaced sheet; the globe-to-map morph until step G6 (D11, option B; see §Globe-to-map morph); FFT and ray-marched
 water; beaches, swash, rivers, weather and ice (Plan 057's list); materials beyond a debug look and a basic lit look;
 paging for large terrain textures; Earth-scale precision of height sources (the mesh itself must be precise at
 any radius, §L7).
@@ -279,10 +279,25 @@ measured on the RTX 3080 before the next starts:
     and a new suite (name open, for example `planet-scene`) with orbit, mid-altitude and ground poses, a descent and
     a turn. Metrics: per-layer GPU pass ms, selection CPU ms, frame ms, triangles, draws. Clouds come from the
     `triangular-engine/cloud-volumes` entry, which has code but no component yet; a `<planetClouds>` wrapper is its
-    own piece of work, with a labelled placeholder until then.
+    own piece of work, with a labelled placeholder until then. `<planet>` carries the morph state (D11, option B);
+    the terrain draws morph 0 only until G6.
+  - **G6 Globe-to-map morph** (D11, option B). After a spike on precision and the map's cut, the terrain bends with
+    the shared morph state; §Globe-to-map morph has the contract.
 - **Order:** G1 and G2 first, so a game can start using the terrain; G3 next; the combined suite (G5) is meaningful
-  once G3 is in, though it can start earlier with the lab material.
-- **Open:** the `<planet>` parent's exact inputs; the new suite's name; whether `<planetClouds>` gets its own plan.
+  once G3 is in, though it can start earlier with the lab material. Then the morph spike, then G6.
+- **G5 `<planet>` inputs (proposal, for the owner):**
+  - `radius` (required, metres) and `sunDirection`, read by the children in place of their own inputs; a child's own
+    input still wins, so each keeps working on its own.
+  - The morph state: `morph` (0 globe, 1 map; a number, default 0), `projection` (`'equal-earth'` default, or
+    `'equirectangular'`) and `projectionCentre` (`{ lonDeg, latDeg }`, or `null` for the baked centre). The parent
+    owns one `createPlanetMorphUniforms()` set, writes these inputs into it, and provides it to the children; the
+    atmosphere takes its `uMorph`. In G5 the terrain keeps drawing the sphere and reports once on `engine.error$` when
+    `morph` is above 0.
+  - The centre stays the scene origin (the terrain assumes it); no `centre` input until a game needs one.
+  - An optional cell-planet `world`, so the terrain's heights and material and a sea-aligned globe radius
+    (`seaAlignedGlobeRadius`) come from one place.
+- **Open:** the owner's yes on the `<planet>` inputs above; the new suite's name (proposed: `planet-scene`); whether
+  `<planetClouds>` gets its own plan (proposed: yes, with a labelled placeholder in G5).
 
 After M6 the owner decides how water and terrain grow from here, and whether Plans 055 and
 057 adopt the core.
@@ -323,6 +338,77 @@ and found the slope criterion's isotropic splits too costly for rows up a wall. 
 volume regions meshed from 3D density, a depth cap) and the hotspot suspicion are in the
 [runbook entry](../runbook/059_lod_surface_core.md#2026-10-27--cliff-detail-reopened-then-parked-nothing-built-no-decision).
 D14 stands as written until this is decided; a multi-agent consensus review may come first.
+
+## Globe-to-map morph (D11, reopened 2026-10-29, proposal)
+
+The owner reopened D11 at the G3 check: the terrain should be able to turn from the 3D sphere into the 2.5D map and
+back, as the cell-planet globe does. Not to be confused with D5's level-blending morph.
+
+**2026-10-29: the owner chose option B.** `<planet>` gets the morph state in G5, the spike follows, then G6 builds the
+morph. The contract below is the plan for G6; the zoom, projection and tiling questions stay open until the spike.
+
+**Why decide now.** G5's `<planet>` parent is where a shared morph would live: `<planetAtmosphere [morph]>` already
+takes the surface material's `morph.uMorph`. If the parent's inputs are settled without it, adding it later changes
+them.
+
+**What exists:**
+- `planetMorphGraph` and `planetBentSurfaceNodes` (`planet-material/planet-morph-nodes.ts`): the bend morph. Every
+  in-between shape is a piece of a sphere of curvature `(1 - morph) / R`, so morph 1 is exactly flat. Equirectangular
+  or Equal Earth map, a baked or a moving projection centre (`setPlanetProjectionCentre`), a fragment cull at the map's
+  cut.
+- Its CPU twin `bend()` (`atmosphere/bent-planet.ts`), written so that morph 1 is exact; the atmosphere bends with it.
+- The cell-planet globe morphs today (`cell-planet-morph-view.component.ts`) and picks through the morph
+  (`cell-planet-morph-raycast.ts`).
+- Plan 055's morph contract (T6): the morph is visual only, shadows morph or are off, culling uses bent bounds, LOD
+  error is measured in morphed screen space.
+- This plan's terrain: `TerrainPlanetMaterial` pins morph to 0 (constants), and the vertex stage writes a
+  camera-relative sphere position (L7).
+
+**Proposed contract** (Plan 055 T6, applied to this terrain):
+1. **Visual only.** Heights, the selector's caches, `groundAt` and physics stay body-fixed and spherical. A morph never
+   rebuilds the mesh or re-bakes heights.
+2. **One morph state for every layer, owned by `<planet>`:** `morph` (0 globe, 1 map), the projection type and the
+   projection centre. `<planetTerrain>`, `<planetAtmosphere>` and the clouds read it from the parent; a standalone
+   `<planetTerrain>` takes the same inputs. Uniforms only, no recompile.
+3. **Vertex stage.** The lattice point, its height and edge folding stay as they are, then the point is bent. Shared
+   seam vertices get the same input and the same arithmetic, so they stay bit-identical. **At morph 0 the output must
+   be exactly today's** (a falsifier: the v9 suite and every G1–G4 spec unchanged).
+4. **Precision (main risk 1).** The bend works on planet-scale floats; L7's precision comes from camera-relative
+   positions. Proposed: the CPU bends each leaf's origin in doubles and passes it camera-relative, as it does today;
+   the GPU bends only the offset inside the leaf, from a per-leaf bent frame (origin, east, north, up, curvature).
+   Near leaves are small, so the error is small where the camera is; large leaves are far. A spike measures vertex
+   jitter 2 m above the ground at morph 0.5 and 1 on the 600 km and 6,371 km spheres, against a full float bend.
+5. **Selection and culling** use bent node bounds (CPU `bend` of each node's corners and height range, padded). As the
+   globe opens, its far side comes into view, so drawn leaves grow towards the map; the leaf cap and priority splitting
+   bound them. To measure: selection CPU p95 at morph 0.5 (already over 0.2 ms while moving, see the runbook).
+6. **The map's cut (main risk 2).** At morph above 0 the sphere is cut along the meridian opposite the projection
+   centre, and the cut moves with a moving centre. A leaf across the cut would draw triangles across the whole map.
+   Options: (a) the fragment cull the globe material uses, which leaves a gap up to one triangle wide; (b) split leaves
+   at the cut to the finest level there, so the gap is under a pixel; (c) draw a leaf across the cut twice, once per
+   side, each clipped. Proposed: (a) first, measured by the crack probe with the cut masked, then (b) if the gap shows.
+   The poles get the same check (Equal Earth's pole lines, equirectangular's stretched poles).
+7. **Material.** `TerrainPlanetMaterial` takes the shared morph uniforms instead of constants: `morphedPosition`
+   becomes the bent position, while `bodyFixedLocal` stays the sphere point, so cells and biomes do not slide.
+8. **Shadows** off while morph is above 0, as T6 allows, until the terrain has a shadow pass.
+9. **Queries and picking.** `groundAt` stays spherical. Picking on the bent terrain needs the inverse bend, as the
+   cell-planet raycast does; this terrain has no ray-hit query yet (M6), so it is listed, not built.
+10. **Suite.** Morph cases in the G5 suite: morph 0, 0.5 and 1 at orbit and at low altitude, and a scripted morph
+    sweep. Metrics: crack px (cut masked), drawn leaves, selection CPU, GPU pass, silhouette against a bent reference.
+
+**Options for the owner:**
+- **A. Keep it out of v1** (D11 as agreed in review). G5 goes ahead without a morph. A game that needs the map draws it
+  with the cell-planet morph globe and switches to `<planetTerrain>` below some altitude.
+- **B. Contract now, build after G5 (recommended).** In G5 `<planet>` gets the morph state, and the terrain says it
+  draws morph 0 only, so the parent's inputs do not change later. A spike on the two risks (precision and the cut)
+  comes next, then a step G6 builds the morph.
+- **C. Build it before G5.** G5 waits for it.
+
+**Open:**
+- ~~Which option.~~ B, chosen 2026-10-29.
+- The closest zoom on the map, which sets the precision target: a tactical view near the ground, or a strategic map
+  seen from altitude.
+- Equal Earth or equirectangular for the terrain's map (the cell planet defaults to Equal Earth).
+- Whether the map tiles sideways at morph 1 (Plan 055's D7).
 
 ## Suite (proposed): `lod-surface-baseline` v1
 
@@ -365,7 +451,7 @@ fine reference during a slow scripted zoom. Both are open to the review.
 | D8 | Where the code lives first and the entry-point names | **Decided** 2026-10-24 (owner): `projects/demo-app/src/app/pages/lod-surface-lab/`, promoted to an entry point (name such as `triangular-engine/lod-surface`) after M2 |
 | D9 | Scale range tested in v1 | **Decided** 2026-10-24 (owner): plane to 100 km, spheres 10 km and 600 km; 6,371 km is spike S1 only and informs scope, not a gate |
 | D10 | Plan 057: park its race until this plan's M3, keeping W1-W17 as the long-term list | **Decided** 2026-10-24 (owner): parked |
-| D11 | Globe-to-map morph | Agreed in review: out of v1 |
+| D11 | Globe-to-map morph | Agreed in review: out of v1. **Reopened** 2026-10-29 by the owner at the G3 check: proposal in §Globe-to-map morph. **Decided** 2026-10-29 (owner): option B, the morph state on `<planet>` in G5, then a spike, then G6; zoom, projection and tiling open |
 | D12 | Cube warp | Agreed in review: equal-angle default, toggle kept; value checked by measurement |
 | D13 | Water v0 look and motion bar (sines or Gerstner; acceptable transition motion) | **Decided** 2026-10-24 (owner): sines (Q = 0) first; the owner judges Gerstner and transition motion by eye at the M3 review; pops are fine until then |
 | D14 | Cliff detail by vector displacement of the sheet (M6, §Cliff detail), which brings sheet overhangs into scope while arches, caves and tunnels stay with Plan 055 | **Decided** 2026-10-25 (owner): accepted as M6; the slope criterion goes into M2 |

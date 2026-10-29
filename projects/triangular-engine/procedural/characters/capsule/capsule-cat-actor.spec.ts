@@ -6,7 +6,7 @@ describe('CapsuleCatActor', () => {
   it('blends the widened front dome smoothly into the unchanged rear body', () => {
     const r = 0.28, length = 0.52;
     expect(catHeadScale(-length / 2, r, length)).toBe(1);
-    expect(catHeadScale(length / 2, r, length)).toBeCloseTo(1.23, 6);
+    expect(catHeadScale(length / 2, r, length)).toBeCloseTo(1.17, 6);
     const start = length / 2 - r * 0.75;
     expect(catHeadScale(start + 0.0001, r, length) - catHeadScale(start, r, length)).toBeLessThan(0.00001);
     const geometry = createCatBodyGeometry(r, length);

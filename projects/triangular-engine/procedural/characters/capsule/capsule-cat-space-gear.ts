@@ -21,6 +21,7 @@ import {
   TorusGeometry,
 } from 'three';
 import type { CapsuleCatCharacterDNA, CapsuleCatPackId } from 'triangular-engine/characters';
+import { catHeadScale } from './capsule-cat-shape';
 
 export interface CapsuleCatSpaceGearResult {
   readonly torsoGearGroup: Group;
@@ -39,14 +40,15 @@ function buildBubbleHelmet(
   const helmet = new Group();
   helmet.name = 'capsule-cat-bubble-helmet';
 
-  // Angled neck collar socket: sits at neck seam, tilted forward under chin and back behind ears
+  // The neck ring follows the capsule cross-section behind the ears.
   const collarGroup = new Group();
-  collarGroup.position.set(0, r * 0.12, length * 0.5);
-  collarGroup.rotation.x = 0.32; // ~18.3 degrees forward tilt
+  const neckZ = length * 0.5 - r * 0.45;
+  collarGroup.position.set(0, 0, neckZ);
 
-  const collarRadius = r * 1.24;
+  const collarRadius = r * (catHeadScale(neckZ, r, length) + 0.015);
   const collarGeo = new TorusGeometry(collarRadius, r * 0.065, 12, 36);
   const collarRing = new Mesh(collarGeo, darkMat);
+  collarRing.name = 'capsule-cat-helmet-collar';
   collarRing.castShadow = true;
   collarGroup.add(collarRing);
 
@@ -55,11 +57,14 @@ function buildBubbleHelmet(
   const lip = new Mesh(lipGeo, darkMat);
   collarGroup.add(lip);
 
-  // Transparent bubble dome attached flush to the collar ring, curving over head and ears
-  const domeRadius = r * 1.53;
-  const domeGeo = new SphereGeometry(domeRadius, 36, 24, 0, Math.PI * 2, 0, Math.PI * 0.70);
+  // Match the spherical cap's open rim to the ring; its widest section clears the ears.
+  const domeRadius = r * 1.33;
+  const domeAngle = Math.PI - Math.asin(collarRadius / domeRadius);
+  const domeGeo = new SphereGeometry(domeRadius, 36, 24, 0, Math.PI * 2, 0, domeAngle);
   domeGeo.rotateX(Math.PI * 0.5);
   const dome = new Mesh(domeGeo, glassMat);
+  dome.name = 'capsule-cat-helmet-dome';
+  dome.position.z = -domeRadius * Math.cos(domeAngle);
   dome.renderOrder = 2;
   dome.castShadow = false;
   dome.receiveShadow = false;
@@ -78,14 +83,17 @@ function buildPetJetpack(
 ): Group {
   const pack = new Group();
   pack.name = 'capsule-cat-pet-jetpack';
-  const y = r * 0.96;
   const z = -length * 0.06;
 
   const tankLength = length * 0.65;
   const tankRadius = r * 0.32;
+  // The front of the body widens into the head. Seat the tank against the
+  // highest part of the back beneath its cylindrical section.
+  const y = r * catHeadScale(z + tankLength * 0.5, r, length) + tankRadius - r * 0.02;
   const tankGeo = new CapsuleGeometry(tankRadius, tankLength, 14, 24);
   tankGeo.rotateX(Math.PI * 0.5);
   const tank = new Mesh(tankGeo, orangeMat);
+  tank.name = 'capsule-cat-jetpack-tank';
   tank.position.set(0, y, z);
   tank.castShadow = true;
   tank.receiveShadow = true;
@@ -179,8 +187,8 @@ function buildMiniPack(
 ): Group {
   const pack = new Group();
   pack.name = packId === 'mini_pack_blue' ? 'capsule-cat-mini-pack-blue' : 'capsule-cat-mini-pack-brown';
-  const y = r * 0.98;
   const z = -length * 0.04;
+  const y = r * catHeadScale(z + length * 0.14, r, length) + r * 0.26;
 
   if (packId === 'mini_pack_brown') {
     packMat.color.set('#8e5d3b');
@@ -191,6 +199,7 @@ function buildMiniPack(
   const bodyGeo = new CapsuleGeometry(r * 0.28, length * 0.28, 10, 18);
   bodyGeo.rotateX(Math.PI * 0.5);
   const body = new Mesh(bodyGeo, packMat);
+  body.name = 'capsule-cat-mini-pack-body';
   body.position.set(0, y, z);
   body.castShadow = true;
   body.receiveShadow = true;
@@ -285,11 +294,11 @@ export function buildCapsuleCatSpaceGear(dna: CapsuleCatCharacterDNA): CapsuleCa
 
     const r = nextDna.bodyRadius;
     const length = nextDna.bodyLength;
-    const neckZ = length * 0.5;
+    const neckZ = length * 0.5 - r * 0.45;
 
     // Standalone neck collar ring when there is no helmet but a pack or harness is worn
     if (!nextDna.helmet && (nextDna.pack !== 'none' || nextDna.harness)) {
-      const collarGeo = new TorusGeometry(r * 1.24, r * 0.07, 10, 36);
+      const collarGeo = new TorusGeometry(r * (catHeadScale(neckZ, r, length) + 0.015), r * 0.07, 10, 36);
       const collar = new Mesh(collarGeo, darkMat);
       collar.position.set(0, 0, neckZ);
       collar.castShadow = true;
