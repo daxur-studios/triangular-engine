@@ -112,7 +112,7 @@ export const CAT_EMOTIONS_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
       gait: 'idle',
       cameraFraming: 'front',
     }),
-    scenario('cat-disgusted', 'Space Cat: Disgusted (Curled Lip, Scrunched Glare, Slight Fang)', {
+    scenario('cat-disgusted', 'Space Cat: Disgusted (Downturned Mouth, Scrunched Glare)', {
       emotion: 'disgusted',
       gait: 'idle',
       cameraFraming: 'front',

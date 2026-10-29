@@ -21,6 +21,7 @@ import type {
   CapsuleCatCharacterDNA,
   CapsuleCatSdfMouthUniforms,
 } from 'triangular-engine/characters';
+import { createCatBodyGeometry } from './capsule-cat-shape';
 
 export interface CapsuleCatBodyUniformMap {
   uFurColor: { value: Color };
@@ -90,7 +91,7 @@ export function createCapsuleCatBodyMaterial(
     metalness: 0.02,
   });
 
-  material.customProgramCacheKey = () => 'capsule-cat-body-sdf-v3';
+  material.customProgramCacheKey = () => 'capsule-cat-body-sdf-v4';
 
   material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms) => {
     Object.assign(shader.uniforms, uniforms);
@@ -186,7 +187,8 @@ uniform float uMouthAsymmetry;`,
 
     float archR = halfW * mix(0.50, 0.42, meowAmt);
     float xNorm = clamp(mp.x / max(0.05, halfW), -1.5, 1.5);
-    float curveY = (1.0 - xNorm * xNorm) * uMouthCurve * 0.055;
+    // Curve the corners, not the centre: negative expressions pull them down.
+    float curveY = xNorm * xNorm * uMouthCurve * 0.09;
 
     // Twin-arch omega upper lip with drooping corners when frowning
     vec2 archP = vec2(abs(mp.x) - archR, mp.y - curveY);
@@ -196,7 +198,12 @@ uniform float uMouthAsymmetry;`,
     // Philtrum seam connecting from nose down to the twin arches
     float dPhiltrum = max(abs(mp.x) - 0.009, -(mp.y - curveY));
     dPhiltrum = max(dPhiltrum, (mp.y - curveY) - 0.14);
-    float dClosedMouth = min(dArch, dPhiltrum);
+    // Replace the smiling omega with a single downturned line for negative
+    // expressions. Its centre stays at the philtrum; its corners fall.
+    float frown = smoothstep(0.05, 0.55, -uMouthCurve);
+    float frownY = -0.11 * xNorm * xNorm * frown;
+    float dFrown = max(abs(mp.y - frownY) - 0.014, abs(mp.x) - halfW);
+    float dClosedMouth = min(mix(dArch, dFrown, frown), dPhiltrum);
 
     // Oval lower cavity for open mouth / meow
     vec2 ovalP = vec2(
@@ -247,11 +254,10 @@ uniform float uMouthAsymmetry;`,
       baseCol = mix(baseCol, interior, mouthMask);
     }
 
-    // Keep the twin-arch lip line defined over an open meow
-    float lipLine = abs(length(archP) - archR) - mix(0.012, 0.016, openBlend);
-    lipLine = max(lipLine, clipY);
-    float lipMask = (1.0 - smoothstep(-aa, aa, lipLine)) * mix(0.65, 0.95, openBlend);
-    baseCol = mix(baseCol, vec3(0.18, 0.07, 0.08), lipMask);
+    // Retain the philtrum when open, but do not overlay the closed smile on
+    // the cavity: that creates a second, misleading grin under the teeth.
+    float philtrumMask = (1.0 - smoothstep(-aa, aa, dPhiltrum)) * openBlend;
+    baseCol = mix(baseCol, vec3(0.18, 0.07, 0.08), philtrumMask);
   }
 
   diffuseColor.rgb = baseCol;
@@ -267,8 +273,7 @@ uniform float uMouthAsymmetry;`,
  * cat SDF mouth. The geometry is rotated so its long axis follows local +Z.
  */
 export function buildCapsuleCatBodyMesh(dna: CapsuleCatCharacterDNA): CapsuleCatBodyMeshResult {
-  const geometry = new CapsuleGeometry(dna.bodyRadius, dna.bodyLength, 32, 48);
-  geometry.rotateX(Math.PI * 0.5);
+  const geometry = createCatBodyGeometry(dna.bodyRadius, dna.bodyLength);
   const { material, uniforms } = createCapsuleCatBodyMaterial(dna);
   const mesh = new Mesh(geometry, material);
   mesh.name = 'capsule-cat-body';

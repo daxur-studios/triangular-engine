@@ -891,6 +891,111 @@ describe('Plan 059 suite', () => {
     expect(zoom).toBeUndefined();
   });
 
+  describe('settling', () => {
+    const TIMEOUT = 'gpuTiming: GpuReadbackTimeoutError: GPU timestamp readback timed out after 500 ms';
+    const scenario = { id: 'test', label: 'test', settings: DEFAULT_SETTINGS, warmupMs: 0, durationMs: 100 } as TestScenario<LodSurfaceTestSettings>;
+
+    /** A host that reports `errorAt` (ms on the fake clock) as engine errors, and a pipeline that is ready from `pipelineAt`. */
+    function settleHost(errorAt: { at: number; error: string }[], pipelineAt = 0) {
+      let now = 0;
+      let error = '';
+      const queue = [...errorAt];
+      const state = { resets: 0, now: () => now };
+      const host = {
+        read: () => DEFAULT_SETTINGS, renderedFrames: () => Math.floor(now / 16),
+        errors: () => error, resetErrors: () => { error = ''; state.resets++; },
+        heightSourceReady: () => true, pipelineReady: () => now >= pipelineAt,
+      } as unknown as LodSurfaceTestHost;
+      spyOn(performance, 'now').and.callFake(() => now);
+      const context = {
+        mode: 'quick', repetition: 1, signal: new AbortController().signal,
+        wait: (ms: number) => {
+          now += ms;
+          if (queue.length && now >= queue[0].at) error = queue.shift()!.error;
+          return Promise.resolve();
+        },
+      } as unknown as TestContext;
+      return { host, context, state };
+    }
+
+    it('tolerates up to two GPU timestamp readback timeouts, clears them and settles afterwards', async () => {
+      const { host, context, state } = settleHost([{ at: 20, error: TIMEOUT }, { at: 60, error: TIMEOUT }]);
+      await createLodSurfaceTestAdapter(host).ready!(context, scenario);
+      expect(state.resets).toBe(2);
+      expect(state.now()).toBeGreaterThan(60);
+    });
+
+    it('throws when a settle sees a third readback timeout', async () => {
+      const { host, context } = settleHost([{ at: 20, error: TIMEOUT }, { at: 40, error: TIMEOUT }, { at: 60, error: TIMEOUT }]);
+      await expectAsync(createLodSurfaceTestAdapter(host).ready!(context, scenario)).toBeRejectedWithError(/at most 2 tolerated/);
+    });
+
+    it('still throws on any other engine error', async () => {
+      const { host, context } = settleHost([{ at: 20, error: 'render: boom' }]);
+      await expectAsync(createLodSurfaceTestAdapter(host).ready!(context, scenario)).toBeRejectedWithError('render: boom');
+    });
+
+    it('does not settle while the surface pipeline is still compiling', async () => {
+      const { host, context, state } = settleHost([], 1_000);
+      await createLodSurfaceTestAdapter(host).ready!(context, scenario);
+      expect(state.now()).toBeGreaterThanOrEqual(1_000);
+    });
+  });
+
+  describe('timer timeouts around the crack probe', () => {
+    const TIMEOUT = 'gpuTiming: GpuReadbackTimeoutError: GPU timestamp readback timed out after 500 ms';
+
+    /** A still case whose window leaves `windowError` behind and whose probe leaves `probeError`. */
+    async function measureStill(windowError: string, probeError: string) {
+      let error = '';
+      let now = 0;
+      const host = {
+        read: () => DEFAULT_SETTINGS, renderedFrames: () => Math.floor(now / 16),
+        errors: () => error, resetErrors: () => { error = ''; }, backendIsWebGpu: () => true,
+        frame: () => ({ stats: { leaves: 1, drawn: 1, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0 }, instances: 1, trianglesPerLeaf: 2, drawCalls: 1, rendererTriangles: 2, drawingBuffer: [1, 1] as const }),
+        onRenderComplete: () => () => undefined, selectionSamples: () => [0.1], leafSamples: () => [1], levelChangeSamples: () => [0], levelChangeAllSamples: () => [0], resetSamples: () => undefined,
+        isSampling: () => false, startSampling: () => undefined, gpuSamplesSoFar: () => [], setZoomProgress: () => undefined, setSweepTime: () => undefined, setTurnTime: () => undefined,
+        stopSampling: () => ({ frames: 100, cpuMedianMs: 1, cpuP95Ms: 1, wallMedianMs: 6, wallP95Ms: 6, gpuMedianMs: null, gpuSamples: 0, invalidReasons: [], verdict: 'ok' as const }),
+        crackProbe: () => { error ||= probeError; return Promise.resolve({ cracks: 0, masked: 0, surface: 10, background: 10, width: 4, height: 4 }); },
+        environment: () => ({}),
+      } as unknown as LodSurfaceTestHost;
+      spyOn(performance, 'now').and.callFake(() => now);
+      const context = {
+        mode: 'quick', repetition: 1, signal: new AbortController().signal,
+        wait: (ms: number) => { now += ms; return Promise.resolve(); },
+        measureWindow: () => { error ||= windowError; return Promise.resolve(); },
+      } as unknown as TestContext;
+      const scenario = { id: 'test', label: 'test', settings: DEFAULT_SETTINGS, warmupMs: 0, durationMs: 100, quickMs: 100 } as TestScenario<LodSurfaceTestSettings>;
+      const observation = await createLodSurfaceTestAdapter(host).measure(scenario, context);
+      return { observation, error: () => error, check: observation.checks?.find((check) => check.name === 'No engine or console error') };
+    }
+
+    it('clears and counts a readback timeout that only the probe introduced', async () => {
+      const result = await measureStill('', TIMEOUT);
+      expect(result.check?.passed).toBeTrue();
+      expect(result.error()).toBe('');
+      expect(result.observation.details?.['probeTimerErrorsTolerated']).toBe(1);
+    });
+
+    it('still fails a readback timeout inside the measured window, even if the probe adds none', async () => {
+      const result = await measureStill(TIMEOUT, '');
+      expect(result.check?.passed).toBeFalse();
+      expect(result.observation.details?.['probeTimerErrorsTolerated']).toBeUndefined();
+    });
+
+    it('keeps an error that was there before the probe', async () => {
+      const before = await measureStill(TIMEOUT, TIMEOUT);
+      expect(before.check?.passed).toBeFalse();
+      expect(before.observation.details?.['probeTimerErrorsTolerated']).toBeUndefined();
+    });
+
+    it('keeps a non-timer error the probe causes', async () => {
+      const other = await measureStill('', 'render: boom');
+      expect(other.check?.passed).toBeFalse();
+      expect(other.error()).toBe('render: boom');
+    });
+  });
+
   it('probes five distinct positions on the biome traversal outside the timing window', async () => {
     let t: number | undefined = 0;
     let now = 0;

@@ -154,11 +154,12 @@ function transformLocalToWorld(
   oy: number,
   oz: number,
 ): CharacterVector3 {
-  const cosX = Math.cos(rx);
-  const sinX = Math.sin(rx);
-  const y1 = ly * cosX - lz * sinX;
-  const z1 = ly * sinX + lz * cosX;
-  const x1 = lx;
+  // Match Three.js's default XYZ Euler: vectors are rotated Z, then Y, then X.
+  const cosZ = Math.cos(rz);
+  const sinZ = Math.sin(rz);
+  const x1 = lx * cosZ - ly * sinZ;
+  const y1 = lx * sinZ + ly * cosZ;
+  const z1 = lz;
 
   const cosY = Math.cos(ry);
   const sinY = Math.sin(ry);
@@ -166,11 +167,11 @@ function transformLocalToWorld(
   const z2 = -x1 * sinY + z1 * cosY;
   const y2 = y1;
 
-  const cosZ = Math.cos(rz);
-  const sinZ = Math.sin(rz);
-  const x3 = x2 * cosZ - y2 * sinZ;
-  const y3 = x2 * sinZ + y2 * cosZ;
-  const z3 = z2;
+  const cosX = Math.cos(rx);
+  const sinX = Math.sin(rx);
+  const x3 = x2;
+  const y3 = y2 * cosX - z2 * sinX;
+  const z3 = y2 * sinX + z2 * cosX;
 
   return characterVector3(x3 + ox, y3 + oy, z3 + oz);
 }
@@ -313,7 +314,9 @@ export function sampleCapsuleCatLocomotion(
   const floatLift = mode === 'float' ? 0.05 : 0;
   const lateralSpread = 1.08;
 
-  const bodyOrigin = characterVector3(bodySwayX, bodyCenterY + bodyBounceY, 0);
+  const bodyDrop = (input.emotion === 'fearful' || dna.panicked) && input.emotion !== 'angry'
+    ? r * 0.15 : 0;
+  const bodyOrigin = characterVector3(bodySwayX, bodyCenterY - bodyDrop + bodyBounceY, 0);
 
   const frontLeftSocket = transformLocalToWorld(
     -lateral,
@@ -443,7 +446,6 @@ export function sampleCapsuleCatLocomotion(
   let tailAmpMult = 1.0;
   let tailTipYOffset = 0.0;
   let tailRadiusMult = 1.0;
-  let bodyDrop = 0.0;
 
   if (emotion === 'angry') {
     // Fast, aggressive tail lashes with wide horizontal whip
@@ -456,7 +458,6 @@ export function sampleCapsuleCatLocomotion(
     tailAmpMult = 0.45;
     tailTipYOffset = -r * 0.85;
     tailRadiusMult = 1.55;
-    bodyDrop = r * 0.15;
   } else if (emotion === 'sad') {
     // Drooping limp tail with barely any sway
     tailFreqMult = 0.6;

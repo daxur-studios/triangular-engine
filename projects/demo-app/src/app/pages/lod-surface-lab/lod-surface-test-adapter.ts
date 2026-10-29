@@ -45,6 +45,8 @@ export interface LodSurfaceTestHost {
   backendIsWebGpu(): boolean;
   /** False while a baked height source is still baking: the surface drawn is not yet the one the settings name. */
   heightSourceReady?(): boolean;
+  /** False while the newest surface mesh is still compiling its pipeline (`compileAsync`): it is not drawn yet. */
+  pipelineReady?(): boolean;
   frame(): LodSurfaceFrameInfo;
   onRenderComplete(callback: (renderedAt: number) => void): () => void;
   /** Main-thread ms of selection plus instance upload, one sample per frame since the last reset. */
@@ -77,6 +79,14 @@ export interface LodSurfaceTestHost {
 const READY_TIMEOUT_MS = 60_000;
 const STALL_MS = 5_000;
 const SETTLE_FRAMES = 3;
+/**
+ * The engine's frame timer gives up on a readback while the GPU is busy compiling a pipeline: expected while the lab settles
+ * (a first pipeline can still stall it) and around a crack probe (its first run compiles `probeMaterial`), not a fault.
+ * Tolerated in those two places only; inside the measured window it still fails the case.
+ */
+const GPU_TIMER_ERROR = /^gpuTiming: GpuReadbackTimeoutError/;
+/** Most such timeouts one settle tolerates; more means the GPU is not coming back. */
+const MAX_GPU_TIMER_ERRORS = 2;
 const MIN_WINDOW_FRAMES = 60;
 /** `performance.now()` is coarsened to 0.1 ms here; GPU timestamps step at about 1 µs. */
 const TIMER_STEP_MS = 0.1;
@@ -152,24 +162,44 @@ function levelChangeMetrics(changes: readonly number[], all: readonly number[], 
 }
 
 export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAdapter<LodSurfaceTestSettings, LodSurfaceTestSettings> {
+  /** GPU timestamp readback timeouts the latest settle tolerated (see {@link GPU_TIMER_ERROR}); reported in the result's details. */
+  let settleTimerErrors = 0;
+
   async function waitSettled(scenario: TestScenario<LodSurfaceTestSettings>, context: TestContext): Promise<void> {
     const began = performance.now();
     let settled = 0;
     let lastFrame = host.renderedFrames();
-    while (settled < SETTLE_FRAMES) {
+    let timerErrors = 0;
+    settleTimerErrors = 0;
+    /** Throws on an error that is not a tolerated timer timeout; true when it cleared one (which restarts the settle). */
+    const drainErrors = (): boolean => {
       const error = host.errors();
-      if (error) throw new Error(error);
-      const frame = host.renderedFrames();
-      const mismatches = settingsMismatches(host.read(), scenario.settings);
-      if (host.heightSourceReady?.() === false) settled = 0;
-      else if (mismatches.length > 0) settled = 0;
-      else if (frame > lastFrame) settled++;
-      lastFrame = frame;
-      if (performance.now() - began > READY_TIMEOUT_MS) {
-        throw new Error(`Lab not settled after ${READY_TIMEOUT_MS / 1000} s: ${mismatches.join('; ') || 'no frames rendered'}`);
+      if (!error) return false;
+      if (!GPU_TIMER_ERROR.test(error)) throw new Error(error);
+      if (++timerErrors > MAX_GPU_TIMER_ERRORS) {
+        throw new Error(`${error} (${timerErrors} GPU timestamp readback timeouts while settling, at most ${MAX_GPU_TIMER_ERRORS} tolerated)`);
       }
-      await context.wait(16);
-    }
+      host.resetErrors();
+      settleTimerErrors = timerErrors;
+      return true;
+    };
+    // A timeout can still arrive just after the last settled frame.
+    do {
+      settled = 0;
+      while (settled < SETTLE_FRAMES) {
+        const tolerated = drainErrors();
+        const frame = host.renderedFrames();
+        const mismatches = settingsMismatches(host.read(), scenario.settings);
+        if (tolerated || host.heightSourceReady?.() === false || host.pipelineReady?.() === false) settled = 0;
+        else if (mismatches.length > 0) settled = 0;
+        else if (frame > lastFrame) settled++;
+        lastFrame = frame;
+        if (performance.now() - began > READY_TIMEOUT_MS) {
+          throw new Error(`Lab not settled after ${READY_TIMEOUT_MS / 1000} s: ${mismatches.join('; ') || 'no frames rendered'}`);
+        }
+        await context.wait(16);
+      }
+    } while (drainErrors());
   }
 
   /** Flies the scripted zoom over the action time, one step per rendered frame. */
@@ -230,6 +260,20 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
       let motionMismatches: string[] = [];
       let motionSeconds = 0;
       const moving = settings.motion !== undefined;
+      let probeTimerErrors = 0;
+      /**
+       * Runs a crack probe (and the frames after it): a readback timeout it alone introduces is cleared and counted, like
+       * the planet shape lab's probes. An error already present before it, or any other error, stays.
+       */
+      const probing = async <T>(run: () => Promise<T>): Promise<T> => {
+        const before = host.errors();
+        const result = await run();
+        if (!before && GPU_TIMER_ERROR.test(host.errors())) {
+          host.resetErrors();
+          probeTimerErrors++;
+        }
+        return result;
+      };
       host.resetSamples();
       host.startSampling();
       const offRender = host.onRenderComplete((renderedAt) => {
@@ -283,12 +327,15 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
           for (let i = 0; i <= 16; i++) {
             host.setZoomProgress(i / 16);
             await waitForFrames(host, 2, context);
-            if (i % 4 === 0) traversalProbes.push(await host.crackProbe());
+            if (i % 4 === 0) traversalProbes.push(await probing(() => host.crackProbe()));
           }
         } finally { host.setZoomProgress(undefined); }
       }
-      const probe = settings.motion === 'zoom' || settings.motion === 'biome-sweep' ? undefined : await host.crackProbe();
-      await waitForFrames(host, 2, context);
+      let probe = undefined as (CrackCount & { readonly width: number; readonly height: number }) | undefined;
+      await probing(async () => {
+        if (settings.motion !== 'zoom' && settings.motion !== 'biome-sweep') probe = await host.crackProbe();
+        await waitForFrames(host, 2, context);
+      });
       const mismatches = moving ? motionMismatches : settingsMismatches(host.read(), settings);
       const error = host.errors();
       const checks: TestCheck[] = [
@@ -363,6 +410,8 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
           unmet: info.stats.unmet, capHit: info.stats.capHit, deepestLevel: info.stats.deepestLevel,
           drawCalls: info.drawCalls, rendererTriangles: info.rendererTriangles,
           drawingBufferWidth: info.drawingBuffer[0], drawingBufferHeight: info.drawingBuffer[1],
+          ...(settleTimerErrors > 0 ? { settleTimerErrorsTolerated: settleTimerErrors } : {}),
+          ...(probeTimerErrors > 0 ? { probeTimerErrorsTolerated: probeTimerErrors } : {}),
           ...(info.bake ? { bakeSource: info.bake.source, bakeSide: info.bake.side, bakeRoundTripMs: info.bake.roundTripMs, twinErrorMaxM: maxOf(info.bake.twinErrorM), twinErrorP95M: percentile(info.bake.twinErrorM, 0.95) } : {}),
           ...(probe ? { crackPixels: probe.cracks, crackMaskedPixels: probe.masked, probeSurfacePixels: probe.surface, probeWidth: probe.width, probeHeight: probe.height } : {}),
         },

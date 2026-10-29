@@ -72,6 +72,28 @@ describe('capsule-cat-locomotion', () => {
     const fast = sampleSuspension('goofy_walk', 0.4, 2);
     expect(Math.abs(fast.phase)).toBeGreaterThan(Math.abs(slow.phase));
   });
+
+  it('keeps the leg sockets on the rotated and lowered torso', () => {
+    for (const emotion of ['neutral', 'fearful'] as const) {
+      const dna = DEFAULT_CAPSULE_CAT_DNA;
+      const sample = sampleCapsuleCatLocomotion({ mode: 'bound_run', elapsedSeconds: 0.37, dna, emotion });
+      const x = -dna.bodyRadius * 0.56;
+      const y = -dna.bodyRadius * 0.52;
+      const z = dna.bodyLength * 0.28;
+      const a = sample.bodyTiltX, b = sample.bodyYawY, c = sample.bodyRollZ;
+      // XYZ Euler rotation matrix, followed by the rendered torso translation.
+      const expectedX = Math.cos(b) * Math.cos(c) * x - Math.cos(b) * Math.sin(c) * y + Math.sin(b) * z;
+      const expectedY = (Math.cos(a) * Math.sin(c) + Math.sin(a) * Math.sin(b) * Math.cos(c)) * x
+        + (Math.cos(a) * Math.cos(c) - Math.sin(a) * Math.sin(b) * Math.sin(c)) * y
+        - Math.sin(a) * Math.cos(b) * z;
+      const expectedZ = (Math.sin(a) * Math.sin(c) - Math.cos(a) * Math.sin(b) * Math.cos(c)) * x
+        + (Math.sin(a) * Math.cos(c) + Math.cos(a) * Math.sin(b) * Math.sin(c)) * y
+        + Math.cos(a) * Math.cos(b) * z;
+      expect(sample.frontLeft.p0.x).toBeCloseTo(expectedX + sample.bodySwayX, 6);
+      expect(sample.frontLeft.p0.y).toBeCloseTo(expectedY + sample.bodyCenterY + sample.bodyBounceY, 6);
+      expect(sample.frontLeft.p0.z).toBeCloseTo(expectedZ, 6);
+    }
+  });
 });
 
 function sampleSuspension(

@@ -8,12 +8,24 @@ runbook: /docs/runbook/070_capsule-doodle-space-cats.md
 map_schema: 1
 document_id: plan-070
 initiative_id: "capsule-doodle-space-cats"
-performance: []
+performance:
+  - id: cat-emotions-v1
+    url: http://triangular-demo.localhost:4200/characters-lab?testSuite=cat-emotions&testVersion=1&testProfile=human-observed&testMode=quick&testRepetitions=1&testAutoStart=1
+    status: runnable-functional
+    evidence:
+      - artifacts/test-runs/cat-emotions@v1/2026-10-29T13-46-59-264Z_headless-hardware_quick_0d50724c-c716e3f0.json
+      - artifacts/test-runs/cat-emotions@v1/2026-10-29T13-50-36-151Z_headless-hardware_quick_0d50724c-25e23b60.json
+  - id: cat-lineup-v1
+    url: http://triangular-demo.localhost:4200/characters-lab?testSuite=cat-lineup&testVersion=1&testProfile=human-observed&testMode=quick&testRepetitions=1&testAutoStart=1
+    status: runnable-functional
+    evidence:
+      - artifacts/test-runs/cat-lineup@v1/2026-10-29T13-47-33-761Z_headless-hardware_quick_0d50724c-c716e3f0.json
+      - artifacts/test-runs/cat-lineup@v1/2026-10-29T13-52-37-372Z_headless-hardware_quick_0d50724c-26ae6a75.json
 ---
 
 # Plan 070: Capsule Doodle Space Cats
 
-Status: **done** (unit tests: see ER 070). Evidence and decisions: [ER 070](/docs/runbook/070_capsule-doodle-space-cats.md).
+Status: **in progress** (visual refinement). Evidence and decisions: [ER 070](/docs/runbook/070_capsule-doodle-space-cats.md).
 
 ## Intended outcome
 
@@ -38,6 +50,7 @@ Out of scope: every dog on the reference sheet; dog presets, dog animation and d
 - **cat-core** — Add `capsule-cat-dna.ts`, `capsule-cat-locomotion.ts` and `capsule-cat-face-projection.ts` with unit specs to `triangular-engine/characters`, and export them from the entry point. Acceptance: the seven presets normalize cleanly; the four gaits return finite four-leg and tail samples; the face projection covers `:3`, `MEOW`, blink, ear flatten and whisker spread.
 - **cat-procedural** — Add `CapsuleCatActor`, `buildCapsuleCatBodyMesh`, `buildCapsuleCatFaceRig`, `CapsuleCatTailMesh`, `buildCapsuleCatPaw` and `buildCapsuleCatSpaceGear` with unit specs to `triangular-engine/procedural`, and export them. Acceptance: the actor builds every preset; limb and tail buffers stay allocated across updates; gear switches helmet/pack/harness cleanly.
 - **cat-lab** — Add a **Capsule Space Cats** toggle to `/characters-lab` with Hero Customizer and 7-Cat Concept Sheet Lineup, including preset, gait, pattern, pack, fur palette and proportion controls. Acceptance: the mode renders the hero and all seven presets, and switching presets follows each preset's gait.
+- **cat-refinement** — Refine expressive mouth and eyes and smoothly enlarge the head within the capsule body; review the seven cats and their motion against the new reference. Acceptance: distinct closed frown and open-mouth shapes, visually reviewed emotion and multi-angle head views, functional browser suites and focused tests pass, and remaining visual limitations are recorded.
 
 ## Relationships
 
@@ -53,8 +66,9 @@ Out of scope: every dog on the reference sheet; dog presets, dog animation and d
 | cat-core       | done  |
 | cat-procedural | done  |
 | cat-lab        | done  |
+| cat-refinement | in_progress |
 
-<!-- tri:review version="1" scope-hash="fea92ec990df5149a9a8b2a9e700ab156bbdda5c4a98c5b84896d40876ac3779" reviewed="2026-10-28" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="24bb93d255cf7c668b3a1a46f82599834e27405945230ba13782368e2c9f979a" reviewed="2026-10-29" reviewer="agent" -->
 <!-- /tri:review -->
 
 ## Delivery progress

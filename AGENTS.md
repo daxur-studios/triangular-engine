@@ -72,7 +72,12 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
   (`npm run test:summary '--' --suite <id>`), or npm swallows the flags and prints every suite.
 - **The demo app is already served.** The owner keeps it running at `http://triangular-demo.localhost:4200`, with the
   result receiver. Never start `ng serve` or another dev server; point browser runs and `npm run test:run --url` at
-  that address. If it does not load, tell the owner instead of starting one.
+  that address. Open it in a browser before concluding that it is unavailable: on Windows, PowerShell/.NET DNS
+  lookups and `Invoke-WebRequest` can fail for `triangular-demo.localhost` even when Chromium opens it successfully.
+  For a shell-only connectivity check, `http://127.0.0.1:4200/characters-lab` can confirm an HTTP response; that
+  alone does not verify the intended hostname, browser rendering, or result receiver. Keep the documented hostname
+  for browser and test-run URLs. If the page itself does not load in the browser, tell the owner instead of starting
+  a server.
 - Timings from SwiftShader runs are not hardware numbers. Runs with `--profile headless-hardware` use the real GPU,
   but compare them only with other headless runs. Check which GPU adapter a run recorded.
 

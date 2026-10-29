@@ -163,6 +163,138 @@ describe('PlanetTerrainComponent', () => {
     material.dispose();
   });
 
+  describe('pipeline warm-up', () => {
+    interface Pending { readonly mesh: unknown; readonly meshVisible: boolean; resolve(): void; reject(error: unknown): void }
+    let pending: Pending[];
+    let compileAsync: jasmine.Spy;
+    const flush = () => new Promise<void>((resolve) => setTimeout(resolve));
+
+    beforeEach(() => {
+      pending = [];
+      compileAsync = jasmine.createSpy('compileAsync').and.callFake((mesh: { visible: boolean }) => new Promise<void>((resolve, reject) => {
+        pending.push({ mesh, meshVisible: mesh.visible, resolve, reject });
+      }));
+      engine.renderer = { ...webGpu, compileAsync };
+    });
+
+    it('keeps the terrain hidden, still selecting, until compileAsync resolves, then shows it', async () => {
+      const fixture = create();
+      const terrain = fixture.componentInstance.terrain()!;
+      beforeRender$.next();
+      expect(compileAsync).toHaveBeenCalledTimes(1);
+      expect(compileAsync.calls.mostRecent().args).toEqual([terrain.surface.mesh, camera, scene]);
+      // The mesh is compiled, not its group: the group is hidden, which compileAsync would skip.
+      expect(pending[0].meshVisible).toBeTrue();
+      expect(terrain.object.visible).toBeFalse();
+      expect(terrain.stats.drawn).toBeGreaterThan(0);
+
+      beforeRender$.next();
+      expect(compileAsync).toHaveBeenCalledTimes(1);
+      expect(terrain.object.visible).toBeFalse();
+
+      pending[0].resolve();
+      await flush();
+      beforeRender$.next();
+      expect(terrain.object.visible).toBeTrue();
+      fixture.destroy();
+    });
+
+    it('re-hides and re-warms when a setting rebuilds the mesh, but not when it only updates it', async () => {
+      const fixture = create();
+      const terrain = fixture.componentInstance.terrain()!;
+      beforeRender$.next();
+      pending[0].resolve();
+      await flush();
+      beforeRender$.next();
+      expect(terrain.object.visible).toBeTrue();
+
+      fixture.componentRef.setInput('cellPixels', 6);
+      fixture.detectChanges();
+      beforeRender$.next();
+      expect(compileAsync).toHaveBeenCalledTimes(1);
+      expect(terrain.object.visible).toBeTrue();
+
+      const firstMesh = terrain.surface.mesh;
+      fixture.componentRef.setInput('leafCap', 512);
+      fixture.detectChanges();
+      expect(terrain.surface.mesh).not.toBe(firstMesh);
+      beforeRender$.next();
+      expect(terrain.object.visible).toBeFalse();
+      expect(compileAsync).toHaveBeenCalledTimes(2);
+      expect(compileAsync.calls.mostRecent().args[0]).toBe(terrain.surface.mesh);
+
+      pending[1].resolve();
+      await flush();
+      beforeRender$.next();
+      expect(terrain.object.visible).toBeTrue();
+      fixture.destroy();
+    });
+
+    it('ignores the answer for a mesh that a rebuild has already replaced', async () => {
+      const fixture = create();
+      const terrain = fixture.componentInstance.terrain()!;
+      beforeRender$.next();
+      fixture.componentRef.setInput('leafCap', 512);
+      fixture.detectChanges();
+      beforeRender$.next();
+      expect(compileAsync).toHaveBeenCalledTimes(2);
+
+      pending[0].resolve();
+      await flush();
+      beforeRender$.next();
+      expect(terrain.object.visible).toBeFalse();
+      expect(compileAsync).toHaveBeenCalledTimes(2);
+
+      pending[1].resolve();
+      await flush();
+      beforeRender$.next();
+      expect(terrain.object.visible).toBeTrue();
+      fixture.destroy();
+    });
+
+    it('shows the terrain anyway when the compile fails, and reports it on error$', async () => {
+      const errors: { phase: string; error: unknown }[] = [];
+      const error$ = new Subject<{ phase: string; error: unknown }>();
+      error$.subscribe((event) => errors.push(event));
+      (engine as any).error$ = error$;
+      const fixture = create();
+      const terrain = fixture.componentInstance.terrain()!;
+      beforeRender$.next();
+      const failure = new Error('pipeline failed');
+      pending[0].reject(failure);
+      await flush();
+      beforeRender$.next();
+      expect(terrain.object.visible).toBeTrue();
+      expect(errors).toEqual([{ phase: 'compile', error: failure }]);
+      fixture.destroy();
+    });
+
+    it('does nothing when the answer arrives after the component is destroyed', async () => {
+      const errors: unknown[] = [];
+      const error$ = new Subject<{ phase: string; error: unknown }>();
+      error$.subscribe((event) => errors.push(event));
+      (engine as any).error$ = error$;
+      const fixture = create();
+      beforeRender$.next();
+      fixture.destroy();
+      pending[0].reject(new Error('too late'));
+      await flush();
+      expect(() => beforeRender$.next()).not.toThrow();
+      expect(errors).toEqual([]);
+      expect(compileAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not warm and stays hidden on a renderer that is not WebGPURenderer', () => {
+      engine.renderer = { isWebGLRenderer: true, compileAsync };
+      const fixture = create();
+      const terrain = fixture.componentInstance.terrain()!;
+      beforeRender$.next();
+      expect(compileAsync).not.toHaveBeenCalled();
+      expect(terrain.object.visible).toBeFalse();
+      fixture.destroy();
+    });
+  });
+
   it('answers groundAt with a sample once the terrain exists', () => {
     const fixture = TestBed.createComponent(PlanetTerrainComponent);
     expect(fixture.componentInstance.groundAt([0, 0, 10_005])).toBeUndefined();

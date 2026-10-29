@@ -44,7 +44,7 @@ function buildBubbleHelmet(
   collarGroup.position.set(0, r * 0.12, length * 0.5);
   collarGroup.rotation.x = 0.32; // ~18.3 degrees forward tilt
 
-  const collarRadius = r * 1.12;
+  const collarRadius = r * 1.24;
   const collarGeo = new TorusGeometry(collarRadius, r * 0.065, 12, 36);
   const collarRing = new Mesh(collarGeo, darkMat);
   collarRing.castShadow = true;
@@ -56,7 +56,7 @@ function buildBubbleHelmet(
   collarGroup.add(lip);
 
   // Transparent bubble dome attached flush to the collar ring, curving over head and ears
-  const domeRadius = r * 1.38;
+  const domeRadius = r * 1.53;
   const domeGeo = new SphereGeometry(domeRadius, 36, 24, 0, Math.PI * 2, 0, Math.PI * 0.70);
   domeGeo.rotateX(Math.PI * 0.5);
   const dome = new Mesh(domeGeo, glassMat);
@@ -289,7 +289,7 @@ export function buildCapsuleCatSpaceGear(dna: CapsuleCatCharacterDNA): CapsuleCa
 
     // Standalone neck collar ring when there is no helmet but a pack or harness is worn
     if (!nextDna.helmet && (nextDna.pack !== 'none' || nextDna.harness)) {
-      const collarGeo = new TorusGeometry(r * 1.02, r * 0.07, 10, 36);
+      const collarGeo = new TorusGeometry(r * 1.24, r * 0.07, 10, 36);
       const collar = new Mesh(collarGeo, darkMat);
       collar.position.set(0, 0, neckZ);
       collar.castShadow = true;

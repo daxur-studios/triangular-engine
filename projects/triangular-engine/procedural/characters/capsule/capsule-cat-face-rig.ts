@@ -28,6 +28,7 @@ import type {
   CapsuleCatFaceProjection,
   CapsuleEyeRigPose,
 } from 'triangular-engine/characters';
+import { catHeadScale } from './capsule-cat-shape';
 
 export interface CapsuleCatEyeAssembly {
   readonly root: Group;
@@ -75,16 +76,17 @@ function buildSingleCatEye(
   const ny = sinEl;
   const nz = cosEl * Math.cos(angle);
 
-  const px = r * nx;
-  const py = r * ny;
   const pz = dna.bodyLength * 0.5 + r * nz;
+  const headScale = catHeadScale(pz, r, dna.bodyLength);
+  const px = r * nx * headScale;
+  const py = r * ny * headScale;
 
   const root = new Group();
   root.name = `capsule-cat-eye-${side}`;
   root.position.set(px, py, pz);
 
   // Orient local +Z along the surface outward normal
-  const target = new Vector3(px + nx, py + ny, pz + nz);
+  const target = new Vector3(px + nx / headScale, py + ny / headScale, pz + nz);
   root.lookAt(target);
 
   // Sclera: bulging googly sphere seated slightly embedded into the head
@@ -351,6 +353,14 @@ export function buildCapsuleCatFaceRig(dna: CapsuleCatCharacterDNA): CapsuleCatF
   nose.position.set(0, r * 0.08, dna.bodyLength * 0.5 + r * 0.985);
   nose.scale.set(1.2, 0.9, 0.65);
   nose.castShadow = true;
+
+  // Eye roots were positioned on the widened dome above; move the remaining
+  // attachments onto the same continuous surface.
+  for (const attachment of [leftEar, rightEar, tuftGroup, leftWhiskers, rightWhiskers, nose]) {
+    const scale = catHeadScale(attachment.position.z, r, dna.bodyLength);
+    attachment.position.x *= scale;
+    attachment.position.y *= scale;
+  }
 
   root.add(
     leftEye.root,

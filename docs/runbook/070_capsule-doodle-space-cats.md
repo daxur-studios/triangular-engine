@@ -8,7 +8,19 @@ record_id: er-070
 scope_history_schema: 1
 plans:
   - /docs/plans/070_capsule-doodle-space-cats.md
-performance: []
+performance:
+  - id: cat-emotions-v1
+    url: http://triangular-demo.localhost:4200/characters-lab?testSuite=cat-emotions&testVersion=1&testProfile=human-observed&testMode=quick&testRepetitions=1&testAutoStart=1
+    status: runnable-functional
+    evidence:
+      - artifacts/test-runs/cat-emotions@v1/2026-10-29T13-46-59-264Z_headless-hardware_quick_0d50724c-c716e3f0.json
+      - artifacts/test-runs/cat-emotions@v1/2026-10-29T13-50-36-151Z_headless-hardware_quick_0d50724c-25e23b60.json
+  - id: cat-lineup-v1
+    url: http://triangular-demo.localhost:4200/characters-lab?testSuite=cat-lineup&testVersion=1&testProfile=human-observed&testMode=quick&testRepetitions=1&testAutoStart=1
+    status: runnable-functional
+    evidence:
+      - artifacts/test-runs/cat-lineup@v1/2026-10-29T13-47-33-761Z_headless-hardware_quick_0d50724c-c716e3f0.json
+      - artifacts/test-runs/cat-lineup@v1/2026-10-29T13-52-37-372Z_headless-hardware_quick_0d50724c-26ae6a75.json
 ---
 
 # Engineering Record 070: Capsule Doodle Space Cats
@@ -81,6 +93,49 @@ gear. The reference sheet's dogs stay out of scope.
   - `npm run test:triangular-engine:procedural` — 264 specs pass.
   - `npx ng test demo-app --watch=false --browsers=ChromeHeadless --include projects/demo-app/src/app/pages/characters-lab/**/*.spec.ts` — 5 specs pass.
   - Automated runner run: `npm run test:summary '--' --suite cat-emotions` verifies all 8 scenarios pass (`auto=pass`).
+
+### 2026-10-29 — Reference review and locomotion attachment correction
+
+- The new cat design sheet depicts a separate round head, a cylindrical body, short
+  legs and an upright hooked tail. The existing single capsule merges head and torso;
+  a silhouette redesign remains open and needs visual review from multiple angles.
+- Corrected the socket transform to match the actor's XYZ Euler rotation and applied
+  the fearful body drop to the sockets as well as the torso. Added a regression check.
+- The configured demo hostname did not resolve, so the current hero and lineup could
+  not be reviewed and the browser suites could not be rerun. The earlier passing
+  `cat-emotions@v1` result is stale and its visual review remains pending; no saved
+  `cat-lineup` result was found. No visual acceptance is implied.
+- The per-frame path currently allocates locomotion samples, vectors, face projections
+  and spring state; the handover's zero-allocation assertion is not established.
+
+### 2026-10-29 — Demo access correction
+
+- The earlier availability conclusion was incorrect: Chromium opens the documented
+  hostname even though PowerShell DNS resolution fails. The hero and seven-cat lineup
+  render in the browser. The new reference calls for a more distinct spherical head;
+  the visual redesign and detailed motion review remain open.
+- Fresh quick, noisy, headless `cat-emotions@v1` and `cat-lineup@v1` runs both
+  completed with automated verdict `pass`; visual review remains pending. These are
+  functional checks, not performance or visual acceptance.
+
+### 2026-10-29 — First head and expression refinement
+
+- Widened the front dome with a smooth transition into the existing capsule; moved
+  face attachments to the new surface. No separate head mesh or new public DNA was added.
+- Closed negative expressions now use a downturned line. Removed the extra smile
+  over open mouths and adjusted the opening curvature; disgust has asymmetric narrowed lids.
+- The character suite passed 140 specs, the procedural suite passed 265 specs, and the
+  library build and records check passed. Quick noisy headless emotion, lineup and speech
+  suites passed automated checks. They do not establish appearance or gait quality.
+- Browser review confirmed the sad frown and removal of the doubled angry outline; the
+  final angry curvature, disgust, speech, head from multiple angles, all variants and gait
+  still require a detailed visual pass. Human visual review remains pending.
+- A later disgust adjustment removed faint fangs from its nearly closed mouth; the updated
+  character suite, demo adapter tests, library build and emotion browser run passed. The
+  saved lineup and speech runs predate that small expression change.
+- The first profile review showed the head enlargement was too subtle. Increased the
+  smooth front widening and resized the helmet and collar. Procedural tests, the build,
+  and a fresh lineup functional run passed. Visual fit and final expression review remain open.
 
 ## Scope history
 

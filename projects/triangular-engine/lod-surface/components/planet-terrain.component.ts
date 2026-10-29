@@ -19,6 +19,10 @@ import { attachLodTerrain } from './attach-lod-terrain';
  * planes are yours to set (a reversed depth buffer, `webGpuRendererParameters: { reversedDepthBuffer: true }`, covers a 2 cm
  * near plane and an orbit view together). Needs `preferredRenderer: 'webgpu'`; on any other renderer it stays hidden.
  *
+ * Each new mesh (the first, and every rebuild) is compiled with `renderer.compileAsync` before it is drawn: the terrain stays
+ * hidden, still selecting, until that finishes, so a new material does not stall the first frame. A failed compile is reported
+ * on `engine.error$` (phase `compile`) and the terrain is shown anyway.
+ *
  * Inputs are read when they change: changing `radius`, `warp`, `heights`, `patchCells`, `leafCap`, `material` or switching
  * the noise on or off rebuilds the mesh; the other inputs only update it. Telemetry (leaves, drawn leaves, selection time,
  * triangles) is on {@link PlanetTerrainComponent.terrain}.

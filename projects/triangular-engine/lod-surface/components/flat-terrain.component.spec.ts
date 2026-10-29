@@ -79,6 +79,37 @@ describe('FlatTerrainComponent', () => {
     fixture.destroy();
   });
 
+  it('stays hidden until compileAsync has compiled its mesh, and warms again after a rebuild', async () => {
+    const resolvers: (() => void)[] = [];
+    const compileAsync = jasmine.createSpy('compileAsync').and.callFake(() => new Promise<void>((resolve) => resolvers.push(resolve)));
+    engine.renderer = { isWebGPURenderer: true, domElement: { height: 1080 }, compileAsync };
+    const flush = () => new Promise<void>((resolve) => setTimeout(resolve));
+    const fixture = TestBed.createComponent(FlatTerrainComponent);
+    fixture.componentRef.setInput('size', 100_000);
+    fixture.detectChanges();
+    const terrain = fixture.componentInstance.terrain()!;
+    beforeRender$.next();
+    expect(compileAsync).toHaveBeenCalledOnceWith(terrain.surface.mesh, camera, scene);
+    expect(terrain.object.visible).toBeFalse();
+    expect(terrain.stats.drawn).toBeGreaterThan(0);
+
+    resolvers[0]();
+    await flush();
+    beforeRender$.next();
+    expect(terrain.object.visible).toBeTrue();
+
+    fixture.componentRef.setInput('patchCells', 32);
+    fixture.detectChanges();
+    beforeRender$.next();
+    expect(terrain.object.visible).toBeFalse();
+    expect(compileAsync).toHaveBeenCalledTimes(2);
+    resolvers[1]();
+    await flush();
+    beforeRender$.next();
+    expect(terrain.object.visible).toBeTrue();
+    fixture.destroy();
+  });
+
   it('refuses cell-planet heights with a clear error: that source is a sphere source', async () => {
     const heights = await cellPlanetHeights(
       (source, layout, planet) => Promise.resolve({ ...runBake(source, layout, planet), roundTripMs: 0 }),

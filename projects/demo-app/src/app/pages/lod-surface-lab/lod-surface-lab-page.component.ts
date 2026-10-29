@@ -40,6 +40,8 @@ const THUMBNAIL_WIDTH = 240;
 const SKY = new Color(0x0b1220);
 /** Selection samples kept for the HUD's running mean. */
 const HUD_SAMPLES = 60;
+/** The surface is drawn after this long even if `compileAsync` has not answered. */
+const COMPILE_GUARD_MS = 60_000;
 
 /**
  * Baked textures kept (CPU arrays and GPU textures; 25 MB each for six faces at 1025², twice that again on the GPU) so
@@ -77,6 +79,8 @@ interface RendererLike {
   readonly domElement?: { readonly width: number; readonly height: number };
   readonly info?: { render: { drawCalls: number; triangles: number } };
   getPixelRatio?(): number;
+  /** Absent on a renderer that cannot compile ahead; the surface is then ready at once. */
+  compileAsync?(object: Mesh, camera: unknown, targetScene: Scene): Promise<void>;
 }
 
 @Component({
@@ -337,6 +341,18 @@ export class LodSurfaceLabPageComponent {
   private selector: LodSelector | undefined;
   private surface: LodSurfaceMesh | undefined;
   private builtKey = '';
+  /**
+   * False from the moment a new surface mesh is made until its pipeline is compiled (`compileAsync`), during which the mesh
+   * stays hidden: a first frame with a new material otherwise compiles it synchronously and stalls the GPU queue past the
+   * engine's 500 ms timestamp readback timeout.
+   */
+  private pipelineWarm = true;
+  /** Bumped for each new surface mesh; an answer from an older one is ignored. */
+  private warmGeneration = 0;
+  /** True while the renderer has not started yet: `compileAsync` would collect nothing, so the warm-up waits for the first frame. */
+  private warmWaitsForRenderer = false;
+  private warmTimer: ReturnType<typeof setTimeout> | undefined;
+  private pageDestroyed = false;
   /** The planet material and its cell lookup, kept while the cell planet is the source (the lookup costs a world build and an atlas). */
   private planetMaterial: { readonly material: TerrainPlanetMaterial; readonly key: string } | undefined;
   private sunLight: DirectionalLight | undefined;
@@ -381,6 +397,7 @@ export class LodSurfaceLabPageComponent {
     resetErrors: () => { this.engineError = ''; },
     backendIsWebGpu: () => this.webGpuOk() && this.hud().backend === 'webgpu',
     heightSourceReady: () => this.pendingBake === '',
+    pipelineReady: () => this.pipelineWarm,
     frame: () => ({
       stats: { ...(this.selector?.stats ?? this.stats()) },
       instances: (this.surface?.mesh.geometry as InstancedBufferGeometry | undefined)?.instanceCount ?? 0,
@@ -430,6 +447,8 @@ export class LodSurfaceLabPageComponent {
       for (const callback of this.renderCallbacks) callback(renderedAt);
     });
     this.destroyRef.onDestroy(() => {
+      this.pageDestroyed = true;
+      clearTimeout(this.warmTimer);
       this.runnerReady.set(false);
       errors.unsubscribe();
       tick.unsubscribe();
@@ -617,6 +636,59 @@ export class LodSurfaceLabPageComponent {
     this.surface.setWireframe(this.wireframe());
     this.engine.scene.add(this.surface.mesh);
     this.builtKey = key;
+    this.warmSurface(this.surface);
+  }
+
+  /**
+   * Compiles the pipeline of a new surface mesh in the background, behind a guard, and shows the mesh when it is done. A later
+   * rebuild supersedes a pending warm-up. A failure goes to `engineError` (the test then fails at its next settle) and the
+   * mesh is shown anyway.
+   */
+  private warmSurface(surface: LodSurfaceMesh): void {
+    const generation = ++this.warmGeneration;
+    clearTimeout(this.warmTimer);
+    this.pipelineWarm = false;
+    surface.mesh.visible = false;
+    this.warmWaitsForRenderer = true;
+    this.startWarm(surface, generation);
+  }
+
+  private startWarm(surface: LodSurfaceMesh, generation: number): void {
+    const renderer = this.engine.renderer as unknown as RendererLike | null | undefined;
+    if (typeof renderer?.compileAsync !== 'function') {
+      this.warmWaitsForRenderer = false;
+      this.finishWarm(generation, surface);
+      return;
+    }
+    // The renderer starts after the page: until a frame has been drawn `compileAsync` would wait for it and then find a hidden mesh.
+    if (this.renderedFrames === 0) return;
+    this.warmWaitsForRenderer = false;
+    const mesh = surface.mesh;
+    // `compileAsync` skips hidden objects while it collects them, which happens before its first await.
+    mesh.visible = true;
+    let compiled: Promise<void>;
+    try {
+      compiled = renderer.compileAsync(mesh, this.engine.camera, this.engine.scene);
+    } catch (error) {
+      compiled = Promise.reject(error);
+    } finally {
+      mesh.visible = false;
+    }
+    const guard = new Promise<never>((_, reject) => {
+      this.warmTimer = setTimeout(() => reject(new Error(`Pipeline compilation did not finish in ${COMPILE_GUARD_MS / 1000} s`)), COMPILE_GUARD_MS);
+    });
+    Promise.race([compiled, guard]).then(
+      () => this.finishWarm(generation, surface),
+      (error: unknown) => this.finishWarm(generation, surface, String(error)),
+    );
+  }
+
+  private finishWarm(generation: number, surface: LodSurfaceMesh, failure?: string): void {
+    if (this.pageDestroyed || generation !== this.warmGeneration) return;
+    clearTimeout(this.warmTimer);
+    if (failure !== undefined) this.engineError ||= `compile: ${failure}`;
+    this.pipelineWarm = true;
+    surface.mesh.visible = this.webGpuOk();
   }
 
   /**
@@ -736,6 +808,7 @@ export class LodSurfaceLabPageComponent {
     const selector = this.selector;
     const surface = this.surface;
     if (!selector || !surface) return;
+    if (this.warmWaitsForRenderer) this.startWarm(surface, this.warmGeneration);
     const view = this.currentView();
     const camera = resolveCamera(view, this.domain, this.source);
     this.camera = camera;

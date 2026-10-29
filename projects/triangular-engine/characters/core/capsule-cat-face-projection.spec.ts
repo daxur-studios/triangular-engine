@@ -79,6 +79,15 @@ describe('capsule-cat-face-projection', () => {
     expect(projection.mouth.mouthAsymmetry).toBeGreaterThan(0.5);
   });
 
+  it('gives disgust a downturned mouth and an asymmetric narrowed gaze', () => {
+    const ctrl = new FacialAnimationController();
+    ctrl.setExpression('disgusted', 1, 0);
+    const projection = projectCapsuleCatFaceState(ctrl.update(0.1), DEFAULT_CAPSULE_CAT_DNA);
+    expect(projection.mouth.mouthCurve).toBeLessThan(-0.5);
+    expect(projection.leftEye.upperLidAngle).toBeGreaterThan(projection.rightEye.upperLidAngle);
+    expect(projection.leftEye.lidTiltZ).toBeLessThan(0);
+  });
+
   it('expresses sad drooping ears, outward lid slant and downturned mouth', () => {
     const ctrl = new FacialAnimationController();
     ctrl.setExpression('sad', 1, 0);

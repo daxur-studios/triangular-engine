@@ -1422,7 +1422,7 @@ Options weighed: a bigger equirect atlas (8192 x 4096 = 128 MB, texel still 0.5 
 - A world with a non-default `jitter`, `plateCount`, `worldProfileKind` or `terrain` must be passed built (the description path rebuilds the default world, like `cellPlanetHeights`).
 - Cells with more than eight neighbours keep the eight nearest (rare; an edge beside a ninth could pick a slightly wrong cell).
 - Macro layer and other `modelWorldMatrix` layers still need the mesh at the camera; vertex-attribute layers do not work on the terrain.
-- Atmosphere on the terrain, gameplay height queries and a hardware timing of the new lookup remain.
+- Atmosphere on the terrain, gameplay height queries and a hardware timing of the new lookup remain. (Later the same day: gameplay queries were built in G4, and the lookup was timed in the warm-up section below.)
 
 ## 2026-10-29: G4: gameplay ground queries (2026-10-29)
 
@@ -1462,3 +1462,39 @@ Five `heightAt` calls (one for the height, four for the normal) and no allocatio
 - Colliders (a Jolt heightfield or mesh that follows the camera region) are M5.
 - The sample is the CPU surface, not the drawn mesh: far from the camera the drawn LOD can sit up to its LOD error away from it. Fine near the camera; a game that needs far agreement should not rely on it.
 - A hardware measurement in a browser (as opposed to Node) was not made; the number above is V8 on the CPU only.
+
+## 2026-10-29: G3 owner check: first-frame stall, pipeline warm-up, planet material timed
+
+The owner's first visible-browser run of `cell-planet-sphere-10km-eye-2m` with `?material=planet` failed while settling (no checks recorded) with `gpuTiming: GpuReadbackTimeoutError: GPU timestamp readback timed out after 500 ms` (`lod-surface-terrain@v9/2026-10-29T13-43-24-667Z_visible-browser_quick_0d50724c-b55f5104.json`). Two headless RTX runs did not reproduce it. Cause, from reading three 0.186.1 (not proven on the owner's run): nothing compiled the terrain's pipeline ahead, so the first frame with a new material built its node graph and pipeline synchronously, which can hold the GPU queue past the engine's 500 ms readback timeout. `compileAsync` registers the pipeline in the cache before it is built, and the renderer skips drawing an object whose pipeline is still pending. But between `compileAsync`'s collection step and its first await, a normal render would still compile synchronously, so the object has to stay out of the render until `compileAsync` resolves.
+
+### Changed
+
+- `lod-surface/components/attach-lod-terrain.ts` (`<planetTerrain>`, `<flatTerrain>`): each new surface mesh (the first, and every rebuild) is compiled with `renderer.compileAsync(mesh, camera, scene)`. The terrain stays hidden, still selecting, until it resolves. Stale answers are ignored. A failure, or no answer within 60 s, is reported on `engine.error$` (phase `compile`) and the terrain is shown anyway. The mesh is passed rather than the hidden group, because `compileAsync` skips a hidden root. No new inputs. README, TSDoc and CHANGELOG updated. Specs: 7 new (hidden until compiled, rebuild re-warms, stale answer, failure, destroy, non-WebGPU).
+- Lab: `rebuild()` warms every new surface mesh the same way (behind a 60 s guard and a generation counter, after the first rendered frame). The adapter's settle waits for `pipelineReady()`.
+- Adapter: a `GpuReadbackTimeoutError` is tolerated while settling (at most 2, each restarts the settle) and when the crack probe introduces one (its first offscreen render compiles the probe material). Counts go to `details.settleTimerErrorsTolerated` / `probeTimerErrorsTolerated`, only when above 0. A timeout inside the measured window still fails the case. Specs: 8 new.
+
+### Measured (RTX 3080, headless-hardware, quick, noisy load: game client, IDE, agents)
+
+| Run | Material | Settle | gpuScenePass med / p95 / max (ms) | frameInterval p95 / max (ms) |
+|---|---|---|---|---|
+| before, 13:48 | planet | not settled in the 4 s cap (invalid) | 0.62 / 0.65 / 0.95 | 7.1 / 12.2 |
+| before, 13:49 | debug | 1.0 s | 0.29 / 0.30 / – | – |
+| after, 14:16 | planet | 1.01 s, no timeouts tolerated | 0.58 / 0.58 / 0.58 | 6.4 / 6.5 |
+| after, 14:16 | debug | 1.01 s, no timeouts tolerated | 0.30 / 0.30 / 0.30 | 6.2 / 6.4 |
+
+Files: `lod-surface-terrain@v9/2026-10-29T14-16-11-105Z_headless-hardware_quick_0d50724c-a8fa5de3.json` (planet) and `...T14-16-30-178Z_...` (debug). Both runs report the usual headless validity issue (power profile not independently verified). Geometry is identical: 2,372 drawn leaves, 1,214,464 triangles, 2.22 px per triangle, 0 crack pixels.
+
+- **The planet material roughly doubles the scene pass: +0.28 ms (0.58 vs 0.30) at a 2 m eye.** That is the 12-fetch cell lookup plus PBR lighting against the debug material's own sun. It sits within a 1.5 ms terrain budget, but it is noisy-load data.
+- With the warm-up, the planet run settles like the debug run. Before, its first frames had a 12 ms frame (max) and it never settled.
+- Still over the proposed budget with either material: 1.21 M triangles (budget 1 M) at 2.2 px per triangle (budget at least 8). This predates G3.
+
+### Verified
+
+lod-surface specs 58 of 58; lod-surface-lab specs 197 of 197 (all ChromeHeadless, single run); `npm run build:triangular-engine`; demo-app `tsc --noEmit`; `npm run docs:records:check`.
+
+### Not done / next
+
+- The owner's visible-browser rerun is what confirms the fix: the stall was never reproduced headless.
+- Later `setWireframe(true)` on a visible surface still compiles at its first draw (lab and library); no case uses it.
+- Scene lights added after the terrain is created make its first draw compile again (README says so). The `<planet>` parent (G5) should create lights first.
+- Morph between the globe and the 2.5D map: excluded by D11, and nothing in G1–G4 supports it. To be decided by the owner before G5.

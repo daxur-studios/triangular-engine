@@ -140,7 +140,7 @@ export function projectCapsuleCatFaceState(
               ? -0.65
               : clamp(smile * 1.05 - frown * 1.05, -1, 1);
 
-  const fangsVisible = emotion === 'angry' ? 1.0 : emotion === 'disgusted' ? 0.45 : 0.0;
+  const fangsVisible = emotion === 'angry' ? 1.0 : 0.0;
   const mouthAsymmetry = emotion === 'skeptical' ? 0.75 : emotion === 'disgusted' ? -0.45 : 0.0;
   const tongueVisible =
     fangsVisible > 0.5
@@ -201,6 +201,8 @@ export function projectCapsuleCatFaceState(
       ? -0.45
       : emotion === 'sad'
         ? 0.40
+        : emotion === 'disgusted'
+          ? -0.25
         : emotion === 'skeptical'
           ? -0.32
           : (browLowerLeft - browRaiseLeft * 0.5) * -0.34;
@@ -209,14 +211,16 @@ export function projectCapsuleCatFaceState(
       ? 0.45
       : emotion === 'sad'
         ? -0.40
+        : emotion === 'disgusted'
+          ? 0.12
         : emotion === 'skeptical'
           ? 0.0
           : (browLowerRight - browRaiseRight * 0.5) * 0.34;
 
   const leftForceGlare =
-    emotion === 'angry' ? 0.78 : emotion === 'sad' ? 0.55 : emotion === 'skeptical' ? 0.65 : 0;
+    emotion === 'angry' ? 0.78 : emotion === 'sad' ? 0.55 : emotion === 'disgusted' ? 0.72 : emotion === 'skeptical' ? 0.65 : 0;
   const rightForceGlare =
-    emotion === 'angry' ? 0.78 : emotion === 'sad' ? 0.55 : emotion === 'skeptical' ? 0.0 : 0;
+    emotion === 'angry' ? 0.78 : emotion === 'sad' ? 0.55 : emotion === 'disgusted' ? 0.48 : emotion === 'skeptical' ? 0.0 : 0;
 
   const leftForceSquint =
     emotion === 'happy' ? 0.55 : emotion === 'angry' ? 0.45 : emotion === 'skeptical' ? 0.45 : 0;

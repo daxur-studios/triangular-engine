@@ -30,6 +30,7 @@ The component needs `EngineService` (so it lives inside a `<tri-engine>` tree), 
 - **Selection** runs in `beforeRender$` and does not depend on the view direction: the tree is the same however the camera turns. Only which selected leaves are drawn depends on the frustum (`cull`).
 - **Camera-relative drawing.** The terrain's group follows the camera, and vertex positions are computed relative to it, so precision holds at planet scale.
 - **Rebuilds.** Changing `radius`/`size`, `warp`, `heights`, `patchCells`, `leafCap`, `material` or switching `detailNoise` on or off rebuilds the mesh. Other inputs only update it.
+- **Pipeline warm-up.** A new mesh (the first, and every rebuild) is compiled with `renderer.compileAsync` before it is drawn: the terrain stays hidden, still selecting, until that finishes, so a new material (the planet material most of all) does not stall the first frame. A failed or very slow (over 60 s) compile is reported on `engine.error$` (phase `compile`) and the terrain is shown anyway. Scene lights and the environment should be in place before the terrain is created; one added later makes the first draw compile again.
 - **Telemetry** is on the `terrain` signal of each component: `stats` (leaves, drawn leaves, selection time), `triangles`, `selector` and `surface` for anything the wrapper does not cover.
 
 ## Inputs

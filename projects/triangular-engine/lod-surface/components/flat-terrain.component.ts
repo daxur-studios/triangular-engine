@@ -16,7 +16,9 @@ import { attachLodTerrain } from './attach-lod-terrain';
  *
  * The square lies in the XZ plane, centred on the scene origin, with +Y up, so it spans `[-size / 2, size / 2]` on both
  * axes. Everything else works as on {@link PlanetTerrainComponent}: view-independent selection from the active camera in
- * `beforeRender$`, one draw call, a `PerspectiveCamera` whose near and far planes you set, WebGPU only.
+ * `beforeRender$`, one draw call, a `PerspectiveCamera` whose near and far planes you set, WebGPU only. Like the planet
+ * terrain, it stays hidden until each new mesh's pipeline is compiled with `renderer.compileAsync`, so a new material does
+ * not stall the first frame.
  */
 @Component({
   standalone: true,

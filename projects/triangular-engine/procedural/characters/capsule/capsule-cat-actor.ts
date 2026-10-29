@@ -13,7 +13,6 @@
  */
 
 import {
-  CapsuleGeometry,
   Color,
   Group,
   MeshStandardMaterial,
@@ -54,6 +53,7 @@ import {
   type CapsuleCatSpaceGearResult,
 } from './capsule-cat-space-gear';
 import { RubberHoseLimbMesh } from './capsule-rubber-hose-limb';
+import { createCatBodyGeometry } from './capsule-cat-shape';
 
 export interface CapsuleCatActorOptions {
   readonly dna?: Partial<CapsuleCatCharacterDNA>;
@@ -193,9 +193,7 @@ export class CapsuleCatActor {
 
     if (bodySizeChanged) {
       this.body.mesh.geometry.dispose();
-      const geometry = new CapsuleGeometry(next.bodyRadius, next.bodyLength, 32, 48);
-      geometry.rotateX(Math.PI * 0.5);
-      this.body.mesh.geometry = geometry;
+      this.body.mesh.geometry = createCatBodyGeometry(next.bodyRadius, next.bodyLength);
     }
     this.body.updateDna(next);
 
