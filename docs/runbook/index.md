@@ -36,5 +36,6 @@ tags: [runbook, index]
 | [Procedural shape verification](/docs/runbook/068_procedural-shape-verification.md) | [PLAN-068](/docs/plans/068_procedural-shape-verification.md) |
 | [Remove Takram integration from the engine](/docs/runbook/069_remove-takram.md) | [PLAN-069](/docs/plans/069_remove-takram.md) |
 | [Capsule Doodle Space Cats](/docs/runbook/070_capsule-doodle-space-cats.md) | [PLAN-070](/docs/plans/070_capsule-doodle-space-cats.md) |
+| [Triangular CLI and Consensus Reviews](/docs/runbook/071_triangular-cli-consensus-reviews.md) | [PLAN-071](/docs/plans/071_triangular-cli-consensus-reviews.md) |
 
 Existing records retain their `docs/runbook/` paths. Legacy runbooks `001`–`042` retain their historical formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

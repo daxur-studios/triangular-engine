@@ -37,5 +37,6 @@ tags: [plans, index]
 | [Procedural shape verification](/docs/plans/068_procedural-shape-verification.md) | planned | [ER 068](/docs/runbook/068_procedural-shape-verification.md) |
 | [Remove Takram integration from the engine](/docs/plans/069_remove-takram.md) | planned | [ER 069](/docs/runbook/069_remove-takram.md) |
 | [Capsule Doodle Space Cats](/docs/plans/070_capsule-doodle-space-cats.md) | planned | [ER 070](/docs/runbook/070_capsule-doodle-space-cats.md) |
+| [Triangular CLI and Consensus Reviews](/docs/plans/071_triangular-cli-consensus-reviews.md) | planned | [ER 071](/docs/runbook/071_triangular-cli-consensus-reviews.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

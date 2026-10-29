@@ -15,11 +15,11 @@ performance: []
 
 Status: **planned**. Evidence and decisions: [ER {{NUMBER}}](/docs/runbook/{{NUMBER}}_{{SLUG}}.md).
 
+<!-- tri:scope -->
+
 ## Intended outcome
 
 Describe the user-visible or developer-visible result. State important constraints and what is out of scope.
-
-<!-- tri:scope -->
 
 ## Phases and acceptance
 

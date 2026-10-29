@@ -12,7 +12,7 @@ This page is the index. Each secondary entry point documents itself in its own `
 - [Secondary entry points](docs/entry-points.md): the import and peer-dependency matrix
 - [Troubleshooting](docs/troubleshooting.md)
 - [CHANGELOG](CHANGELOG.md): release history
-- AI agents: the shipped `triangular-engine` skill (`skills/triangular-engine/SKILL.md` in the installed package) holds the agent conventions and points at the entry guides below.
+- AI agents: the shipped `triangular-engine` skill (`skills/triangular-engine/SKILL.md` in the installed package) holds the engine conventions; the `triangular-cli` skill (`skills/triangular-cli/SKILL.md`) covers project documentation and CLI workflows.
 
 Install a standalone Angular app with:
 
@@ -23,6 +23,9 @@ ng add triangular-engine
 Manual installation and peer versions are in [getting started](docs/getting-started.md).
 
 For reusable game tests and one-click visual or performance test URLs, use the `triangular-engine-testing` skill (`skills/triangular-engine-testing/SKILL.md` in the installed package) and the [testing guide](testing/README.md).
+
+The package also provides the `triangular` command for project documents and testing tools. See the
+[CLI guide](docs/cli.md) for installation, consensus reviews, and commands that target another project root.
 
 ## Features
 

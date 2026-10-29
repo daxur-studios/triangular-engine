@@ -13,6 +13,7 @@ These guides ship in the npm package at `node_modules/triangular-engine/docs/`. 
 - [Particles and VFX](particles.md) and [audio](audio.md)
 - [Secondary entry points](entry-points.md): the import matrix and peer dependencies
 - [Troubleshooting](troubleshooting.md)
+- [Triangular CLI](cli.md): project documents, consensus reviews and testing commands
 - [API: selectors](api/selectors.md)
 - Examples: [basic scene](examples/basic-scene.md), [multi-viewport](examples/multi-viewport.md)
 

@@ -40,19 +40,20 @@ opt in; existing documents without that metadata remain unassessed, not implicit
 
 New mapped plans use `map_schema: 1` and a stable `initiative_id`. The versioned manifest is
 generated from these Markdown sources; do not edit generated output. Start with
-[`docs/templates/engineering-plan.md`](templates/engineering-plan.md) and
-[`docs/templates/engineering-record.md`](templates/engineering-record.md). Create a pair with
-`npm run docs:records:new -- --title "A short title" --slug lower-kebab-case`. The helper reserves
+[`engineering-plan.md`](../projects/triangular-engine/docs/templates/engineering-plan.md) and
+[`engineering-record.md`](../projects/triangular-engine/docs/templates/engineering-record.md).
+Create a pair with
+`triangular docs plan new --title "A short title" --slug lower-kebab-case`. The helper reserves
 a shared number through exclusive file creation and updates both indexes under a short-lived lock.
-`npm run docs:records:next` previews the next candidate; it does not reserve it. To create for a
-consumer workspace, invoke `node scripts/engineering-records.mjs new --root <workspace> ...`.
-The tool uses these checked-in templates and the consumer workspace's `docs/plans/`,
+`triangular docs records next` previews the next candidate; it does not reserve it. To create for a
+consumer workspace, invoke `triangular docs plan new --root <workspace> ...`. The tool uses the package's
+templates and the consumer workspace's `docs/plans/`,
 `docs/runbook/` and index files.
 
 The paired Engineering Record has `scope_history_schema: 1` and one `tri:scope-history` block.
 Its initial `tri:scope-baseline state="unconfirmed"` is not a baseline. Establish one only after
 the developer explicitly confirms the exact current scope, with
-`npm run docs:records:baseline -- docs/plans/<file>.md --developer-confirmed`. This writes a frozen
+`triangular docs records baseline docs/plans/<file>.md --developer-confirmed`. This writes a frozen
 list of stable phase IDs and a scope hash; an existing confirmed baseline cannot be replaced.
 Append changes as `tri:scope-change` entries with stable ID, date, kind, origin, disposition,
 affected scope IDs, summary, reason and impact. Allowed origins are `requested`, `discovered` and
@@ -68,7 +69,7 @@ planned scope, not elapsed effort. Allowed relation labels are `depends-on`, `bu
 The `tri:review` marker stores schema version, the SHA-256 fingerprint of scoped intent and review
 item meaning, review date and reviewer role. It is current only when that fingerprint matches.
 Refresh it after examining changed scope with
-`npm run docs:records:review -- docs/plans/<file>.md agent` (or `developer`). This records
+`triangular docs records review docs/plans/<file>.md --reviewer agent` (or `developer`). This records
 who refreshed the assessment; it does not record user approval. Item markers declare a stable ID,
 kind (`intent`, `assumption` or `investigation`), applicable phases, blocking phases and state
 (`open`, `deferred` or `resolved`). Keep the checkbox synchronized. A resolved item needs a
@@ -83,13 +84,32 @@ rework first, and keep all others accessible.
 For a fresh plan, a phase with an unresolved blocker is `needs-resolution`; an unresolved item that
 applies but does not block it is `open-items`; no applicable unresolved items is `ready`. Missing,
 malformed or stale review is `unassessed`, never ready. These badges describe scoped readiness, not
-completion, quality, test success or informed developer understanding. `npm run docs:records:check`
-checks mapped docs and fails on invalid metadata. `npm run docs:records:manifest` prints the adapter
+completion, quality, test success or informed developer understanding. `triangular docs records check`
+checks mapped docs and fails on invalid metadata. `triangular docs records manifest` prints the adapter
 contract as JSON, including diagnostics; stale or malformed reviews remain unassessed in the output.
 `npm run docs:records:export` updates the demo's generated manifest and current test fingerprint;
 `npm run serve:demo-map` refreshes it before opening the demo app. Do not edit the generated JSON.
 Legacy `type: Plan` documents without `map_schema: 1` remain in the manifest as unassessed cards,
 with no inferred phases or progress. Their files remain unchanged; do not bulk-convert them.
+
+## Consensus reviews
+
+Use one Consensus Review Markdown file per consequential engineering decision. Reviews live in
+`docs/consensus/`, use their own `C001` sequence and a stable kebab-case key, and may link to a Plan
+and Engineering Record. All participants and rounds for the same decision stay in one file. Preserve
+independent first-round responses; use a targeted second round only for material disagreement. A
+review can recommend an approach, retain contenders, request an experiment/spike with pass/fail
+criteria, or remain unresolved. Agent agreement is not developer approval. Plans hold accepted work;
+Engineering Records keep dated decisions and evidence; reviews preserve the deliberation.
+
+Create and update reviews from the packaged
+[`consensus-review.md`](../projects/triangular-engine/docs/templates/consensus-review.md) template
+with `triangular docs consensus`. The command is keyed by the stable slug:
+repeating creation with identical inputs returns the existing file unchanged, and conflicting inputs
+fail without overwriting contributions. Prompt generation freezes the shared brief; changing that
+brief requires a new review. The CLI creates prompts and records responses but does not launch AI
+providers. See the [CLI guide](../projects/triangular-engine/docs/cli.md) and packaged
+[`triangular-cli` skill](../projects/triangular-engine/.agents/skills/triangular-cli/SKILL.md).
 
 ## Runnable experiment history
 
