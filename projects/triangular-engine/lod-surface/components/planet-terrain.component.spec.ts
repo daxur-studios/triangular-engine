@@ -3,6 +3,8 @@ import { Subject } from 'rxjs';
 import { PerspectiveCamera, Scene } from 'three';
 import { EngineService } from 'triangular-engine';
 import { TERRAIN_DEFAULTS, createHeightSource } from 'triangular-engine/lod-surface/core';
+import { buildCellPlanetWorld } from 'triangular-engine/worldgen';
+import { TerrainPlanetMaterial } from '../terrain-planet-material';
 import { PlanetTerrainComponent } from './planet-terrain.component';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -144,5 +146,20 @@ describe('PlanetTerrainComponent', () => {
     expect(material.positionNode).toBeTruthy();
     fixture.destroy();
     expect(dispose).not.toHaveBeenCalled();
+  });
+  it('draws with the planet material from the `material` input alone, with the cell colours and the sun input', () => {
+    const material = new TerrainPlanetMaterial({ cellPlanet: buildCellPlanetWorld({ cellCount: 80, seed: 2 }), cellLookup: { atlasWidth: 64 } });
+    const fixture = create();
+    fixture.componentRef.setInput('material', material);
+    fixture.componentRef.setInput('sunDirection', [0, 0, 2]);
+    fixture.detectChanges();
+    const terrain = fixture.componentInstance.terrain()!;
+    expect(terrain.surface.material).toBe(material);
+    // The mesh bound its nodes without any wiring by the caller: the stage-1 override is in force.
+    expect(material.stageOverride?.id).toBe('lodTerrain');
+    expect(material.stackKey).toContain('cellLookup');
+    expect(material.dayNight.uSunDirection.value.z).toBeCloseTo(1, 6);
+    fixture.destroy();
+    material.dispose();
   });
 });

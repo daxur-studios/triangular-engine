@@ -165,6 +165,14 @@ export class CapsuleCatActor {
     return this.lastFaceProjection;
   }
 
+  get catBody(): CapsuleCatBodyMeshResult {
+    return this.body;
+  }
+
+  get catFaceRig(): CapsuleCatFaceRigResult {
+    return this.faceRig;
+  }
+
   /**
    * Updates the cat's DNA in place, rebuilding only the geometry that actually
    * changed (body, face rig, gear, or limb thickness).
@@ -247,6 +255,7 @@ export class CapsuleCatActor {
       elapsedSeconds: this.elapsedSeconds,
       dna: this.currentDna,
       speedMultiplier: this.speedMultiplier,
+      emotion: frameState.currentEmotion,
     });
     this.lastLocomotionSample = loco;
 

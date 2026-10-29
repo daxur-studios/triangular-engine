@@ -1,6 +1,8 @@
-import { vec3 } from 'three/tsl';
+import { float, vec3 } from 'three/tsl';
 import { PlanetSurfaceMaterial } from './planet-surface-material';
 import { SURFACE_LAYER_ORDER } from './planet-surface-layers';
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 describe('PlanetSurfaceMaterial', () => {
   const layer = (name: string, calls: string[]) => () => {
@@ -102,5 +104,82 @@ describe('PlanetSurfaceMaterial', () => {
     material.morph.uMorph.value = 0.5;
     expect(material.context.uniforms).toBe(material.morph);
     expect(material.context.uniforms.uMorph.value).toBe(0.5);
+  });
+  describe('stage-1 override', () => {
+    const recording = (seen: any[]) => (context: any) => {
+      seen.push(context);
+      return { albedo: vec3(1, 0, 0), roughness: float(1), metalness: float(0) };
+    };
+
+    it('is absent by default: the context, normal, masks and cache key are the plain globe material', () => {
+      const material = new PlanetSurfaceMaterial();
+      const graph = material.morphGraph;
+      expect(material.stageOverride).toBeUndefined();
+      expect(material.context).toBe(material.context);
+      expect(material.context.radialDirection).toBe(graph.radialDirection);
+      expect(material.context.sphereNormal).toBe(graph.sphereNormal);
+      expect(material.context.morphedPosition).toBe(graph.morphedLocal);
+      expect(material.context.bodyFixedLocal).toBe(graph.bodyFixedLocal);
+      expect(material.context.projectedLon).toBe(graph.projectedLon);
+      expect(material.context.seamCull).toBe(graph.seamCull);
+      expect(material.normalNode).toBe(graph.normalNode);
+      expect(material.maskNode).toBe(graph.visibleMask);
+      expect(material.maskShadowNode).toBe(graph.visibleMaskShadow);
+      expect(material.positionNode).toBe(graph.positionNode);
+      expect(material.customProgramCacheKey().endsWith(`|planetSurface:${material.stackKey}`)).toBeTrue();
+    });
+
+    it('builds layers from the globe context until an override is set', () => {
+      const seen: any[] = [];
+      const material = new PlanetSurfaceMaterial();
+      material.addSurfaceLayer({ id: 'probe', order: 10, layer: recording(seen) });
+      expect(seen[seen.length - 1]).toBe(material.context);
+      expect(seen[seen.length - 1].radialDirection).toBe(material.morphGraph.radialDirection);
+    });
+
+    it('hands the overridden context to every layer and replaces the normal and masks', () => {
+      const seen: any[] = [];
+      const material = new PlanetSurfaceMaterial();
+      material.addSurfaceLayer({ id: 'probe', order: 10, layer: recording(seen) });
+      const globeContext = material.context;
+      const radial = vec3(0, 1, 0);
+      const uv = vec3(0.5, 0.5, 0);
+      const versionBefore = material.version;
+
+      material.setStageOverride({
+        id: 'custom',
+        context: { radialDirection: radial, uv },
+        shadingNormal: vec3(0, 0, 1),
+        maskNode: null,
+      });
+
+      const used = seen[seen.length - 1];
+      expect(used).toBe(material.context);
+      expect(used.radialDirection).toBe(radial);
+      expect(used.uv).toBe(uv);
+      // Fields the override does not name stay the globe's.
+      expect(used.sphereNormal).toBe(globeContext.sphereNormal);
+      expect(used.uniforms).toBe(material.morph);
+      expect(material.normalNode).not.toBe(material.morphGraph.normalNode);
+      expect(material.maskNode).toBeNull();
+      expect(material.maskShadowNode).toBe(material.morphGraph.visibleMaskShadow);
+      expect(material.stageOverride?.id).toBe('custom');
+      expect(material.version).toBeGreaterThan(versionBefore);
+      expect(material.customProgramCacheKey().endsWith(`|planetSurface:${material.stackKey}|stage:custom`)).toBeTrue();
+      // The stacks are untouched.
+      expect(material.stackKey).toBe('morph:true/false;layers:vertexColor|probe;occluders:;emissives:');
+    });
+
+    it('restores the globe stage 1 when cleared', () => {
+      const material = new PlanetSurfaceMaterial();
+      material.setStageOverride({ id: 'custom', context: { radialDirection: vec3(1, 0, 0) }, shadingNormal: vec3(0, 0, 1), maskNode: null, maskShadowNode: null });
+      material.setStageOverride(null);
+      expect(material.stageOverride).toBeUndefined();
+      expect(material.context.radialDirection).toBe(material.morphGraph.radialDirection);
+      expect(material.normalNode).toBe(material.morphGraph.normalNode);
+      expect(material.maskNode).toBe(material.morphGraph.visibleMask);
+      expect(material.maskShadowNode).toBe(material.morphGraph.visibleMaskShadow);
+      expect(material.customProgramCacheKey().endsWith(`|planetSurface:${material.stackKey}`)).toBeTrue();
+    });
   });
 });

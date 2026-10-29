@@ -2,7 +2,7 @@
 
 Level-of-detail terrain for games: `<planetTerrain>` for a sphere and `<flatTerrain>` for a bounded square. Both draw a quadtree of patches in one instanced draw call, selected on the CPU every frame from the active camera, with cracks closed by edge folding. WebGPU only (`preferredRenderer: 'webgpu'`); on another renderer the terrain stays hidden and does nothing.
 
-Status: **preview** (Plan 059, step G1). Try it at `/lod-surface-lab` in the demo app.
+Status: **preview** (Plan 059, step G3). Try it at `/lod-surface-lab` in the demo app.
 
 ## Entries
 
@@ -46,8 +46,8 @@ The component needs `EngineService` (so it lives inside a `<tri-engine>` tree), 
 | `hysteresis` | 0.15 | Split/merge hysteresis ratio; 0 is a single threshold. |
 | `cull` | true | Draw only leaves inside the frustum. |
 | `warp` (planet only) | `'equal-angle'` | Cube warp; baked heights must use the same one. |
-| `material` | debug material | A `NodeMaterial`; the terrain sets its `positionNode`. You dispose it. |
-| `sunDirection`, `view`, `lighting`, `bounds`, `wireframe` | see TSDoc | Options of the default debug material. |
+| `material` | debug material | A `NodeMaterial`; the terrain sets its `positionNode`. Pass a `TerrainPlanetMaterial` to draw with the planet material ([below](#planet-material)). You dispose it. |
+| `sunDirection`, `view`, `lighting`, `bounds`, `wireframe` | see TSDoc | Options of the default debug material. `sunDirection` also reaches a `TerrainPlanetMaterial`. |
 
 ## Heights
 
@@ -101,19 +101,29 @@ export class GameComponent {
 
 The bake takes seconds (the world build, then the texture), so the terrain appears once the promise resolves; before that, omit `heights` for a flat sphere. `radius` and `warp` must equal the component's, or the terrain throws. The source is sphere-only: given to `<flatTerrain>` it throws "use `<planetTerrain>`". Dispose it (`heights.dispose()`) when you replace it.
 
-## Planet material (spike, preview)
+## Planet material
 
-`TerrainPlanetMaterial` is `PlanetSurfaceMaterial` for the terrain (Plan 059, step G3 spike). The plain material reads vertex attributes only the morph globe has, so on the terrain it draws black; this subclass keeps its layer, occluder, emissive, lighting and atmosphere stacks and rebuilds the planet context from the terrain's own vertex nodes (`LodSurfaceMesh.nodes`). It is lit by scene lights, so add a directional light.
+`TerrainPlanetMaterial` draws the terrain with `PlanetSurfaceMaterial` (`triangular-engine/planet-material`), so the ground has the planet material's layer, occluder, emissive, lighting and atmosphere stacks and the colours of the cell-planet globe (Plan 059, step G3; preview). It goes in the `material` input with nothing else to wire: the terrain mesh gives the material its vertex nodes (`bindLodSurfaceNodes`) and its sun direction.
 
 ```ts
-const material = new TerrainPlanetMaterial();           // solid base colour; add layers on top
-const cells = cellLookupLayer();                        // from triangular-engine/planet-material
-material.addSurfaceLayer({ id: 'cellLookup', order: SURFACE_LAYER_ORDER.cellLookup, layer: cells.layer });
-// <planetTerrain [radius]="r" [heights]="h" [material]="material" />
+import { buildCellPlanetWorld } from 'triangular-engine/worldgen';
+import { PlanetTerrainComponent, TerrainPlanetMaterial } from 'triangular-engine/lod-surface';
+
+const world = buildCellPlanetWorld({ seed: 7, cellCount: 1500 });     // the world the heights were baked from
+material = new TerrainPlanetMaterial({ cellPlanet: world });
+// template: <planetTerrain [radius]="r" [heights]="heights()" [material]="material" [sunDirection]="sun" />
+// add a DirectionalLight and an AmbientLight to the scene: this material is lit by them (standard PBR)
 ```
 
-Layers that read a vertex attribute (the vertex-colour base, the macro layer's land mask, streamed tiles) still need that attribute and do not work here. Preview: the shape may change in G3 (see the Plan 059 runbook). The sea sits at `radius` on the terrain but at `radius + seaLevelElevation * heightScale` on the morph globe; see the runbook for the offset.
+Why the `material` input and not a new input or component: the terrain already hands a supplied material the nodes it needs, so the one object a game creates is the material, and `cellPlanet` is its ground-colour option. You dispose the material, which also frees its cell textures.
+
+- **Colours come from the same world.** `cellPlanet` takes the built world (`ICellPlanetWorld`) or the description given to `cellPlanetHeights` (`{ seed, cellCount, relaxationIterations? }`, built on the calling thread and kept). Land and ice take their biome colour, the sea the ocean colour (lava for a lava world): the globe's `natural` colours for that world. Pass the **same** world as the heights, or ground and heights disagree. `material.cells` has `opacity` and `updatePalette(Float32Array)` to recolour cells (territory overlays) without a rebuild; `cellLookup: { atlasWidth, colours }` overrides the atlas size and the palette.
+- **Exact cell edges at any zoom.** The ground uses `cellVoronoiLayer`, not the plain atlas lookup (nearest-filtered, so an edge is a staircase of atlas texels up close). A 1,024 x 512 atlas finds a nearby cell; the shader then picks the true one, the cell centre with the largest dot product among that cell and its neighbours, so an edge is a straight Voronoi edge at 2 cm. Memory for 1,000 cells: a 2 MB atlas plus 64 KB of tables. Cost: 12 texture fetches per fragment where the plain lookup has 2. The atlas grows past about 20,000 cells to keep a texel under a quarter of a cell. Building it takes about 50 ms for 1,000 cells on the calling thread, after the world itself (about 100 ms).
+- **Sea level.** The terrain puts the sea at `radius`; the morph globe puts it `seaLevelElevation * heightScale` higher (0.3232 for the lab seed: 48 m on the 10 km sphere). Defaults are unchanged. To draw both in one scene, give the globe `seaAlignedGlobeRadius(radius, world, heightScaleM)` (from `lod-surface/core`) as its radius and keep the terrain's `radius`. The future `<planet>` parent will do it for you.
+- **Sun.** The PBR lighting reads the scene's lights. `material.setSunDirection(dir)` (called by `<planetTerrain [sunDirection]>`) keeps `material.dayNight.uSunDirection` in step, which is where a parent's day/night lighting stage reads it; moving the scene's directional light to match is the parent's job.
+- **Without a cell planet** `new TerrainPlanetMaterial()` is a solid colour to which you add your own layers (`addSurfaceLayer`). Layers that read a vertex attribute (the vertex-colour base, the macro layer's land mask, streamed tiles) do not work here: the terrain has none.
+- **How it plugs in.** The material calls `PlanetSurfaceMaterial.setStageOverride` with the terrain's nodes (see the [planet material README](../planet-material/README.md#using-the-material-on-another-mesh)). Layers that lift `position` through the model matrix need the mesh at the camera, which `LodTerrainBody` keeps.
 
 ## Not included
 
-Gameplay height and normal queries, the finished planet material integration and a parent `<planet>` component are later steps of Plan 059. The older `triangular-engine/terrain` entry is a different system and is unchanged.
+Gameplay height and normal queries, atmosphere on the terrain, and a parent `<planet>` component (globe, terrain, sea alignment and sun in one place) are later steps of Plan 059. The older `triangular-engine/terrain` entry is a different system and is unchanged.

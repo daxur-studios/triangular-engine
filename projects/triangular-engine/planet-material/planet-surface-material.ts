@@ -1,6 +1,6 @@
 import { FrontSide, type Side } from 'three';
 import { MeshStandardNodeMaterial } from 'three/webgpu';
-import { float, vec3, vec4 } from 'three/tsl';
+import { float, normalize, transformNormalToView, vec3, vec4 } from 'three/tsl';
 import { createPlanetContext, type IPlanetContext } from './planet-context';
 import {
   createPlanetMorphUniforms,
@@ -39,6 +39,36 @@ export interface IPlanetSurfaceMaterialOptions extends IPlanetMorphGraphOptions 
 }
 
 /**
+ * Stage 1 supplied from outside the material: the shared planet context, the shading normal and the fragment mask,
+ * for a mesh that is not the morph globe (the globe's stage 1 reads its `position`, `normal`, `aFlatPos` and `aFlatNorm`
+ * attributes, which such a mesh does not have). Give it to {@link PlanetSurfaceMaterial.setStageOverride}.
+ *
+ * Everything except `id` is optional: what is omitted keeps the globe's value, so an override replaces only what it names.
+ * The layer, occluder, emissive, lighting and atmosphere stacks are unchanged and read the overridden context.
+ */
+export interface IPlanetStageOverride {
+  /**
+   * Names the override in the shader cache key (`customProgramCacheKey`). Two overrides that build different graphs
+   * must have different ids, or the program built for one is reused for the other.
+   */
+  readonly id: string;
+  /**
+   * Context fields to replace (position, radial direction, sphere normal, uv, lat/lon, ...). Omitted fields keep the
+   * globe's. Fields are TSL nodes; vertex-stage values must be varyings, readable in the fragment stage.
+   */
+  readonly context?: Partial<IPlanetContext>;
+  /**
+   * The unit shading normal in the body frame (a node). The material turns it into view space for the PBR lighting
+   * (`transformNormalToView`), as the globe does for its own. Default: the globe's.
+   */
+  readonly shadingNormal?: any;
+  /** Fragment mask (false discards). `null` removes it; omitted keeps the globe's, which reads attributes a non-globe mesh lacks. */
+  readonly maskNode?: any | null;
+  /** The shadow pass's mask, without derivatives. `null` removes it; omitted keeps the globe's. */
+  readonly maskShadowNode?: any | null;
+}
+
+/**
  * The cell-planet surface as one TSL node material (Plan 050).
  *
  * Stages, in order, all reading one shared {@link IPlanetContext}:
@@ -56,8 +86,6 @@ export interface IPlanetSurfaceMaterialOptions extends IPlanetMorphGraphOptions 
 export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
   /** The morph uniforms (TSL uniform nodes unless supplied in the options). */
   readonly morph: IPlanetMorphUniforms;
-  /** The shared planet context, for building layers outside the material. */
-  readonly context: IPlanetContext;
   /** Stage 1's graph, for callers building their own material from the same pieces. */
   readonly morphGraph: IPlanetMorphGraph;
 
@@ -69,6 +97,8 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
   private atmosphereEntry?: { readonly id: string; readonly stage: AtmosphereStage };
   private lastSample: ISurfaceSample = { albedo: vec3(1, 1, 1), roughness: float(1), metalness: float(0) };
   private readonly morphOptionsKey: string;
+  private readonly globeContext: IPlanetContext;
+  private stageEntry?: { readonly override: IPlanetStageOverride; readonly context: IPlanetContext };
 
   constructor(options: IPlanetSurfaceMaterialOptions = {}) {
     super();
@@ -80,7 +110,7 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
     }`;
     this.lightingEntry = options.lighting;
     this.atmosphereEntry = options.atmosphere;
-    this.context = createPlanetContext(this.morph, this.morphGraph);
+    this.globeContext = createPlanetContext(this.morph, this.morphGraph);
 
     this.positionNode = this.morphGraph.positionNode;
     this.normalNode = this.morphGraph.normalNode;
@@ -93,6 +123,47 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
       value: options.base ?? vertexColorLayer({ roughness: options.roughness, metalness: options.metalness }),
     });
     this.rebuild();
+  }
+
+  /**
+   * The shared planet context, for building layers outside the material: the globe's, or the one with the
+   * {@link setStageOverride} fields replaced. Read it after the override is set, since the object is replaced with it.
+   */
+  get context(): IPlanetContext {
+    return this.stageEntry?.context ?? this.globeContext;
+  }
+
+  /** The stage-1 override in force, or `undefined` for the globe's own stage 1. */
+  get stageOverride(): IPlanetStageOverride | undefined {
+    return this.stageEntry?.override;
+  }
+
+  /**
+   * Supplies stage 1 from outside, for a mesh that is not the morph globe (the LOD terrain: see `TerrainPlanetMaterial`
+   * in `triangular-engine/lod-surface`). The context fields, the shading normal and the fragment mask named in the
+   * override replace the globe's; every layer, occluder, emissive, lighting and atmosphere stage is rebuilt against
+   * them. `null` restores the globe's stage 1. Without an override the material is exactly the globe material.
+   *
+   * Set the mesh's `positionNode` yourself: it is not part of the override. Triggers a recompile and adds the override's
+   * `id` to {@link customProgramCacheKey}.
+   */
+  setStageOverride(override: IPlanetStageOverride | null): this {
+    if (override === null) {
+      this.stageEntry = undefined;
+      this.normalNode = this.morphGraph.normalNode;
+      this.maskNode = this.morphGraph.visibleMask;
+      this.maskShadowNode = this.morphGraph.visibleMaskShadow;
+    } else {
+      this.stageEntry = { override, context: { ...this.globeContext, ...override.context } };
+      this.normalNode = override.shadingNormal
+        ? transformNormalToView(normalize(override.shadingNormal))
+        : this.morphGraph.normalNode;
+      this.maskNode = override.maskNode === undefined ? this.morphGraph.visibleMask : override.maskNode;
+      this.maskShadowNode =
+        override.maskShadowNode === undefined ? this.morphGraph.visibleMaskShadow : override.maskShadowNode;
+    }
+    this.rebuild();
+    return this;
   }
 
   /** Adds a surface layer. Throws if `id` is taken. Triggers a recompile. */
@@ -180,7 +251,8 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
   }
 
   override customProgramCacheKey(): string {
-    return `${super.customProgramCacheKey()}|planetSurface:${this.stackKey}`;
+    const stage = this.stageEntry ? `|stage:${this.stageEntry.override.id}` : '';
+    return `${super.customProgramCacheKey()}|planetSurface:${this.stackKey}${stage}`;
   }
 
   private rebuild(): void {

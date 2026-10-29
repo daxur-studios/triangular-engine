@@ -8,6 +8,7 @@
  */
 
 import type { CapsuleCatCharacterDNA, CapsuleCatGaitMode } from './capsule-cat-dna';
+import type { ExtendedEmotionName } from './face-semantic-channels';
 import {
   characterVector3,
   type CharacterVector3,
@@ -36,6 +37,8 @@ export interface CapsuleCatLocomotionInput {
   readonly dna: CapsuleCatCharacterDNA;
   /** Optional normalized movement speed multiplier ([0.3, 2.0], default 1.0). */
   readonly speedMultiplier?: number;
+  /** Optional emotional state to modulate tail kinematics and feline posture. */
+  readonly emotion?: ExtendedEmotionName;
 }
 
 export interface CapsuleCatLocomotionSample {
@@ -434,10 +437,46 @@ export function sampleCapsuleCatLocomotion(
   );
 
   const walkPitch = mode === 'goofy_walk' ? 0.35 : mode === 'bound_run' ? 0.5 : 0.18;
+  const emotion = input.emotion;
+
+  let tailFreqMult = 1.0;
+  let tailAmpMult = 1.0;
+  let tailTipYOffset = 0.0;
+  let tailRadiusMult = 1.0;
+  let bodyDrop = 0.0;
+
+  if (emotion === 'angry') {
+    // Fast, aggressive tail lashes with wide horizontal whip
+    tailFreqMult = 2.4;
+    tailAmpMult = 2.1;
+    tailTipYOffset = -r * 0.45;
+  } else if (emotion === 'fearful' || dna.panicked) {
+    // Puffed-up bottle-brush tail tucked low between the legs; cowering body
+    tailFreqMult = 0.8;
+    tailAmpMult = 0.45;
+    tailTipYOffset = -r * 0.85;
+    tailRadiusMult = 1.55;
+    bodyDrop = r * 0.15;
+  } else if (emotion === 'sad') {
+    // Drooping limp tail with barely any sway
+    tailFreqMult = 0.6;
+    tailAmpMult = 0.28;
+    tailTipYOffset = -r * 0.95;
+  } else if (emotion === 'happy') {
+    // Cheerful upright question-mark tail
+    tailFreqMult = 1.15;
+    tailAmpMult = 1.1;
+    tailTipYOffset = r * 0.35;
+  } else if (emotion === 'surprised') {
+    // Tall, fluffed up straight tail
+    tailRadiusMult = 1.4;
+    tailTipYOffset = r * 0.45;
+  }
+
   const tailSwayPhase =
-    elapsedSeconds * (mode === 'bound_run' ? 4.4 : mode === 'float' ? 1.2 : 2.4) +
+    elapsedSeconds * (mode === 'bound_run' ? 4.4 : mode === 'float' ? 1.2 : 2.4) * tailFreqMult +
     (mode === 'idle' ? 0 : phase * 0.5);
-  const swayAmplitude = r * profile.tailSway;
+  const swayAmplitude = r * profile.tailSway * tailAmpMult;
   const sway = Math.sin(tailSwayPhase) * swayAmplitude;
   const secondary = Math.cos(tailSwayPhase * 0.7) * swayAmplitude * 0.35;
   const curl = dna.tailCurl;
@@ -445,28 +484,28 @@ export function sampleCapsuleCatLocomotion(
   const tailBaseZ = -length * 0.5 - r * 0.1;
   const streamBack = mode === 'bound_run' ? r * 0.35 : 0;
   const tail: CapsuleCatTailPose = {
-    base: characterVector3(bodySwayX * 0.4, r * 0.18, tailBaseZ),
+    base: characterVector3(bodySwayX * 0.4, r * 0.18 - bodyDrop * 0.5, tailBaseZ),
     control1: characterVector3(
       bodySwayX * 0.3 + sway * 0.25,
-      r * (0.82 + profile.tailSway * 0.12),
+      r * (0.82 + profile.tailSway * 0.12) + tailTipYOffset * 0.3,
       tailBaseZ - r * (0.55 + curl * 0.12),
     ),
     control2: characterVector3(
       bodySwayX * 0.2 - sway * 0.55 + secondary,
-      r * (1.45 + curl * 0.5),
+      r * (1.45 + curl * 0.5) + tailTipYOffset * 0.7,
       tailBaseZ - r * (0.95 - curl * 0.4) - streamBack * 0.5,
     ),
     tip: characterVector3(
       sway * 0.85 + secondary * 0.5,
-      r * (1.78 + curl * 0.6) - streamBack * 0.45,
+      r * (1.78 + curl * 0.6) + tailTipYOffset - streamBack * 0.45,
       tailBaseZ - r * (0.35 - curl * 0.6) - streamBack,
     ),
-    radius: Math.max(0.022, r * 0.155),
+    radius: Math.max(0.022, r * 0.155) * tailRadiusMult,
   };
 
   return {
     phase,
-    bodyCenterY,
+    bodyCenterY: bodyCenterY - bodyDrop,
     bodyBounceY,
     bodySwayX,
     bodyTiltX,

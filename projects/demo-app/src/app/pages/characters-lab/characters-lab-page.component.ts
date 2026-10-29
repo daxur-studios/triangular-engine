@@ -1,6 +1,15 @@
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, inject, isDevMode, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { TestRunnerComponent, type TestProgress } from 'triangular-engine/testing';
+import {
+  CHARACTERS_LAB_TEST_HISTORY,
+  type CharactersLabTestSettings,
+} from './characters-lab-tests';
+import {
+  createCharactersLabTestAdapter,
+  type CharactersLabTestHost,
+} from './characters-lab-test-adapter';
 import {
   AnimationMixer,
   Bone,
@@ -111,7 +120,7 @@ function lerpAngle(from: number, to: number, t: number): number {
 
 @Component({
   selector: 'app-characters-lab-page',
-  imports: [EngineModule, DecimalPipe],
+  imports: [EngineModule, DecimalPipe, TestRunnerComponent],
   templateUrl: './characters-lab-page.component.html',
   styleUrl: './characters-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -220,6 +229,117 @@ export class CharactersLabPageComponent {
   protected emotion: EmotionName = 'happy';
   protected speechText = 'Hello there, welcome to the Capsule Doodle space program!';
   protected readonly emotions = EMOTION_NAMES;
+
+  // triangular-engine/testing runner integration
+  protected readonly testHistory = CHARACTERS_LAB_TEST_HISTORY;
+  protected readonly allowTestAutoStart = isDevMode();
+  protected readonly runnerReady = signal(true);
+  protected readonly runnerBusy = signal(false);
+  protected readonly activeTestScenario = signal<string | null>(null);
+
+  private engineError = '';
+  private totalRenderedFrames = 0;
+  private readonly renderCompleteCallbacks = new Set<(renderedAt: number) => void>();
+
+  private readonly testHost: CharactersLabTestHost = {
+    read: () => ({
+      characterType: this.viewMode === 'capsule-cats' ? 'cat' : 'human',
+      presetId: this.viewMode === 'capsule-cats' ? this.selectedCatPresetId : this.selectedPresetId,
+      emotion: this.activeEmotion,
+      gait: this.viewMode === 'capsule-cats' ? this.capsuleCatLocomotion : this.capsuleLocomotion,
+      cameraFraming: this.cameraFraming,
+      panicked: this.capsuleCatHeroActor.dna.panicked,
+      tuft: this.capsuleCatHeroActor.dna.tuft,
+      restMouthPose: this.capsuleCatHeroActor.dna.restMouthPose,
+      rightHandAction: this.capsuleRightHandAction,
+      leftHandAction: this.capsuleLeftHandAction,
+    }),
+    apply: (settings) => {
+      if (settings.characterType === 'cat') {
+        if (this.viewMode !== 'capsule-cats') {
+          this.setViewMode('capsule-cats');
+        }
+        if (settings.presetId && settings.presetId !== this.selectedCatPresetId) {
+          this.selectCapsuleCatPreset(settings.presetId);
+        }
+        if (settings.gait) {
+          this.setCapsuleCatLocomotion(settings.gait as CapsuleCatGaitMode);
+        }
+        if (settings.panicked !== undefined && settings.panicked !== this.capsuleCatHeroActor.dna.panicked) {
+          this.capsuleCatHeroActor.setDna({ panicked: settings.panicked });
+        }
+        if (settings.tuft !== undefined && settings.tuft !== this.capsuleCatHeroActor.dna.tuft) {
+          this.capsuleCatHeroActor.setDna({ tuft: settings.tuft });
+        }
+        if (settings.restMouthPose) {
+          this.capsuleCatHeroActor.setDna({ restMouthPose: settings.restMouthPose });
+        }
+      } else {
+        if (this.viewMode !== 'capsule-doodle') {
+          this.setViewMode('capsule-doodle');
+        }
+        if (settings.presetId && settings.presetId !== this.selectedPresetId) {
+          this.selectCapsulePreset(settings.presetId);
+        }
+        if (settings.gait) {
+          this.setCapsuleLocomotion(settings.gait as CapsuleLocomotionMode);
+        }
+        if (settings.rightHandAction) {
+          this.setCapsuleRightHand(settings.rightHandAction);
+        }
+        if (settings.leftHandAction) {
+          this.setCapsuleLeftHand(settings.leftHandAction);
+        }
+      }
+      if (settings.emotion) {
+        this.setFaceExpression(settings.emotion);
+      }
+      if (settings.cameraFraming) {
+        this.setCameraFraming(settings.cameraFraming);
+      }
+      this.cdr.markForCheck();
+    },
+    renderedFrames: () => this.totalRenderedFrames,
+    errors: () => this.engineError,
+    resetErrors: () => {
+      this.engineError = '';
+    },
+    onRenderComplete: (cb) => {
+      this.renderCompleteCallbacks.add(cb);
+      return () => {
+        this.renderCompleteCallbacks.delete(cb);
+      };
+    },
+    speak: (text) => {
+      this.speechText = text;
+      this.speak();
+    },
+    isSpeaking: () => this.speaking,
+    setTurntableAngle: (radians) => {
+      if (this.viewMode === 'capsule-cats') {
+        this.capsuleCatHeroActor.root.rotation.y = radians !== undefined ? radians : -0.28;
+      } else if (this.viewMode === 'capsule-doodle') {
+        this.capsuleHeroActor.root.rotation.y = radians !== undefined ? radians : 0;
+      }
+    },
+    environment: () => ({
+      browser: typeof navigator !== 'undefined' ? navigator.userAgent : 'node',
+    }),
+    thumbnail: async () => {
+      const canvas = this.engine.renderer?.domElement;
+      if (!canvas) return undefined;
+      return new Promise<Blob | undefined>((resolve) => {
+        canvas.toBlob((blob) => resolve(blob ?? undefined), 'image/jpeg', 0.85);
+      });
+    },
+  };
+  readonly testAdapter = createCharactersLabTestAdapter(this.testHost);
+
+  protected onTestProgress(progress: TestProgress | null): void {
+    this.runnerBusy.set(progress !== null);
+    this.activeTestScenario.set(progress?.label ?? null);
+    this.cdr.markForCheck();
+  }
 
   private readonly engine = inject(EngineService);
   private readonly rig = createHumanoidRig();
@@ -346,6 +466,11 @@ export class CharactersLabPageComponent {
     this.loadReferenceModel();
 
     const destroyRef = inject(DestroyRef);
+    this.engine.error$
+      .pipe(takeUntilDestroyed(destroyRef))
+      .subscribe((event) => {
+        this.engineError ||= `${event.phase}: ${String(event.error)}`;
+      });
     this.engine.tick$
       .pipe(takeUntilDestroyed(destroyRef))
       .subscribe((deltaSeconds) => this.update(deltaSeconds));
@@ -742,14 +867,14 @@ export class CharactersLabPageComponent {
         this.cameraPosition.set([0, 2.35, 4.6]);
         this.cameraTarget.set([0, 0.48, 0.0]);
       } else if (framing === 'full-shot') {
-        this.cameraPosition.set([1.15, 0.72, 1.45]);
-        this.cameraTarget.set([0, 0.40, 0.05]);
+        this.cameraPosition.set([1.25, 0.58, 1.45]);
+        this.cameraTarget.set([0, 0.28, 0.05]);
       } else if (framing === 'front') {
-        this.cameraPosition.set([0, 0.54, 1.05]);
-        this.cameraTarget.set([0, 0.48, 0.32]);
+        this.cameraPosition.set([0, 0.40, 0.92]);
+        this.cameraTarget.set([0, 0.35, 0.30]);
       } else if (framing === 'three-quarter') {
-        this.cameraPosition.set([0.65, 0.58, 0.95]);
-        this.cameraTarget.set([0, 0.46, 0.18]);
+        this.cameraPosition.set([0.65, 0.44, 0.92]);
+        this.cameraTarget.set([0, 0.32, 0.18]);
       } else {
         this.cameraPosition.set([1.35, 0.48, 0.0]);
         this.cameraTarget.set([0, 0.44, 0.0]);
@@ -1075,6 +1200,11 @@ export class CharactersLabPageComponent {
 
   private update(deltaSeconds: number): void {
     this.elapsed += deltaSeconds;
+    this.totalRenderedFrames++;
+    const renderedAt = performance.now();
+    for (const cb of this.renderCompleteCallbacks) {
+      cb(renderedAt);
+    }
 
     // 1. Update Facial Controller
     if (this.wanderGaze) {

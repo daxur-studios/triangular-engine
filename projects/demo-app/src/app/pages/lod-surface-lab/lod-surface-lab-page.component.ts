@@ -6,10 +6,6 @@ import { vec4 } from 'three/tsl';
 import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
 import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import { TerrainPlanetMaterial } from 'triangular-engine/lod-surface';
-import { SURFACE_LAYER_ORDER, cellLookupLayer, type ICellLookupLayer } from 'triangular-engine/planet-material';
-import { buildCellPerPixelLookupPayload } from 'triangular-engine/worldgen/render';
-import { OCEAN_COLOR, biomeColor, parseColorToLinearRgb } from 'triangular-engine/worldgen/render/core';
-import type { ICellPlanetWorld } from 'triangular-engine/worldgen';
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import {
   POSES, biomePathView, lookView, panView, poseView, resolveCamera, sweepPathView, turnPathView, zoomPathView, zoomView, type CameraView, type PoseId,
@@ -63,23 +59,10 @@ function initialSurfaceMaterial(): SurfaceMaterialId {
   }
 }
 
-/** Linear RGBA per cell, the terrain's own world: biome colour on land (and ice), the ocean colour below the sea. */
-function cellBiomeColours(world: ICellPlanetWorld): Float32Array {
-  const out = new Float32Array(world.graph.cells.length * 4);
-  const ocean = parseColorToLinearRgb(OCEAN_COLOR);
-  for (const cell of world.graph.cells) {
-    const [r, g, b] = world.tectonics.isLand[cell.id] ? parseColorToLinearRgb(biomeColor(world.ecology.biome[cell.id])) : ocean;
-    out.set([r, g, b, 1], cell.id * 4);
-  }
-  return out;
-}
-
 const maxOf = (values: readonly number[]): number => values.reduce((a, b) => Math.max(a, b), 0);
 
-/** Surface materials of the lab: the built-in debug material, or the cell-planet `PlanetSurfaceMaterial` (Plan 059 G3 spike). Not a test setting. */
+/** Surface materials of the lab: the built-in debug material, or the cell-planet `TerrainPlanetMaterial` (Plan 059 G3). Not a test setting. */
 type SurfaceMaterialId = 'debug' | 'planet';
-/** Cell-id atlas size of the planet material's cell lookup (spike: nearest-filtered, so cell edges step at ground level). */
-const CELL_ATLAS = { cellIdWidth: 2048, cellIdHeight: 1024 } as const;
 
 const SOFTWARE = /swiftshader|llvmpipe|software|basic render|microsoft basic/i;
 
@@ -355,7 +338,7 @@ export class LodSurfaceLabPageComponent {
   private surface: LodSurfaceMesh | undefined;
   private builtKey = '';
   /** The planet material and its cell lookup, kept while the cell planet is the source (the lookup costs a world build and an atlas). */
-  private planetMaterial: { readonly material: TerrainPlanetMaterial; readonly cells: ICellLookupLayer; readonly key: string } | undefined;
+  private planetMaterial: { readonly material: TerrainPlanetMaterial; readonly key: string } | undefined;
   private sunLight: DirectionalLight | undefined;
   private ambientLight: AmbientLight | undefined;
   /** Key of the bake being waited for, or '' when none (the drawn surface is then the one the settings name). */
@@ -637,27 +620,21 @@ export class LodSurfaceLabPageComponent {
   }
 
   /**
-   * The planet material for the current source: on the cell planet (a sphere) it paints the world's cells by direction through
-   * `cellLookupLayer`; otherwise it is a plain colour. Kept between rebuilds while its key (source, radius) is unchanged.
+   * The planet material for the current source: on the cell planet (a sphere) it paints the world's cells (the same world the
+   * heights come from) through `TerrainPlanetMaterial`'s `cellPlanet` option; otherwise it is a plain colour. Kept between
+   * rebuilds while its key (source, radius) is unchanged.
    */
   private planetMaterialFor(domain: LodDomain): { readonly material: TerrainPlanetMaterial; readonly key: string } {
     const cellPlanet = this.sourceId() === 'cell-planet' && domain.kind === 'sphere';
     const key = cellPlanet ? `planet-cells-${domain.sizeM}` : 'planet-plain';
     if (this.planetMaterial?.key === key) return this.planetMaterial;
     this.disposePlanetMaterial();
-    const material = new TerrainPlanetMaterial();
-    const cells = cellLookupLayer();
-    if (cellPlanet) {
-      const world = cellPlanetWorld(cellPlanetFor(domain.sizeM)).world;
-      cells.setLookup(buildCellPerPixelLookupPayload(world.graph, cellBiomeColours(world), CELL_ATLAS));
-      material.addSurfaceLayer({ id: 'cellLookup', order: SURFACE_LAYER_ORDER.cellLookup, layer: cells.layer });
-    }
-    this.planetMaterial = { material, cells, key };
+    const material = new TerrainPlanetMaterial(cellPlanet ? { cellPlanet: cellPlanetWorld(cellPlanetFor(domain.sizeM)).world } : {});
+    this.planetMaterial = { material, key };
     return this.planetMaterial;
   }
 
   private disposePlanetMaterial(): void {
-    this.planetMaterial?.cells.dispose();
     this.planetMaterial?.material.dispose();
     this.planetMaterial = undefined;
   }

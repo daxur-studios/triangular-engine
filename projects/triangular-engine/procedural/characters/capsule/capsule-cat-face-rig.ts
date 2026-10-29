@@ -376,25 +376,47 @@ export function buildCapsuleCatFaceRig(dna: CapsuleCatCharacterDNA): CapsuleCatF
     applyEyePose(leftEye, projection.leftEye);
     applyEyePose(rightEye, projection.rightEye);
 
-    // earPerk in [-1, 1]: alert = perk forward, fearful = flatten back & spread
-    for (const ear of [leftEar, rightEar]) {
-      const isLeft = ear.name.includes('left');
-      const sign = isLeft ? -1 : 1;
-      const baseX = (ear.userData['baseX'] as number) ?? -0.10;
-      const baseZ = (ear.userData['baseZ'] as number) ?? -sign * 0.32;
-      const perk = projection.earPerk;
-      if (perk >= 0) {
-        ear.rotation.x = baseX + perk * 0.32;
-        ear.rotation.z = baseZ;
-      } else {
-        ear.rotation.x = baseX + perk * 0.48;
-        ear.rotation.z = baseZ - sign * perk * 0.18;
+    // 3D Ear Poses (airplane ears, pinned back, perky, asymmetric skepticism)
+    const leftPose = projection.leftEar;
+    const rightPose = projection.rightEar;
+    if (leftPose && rightPose) {
+      const lx = (leftEar.userData['baseX'] as number) ?? -0.10;
+      const ly = (leftEar.userData['baseY'] as number) ?? -0.22;
+      const lz = (leftEar.userData['baseZ'] as number) ?? 0.32;
+      leftEar.rotation.set(lx + leftPose.pitch, ly + leftPose.yaw, lz + leftPose.roll);
+
+      const rx = (rightEar.userData['baseX'] as number) ?? -0.10;
+      const ry = (rightEar.userData['baseY'] as number) ?? 0.22;
+      const rz = (rightEar.userData['baseZ'] as number) ?? -0.32;
+      rightEar.rotation.set(rx + rightPose.pitch, ry + rightPose.yaw, rz + rightPose.roll);
+    } else {
+      // Fallback to scalar earPerk
+      for (const ear of [leftEar, rightEar]) {
+        const isLeft = ear.name.includes('left');
+        const sign = isLeft ? -1 : 1;
+        const baseX = (ear.userData['baseX'] as number) ?? -0.10;
+        const baseZ = (ear.userData['baseZ'] as number) ?? -sign * 0.32;
+        const perk = projection.earPerk;
+        if (perk >= 0) {
+          ear.rotation.x = baseX + perk * 0.32;
+          ear.rotation.z = baseZ;
+        } else {
+          ear.rotation.x = baseX + perk * 0.48;
+          ear.rotation.z = baseZ - sign * perk * 0.18;
+        }
       }
     }
 
-    const spreadScale = 0.92 + projection.whiskerSpread * 0.24;
+    const spreadScale = 0.92 + projection.whiskerSpread * 0.28;
     leftWhiskers.scale.setScalar(spreadScale);
     rightWhiskers.scale.setScalar(spreadScale);
+
+    const wAngle = projection.whiskerAngle ?? 0;
+    // Bristled forward (+wAngle) or drooping/flattened back (-wAngle)
+    leftWhiskers.rotation.y = -wAngle;
+    rightWhiskers.rotation.y = wAngle;
+    leftWhiskers.rotation.z = -wAngle * 0.4;
+    rightWhiskers.rotation.z = wAngle * 0.4;
   };
 
   const updateColorsAndStyle = (nextDna: CapsuleCatCharacterDNA): void => {

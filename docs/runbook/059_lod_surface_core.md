@@ -1378,3 +1378,48 @@ For the lab's cell-planet seed `seaLevelElevation` is 0.3232 (a quantile of cell
 - Lab specs: 189 of 189 pass.
 - `npm run build:triangular-engine` passes; `tsc -p projects/demo-app/tsconfig.app.json --noEmit` is clean.
 - Caveats: the new drawing spec uses the WebGL2 backend headless (native WebGPU was not checked); the owner has not yet looked at the lab visually; the biome palette and atlas are spike shortcuts.
+
+## 2026-10-29: G3: planet material (2026-10-29)
+
+Turns the G3 spike into the supported path: `<planetTerrain [material]="new TerrainPlanetMaterial({ cellPlanet: world })">` draws the ground in the globe's colours for the same cell planet, with exact cell edges up close. The owner approved an additive `planet-material` API change for step 1.
+
+### What changed
+
+1. **`PlanetSurfaceMaterial.setStageOverride(override | null)`** (`planet-material/planet-surface-material.ts`, new `IPlanetStageOverride`). The override carries an `id` (part of the shader cache key), partial `context` fields, a body-frame `shadingNormal` (the material turns it into view space) and `maskNode` / `maskShadowNode` (`null` removes, omitted keeps the globe's). `context` is now a getter over the globe's context or the merged one. The spike's readonly cast and private `rebuild()` call are gone. Default path unchanged: with no override the context object, `normalNode`, masks and cache key are the globe material's (specs assert identity against `morphGraph`, and every existing planet-material spec passes untouched).
+2. **`TerrainPlanetMaterial`** uses it from `bindLodSurfaceNodes` (id `lodTerrain`), no casts or private access. `bindLodSurfaceNodes` stays the link between mesh and material.
+3. **`<planetTerrain>` API: the `material` input, nothing new.** The mesh already hands a supplied material its nodes, so the smallest clean surface is one object: `new TerrainPlanetMaterial({ cellPlanet })` in `[material]`. A new input or component would have had to own a material it does not create and dispose. `sunDirection` now reaches the material too (new `LodSurfaceSunConsumer.setSunDirection`, called by `LodSurfaceMesh.setSun` for a supplied material).
+4. **Colours from the same world.** `cellPlanet` takes the built `ICellPlanetWorld` or the `cellPlanetHeights` description (`resolveCellPlanetWorld`, built on the calling thread through the cached `cellPlanetWorld`). `cellPlanetCellColours` paints land and ice by biome and the sea by the ocean colour (lava for lava worlds): the globe's `natural` colours for that world (the old spike used `world.tectonics.isLand`; this uses the sampler's `isLand || isIce` like `buildCellColourData`). Main thread kept; see the cost below.
+5. **Exact cell lookup.** New `cellVoronoiLayer` (planet-material) and `buildCellPlanetLookup` (lod-surface/core). See below.
+6. **Sea level.** `seaAlignedGlobeRadius(radius, world | seaLevelElevation, heightScaleM)` = `radius - seaLevelElevation * heightScaleM`. Neither default moved; a game gives the globe that radius and keeps the terrain's `radius`. Documented in both READMEs. 0.3232 * 150 = 48.5 m on the 10 km sphere. The `<planet>` parent will apply it.
+7. **Sun.** `TerrainPlanetMaterial.dayNight` (`IPlanetDayNightUniforms`) and `setSunDirection(dir)`: the place a parent's day/night lighting stage reads. The PBR path still uses scene lights; the parent moves those. Nothing else was built.
+
+### Cell lookup choice and cost
+
+Options weighed: a bigger equirect atlas (8192 x 4096 = 128 MB, texel still 0.5 km at a 10 km radius so steps remain at 2 cm), a per-face cube atlas (same trade, 6 x 1024^2 = 24 MB), or the nearest-cell search itself. Chosen: **coarse atlas to find a nearby cell, then the exact Voronoi rule in the shader** (largest centre dot among the atlas cell and its eight neighbour slots). It is exact wherever an atlas texel is smaller than a cell, so the atlas shrank from the spike's 2048 x 1024 (8 MB) to 1024 x 512 (2 MB), growing past about 20,000 cells.
+
+- Memory (1,000 cells): 2.0 MB atlas + 64 KB tables (16 B colour, 16 B centre, 32 B neighbours per cell), about 2.09 MB in all (the spike's atlas alone was 8 MB).
+- Shader: 12 texture fetches per fragment (atlas 1, neighbours 2, centres 9, colour 1) against 2 for `cellLookupLayer`, plus nine dot products and selects. All explicit-level nearest fetches into tiny tables; not measured on the RTX (no browser run). Expect it to be small next to the vertex and lighting work, but it is the first thing to look at if a ground-level frame time moves.
+- Build, measured headless (Chrome, CPU): world for 1,000 cells 99 ms; colours + 1024 x 512 atlas + tables **46 ms**, main thread. Not worth a worker.
+- Verified on the GPU backend (WebGL2 via `forceWebGL`): on a deliberately coarse 32 x 16 atlas of a 150-cell world, 400 directions all match `findCellAt`'s colour with the exact layer and more than five do not with the plain layer (control), so the fix is what removes the steps.
+
+### Files
+
+`planet-material/planet-surface-material.ts` (+ spec), `planet-material/cell-voronoi-layer.ts` (+ spec), `planet-material/public-api.ts`, `planet-material/README.md`; `lod-surface/terrain-planet-material.ts` (+ spec), `lod-surface/cell-planet-ground.spec.ts`, `lod-surface/core/lod-cell-planet-lookup.ts` (+ spec), `lod-surface/core/lod-surface-mesh.ts`, `lod-surface/core/public-api.ts`, `lod-surface/components/planet-terrain.component.ts` (+ spec), `lod-surface/README.md`, `CHANGELOG.md`; lab: `lod-surface-lab-page.component.ts` (`?material=planet` now builds `new TerrainPlanetMaterial({ cellPlanet })`; the local biome colour and atlas code is gone).
+
+### Verified
+
+- `lod-surface` library specs (ChromeHeadless): 37 of 37 (22 before).
+- `planet-material` library specs: 91 of 91.
+- Lab specs (`**/lod-surface-lab/**/*.spec.ts`): 189 of 189, unchanged. The default debug material path was not touched (only `setSun` gained a supplied-material branch), so lab measurements with it are unchanged.
+- `planet-material-extensions` page specs: 16 of 17. The failure (`builds and parses exact-version and latest launch links`) expects a launch link without `testMode=standard`; `testing/test-launch.ts` (untouched here) now adds it. It is not caused by this change.
+- `npm run build:triangular-engine` passes; `npx tsc -p projects/demo-app/tsconfig.app.json --noEmit` is clean.
+- Caveats: GPU specs use the WebGL2 backend headless; the owner has not yet looked at the result on WebGPU; the shader cost is not measured on hardware.
+
+### What's left
+
+- The `<planet>` parent: apply `seaAlignedGlobeRadius`, move the scene light with the sun, share the world between globe, heights and ground.
+- Colours are the biome (`natural`) palette. The globe's `material` colour mode (rivers, slope, snow line) needs the render-core world and is not reproduced; ice and biome are.
+- A world with a non-default `jitter`, `plateCount`, `worldProfileKind` or `terrain` must be passed built (the description path rebuilds the default world, like `cellPlanetHeights`).
+- Cells with more than eight neighbours keep the eight nearest (rare; an edge beside a ninth could pick a slightly wrong cell).
+- Macro layer and other `modelWorldMatrix` layers still need the mesh at the camera; vertex-attribute layers do not work on the terrain.
+- Atmosphere on the terrain, gameplay height queries and a hardware timing of the new lookup remain.

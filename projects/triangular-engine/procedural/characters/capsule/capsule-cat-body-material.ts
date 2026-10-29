@@ -37,6 +37,8 @@ export interface CapsuleCatBodyUniformMap {
   uMouthCurve: { value: number };
   uMouthMeow: { value: number };
   uTongueVisible: { value: number };
+  uFangsVisible: { value: number };
+  uMouthAsymmetry: { value: number };
 }
 
 export interface CapsuleCatBodyMeshResult {
@@ -68,6 +70,8 @@ export function createCapsuleCatBodyUniforms(dna: CapsuleCatCharacterDNA): Capsu
     uMouthCurve: { value: 0.35 },
     uMouthMeow: { value: dna.restMouthPose === 'meow' ? 0.82 : 0 },
     uTongueVisible: { value: dna.restMouthPose === 'meow' ? 0.8 : 0 },
+    uFangsVisible: { value: 0 },
+    uMouthAsymmetry: { value: 0 },
   };
 }
 
@@ -86,7 +90,7 @@ export function createCapsuleCatBodyMaterial(
     metalness: 0.02,
   });
 
-  material.customProgramCacheKey = () => 'capsule-cat-body-sdf-v2';
+  material.customProgramCacheKey = () => 'capsule-cat-body-sdf-v3';
 
   material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms) => {
     Object.assign(shader.uniforms, uniforms);
@@ -125,7 +129,9 @@ uniform float uMouthOpen;
 uniform float uMouthWidth;
 uniform float uMouthCurve;
 uniform float uMouthMeow;
-uniform float uTongueVisible;`,
+uniform float uTongueVisible;
+uniform float uFangsVisible;
+uniform float uMouthAsymmetry;`,
       )
       .replace(
         '#include <color_fragment>',
@@ -164,10 +170,14 @@ uniform float uTongueVisible;`,
 
   // 2D SDF Cat Mouth on the front snout cap (below the nose button)
   if (z > uNeckZ && vCatLocalNormal.z > 0.12) {
-    vec2 mp = vec2(
+    vec2 rawMp = vec2(
       vCatLocalPos.x / r,
       (vCatLocalPos.y - uMouthCenterY) / r
     );
+
+    // Asymmetrical mouth quirk / smirk
+    float asymY = rawMp.x * uMouthAsymmetry * 0.16;
+    vec2 mp = vec2(rawMp.x, rawMp.y + asymY);
 
     float halfW = clamp(uMouthWidth * 0.32, 0.08, 0.38);
     float openAmt = clamp(uMouthOpen, 0.0, 1.0);
@@ -176,11 +186,12 @@ uniform float uTongueVisible;`,
 
     float archR = halfW * mix(0.50, 0.42, meowAmt);
     float xNorm = clamp(mp.x / max(0.05, halfW), -1.5, 1.5);
-    float curveY = (1.0 - xNorm * xNorm) * uMouthCurve * 0.05;
+    float curveY = (1.0 - xNorm * xNorm) * uMouthCurve * 0.055;
 
-    // Twin-arch omega upper lip
+    // Twin-arch omega upper lip with drooping corners when frowning
     vec2 archP = vec2(abs(mp.x) - archR, mp.y - curveY);
-    float dArch = max(abs(length(archP) - archR) - mix(0.014, 0.020, meowAmt), archP.y);
+    float clipY = archP.y - max(0.0, -uMouthCurve) * (abs(mp.x) - archR) * 0.45;
+    float dArch = max(abs(length(archP) - archR) - mix(0.014, 0.020, meowAmt), clipY);
 
     // Philtrum seam connecting from nose down to the twin arches
     float dPhiltrum = max(abs(mp.x) - 0.009, -(mp.y - curveY));
@@ -211,13 +222,26 @@ uniform float uTongueVisible;`,
       vec3 interior = cavity;
 
       if (openBlend > 0.05) {
-        vec2 tongueCenter = vec2(0.0, curveY - halfH * 0.60);
-        float dTongue = length(
-          (vec2(mp.x, mp.y - curveY) - tongueCenter) * vec2(0.9, 1.15)
-        ) - halfW * 0.58;
-        float tongueMask = (1.0 - smoothstep(-aa, aa, dTongue)) * uTongueVisible;
-        vec3 tongue = mix(vec3(0.86, 0.32, 0.42), vec3(0.98, 0.48, 0.56), 0.5);
-        interior = mix(interior, tongue, tongueMask);
+        if (uTongueVisible > 0.02) {
+          vec2 tongueCenter = vec2(0.0, curveY - halfH * 0.60);
+          float dTongue = length(
+            (vec2(mp.x, mp.y - curveY) - tongueCenter) * vec2(0.9, 1.15)
+          ) - halfW * 0.58;
+          float tongueMask = (1.0 - smoothstep(-aa, aa, dTongue)) * uTongueVisible;
+          vec3 tongue = mix(vec3(0.86, 0.32, 0.42), vec3(0.98, 0.48, 0.56), 0.5);
+          interior = mix(interior, tongue, tongueMask);
+        }
+
+        // Sharp cartoon cat fangs descending from the upper lip
+        if (uFangsVisible > 0.05) {
+          vec2 fangP = vec2(abs(mp.x) - archR * 0.95, mp.y - curveY);
+          float fangW = halfW * 0.20;
+          float fangH = halfH * 0.65 + 0.008;
+          float dFang = max(abs(fangP.x) - (1.0 - clamp(-fangP.y / max(0.004, fangH), 0.0, 1.0)) * fangW, fangP.y);
+          dFang = max(dFang, -fangP.y - fangH);
+          float fangMask = (1.0 - smoothstep(-aa, aa, dFang)) * uFangsVisible;
+          interior = mix(interior, vec3(0.96, 0.95, 0.93), fangMask);
+        }
       }
 
       baseCol = mix(baseCol, interior, mouthMask);
@@ -225,7 +249,7 @@ uniform float uTongueVisible;`,
 
     // Keep the twin-arch lip line defined over an open meow
     float lipLine = abs(length(archP) - archR) - mix(0.012, 0.016, openBlend);
-    lipLine = max(lipLine, archP.y);
+    lipLine = max(lipLine, clipY);
     float lipMask = (1.0 - smoothstep(-aa, aa, lipLine)) * mix(0.65, 0.95, openBlend);
     baseCol = mix(baseCol, vec3(0.18, 0.07, 0.08), lipMask);
   }
@@ -269,6 +293,8 @@ export function buildCapsuleCatBodyMesh(dna: CapsuleCatCharacterDNA): CapsuleCat
     uniforms.uMouthCurve.value = mouth.mouthCurve;
     uniforms.uMouthMeow.value = mouth.meow;
     uniforms.uTongueVisible.value = mouth.tongueVisible;
+    uniforms.uFangsVisible.value = mouth.fangsVisible ?? 0;
+    uniforms.uMouthAsymmetry.value = mouth.mouthAsymmetry ?? 0;
   };
 
   return {

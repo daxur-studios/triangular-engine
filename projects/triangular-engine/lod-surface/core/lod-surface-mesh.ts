@@ -67,6 +67,18 @@ export interface LodSurfaceNodesConsumer {
   bindLodSurfaceNodes(nodes: LodSurfaceNodes): void;
 }
 
+/**
+ * A material that wants the sun direction `LodSurfaceMesh.setSun` is given (so `<planetTerrain [sunDirection]>` reaches it).
+ * The built-in material uses it for its own lighting; a supplied material that implements this receives it instead.
+ */
+export interface LodSurfaceSunConsumer {
+  /** The unit direction to the sun in the domain frame. */
+  setSunDirection(direction: Vec3): void;
+}
+
+const consumesSun = (material: unknown): material is LodSurfaceSunConsumer =>
+  typeof (material as Partial<LodSurfaceSunConsumer>).setSunDirection === 'function';
+
 const consumesNodes = (material: unknown): material is LodSurfaceNodesConsumer =>
   typeof (material as Partial<LodSurfaceNodesConsumer>).bindLodSurfaceNodes === 'function';
 
@@ -85,7 +97,7 @@ export interface LodSurfaceMeshOptions {
    * its `positionNode` and nothing else, so colour, lighting and normals are the material's; one that implements
    * {@link LodSurfaceNodesConsumer} also receives the vertex nodes ({@link LodSurfaceNodes}). It is not disposed by
    * {@link LodSurfaceMesh.dispose}: its owner disposes it. The debug setters (`setView`, `setLighting`, `setBounds`,
-   * `setSun`) change only the built-in material and do nothing to a supplied one.
+   * `setSun`) change only the built-in material; `setSun` also reaches a supplied material that implements {@link LodSurfaceSunConsumer}.
    */
   readonly material?: NodeMaterial;
   /**
@@ -390,7 +402,10 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     setLighting(on) { uLighting.value = on ? 1 : 0; },
     setDetailNoise(share) { uDetailAmp.value = share * detailTexelM; },
     setDetailFade(spacingAngle) { uDetailFade.value = Math.max(spacingAngle, 1e-6); },
-    setSun(direction) { (uSun.value as Vector3).set(...direction).normalize(); },
+    setSun(direction) {
+      (uSun.value as Vector3).set(...direction).normalize();
+      if (!ownMaterial && consumesSun(material)) material.setSunDirection(direction);
+    },
     dispose() {
       geometry.dispose();
       if (ownMaterial) material.dispose();

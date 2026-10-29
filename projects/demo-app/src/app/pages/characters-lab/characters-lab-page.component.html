@@ -18,7 +18,28 @@
   </div>
 </header>
 
+<!-- AUTOMATED SCENARIO RUNNER (triangular-engine/testing) -->
+<details class="test-runner-details" [open]="true">
+  <summary>
+    <span>Repeatable Automated Scenarios (triangular-engine/testing)</span>
+    @if (activeTestScenario(); as current) {
+      <span class="active-pill">Running: {{ current }}</span>
+    }
+  </summary>
+  <div class="test-runner-panel">
+    <tri-test-runner
+      [suites]="testHistory"
+      [adapter]="testAdapter"
+      [available]="runnerReady()"
+      [allowAutoStart]="allowTestAutoStart"
+      [resultSink]="true"
+      (progressChange)="onTestProgress($event)"
+    />
+  </div>
+</details>
+
 <!-- TOP NAVIGATION: VIEW MODE & FRAMING -->
+<fieldset class="controls-fieldset" [disabled]="runnerBusy()">
 <section class="controls">
   <div class="control-group">
     <span>View Mode</span>
@@ -692,15 +713,7 @@
     </div>
   </section>
 }
-
-<section class="scope-note">
-  <b>Capsule Doodle Procedural Architecture</b>
-  <span>Single-mesh <code>CapsuleGeometry</code> with skin/suit split &amp; 2D SDF mouth shader; 3-point Quadratic Bezier rubber-hose limbs updated in-place with zero per-frame allocation; analytical foot-arc gait + spring-damped secondary motion on jetpack &amp; hair.</span>
-  <b>Semantic Control API</b>
-  <span>Driven by the same framework-free <code>FacialAnimationController</code> (<code>lookAt</code>, <code>setExpression</code>, <code>setFaceChannel</code>, <code>playVisemes</code>, <code>blink</code>) as ARKit 52 and humanoid rigs.</span>
-  <b>Capsule Space Cats Architecture</b>
-  <span>Horizontal <code>CapsuleGeometry</code> with three shader suit/fur patterns and a projected twin-arch <code>:3</code>/<code>MEOW</code> mouth; four zero-allocation Quadratic Bezier rubber-hose legs, a tapered S-curve tail with spring-damper lag, and the same modular cat space gear across the seven concept presets.</span>
-</section>
+</fieldset>
 
 <!-- 3D VIEWPORT WITH DEDICATED LIGHTING -->
 <scene>
@@ -716,3 +729,15 @@
     <directionalLight [position]="[6, 9, 5]" [intensity]="2.4" />
   }
 </scene>
+
+<details class="scope-note-details">
+  <summary>Architecture &amp; Specifications</summary>
+  <div class="scope-note">
+    <b>Capsule Doodle Procedural Architecture</b>
+    <span>Single-mesh <code>CapsuleGeometry</code> with skin/suit split &amp; 2D SDF mouth shader; 3-point Quadratic Bezier rubber-hose limbs updated in-place with zero per-frame allocation; analytical foot-arc gait + spring-damped secondary motion on jetpack &amp; hair.</span>
+    <b>Semantic Control API</b>
+    <span>Driven by the same framework-free <code>FacialAnimationController</code> (<code>lookAt</code>, <code>setExpression</code>, <code>setFaceChannel</code>, <code>playVisemes</code>, <code>blink</code>) as ARKit 52 and humanoid rigs.</span>
+    <b>Capsule Space Cats Architecture</b>
+    <span>Horizontal <code>CapsuleGeometry</code> with three shader suit/fur patterns and a projected twin-arch <code>:3</code>/<code>MEOW</code> mouth; four zero-allocation Quadratic Bezier rubber-hose legs, a tapered S-curve tail with spring-damper lag, and the same modular cat space gear across the seven concept presets.</span>
+  </div>
+</details>

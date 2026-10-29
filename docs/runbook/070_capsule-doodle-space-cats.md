@@ -57,6 +57,31 @@ gear. The reference sheet's dogs stay out of scope.
   the unrelated missing `mermaid` package imported by `@daxur-studios/mermaid-runtime`.
   No cat/character template error was reported before that bundling failure.
 
+### 2026-10-29 — Locomotion Stride, Emotion Kinematics & Test Runner Integration
+
+- **Locomotion Stride Direction Fix.** Inverted the $Z$ stride kinematics in `capsule-locomotion.ts`
+  and `capsule-cat-locomotion.ts` so airborne limbs swing forward ($+Z$) and grounded contact limbs
+  push backward ($-Z$) across both humanoids and quadrupeds.
+- **Feline Facial Emotion Kinematics.**
+  - Added 3D ear rotation (`CapsuleCatEarPose` with pitch, yaw, and roll per ear) in `capsule-cat-face-projection.ts`
+    and applied it in `CapsuleCatFaceRig` to support feline cartoon expressions (airplane ears for angry,
+    pinned-back for fearful, drooping for sad, perky upright for happy/surprised, and asymmetric one-ear twitch for skeptical).
+  - Added cartoon vampire fangs (`uFangsVisible`) and asymmetric smirk tilt (`uMouthAsymmetry`)
+    to the procedural body SDF mouth shader in `capsule-cat-body-material.ts`.
+  - Modulated whisker pitch/spread per emotion (bristled forward on angry, drooping down on sad).
+  - Modulated tail kinematics in `capsule-cat-locomotion.ts` based on current emotion (aggressive whipping
+    lash on angry, puffed-up bottle-brush tail tucked low on fearful, limp droop on sad, upright hook on happy).
+- **`triangular-engine/testing` Integration in `/characters-lab`.**
+  - Integrated `<tri-test-runner>` with collapsible details, test status indicators, and control locking.
+  - Implemented `CharactersLabTestAdapter` and test suites (`cat-emotions`, `cat-lineup`, `cat-speech`, `human-baselines`)
+    in `characters-lab-tests.ts` supporting headless automated verification and URL parameter auto-start
+    (`?testSuite=cat-emotions&testVersion=1&testAutoStart=1`).
+- **Verification.**
+  - `npm run test:triangular-engine:characters` — 138 specs pass.
+  - `npm run test:triangular-engine:procedural` — 264 specs pass.
+  - `npx ng test demo-app --watch=false --browsers=ChromeHeadless --include projects/demo-app/src/app/pages/characters-lab/**/*.spec.ts` — 5 specs pass.
+  - Automated runner run: `npm run test:summary '--' --suite cat-emotions` verifies all 8 scenarios pass (`auto=pass`).
+
 ## Scope history
 
 <!-- tri:scope-history -->

@@ -43,6 +43,7 @@ Geometry needs the attributes the stages read: `aFlatPos` / `aFlatNorm` (the fla
 | `PlanetSurfaceMaterial` | The material, with the stage/slot API above |
 | `vertexColorLayer`, `solidColorLayer` | Base layers |
 | `cellLookupLayer`, `streamedMaterialLayer`, `macroVariationLayer` | Stock surface layers (ports of the GLSL patches) |
+| `cellVoronoiLayer` | `cellLookupLayer` with exact cell edges at any zoom ([below](#exact-cell-edges-at-any-zoom)) |
 | `flatFeatureLayer` | Runways, taxiways, aprons and roads from a per-page feature list, with markings ([below](#flat-features-runways-roads)) |
 | `checkerDebugLayer` | A debug checkerboard as a layer: geography (`latLon`) or map-UV cells, `fwidth`-filtered, live-toggled |
 | `planetOceanMaterial` | The ocean shell: `MeshStandardNodeMaterial` + stage 1 |
@@ -50,7 +51,30 @@ Geometry needs the attributes the stages read: `aFlatPos` / `aFlatNorm` (the fla
 | `simpleDayNightLighting`, `sunVisibilityLighting` | Lighting stages; `IPlanetLightingInputs`, `ISimpleDayNightLightingOptions`, `ISunVisibilityLightingOptions` are their options |
 | `roadLayer`, `moonEclipseOcclusion`, `nightLightsEmissive` | Working examples of a layer, an occluder and an emissive. Use or copy them |
 | `createPlanetMorphUniforms`, `planetMorphGraph`, `createPlanetContext` | Stage 1 pieces, to build a different material from the same graph |
+| `IPlanetStageOverride`, `PlanetSurfaceMaterial.setStageOverride` | Supply stage 1 for a mesh that is not the morph globe ([below](#using-the-material-on-another-mesh)) |
 | `equirectangularFlat`, `equalEarthFlat`, `seam*` | The projection and seam `Fn`s |
+
+## Using the material on another mesh
+
+Stage 1 reads the morph globe's attributes (`position`, `normal`, `aFlatPos`, `aFlatNorm`). A mesh without them (the LOD terrain) draws black unless it supplies stage 1 itself: `setStageOverride` takes the context fields, the shading normal and the fragment mask, and rebuilds every stack against them.
+
+```ts
+material.positionNode = myMesh.positionNode;        // yours: the override does not carry the position
+material.setStageOverride({
+  id: 'myMesh',                                     // part of the shader cache key: one id per distinct graph
+  context: { radialDirection, sphereNormal, uv, latLon, bodyFixedLocal, morphedPosition, morphedBatchedLocal },
+  shadingNormal: normalNode,                        // body frame; the material turns it into view space
+  maskNode: null,                                   // null removes the globe's seam mask, which reads missing attributes
+  maskShadowNode: null,
+});
+material.setStageOverride(null);                    // back to the globe's stage 1
+```
+
+Fields you leave out keep the globe's, and `material.context` returns the merged context, so layers built afterwards see it. With no override set (the default) the context, normal, masks and cache key are exactly the globe material's, so the globe scenes are unchanged. `TerrainPlanetMaterial` in [`triangular-engine/lod-surface`](../lod-surface/README.md#planet-material) is the worked example, including how to draw its sea level against the globe's.
+
+## Exact cell edges at any zoom
+
+`cellLookupLayer` reads a nearest-filtered cell-id atlas, so a cell edge is a staircase of atlas texels up close. `cellVoronoiLayer()` has the same controls (`enabled`, `opacity`, `updatePalette`, `dispose`) but its `setLookup` also takes each cell's centre and up to eight neighbour ids (`ICellVoronoiPayload`; `buildCellPlanetLookup` in `lod-surface/core` makes one from a `triangular-engine/worldgen` world). The atlas only finds a nearby cell; the shader then picks the cell whose centre has the largest dot product with the direction among that cell and its neighbours, which is the planet's own nearest-cell rule, so the edge is straight at any zoom. The atlas texel only needs to be smaller than a cell. Cost: 12 texture fetches per fragment (one atlas, two neighbour, nine centre) against two for the plain layer; memory: 64 B per cell on top of the atlas.
 
 ## Flat features (runways, roads)
 

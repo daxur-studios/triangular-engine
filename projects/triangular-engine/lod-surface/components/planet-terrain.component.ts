@@ -55,9 +55,15 @@ export class PlanetTerrainComponent {
   readonly cull = input(true);
   /** `'equal-angle'` (default) or `'none'` cube warp. Baked heights must have been made with the same one. */
   readonly warp = input<CubeWarp>('equal-angle');
-  /** A node material to draw with; the terrain sets its `positionNode`. Default: the debug material (level colours, sun lighting). You dispose it. */
+  /**
+   * A node material to draw with; the terrain sets its `positionNode`. Default: the debug material (level colours, sun lighting).
+   * You dispose it.
+   *
+   * To draw with the planet material, pass a `TerrainPlanetMaterial` (`new TerrainPlanetMaterial({ cellPlanet: world })`):
+   * the terrain hands it its vertex nodes and sun itself, so there is nothing else to wire. It is lit by scene lights.
+   */
   readonly material = input<NodeMaterial | undefined>(undefined);
-  /** Direction to the sun in the scene frame, for the default material. */
+  /** Direction to the sun in the scene frame, for the default material, and passed to a `TerrainPlanetMaterial` as its `setSunDirection` (the scene's own light is still yours to place). */
   readonly sunDirection = input<Vec3 | readonly [number, number, number]>([0.4, 0.8, 0.45]);
   /** Default material colouring: one colour per level, or grey. */
   readonly view = input<LodView>('lod');

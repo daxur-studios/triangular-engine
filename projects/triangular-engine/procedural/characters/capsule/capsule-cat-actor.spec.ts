@@ -72,4 +72,35 @@ describe('CapsuleCatActor', () => {
   it('normalizes a default DNA without modifiers', () => {
     expect(DEFAULT_CAPSULE_CAT_DNA.bodyPattern).toBe('front_suit');
   });
+
+  it('updates ear 3D rotations, mouth uniforms and tail kinematics with emotions', () => {
+    const actor = new CapsuleCatActor();
+
+    // 1. Angry
+    actor.facialController.setExpression('angry', 1, 0);
+    actor.update(0.1);
+    expect(actor.latestFaceProjection?.mouth.fangsVisible).toBeGreaterThan(0.8);
+    expect(actor.catBody.uniforms.uFangsVisible.value).toBeGreaterThan(0.8);
+    expect(actor.catFaceRig.leftEar.rotation.z).toBeGreaterThan(0.8); // Airplane ear roll
+    expect(actor.latestLocomotionSample?.tail.radius).toBeGreaterThan(0);
+
+    // 2. Skeptical
+    actor.facialController.setExpression('skeptical', 1, 0);
+    actor.update(0.1);
+    expect(actor.latestFaceProjection?.mouth.mouthAsymmetry).toBeGreaterThan(0.5);
+    expect(actor.catBody.uniforms.uMouthAsymmetry.value).toBeGreaterThan(0.5);
+
+    // 3. Fearful (tail puffed & tucked)
+    actor.facialController.setExpression('fearful', 1, 0);
+    actor.update(0.1);
+    const fearfulTailRadius = actor.latestLocomotionSample?.tail.radius ?? 0;
+
+    // 4. Neutral
+    actor.facialController.setExpression('neutral', 1, 0);
+    actor.update(0.1);
+    const neutralTailRadius = actor.latestLocomotionSample?.tail.radius ?? 0;
+    expect(fearfulTailRadius).toBeGreaterThan(neutralTailRadius);
+
+    actor.dispose();
+  });
 });

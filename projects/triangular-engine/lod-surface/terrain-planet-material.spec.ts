@@ -1,5 +1,6 @@
 import { DirectionalLight, FloatType, NearestFilter, PerspectiveCamera, RGBAFormat, RenderTarget, Scene } from 'three';
 import { LodTerrainBody, createHeightSource, type LodTerrainSettings } from 'triangular-engine/lod-surface/core';
+import { buildCellPlanetWorld } from 'triangular-engine/worldgen';
 import { PlanetSurfaceMaterial, SURFACE_LAYER_ORDER, cellLookupLayer, solidColorLayer } from 'triangular-engine/planet-material';
 import { getEvalRenderer } from '../planet-material/gpu-eval.testing';
 import { TerrainPlanetMaterial } from './terrain-planet-material';
@@ -61,7 +62,8 @@ describe('TerrainPlanetMaterial', () => {
     expect(material.maskShadowNode).toBeNull();
     // The layer stacks are the base class's: ids unchanged, and the program cache key tells it apart from the globe's.
     expect(material.stackKey).toBe('morph:true/false;layers:base;occluders:;emissives:');
-    expect(material.customProgramCacheKey().endsWith('|lodTerrain')).toBeTrue();
+    expect(material.customProgramCacheKey().endsWith('|stage:lodTerrain')).toBeTrue();
+    expect(material.stageOverride?.id).toBe('lodTerrain');
     expect(body.surface.nodes.up).toBeTruthy();
     body.dispose();
   });
@@ -112,6 +114,42 @@ describe('TerrainPlanetMaterial', () => {
 
     body.dispose();
     cells.dispose();
+    material.dispose();
+  });
+  it('builds the ground colours from a cell planet world and owns the layer', () => {
+    const world = buildCellPlanetWorld({ cellCount: 120, seed: 5 });
+    const material = new TerrainPlanetMaterial({ cellPlanet: world, cellLookup: { atlasWidth: 64 } });
+    expect(material.stackKey).toContain('layers:base|cellLookup');
+    expect(material.cells).toBeDefined();
+    expect(material.cellLookupMs).toBeGreaterThanOrEqual(0);
+    const disposeCells = spyOn(material.cells!, 'dispose').and.callThrough();
+    material.dispose();
+    expect(disposeCells).toHaveBeenCalledTimes(1);
+  });
+
+  it('builds the world from the description given to cellPlanetHeights', () => {
+    const material = new TerrainPlanetMaterial({ cellPlanet: { seed: 5, cellCount: 80 }, cellLookup: { atlasWidth: 64 } });
+    expect(material.cells).toBeDefined();
+    material.dispose();
+  });
+
+  it('has no cell layer without cellPlanet', () => {
+    const material = new TerrainPlanetMaterial();
+    expect(material.cells).toBeUndefined();
+    expect(material.cellLookupMs).toBeUndefined();
+    material.dispose();
+  });
+
+  it('keeps the sun direction for a parent: normalised in dayNight, fed by the mesh', () => {
+    const material = new TerrainPlanetMaterial();
+    material.setSunDirection([0, 3, 4]);
+    const sun = material.dayNight.uSunDirection.value;
+    expect([sun.x, sun.y, sun.z].map((v) => +v.toFixed(3))).toEqual([0, 0.6, 0.8]);
+    const body = new LodTerrainBody(settings(material));
+    body.setSun([4, 0, 3]);
+    const fed = material.dayNight.uSunDirection.value;
+    expect([fed.x, fed.y, fed.z].map((v) => +v.toFixed(3))).toEqual([0.8, 0, 0.6]);
+    body.dispose();
     material.dispose();
   });
 });

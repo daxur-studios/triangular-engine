@@ -14,6 +14,7 @@ export * from './planet-extension-examples';
 export * from './macro-variation-layer';
 export * from './checker-debug-layer';
 export * from './cell-lookup-layer';
+export * from './cell-voronoi-layer';
 export * from './streamed-material-layer';
 export * from './flat-feature-layer';
 export * from './planet-line-materials';
