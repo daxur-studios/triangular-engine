@@ -90,4 +90,16 @@ describe('FlatTerrainComponent', () => {
     expect(() => fixture.detectChanges()).toThrowError(/sphere source.*<planetTerrain>/);
     heights.dispose();
   });
+
+  it('answers groundAt with a sample once the terrain exists', () => {
+    const fixture = TestBed.createComponent(FlatTerrainComponent);
+    expect(fixture.componentInstance.groundAt([10, 3, 10])).toBeUndefined();
+    fixture.componentRef.setInput('size', 100_000);
+    fixture.detectChanges();
+    const sample = fixture.componentInstance.groundAt([10, 3, 10])!;
+    expect(sample.altitudeM).toBeCloseTo(3 - sample.heightM, 9);
+    expect(sample.up).toEqual([0, 1, 0]);
+    expect(sample.point[0]).toBe(10);
+    fixture.destroy();
+  });
 });

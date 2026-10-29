@@ -124,6 +124,32 @@ Why the `material` input and not a new input or component: the terrain already h
 - **Without a cell planet** `new TerrainPlanetMaterial()` is a solid colour to which you add your own layers (`addSurfaceLayer`). Layers that read a vertex attribute (the vertex-colour base, the macro layer's land mask, streamed tiles) do not work here: the terrain has none.
 - **How it plugs in.** The material calls `PlanetSurfaceMaterial.setStageOverride` with the terrain's nodes (see the [planet material README](../planet-material/README.md#using-the-material-on-another-mesh)). Layers that lift `position` through the model matrix need the mesh at the camera, which `LodTerrainBody` keeps.
 
+## Standing on the ground
+
+`groundAt(position, out?)` answers "what is under this point" from the CPU twin of the heights, detail noise included. It is on `LodTerrainBody`, `<planetTerrain>` and `<flatTerrain>` (the components return `undefined` until the terrain exists); `groundAt(source, domain, position, out?, stepM?)` and `createGroundSample()` are the pure function and a reusable sample in `lod-surface/core`, which also run in a worker.
+
+```ts
+import { createGroundSample } from 'triangular-engine/lod-surface/core';
+
+private readonly ground = createGroundSample();   // reused: nothing is allocated per frame
+
+update(dt: number): void {
+  const sample = this.terrain.groundAt(this.feet, this.ground);   // feet: a point in the scene frame
+  if (!sample) return;
+  if (sample.altitudeM <= 0) {                 // at or below the ground: snap onto it
+    this.feet.set(...sample.point);
+  }
+  this.body.quaternion.setFromUnitVectors(UP, new Vector3(...sample.normal));   // align to the slope
+}
+```
+
+- `point` is the ground under the query (`up` times `radius + heightM` on a sphere, `y = heightM` on a plane), `normal` its unit normal, `up` the base surface's up (away from the sphere's centre, +Y on the plane), `altitudeM` how far the query is above the ground along `up` (negative: underground).
+- The normal is a central difference of `heightAt` in two tangent directions, half a texel of the height texture each way, so it follows the relief the texture can hold and ignores the finest noise octaves. The step is the body's own; pass `stepM` to the pure function for an analytic source with finer features.
+- It is the full-detail surface. What is drawn can differ from it by the LOD error, which is smallest near the camera, so use it for characters and vehicles near the camera. Baked sources read the same texels as the vertex stage.
+- It is not a ray cast: the answer is the ground along `up`, one height per point, so a cliff face or overhang is not represented.
+- On a plane a query outside the square is clamped to the nearest edge point. The sphere's exact centre has no direction; `up` is then +Y.
+- Cost: five `heightAt` calls, about 1 to 4 microseconds per call in Node (see runbook 059, G4).
+
 ## Not included
 
-Gameplay height and normal queries, atmosphere on the terrain, and a parent `<planet>` component (globe, terrain, sea alignment and sun in one place) are later steps of Plan 059. The older `triangular-engine/terrain` entry is a different system and is unchanged.
+Ray hits against the ground (cliffs, overhangs), physics colliders (Plan 059 M5), atmosphere on the terrain, and a parent `<planet>` component (globe, terrain, sea alignment and sun in one place) are later steps of Plan 059. The older `triangular-engine/terrain` entry is a different system and is unchanged.

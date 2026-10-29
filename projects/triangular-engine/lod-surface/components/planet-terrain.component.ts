@@ -2,7 +2,7 @@ import { Component, DestroyRef, computed, inject, input } from '@angular/core';
 import type { NodeMaterial } from 'three/webgpu';
 import { EngineService } from 'triangular-engine';
 import {
-  TERRAIN_DEFAULTS, createHeightSource, type CubeWarp, type HeightSource, type LodView, type PatchCells, type Vec3,
+  TERRAIN_DEFAULTS, createHeightSource, type GroundSample, type CubeWarp, type HeightSource, type LodView, type PatchCells, type Vec3,
 } from 'triangular-engine/lod-surface/core';
 import { attachLodTerrain } from './attach-lod-terrain';
 
@@ -102,4 +102,12 @@ export class PlanetTerrainComponent {
       };
     }),
   );
+
+  /**
+   * The ground under `position` (a point in the scene frame, e.g. a character's feet): height, ground point, normal and
+   * altitude, from the CPU twin with detail noise. `undefined` until the terrain exists. Pass `out` to allocate nothing.
+   */
+  groundAt(position: Vec3, out?: GroundSample): GroundSample | undefined {
+    return this.terrain()?.groundAt(position, out);
+  }
 }

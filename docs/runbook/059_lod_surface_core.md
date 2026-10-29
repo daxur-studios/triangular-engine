@@ -1423,3 +1423,42 @@ Options weighed: a bigger equirect atlas (8192 x 4096 = 128 MB, texel still 0.5 
 - Cells with more than eight neighbours keep the eight nearest (rare; an edge beside a ninth could pick a slightly wrong cell).
 - Macro layer and other `modelWorldMatrix` layers still need the mesh at the camera; vertex-attribute layers do not work on the terrain.
 - Atmosphere on the terrain, gameplay height queries and a hardware timing of the new lookup remain.
+
+## 2026-10-29: G4: gameplay ground queries (2026-10-29)
+
+Plan step 3c. A character or vehicle can ask "what is the ground under this point" and get the height, the ground point, the normal and how far above the ground it is. Colliders stay with M5.
+
+### What was built
+
+- `lod-surface/core/lod-ground-query.ts` (pure, no Three.js, no Angular, worker-safe): `groundAt(source, domain, position, out?, stepM?)`, `createGroundSample()`, `defaultGroundStepM(domain, cells?)`, type `GroundSample { heightM, point, normal, up, altitudeM }`. Exported from `core/public-api.ts`.
+- `LodTerrainBody.groundAt(position, out?)` calls it with `body.source` (the heights with detail noise wrapped in) and `settings.domain`, with a step sized by the body's own texture.
+- `<planetTerrain>.groundAt` and `<flatTerrain>.groundAt`: thin, `undefined` until the terrain exists.
+- `position` is any point in the scene frame (the body sits at the origin). Sphere: up is the position normalised, the base point lies on the sphere along it, `altitudeM = |p| - (R + h)`. Plane: up is +Y, the base point is the projection onto y = 0. The sphere's exact centre has no direction; `up` is then +Y, no NaN and no throw (a game calling every frame should not crash for one frame at the centre).
+- Outside the plane's square the query is clamped to the nearest edge point. That matches the baked sources (`latticeOfPosition` clamps) and keeps analytic sources from inventing height beyond the terrain; `point` lies on the edge.
+
+### The normal
+
+Central differences of `source.heightAt` in two tangent directions, east and north of the same local frame as `groundFrame` (the reference axis switches within 0.999 of the Y axis, so the poles are fine; the frame is computed inline, so nothing allocates). On a sphere the two sample points are `R * (up cos a +- east sin a)`, which stay on the base sphere, with arc `R a` each side. Because the surface is `(R + h) * up`, its tangents are `k * east + dh/de * up` and `k * north + dh/dn * up` with `k = 1 + h/R`, and the normal is `up - (dh/de) east / k - (dh/dn) north / k`, normalised. On the plane the same with `k = 1` (east +X, north -Z); there the step shrinks at the square's edge instead of leaving it.
+
+**Step: half a texel of the height texture** (`detailTexelMetres(domain, cells) / 2`; `cells` is the baked texture's side, else 1,024 as in the default bake). Why: a baked height is a bilinear facet per texel, so a difference over much less than a texel measures one facet and the normal would jump at every texel edge. Half a texel each way (one texel across) smooths over the facet edges and the finest detail-noise octaves (wavelength under a tenth of a texel, amplitude at 4 % of a texel or less), and still follows the relief the texture holds. It is 7.7 m on the 10 km sphere with the default bake and 460 m on the 600 km sphere: at the large size the ground really is smooth at that scale, since the detail noise is the only relief under a texel. For analytic sources with fine features (the bumps go down to 7 m) pass a smaller `stepM`; the specs use 5 cm. The step is capped at a half radian on a tiny sphere.
+
+### Cost
+
+Five `heightAt` calls (one for the height, four for the normal) and no allocation with a reused `out`. Measured once in Node 22 (V8, the owner's laptop, 200,000 calls after warm-up, bundled with esbuild from the library source; not a spec, no timing assertion): bumps 1.3 us per call, a 1,024-texel bake 1.0 us, a bake with detail noise 3.5 us (the detail noise's hash dominates). A thousand characters is 1 to 4 ms per frame, so one call per character per frame is cheap; many calls per character (a wheel or foot each) are still fine.
+
+### Not made a drop-in: the lab camera
+
+`lod-surface-lab/lod-camera.ts` was not switched. It clamps the surface at sea level (`Math.max(0, h)`), uses the unclamped ground point as the plane base and reports `clearanceM` as the lift above the unclamped height, so using `groundAt` would change behaviour (plane edge clamping, the sea floor) for no gain and risk the lab suites' numbers. Lab specs and suites are untouched.
+
+### Verified
+
+- `lod-surface` library specs (`ng test triangular-engine --include='../lod-surface/**/*.spec.ts' --browsers=ChromeHeadless --watch=false`; the include is relative to the project's `src`): 51 of 51 (37 before, 14 added). New: flat ground (normal = up, signed altitude, plane and sphere), `heightM` equals `heightAt` at the base point and `point` lies on the surface (altitude of `point` is 0), the sphere normal matches the analytic 3D gradient of the bumps source (with the radial `k`) at 11 directions including both poles, face centres, edges and corners, the plane normal matches the analytic gradient, the plane corner (one-sided step) and the outside clamp, finite unit normals facing out for analytic and baked sources at poles, edges and corners and at the sphere's centre, no jump across a cube edge, `out` reuse (same object and arrays), baked `heightM` equals `heightAtLattice` at the base point's lattice position, `LodTerrainBody.groundAt` includes detail noise within `detailBoundM` and equals the raw source with noise off, and the two components return `undefined` before the terrain exists and a sample after.
+- The first run of the new spec found a sign error in the plane normal's z component (north is -Z); fixed and the analytic-gradient spec now pins it.
+- `npm run build:triangular-engine` passes; `npx tsc -p projects/demo-app/tsconfig.app.json --noEmit` is clean; `npm run docs:records:check` is OK. Lab specs were not rerun: no lab file changed.
+
+### Open items
+
+- A ray-hit query (first intersection of a ray or sweep with the terrain) is M6 / cliffs. `groundAt` returns the single height along `up`, so overhangs and cliff faces are not represented.
+- Colliders (a Jolt heightfield or mesh that follows the camera region) are M5.
+- The sample is the CPU surface, not the drawn mesh: far from the camera the drawn LOD can sit up to its LOD error away from it. Fine near the camera; a game that needs far agreement should not rely on it.
+- A hardware measurement in a browser (as opposed to Node) was not made; the number above is V8 on the CPU only.

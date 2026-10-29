@@ -1,7 +1,8 @@
 import { Group, type PerspectiveCamera } from 'three';
 import type { NodeMaterial } from 'three/webgpu';
-import { withDetailNoise } from './lod-detail-noise';
+import { detailTexelMetres, withDetailNoise } from './lod-detail-noise';
 import type { LodDomain, Vec3 } from './lod-domain';
+import { createGroundSample, groundAt, type GroundSample } from './lod-ground-query';
 import { DEFAULT_BAKE_K } from './lod-height-bake';
 import type { HeightSource } from './lod-height';
 import type { TextureHeightSource } from './lod-height-texture';
@@ -81,6 +82,7 @@ export class LodTerrainBody {
   /** Wall time of the last selection plus upload, ms. */
   selectionMs = 0;
 
+  private groundStepM = 1;
   private builtKey = '';
   private builtHeights: HeightSource | undefined;
   private builtMaterial: NodeMaterial | undefined;
@@ -125,6 +127,7 @@ export class LodTerrainBody {
     this.settings = settings;
     const detailCells = settings.detailCells ?? 2 ** (baked?.layout.k ?? DEFAULT_BAKE_K);
     // The selector and the camera see the noise through the source (heights, bound and node ranges); the mesh adds it in the vertex stage.
+    this.groundStepM = detailTexelMetres(domain, detailCells) / 2;
     this.source = withDetailNoise(heights, { domain, cells: detailCells, share: settings.detailNoise });
     this.selector = new LodSelector({
       domain, patchCells: settings.patchCells, mode: 'distance', fixedLevel: 5, cellPixels: Math.max(PIXEL_FLOOR, settings.cellPixels),
@@ -154,6 +157,16 @@ export class LodTerrainBody {
     this.builtKey = key;
     this.builtHeights = heights;
     this.builtMaterial = settings.material;
+  }
+
+  /**
+   * The ground under `position` (a point in the scene frame, e.g. a character's feet): height, ground point, normal and the
+   * point's altitude above it, from the CPU twin with detail noise included. Pass `out` (see `createGroundSample`) to
+   * allocate nothing per call. The normal's difference step is half a texel of this body's height texture. See
+   * {@link groundAt} for the details and limits.
+   */
+  groundAt(position: Vec3, out: GroundSample = createGroundSample()): GroundSample {
+    return groundAt(this.source, this.settings.domain, position, out, this.groundStepM);
   }
 
   /** Debug colouring of the built-in material (one colour per level, or grey). Kept across mesh rebuilds. */

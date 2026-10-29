@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { PerspectiveCamera, Scene } from 'three';
 import { EngineService } from 'triangular-engine';
-import { TERRAIN_DEFAULTS, createHeightSource } from 'triangular-engine/lod-surface/core';
+import { TERRAIN_DEFAULTS, createGroundSample, createHeightSource } from 'triangular-engine/lod-surface/core';
 import { buildCellPlanetWorld } from 'triangular-engine/worldgen';
 import { TerrainPlanetMaterial } from '../terrain-planet-material';
 import { PlanetTerrainComponent } from './planet-terrain.component';
@@ -161,5 +161,20 @@ describe('PlanetTerrainComponent', () => {
     expect(material.dayNight.uSunDirection.value.z).toBeCloseTo(1, 6);
     fixture.destroy();
     material.dispose();
+  });
+
+  it('answers groundAt with a sample once the terrain exists', () => {
+    const fixture = TestBed.createComponent(PlanetTerrainComponent);
+    expect(fixture.componentInstance.groundAt([0, 0, 10_005])).toBeUndefined();
+    fixture.componentRef.setInput('radius', 10_000);
+    fixture.componentRef.setInput('heights', createHeightSource('bumps', 'sphere'));
+    fixture.detectChanges();
+    const out = createGroundSample();
+    const sample = fixture.componentInstance.groundAt([0, 0, 10_005], out)!;
+    expect(sample).toBe(out);
+    expect(sample.up).toEqual([0, 0, 1]);
+    expect(sample.altitudeM).toBeCloseTo(5 - sample.heightM, 9);
+    expect(sample.normal.every(Number.isFinite)).toBeTrue();
+    fixture.destroy();
   });
 });
