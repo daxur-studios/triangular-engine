@@ -43,6 +43,33 @@ const smallSin = (x: any): any => {
   return x.mul(inner);
 };
 
+/**
+ * Per-vertex values of the drawn surface that a material can read, as TSL varyings (Plan 059 G3 spike; preview, may change).
+ * The mesh has no `normal`, `uv` or `color` attributes, so a material that wants a direction, a normal or a position takes them
+ * from here. All are in the body frame (the sphere's or the plane's own axes), except `position`, which is relative to the camera.
+ */
+export interface LodSurfaceNodes {
+  /** Unit direction from the body's centre to the vertex's base point, before its height (varying). On the plane: the plane normal. */
+  readonly up: any;
+  /** Unit shading normal from the height gradient (varying): it tilts with relief, unlike `up`. */
+  readonly normal: any;
+  /** The vertex position relative to the camera position last passed to {@link LodSurfaceMesh.upload} (varying): add the mesh's world position for scene space. */
+  readonly position: any;
+  /** Selector level of the leaf (varying). */
+  readonly level: any;
+}
+
+/**
+ * A material that wants {@link LodSurfaceNodes}: the mesh calls this once, when it is built, right after it sets the material's
+ * `positionNode`. The material builds whatever it reads from the nodes (and may mark itself for recompilation).
+ */
+export interface LodSurfaceNodesConsumer {
+  bindLodSurfaceNodes(nodes: LodSurfaceNodes): void;
+}
+
+const consumesNodes = (material: unknown): material is LodSurfaceNodesConsumer =>
+  typeof (material as Partial<LodSurfaceNodesConsumer>).bindLodSurfaceNodes === 'function';
+
 /** What {@link createLodSurfaceMesh} needs to build the one-draw-call surface. */
 export interface LodSurfaceMeshOptions {
   /** The body drawn: plane or cube-sphere, its size and the cube warp. */
@@ -55,7 +82,8 @@ export interface LodSurfaceMeshOptions {
   readonly capacity: number;
   /**
    * Material to draw with instead of the built-in debug material (LOD colours, sun lighting, patch bounds). The mesh sets
-   * its `positionNode` and nothing else, so colour, lighting and normals are the material's. It is not disposed by
+   * its `positionNode` and nothing else, so colour, lighting and normals are the material's; one that implements
+   * {@link LodSurfaceNodesConsumer} also receives the vertex nodes ({@link LodSurfaceNodes}). It is not disposed by
    * {@link LodSurfaceMesh.dispose}: its owner disposes it. The debug setters (`setView`, `setLighting`, `setBounds`,
    * `setSun`) change only the built-in material and do nothing to a supplied one.
    */
@@ -75,6 +103,8 @@ export interface LodSurfaceMesh {
   readonly probeMaterial: MeshBasicNodeMaterial;
   /** The material in use: the built-in debug material, or the one supplied in the options. */
   readonly material: NodeMaterial;
+  /** The vertex varyings a supplied material can read (see {@link LodSurfaceNodes}). */
+  readonly nodes: LodSurfaceNodes;
   /**
    * Writes the drawn leaves for a camera position (doubles); returns the instance count. The leaf arrays are only
    * rewritten, and the GPU buffers only marked for upload, when the selection changed since the last call.
@@ -284,6 +314,12 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const shadingNormal = varying(normalize(own.up.sub(tangential)), 'vLodNormal') as any;
   const patchUv = varying(grid.mul(1 / patchCells), 'vLodPatchUv') as any;
   const level = varying(info.x, 'vLodLevel') as any;
+  const nodes: LodSurfaceNodes = {
+    up: varying(own.up, 'vLodUp') as any,
+    normal: shadingNormal,
+    position: varying(positionNode, 'vLodPosition') as any,
+    level,
+  };
 
   const hue = fract(level.mul(0.137).add(0.05));
   const palette = vec3(0.5).add(vec3(0.5).mul(cos(vec3(hue, hue.add(1 / 3), hue.add(2 / 3)).mul(2 * Math.PI))));
@@ -297,6 +333,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const material: NodeMaterial = options.material ?? new MeshBasicNodeMaterial({ side: FrontSide });
   material.positionNode = positionNode;
   if (ownMaterial) material.colorNode = colorNode;
+  else if (consumesNodes(material)) material.bindLodSurfaceNodes(nodes);
   const probeMaterial = new MeshBasicNodeMaterial({ side: FrontSide });
   probeMaterial.positionNode = positionNode;
   probeMaterial.colorNode = vec4(1, 1, 1, 1);
@@ -316,6 +353,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   return {
     mesh,
     material,
+    nodes,
     probeMaterial,
     upload(selector, camera) {
       if (selector !== packedFrom || selector.version !== packedVersion) {

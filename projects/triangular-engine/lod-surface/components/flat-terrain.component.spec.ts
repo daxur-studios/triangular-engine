@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { PerspectiveCamera, Scene } from 'three';
 import { EngineService } from 'triangular-engine';
-import { createHeightSource } from 'triangular-engine/lod-surface/core';
+import { cellPlanetHeights, createHeightSource, runBake } from 'triangular-engine/lod-surface/core';
 import { FlatTerrainComponent } from './flat-terrain.component';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -77,5 +77,17 @@ describe('FlatTerrainComponent', () => {
     expect(terrain.stats.drawn).toBe(terrain.stats.leaves);
     expect(terrain.stats.drawn).toBeGreaterThan(awayDrawn);
     fixture.destroy();
+  });
+
+  it('refuses cell-planet heights with a clear error: that source is a sphere source', async () => {
+    const heights = await cellPlanetHeights(
+      (source, layout, planet) => Promise.resolve({ ...runBake(source, layout, planet), roundTripMs: 0 }),
+      { seed: 5, cellCount: 120, relaxationIterations: 1, heightScaleM: 80, radius: 10_000, bakeK: 3 },
+    );
+    const fixture = TestBed.createComponent(FlatTerrainComponent);
+    fixture.componentRef.setInput('size', 100_000);
+    fixture.componentRef.setInput('heights', heights);
+    expect(() => fixture.detectChanges()).toThrowError(/sphere source.*<planetTerrain>/);
+    heights.dispose();
   });
 });

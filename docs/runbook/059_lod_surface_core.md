@@ -1215,7 +1215,8 @@ pinned to the 1,024 cap they were measured at, so their definitions and numbers 
 
 ### Found
 
-- No clouds component exists in the library yet; G5 starts with a labelled placeholder.
+- Correction (same day): a `triangular-engine/cloud-volumes` entry exists, with code but no component; G5 needs a
+  `<planetClouds>` wrapper over it, with a labelled placeholder until then.
 - `PlanetSurfaceMaterial` was built for the cell-planet globe; whether it accepts this terrain's displaced positions
   and normals is unchecked, so G3 starts with a short spike.
 
@@ -1263,3 +1264,117 @@ pinned to the 1,024 cap they were measured at, so their definitions and numbers 
 
 - Terrain v9 is still unrun; G2 (cell-planet heights) is next.
 - Whether `core` should export less than every moved file is open.
+
+### Measured (terrain v9 after G1, 2026-10-29)
+
+Quick visible-browser run on the RTX 3080, after the move into `triangular-engine/lod-surface`, compared with the last
+v8 run (1,024 cap, selection inside the frustum):
+
+- 61 of 62 cases valid, 0 failed; `biome-cells-32-1` hit its window cap without settling (its partner `-3` settled).
+  0 crack px everywhere; the injected-gap control still finds 27,725 px. The move broke nothing visible to the suite.
+- Drawn leaves rise in almost every case (for example 600 km eye-2m 760 to 2,087; plane eye-2m 743 to 1,203), so the
+  4,096 cap more than restores on-screen detail. Exceptions: the 10 km spheres at mid-5km draw fewer (about 700 to
+  450), because the budget now covers the far side; the `biome-cap-1024/512` A/B draws about half its v8 count, as
+  expected under view-independent selection.
+- GPU scene pass median: mean over the cases 0.12 to 0.17 ms; highest 0.43 ms (32-cell patches). Inside the 1.5 ms
+  terrain proposal.
+- Selection CPU p95 stays 0.1 ms on static poses but rises on moving cases: sweeps 0.3 to 0.7 ms, traversals 0.5 to
+  1.1 ms, over the L5 0.2 ms target. Open: cheaper selection when moving (incremental updates, or selecting every
+  other frame).
+
+## 2026-10-29: G2: cell-planet heights (2026-10-29)
+
+### What changed
+
+- New public `cellPlanetHeights(bake, options): Promise<TextureHeightSource>` in
+  `triangular-engine/lod-surface/core`. `options` = `{ seed, cellCount, relaxationIterations? (default 2), heightScaleM, radius, warp?, bakeK? }`.
+  It validates with `parseCellPlanet`, bakes `'cell-planet'` through the app's `createBakeClient` worker (the existing
+  `serveBakeRequests` path; the description crosses `postMessage`, the worker rebuilds the world) and wraps the result with
+  `createTextureHeightSource`. TSDoc says the parameters must match the game's `buildCellPlanetWorld`, and that only
+  seed, cell count and relaxation are described (not `jitter`, `plateCount`, `worldProfileKind`, `terrain`).
+- Why a promise and not a value for `[heights]`: baked heights exist only after the worker bake, and the `heights` input
+  takes a ready `HeightSource`. A game awaits the call and binds the result (README example). A "pass a prebuilt world"
+  variant was skipped: a world object does not cross `postMessage`, so the worker would rebuild it anyway.
+- Plane misuse: `LodTerrainBody.configure` throws "Cell-planet heights are a sphere source: use <planetTerrain>, not
+  <flatTerrain>" when the source id is `cell-planet` on a plane. The bake path already threw for a plane layout, and a
+  radius/warp mismatch already threw.
+- Lab page not changed: its cell-planet path needs the bake's `probes`, `worldBuildMs` and `roundTripMs` for the suite
+  metrics, which the public function (source only) drops; a swap would change measured output, so it stays on `bakeInWorker`.
+
+### Files
+
+`lod-surface/core/lod-cell-planet-heights.ts` (+ `.spec.ts`), `core/public-api.ts`, `core/lod-terrain-body.ts`,
+`components/flat-terrain.component.spec.ts`, `lod-surface/README.md`, `CHANGELOG.md`.
+
+### Verified
+
+- Library specs (`../lod-surface/**/*.spec.ts`, ChromeHeadless): 18 of 18.
+- Lab specs (`**/lod-surface-lab/**/*.spec.ts`, ChromeHeadless): 189 of 189, unchanged.
+- `npm run build:triangular-engine` passes; `npm run docs:records:check` OK.
+
+### Finding: does the terrain ground line up with the globe from orbit? (for G3)
+
+- Terrain: height = `(sample.elevation - sample.seaLevel) * heightScaleM` above `radius`, so the sea sits exactly at `radius`.
+- `<planetView>` (`worldgen/render`, `planet-view.component.ts`): vertex radius = `1 + elevation * elevationScale` with the raw
+  tectonic cell elevation (not sea-relative) in a unit-radius world; `elevationScale` is a fraction of the radius.
+- Morph globe (`planet-morph-geometry.ts`, used by `planet-material`'s morph nodes): `radius + sample.elevation * heightScale`,
+  with the same `createPlanetSurfaceSampler` samples as the terrain; raw elevation, and with `seabedRelief: false`
+  non-land cells are clamped to `seaLevelElevation`.
+- So the globe's sea level is at `radius + seaLevelElevation * heightScale`, while the terrain's is at `radius`.
+  `seaLevelElevation` is a quantile of the cell elevations (`elevation.ts`), not zero. The two meet only if the globe is
+  drawn at radius `R - seaLevelElevation * heightScale` (equivalently, the terrain adds `seaLevel * heightScaleM`), with
+  `heightScaleM` equal to the globe's `heightScale` in the same units. Relief shape matches (same sampler, same scale),
+  but the offset does not unless G3 compensates. The planet-view cell elevation differs from the sampler's detailed
+  elevation by the sampler's sub-cell detail. Neither side was changed.
+
+## 2026-10-29: G3 spike: planet material (2026-10-29)
+
+Question: can `<planetTerrain>` draw with `PlanetSurfaceMaterial` (`triangular-engine/planet-material`), so the ground looks like the cell-planet globe from orbit?
+
+**Verdict: works with changes.** The material's layer, occluder, emissive, lighting and atmosphere stacks work unchanged. Only its stage 1 (the globe-only context) has to be replaced. Two small, additive, internal changes were enough; `planet-material`'s public API is untouched.
+
+### What the material reads, and what the terrain has
+
+| Material needs | Terrain has | Resolution in the spike |
+|---|---|---|
+| geometry `position` as sphere position | grid `(x, y, 0)` | replaced by the terrain's `positionNode` |
+| geometry `normal` | absent | `nodes.normal`, the height-gradient shading normal |
+| `aFlatPos`, `aFlatNorm` | absent | not needed: the terrain is always morph 0 |
+| `color` (vertex-colour base layer) | absent | solid-colour base layer (`TerrainPlanetMaterial` default) |
+| `uv` | absent | `cellAtlasUv(radialDirection)` |
+| radial direction, lat/lon | derivable | `nodes.up` varying (exact, no height in it) |
+| body-fixed / morphed position | derivable | `nodes.position`, camera-relative; lifting by `modelWorldMatrix` is right for `LodTerrainBody` (mesh at the camera) but not for the lab (mesh at the origin) |
+| fragment mask (seam cull) | reads the missing attributes | set to null |
+| lights | not in the mesh | scene `DirectionalLight` plus `AmbientLight` |
+
+Control: the plain `PlanetSurfaceMaterial` on the terrain draws black (centre pixel below 0.01) and logs three missing-attribute warnings.
+
+### Changes (all additive)
+
+- `lod-surface/core/lod-surface-mesh.ts`: new exported `LodSurfaceNodes` (`up`, `normal`, `position`, `level` varyings) and `LodSurfaceNodesConsumer` (`bindLodSurfaceNodes`). `LodSurfaceMesh.nodes` exposes them. A supplied material that implements the hook is called after the nodes exist; the mesh still sets only `positionNode` on a supplied material. This solves the circular construction (the material must exist before the mesh's nodes).
+- `lod-surface/terrain-planet-material.ts` (new, exported): `TerrainPlanetMaterial extends PlanetSurfaceMaterial`. On bind it rebuilds the `IPlanetContext` from the nodes, sets `normalNode`, clears the masks and rebuilds the stacks. Spike shortcut: it assigns the readonly `context` through a cast and calls the private `rebuild()`.
+- Lab: `?material=planet` or the panel's "Surface material (G3 spike)" buttons. On the cell-planet sphere it paints biome colours by direction through `cellLookupLayer` (2048x1024 cell-id atlas) with a scene sun. `LodSurfaceTestSettings` and the suites are unchanged, so no suite version moves. Saved runs carry the environment label `surface.material`.
+- Docs: `lod-surface/README.md` and `CHANGELOG.md`.
+
+### Sea level
+
+For the lab's cell-planet seed `seaLevelElevation` is 0.3232 (a quantile of cell elevations, not zero). The terrain puts sea at `radius` (height is `(elev - seaLevel) * heightScaleM`); the globe puts it at `radius + elev * heightScale`. At the lab's scales the globe's sea sits about 48.5 m above the terrain's on the 10 km sphere and about 388 m on the 600 km sphere. Recommendation: shift the globe, not the terrain. The terrain's zero-at-sea contract is what gameplay and the camera rely on, so draw the globe at radius `R - seaLevelElevation * heightScale` (same `heightScale` units). Expose `seaLevelElevation` from the world or the bake so callers need not recompute it. Neither side was changed in the spike.
+
+### Recommended G3 design
+
+1. Keep `bindLodSurfaceNodes` and its types as the supported path.
+2. Give `PlanetSurfaceMaterial` an official way to take a context or stage-1 override. That replaces the readonly cast and the private `rebuild()` call. It is a `planet-material` API change and needs owner approval.
+3. `<planetTerrain>` accepts or creates the terrain flavour itself (default `TerrainPlanetMaterial`, or a `surface` input).
+4. The cell lookup must come from the same world the globe uses. The spike coloured cells from the terrain's own `buildCellPlanetWorld` world with biome colours, not the render-core "material" colours.
+5. Use a higher-resolution or analytic cell lookup. The atlas is nearest-filtered, so cell edges step at ground level.
+6. Add the sea-level helper above and offset the globe.
+7. A `<planet>` parent supplies the sun light and direction.
+8. The macro layer lifts position through `modelWorldMatrix`, so it works only while the mesh sits at the camera (`LodTerrainBody` does).
+9. A resolved-world palette (biome and ice) should replace the spike's local `cellBiomeColours`.
+
+### Verification
+
+- `lod-surface` library specs: 22 of 22 pass (18 before, 4 new in `terrain-planet-material.spec.ts`).
+- Lab specs: 189 of 189 pass.
+- `npm run build:triangular-engine` passes; `tsc -p projects/demo-app/tsconfig.app.json --noEmit` is clean.
+- Caveats: the new drawing spec uses the WebGL2 backend headless (native WebGPU was not checked); the owner has not yet looked at the lab visually; the biome palette and atlas are spike shortcuts.

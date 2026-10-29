@@ -10,6 +10,7 @@ per-entry `rootDir` owns them. The supported worker entries are:
 
 - `triangular-engine/terrain/core`
 - `triangular-engine/worldgen/render/core`
+- `triangular-engine/lod-surface/core`
 
 Those entries may depend on Three.js-free TypeScript and standard platform APIs,
 but must not import Angular, the engine root, or their Angular-bearing parent

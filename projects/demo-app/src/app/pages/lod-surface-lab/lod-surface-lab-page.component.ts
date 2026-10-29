@@ -1,10 +1,15 @@
 import { Component, DestroyRef, computed, inject, isDevMode, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { Color, InstancedBufferGeometry, Matrix4, Mesh, PerspectiveCamera, PlaneGeometry, RenderTarget, Scene, SphereGeometry, Vector3 } from 'three';
+import { AmbientLight, Color, DirectionalLight, InstancedBufferGeometry, Matrix4, Mesh, PerspectiveCamera, PlaneGeometry, RenderTarget, Scene, SphereGeometry, Vector3 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import { vec4 } from 'three/tsl';
 import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
 import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
+import { TerrainPlanetMaterial } from 'triangular-engine/lod-surface';
+import { SURFACE_LAYER_ORDER, cellLookupLayer, type ICellLookupLayer } from 'triangular-engine/planet-material';
+import { buildCellPerPixelLookupPayload } from 'triangular-engine/worldgen/render';
+import { OCEAN_COLOR, biomeColor, parseColorToLinearRgb } from 'triangular-engine/worldgen/render/core';
+import type { ICellPlanetWorld } from 'triangular-engine/worldgen';
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import {
   POSES, biomePathView, lookView, panView, poseView, resolveCamera, sweepPathView, turnPathView, zoomPathView, zoomView, type CameraView, type PoseId,
@@ -12,7 +17,7 @@ import {
 } from './lod-camera';
 import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
 import {
-  CAP_SLACK, DEFAULT_BAKE_K, DOMAIN_PRESETS, HEIGHT_SOURCES, HEIGHT_SOURCE_LABELS, LodSelector, PATCH_CELLS, PIXEL_FLOOR, cellPlanetFor, createHeightSource, createLodSurfaceMesh,
+  CAP_SLACK, DEFAULT_BAKE_K, DOMAIN_PRESETS, HEIGHT_SOURCES, HEIGHT_SOURCE_LABELS, LodSelector, PATCH_CELLS, PIXEL_FLOOR, cellPlanetFor, cellPlanetWorld, createHeightSource, createLodSurfaceMesh,
   createTextureHeightSource, domainPreset, frustumNormals, groundFrame, isBakedSource, percentile, sourceSupports, textureMegabytes, twinErrors, withDetailNoise,
   type BakeLayout, type BakedSourceId, type CellPlanetDescription, type CubeWarp, type DomainPresetId, type HeightSource, type HeightSourceId, type LodDomain, type LodMode,
   type LodSurfaceMesh, type LodView, type PatchCells, type SelectorStats, type SelectorView, type TextureHeightSource,
@@ -49,7 +54,32 @@ const BAKE_CACHE = 2;
 /** Texture sizes offered for baked sources: 2^k texel cells per face side. */
 const BAKE_SIZES = [10, 11] as const;
 
+/** `?material=planet` starts the lab with the planet material. */
+function initialSurfaceMaterial(): SurfaceMaterialId {
+  try {
+    return new URLSearchParams(globalThis.location?.search ?? '').get('material') === 'planet' ? 'planet' : 'debug';
+  } catch {
+    return 'debug';
+  }
+}
+
+/** Linear RGBA per cell, the terrain's own world: biome colour on land (and ice), the ocean colour below the sea. */
+function cellBiomeColours(world: ICellPlanetWorld): Float32Array {
+  const out = new Float32Array(world.graph.cells.length * 4);
+  const ocean = parseColorToLinearRgb(OCEAN_COLOR);
+  for (const cell of world.graph.cells) {
+    const [r, g, b] = world.tectonics.isLand[cell.id] ? parseColorToLinearRgb(biomeColor(world.ecology.biome[cell.id])) : ocean;
+    out.set([r, g, b, 1], cell.id * 4);
+  }
+  return out;
+}
+
 const maxOf = (values: readonly number[]): number => values.reduce((a, b) => Math.max(a, b), 0);
+
+/** Surface materials of the lab: the built-in debug material, or the cell-planet `PlanetSurfaceMaterial` (Plan 059 G3 spike). Not a test setting. */
+type SurfaceMaterialId = 'debug' | 'planet';
+/** Cell-id atlas size of the planet material's cell lookup (spike: nearest-filtered, so cell edges step at ground level). */
+const CELL_ATLAS = { cellIdWidth: 2048, cellIdHeight: 1024 } as const;
 
 const SOFTWARE = /swiftshader|llvmpipe|software|basic render|microsoft basic/i;
 
@@ -206,6 +236,13 @@ interface RendererLike {
           <input type="range" min="0" max="0.1" step="0.01" aria-label="Detail noise below the texel size, share of the texel" [value]="detailNoise()" (input)="setDetailNoise(+$any($event.target).value)" />
         </p>
 
+        <p class="label">Surface material (G3 spike)</p>
+        <p class="row">
+          <button (click)="setSurfaceMaterial('debug')" [class.active]="surfaceMaterial() === 'debug'">debug</button>
+          <button (click)="setSurfaceMaterial('planet')" [class.active]="surfaceMaterial() === 'planet'" data-testid="planet-material">planet material</button>
+        </p>
+        <p class="note">Planet material: the cell-planet look (cell colours by direction, PBR sun). Pick the cell-planet source on a sphere; other sources get a plain green. Not part of any suite.</p>
+
         <p class="label">Debug view</p>
         <p class="row">
           <button (click)="setView('lod')" [class.active]="view() === 'lod'">LOD colours</button>
@@ -296,6 +333,8 @@ export class LodSurfaceLabPageComponent {
     const world = info.worldBuildMs === undefined ? '' : `world ${info.worldBuildMs.toFixed(0)} ms, `;
     return `${info.source} ${info.side}² x ${info.faces}: ${world}bake ${perFace} ms per face (+${info.pyramidMs.toFixed(0)} pyramid, ${info.roundTripMs.toFixed(0)} round trip) · upload ${upload} · ${info.textureMB.toFixed(1)} MB · twin vs source max ${maxOf(info.twinErrorM).toFixed(2)} m, p95 ${percentile(info.twinErrorM, 0.95).toFixed(2)} m`;
   });
+  /** Which material draws the surface. Start with `?material=planet` in the URL. */
+  readonly surfaceMaterial = signal<SurfaceMaterialId>(initialSurfaceMaterial());
   readonly freeCamera = signal(false);
   readonly frozen = signal(false);
 
@@ -315,6 +354,10 @@ export class LodSurfaceLabPageComponent {
   private selector: LodSelector | undefined;
   private surface: LodSurfaceMesh | undefined;
   private builtKey = '';
+  /** The planet material and its cell lookup, kept while the cell planet is the source (the lookup costs a world build and an atlas). */
+  private planetMaterial: { readonly material: TerrainPlanetMaterial; readonly cells: ICellLookupLayer; readonly key: string } | undefined;
+  private sunLight: DirectionalLight | undefined;
+  private ambientLight: AmbientLight | undefined;
   /** Key of the bake being waited for, or '' when none (the drawn surface is then the one the settings name). */
   private pendingBake = '';
   private activeBake = '';
@@ -412,6 +455,8 @@ export class LodSurfaceLabPageComponent {
         this.engine.scene.remove(this.surface.mesh);
         this.surface.dispose();
       }
+      this.disposePlanetMaterial();
+      this.setPlanetLights(false);
       this.pendingBake = '';
       for (const { source } of this.bakes.values()) source.dispose();
       this.bakes.clear();
@@ -459,6 +504,7 @@ export class LodSurfaceLabPageComponent {
   setLighting(on: boolean): void { this.lighting.set(on); this.surface?.setLighting(on); }
   setBounds(on: boolean): void { this.bounds.set(on); this.surface?.setBounds(on); }
   setWireframe(on: boolean): void { this.wireframe.set(on); this.surface?.setWireframe(on); }
+  setSurfaceMaterial(id: SurfaceMaterialId): void { this.surfaceMaterial.set(id); this.rebuild(); }
 
   async runProbe(): Promise<void> {
     const result = await this.crackProbe();
@@ -563,7 +609,9 @@ export class LodSurfaceLabPageComponent {
       ...(this.source.nodeRange ? { heightRanges: { nodeRange: this.source.nodeRange.bind(this.source) } } : {}),
     });
     const capacity = this.leafCap() + CAP_SLACK + 6;
-    const key = [this.domainId(), this.warp(), this.sourceId(), this.activeBake, this.patchCells(), capacity, this.detailNoise() > 0, this.bakeK()].join('|');
+    const planetMaterial = this.surfaceMaterial() === 'planet' ? this.planetMaterialFor(domain) : undefined;
+    this.setPlanetLights(planetMaterial !== undefined);
+    const key = [this.domainId(), this.warp(), this.sourceId(), this.activeBake, this.patchCells(), capacity, this.detailNoise() > 0, this.bakeK(), planetMaterial?.key ?? 'debug'].join('|');
     if (key === this.builtKey && this.surface) {
       this.surface.setDetailNoise(this.detailNoise());
       return;
@@ -572,7 +620,11 @@ export class LodSurfaceLabPageComponent {
       this.engine.scene.remove(this.surface.mesh);
       this.surface.dispose();
     }
-    this.surface = createLodSurfaceMesh({ domain: this.domain, patchCells: this.patchCells(), source: this.source, capacity, ...(this.detailNoise() > 0 ? { detail: { cells: 2 ** this.bakeK() } } : {}) });
+    this.surface = createLodSurfaceMesh({
+      domain: this.domain, patchCells: this.patchCells(), source: this.source, capacity,
+      ...(this.detailNoise() > 0 ? { detail: { cells: 2 ** this.bakeK() } } : {}),
+      ...(planetMaterial ? { material: planetMaterial.material } : {}),
+    });
     this.surface.setFolding(this.folding());
     this.surface.setInjectedGap(this.injectedGap());
     this.surface.setView(this.view());
@@ -582,6 +634,44 @@ export class LodSurfaceLabPageComponent {
     this.surface.setWireframe(this.wireframe());
     this.engine.scene.add(this.surface.mesh);
     this.builtKey = key;
+  }
+
+  /**
+   * The planet material for the current source: on the cell planet (a sphere) it paints the world's cells by direction through
+   * `cellLookupLayer`; otherwise it is a plain colour. Kept between rebuilds while its key (source, radius) is unchanged.
+   */
+  private planetMaterialFor(domain: LodDomain): { readonly material: TerrainPlanetMaterial; readonly key: string } {
+    const cellPlanet = this.sourceId() === 'cell-planet' && domain.kind === 'sphere';
+    const key = cellPlanet ? `planet-cells-${domain.sizeM}` : 'planet-plain';
+    if (this.planetMaterial?.key === key) return this.planetMaterial;
+    this.disposePlanetMaterial();
+    const material = new TerrainPlanetMaterial();
+    const cells = cellLookupLayer();
+    if (cellPlanet) {
+      const world = cellPlanetWorld(cellPlanetFor(domain.sizeM)).world;
+      cells.setLookup(buildCellPerPixelLookupPayload(world.graph, cellBiomeColours(world), CELL_ATLAS));
+      material.addSurfaceLayer({ id: 'cellLookup', order: SURFACE_LAYER_ORDER.cellLookup, layer: cells.layer });
+    }
+    this.planetMaterial = { material, cells, key };
+    return this.planetMaterial;
+  }
+
+  private disposePlanetMaterial(): void {
+    this.planetMaterial?.cells.dispose();
+    this.planetMaterial?.material.dispose();
+    this.planetMaterial = undefined;
+  }
+
+  /** The planet material is lit by scene lights (PBR); the debug material has its own sun. */
+  private setPlanetLights(on: boolean): void {
+    if (on && !this.sunLight) {
+      this.sunLight = new DirectionalLight(0xffffff, 3);
+      this.ambientLight = new AmbientLight(0xaabbdd, 0.5);
+      this.engine.scene.add(this.sunLight, this.sunLight.target, this.ambientLight);
+    } else if (!on && this.sunLight) {
+      this.engine.scene.remove(this.sunLight, this.sunLight.target, this.ambientLight!);
+      this.sunLight = this.ambientLight = undefined;
+    }
   }
 
   /** The current source for a domain: analytic ones at once, baked ones from the cache or after a bake (then undefined). */
@@ -693,7 +783,9 @@ export class LodSurfaceLabPageComponent {
     const { up: groundUp, east, north } = groundFrame(this.domain.kind, view.ground);
     // A low light across the cut (from the camera's right) throws one wall into shade and lights the other.
     const canyonLight = this.poseId() === 'biome-canyon' && this.zoomProgress === undefined;
-    surface.setSun([0, 1, 2].map((k) => canyonLight ? 0.35 * groundUp[k] + (Math.cos(view.headingRad) * east[k] - Math.sin(view.headingRad) * north[k]) + 0.25 * (Math.cos(view.headingRad) * north[k] + Math.sin(view.headingRad) * east[k]) : groundUp[k] + 0.6 * east[k] + 0.4 * north[k]) as [number, number, number]);
+    const sun = [0, 1, 2].map((k) => canyonLight ? 0.35 * groundUp[k] + (Math.cos(view.headingRad) * east[k] - Math.sin(view.headingRad) * north[k]) + 0.25 * (Math.cos(view.headingRad) * north[k] + Math.sin(view.headingRad) * east[k]) : groundUp[k] + 0.6 * east[k] + 0.4 * north[k]) as [number, number, number];
+    surface.setSun(sun);
+    this.sunLight?.position.set(sun[0], sun[1], sun[2]);
 
     const began = performance.now();
     let levelChanges = 0;
@@ -811,6 +903,7 @@ export class LodSurfaceLabPageComponent {
       'canvas.drawingBufferHeight': renderer.domElement?.height ?? 0,
       devicePixelRatio: globalThis.devicePixelRatio ?? 1,
       reversedDepthBuffer: true,
+      'surface.material': this.surfaceMaterial(),
     };
   }
 

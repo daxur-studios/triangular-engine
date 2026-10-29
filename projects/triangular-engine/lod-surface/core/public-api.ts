@@ -16,6 +16,7 @@ export * from './lod-height-noise';
 export * from './lod-height-terrain';
 export * from './lod-height-bake-client';
 export * from './lod-height-texture';
+export * from './lod-cell-planet-heights';
 export * from './lod-detail-noise';
 export * from './lod-surface-mesh';
 export * from './lod-terrain-body';

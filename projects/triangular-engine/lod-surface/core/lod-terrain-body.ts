@@ -115,6 +115,9 @@ export class LodTerrainBody {
   configure(settings: LodTerrainSettings): void {
     const { domain, heights } = settings;
     const baked = (heights as Partial<TextureHeightSource>).baked;
+    if (heights.id === 'cell-planet' && domain.kind === 'plane') {
+      throw new Error('Cell-planet heights are a sphere source: use <planetTerrain>, not <flatTerrain>');
+    }
     if (baked && (baked.layout.kind !== domain.kind || baked.layout.sizeM !== domain.sizeM || baked.layout.warp !== domain.warp)) {
       const { kind, sizeM, warp } = baked.layout;
       throw new Error(`Heights were baked for a ${kind} of ${sizeM} m (${warp} warp), not a ${domain.kind} of ${domain.sizeM} m (${domain.warp} warp)`);

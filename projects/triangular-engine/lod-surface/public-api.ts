@@ -7,3 +7,4 @@
  */
 export * from './components/planet-terrain.component';
 export * from './components/flat-terrain.component';
+export * from './terrain-planet-material';

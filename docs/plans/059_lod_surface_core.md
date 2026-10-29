@@ -277,8 +277,9 @@ measured on the RTX 3080 before the next starts:
     the ground; Jolt colliders stay with M5.
   - **G5 Combined scene and suite.** A demo page with `<planet>`, `<planetTerrain>`, `<planetAtmosphere>` and clouds,
     and a new suite (name open, for example `planet-scene`) with orbit, mid-altitude and ground poses, a descent and
-    a turn. Metrics: per-layer GPU pass ms, selection CPU ms, frame ms, triangles, draws. Clouds start as a labelled
-    placeholder; a real `<planetClouds>` is its own piece of work, since no clouds component exists yet.
+    a turn. Metrics: per-layer GPU pass ms, selection CPU ms, frame ms, triangles, draws. Clouds come from the
+    `triangular-engine/cloud-volumes` entry, which has code but no component yet; a `<planetClouds>` wrapper is its
+    own piece of work, with a labelled placeholder until then.
 - **Order:** G1 and G2 first, so a game can start using the terrain; G3 next; the combined suite (G5) is meaningful
   once G3 is in, though it can start earlier with the lab material.
 - **Open:** the `<planet>` parent's exact inputs; the new suite's name; whether `<planetClouds>` gets its own plan.

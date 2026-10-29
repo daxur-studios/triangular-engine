@@ -1,5 +1,9 @@
 # Changelog
 
+- `triangular-engine/lod-surface`: `TerrainPlanetMaterial`, a `PlanetSurfaceMaterial` for `<planetTerrain [material]>` (Plan 059, step G3 spike; preview). `LodSurfaceMesh` gains `nodes` (`LodSurfaceNodes`: `up`, `normal`, `position`, `level` varyings) and calls `bindLodSurfaceNodes` on a supplied material that has it (`LodSurfaceNodesConsumer`). `planet-material` is unchanged.
+
+- `triangular-engine/lod-surface/core`: `cellPlanetHeights(bake, { seed, cellCount, relaxationIterations?, heightScaleM, radius, warp?, bakeK? })` bakes a `triangular-engine/worldgen` cell planet's heights (sea at 0, metres) in the app's bake worker and returns a `TextureHeightSource` for `<planetTerrain [heights]>` (Plan 059, step G2). The parameters must match the game's `buildCellPlanetWorld`. Sphere only: `<flatTerrain>` now throws a clear "use `<planetTerrain>`" error for cell-planet heights. New exports: `cellPlanetHeights`, `CellPlanetHeightsOptions`.
+
 - `triangular-engine/lod-surface`: new entry point, the LOD terrain promoted from the demo lab (Plan 059, step G1). Behaviour and measurements are unchanged.
   - **Components:** `<planetTerrain>` (`PlanetTerrainComponent`, inputs `radius`, `heights`, `detailNoise`, `detailCells`, `leafCap`, `cellPixels`, `patchCells`, `hysteresis`, `cull`, `warp`, `material`, plus debug-material options) and `<flatTerrain>` (`FlatTerrainComponent`, `size` instead of `radius`). They attach to `engine.scene`, select every frame from the active camera, need the WebGPU renderer, and expose a `terrain` signal with the selector, stats and surface.
   - **`triangular-engine/lod-surface/core`:** framework-free and worker-safe: domains and cube warp, `LodSelector`, `LodSurfaceMesh` (optional `material`), analytic and baked height sources, `createBakeClient` and `serveBakeRequests` (the app owns a one-line worker file), `LodTerrainBody`, `TERRAIN_DEFAULTS`.

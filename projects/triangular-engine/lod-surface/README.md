@@ -69,6 +69,51 @@ const heights = createTextureHeightSource('biome-mix', result.baked);
 
 `layout` is a `BakeLayout` (body, cube warp and texture size exponent between `MIN_BAKE_K` and `MAX_BAKE_K`). A bake made for a different body or warp than the component's is rejected with an explicit error. Dispose a texture source when you replace it.
 
+## Cell-planet heights
+
+A game that builds a `triangular-engine/worldgen` cell planet can put `<planetTerrain>` on it with `cellPlanetHeights`. It does not take the built world: worldgen is deterministic, so the worker rebuilds the same world from its parameters. **They must match the ones the game used for `buildCellPlanetWorld`** (`seed`, `cellCount`, `relaxationIterations`); a world built with a non-default `jitter`, `plateCount`, `worldProfileKind` or `terrain` is not reproduced. The height at a point is `(elevation - seaLevel) * heightScaleM` metres above `radius`, the sea at 0.
+
+```ts
+// height-bake.worker.ts (in your app)
+import { serveBakeRequests } from 'triangular-engine/lod-surface/core';
+serveBakeRequests(self);
+```
+
+```ts
+// game.component.ts
+import { createBakeClient, cellPlanetHeights, type TextureHeightSource } from 'triangular-engine/lod-surface/core';
+
+const bake = createBakeClient(() => new Worker(new URL('./height-bake.worker', import.meta.url), { type: 'module' }));
+
+@Component({
+  imports: [PlanetTerrainComponent],
+  template: `@if (heights(); as h) { <planetTerrain [radius]="radius" [heights]="h" /> }`,
+})
+export class GameComponent {
+  readonly radius = 600_000;
+  readonly heights = signal<TextureHeightSource | undefined>(undefined);
+
+  async ngOnInit() {
+    this.heights.set(await cellPlanetHeights(bake, { seed: 7, cellCount: 1500, heightScaleM: 4_000, radius: this.radius }));
+  }
+}
+```
+
+The bake takes seconds (the world build, then the texture), so the terrain appears once the promise resolves; before that, omit `heights` for a flat sphere. `radius` and `warp` must equal the component's, or the terrain throws. The source is sphere-only: given to `<flatTerrain>` it throws "use `<planetTerrain>`". Dispose it (`heights.dispose()`) when you replace it.
+
+## Planet material (spike, preview)
+
+`TerrainPlanetMaterial` is `PlanetSurfaceMaterial` for the terrain (Plan 059, step G3 spike). The plain material reads vertex attributes only the morph globe has, so on the terrain it draws black; this subclass keeps its layer, occluder, emissive, lighting and atmosphere stacks and rebuilds the planet context from the terrain's own vertex nodes (`LodSurfaceMesh.nodes`). It is lit by scene lights, so add a directional light.
+
+```ts
+const material = new TerrainPlanetMaterial();           // solid base colour; add layers on top
+const cells = cellLookupLayer();                        // from triangular-engine/planet-material
+material.addSurfaceLayer({ id: 'cellLookup', order: SURFACE_LAYER_ORDER.cellLookup, layer: cells.layer });
+// <planetTerrain [radius]="r" [heights]="h" [material]="material" />
+```
+
+Layers that read a vertex attribute (the vertex-colour base, the macro layer's land mask, streamed tiles) still need that attribute and do not work here. Preview: the shape may change in G3 (see the Plan 059 runbook). The sea sits at `radius` on the terrain but at `radius + seaLevelElevation * heightScale` on the morph globe; see the runbook for the offset.
+
 ## Not included
 
-Gameplay height and normal queries, cell-planet heights, the planet material and a parent `<planet>` component are later steps of Plan 059. The older `triangular-engine/terrain` entry is a different system and is unchanged.
+Gameplay height and normal queries, the finished planet material integration and a parent `<planet>` component are later steps of Plan 059. The older `triangular-engine/terrain` entry is a different system and is unchanged.
