@@ -39,36 +39,33 @@ function buildBubbleHelmet(
   const helmet = new Group();
   helmet.name = 'capsule-cat-bubble-helmet';
 
-  // Angled metallic neck collar ring (top tilts back behind ears, bottom tilts forward under chin)
+  // Angled neck collar socket: sits at neck seam, tilted forward under chin and back behind ears
   const collarGroup = new Group();
-  collarGroup.position.set(0, r * 0.08, length * 0.5);
-  collarGroup.rotation.x = 0.36;
+  collarGroup.position.set(0, r * 0.12, length * 0.5);
+  collarGroup.rotation.x = 0.32; // ~18.3 degrees forward tilt
 
-  const collarGeo = new TorusGeometry(r * 1.08, r * 0.065, 12, 36);
+  const collarRadius = r * 1.12;
+  const collarGeo = new TorusGeometry(collarRadius, r * 0.065, 12, 36);
   const collarRing = new Mesh(collarGeo, darkMat);
   collarRing.castShadow = true;
   collarGroup.add(collarRing);
 
-  const lipGeo = new CylinderGeometry(r * 1.06, r * 1.06, r * 0.08, 32, 1, true);
+  const lipGeo = new CylinderGeometry(collarRadius * 0.98, collarRadius * 0.98, r * 0.08, 32, 1, true);
   lipGeo.rotateX(Math.PI * 0.5);
   const lip = new Mesh(lipGeo, darkMat);
   collarGroup.add(lip);
 
-  helmet.add(collarGroup);
-
-  // Crystal-clear glass dome enclosing head, pointed ears and whiskers
-  const headCenterY = r * 0.28;
-  const headCenterZ = length * 0.5 + r * 0.38;
+  // Transparent bubble dome attached flush to the collar ring, curving over head and ears
   const domeRadius = r * 1.38;
+  const domeGeo = new SphereGeometry(domeRadius, 36, 24, 0, Math.PI * 2, 0, Math.PI * 0.70);
+  domeGeo.rotateX(Math.PI * 0.5);
+  const dome = new Mesh(domeGeo, glassMat);
+  dome.renderOrder = 2;
+  dome.castShadow = false;
+  dome.receiveShadow = false;
+  collarGroup.add(dome);
 
-  const glassGeo = new SphereGeometry(domeRadius, 36, 28);
-  const glass = new Mesh(glassGeo, glassMat);
-  glass.position.set(0, headCenterY, headCenterZ);
-  glass.renderOrder = 2;
-  glass.castShadow = false;
-  glass.receiveShadow = false;
-  helmet.add(glass);
-
+  helmet.add(collarGroup);
   return helmet;
 }
 

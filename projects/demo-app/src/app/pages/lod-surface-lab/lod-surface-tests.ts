@@ -54,8 +54,14 @@ const CELLS_16: LodSurfaceTestSettings = { ...CELLS_32, patchCells: 16 };
 /** Default detail noise amplitude, a share of the texel size (about 4 m on the plane's 98 m texel, 37 m on the 600 km sphere's 920 m one). */
 export const DEFAULT_DETAIL_SHARE = 0.04;
 
-/** The lab's defaults, and what `lod-surface-terrain` v8 runs with: 16 cells and the detail noise on. */
-export const DEFAULT_SETTINGS: LodSurfaceTestSettings = { ...CELLS_16, detailNoise: DEFAULT_DETAIL_SHARE };
+/** The lab's default leaf cap (was 1,024 until the selection became view-independent, 2026-10-29, which keeps the off-screen detail in the budget). */
+export const DEFAULT_LEAF_CAP = 4096;
+
+/** The lab's defaults, and what `lod-surface-terrain` v9 runs with: 16 cells, the detail noise on and a 4,096-leaf cap. */
+export const DEFAULT_SETTINGS: LodSurfaceTestSettings = { ...CELLS_16, detailNoise: DEFAULT_DETAIL_SHARE, leafCap: DEFAULT_LEAF_CAP };
+
+/** What `lod-surface-terrain` v8 ran with: the defaults of that day, 16 cells and the detail noise on, at a 1,024-leaf cap. Its definition keeps it. */
+const DETAIL_16_CAP_1024: LodSurfaceTestSettings = { ...DEFAULT_SETTINGS, leafCap: 1024 };
 
 /** What suites before the hysteresis existed were measured with: the single threshold. Their definitions keep it. */
 const NO_HYSTERESIS: LodSurfaceTestSettings = { ...CELLS_32, hysteresis: 0 };
@@ -338,16 +344,18 @@ const BASELINE_V7: TestSuite<LodSurfaceTestSettings> = {
 const TERRAIN_V8: TestSuite<LodSurfaceTestSettings> = {
   ...TERRAIN_V7, version: 8,
   title: 'LOD surface core: terrain at 16 cells with detail noise below the texel size (Plan 059)',
-  scenarios: [...terrainScenarios(DEFAULT_SETTINGS, true), ...biomeCases(DEFAULT_SETTINGS), ...capAbab(DEFAULT_SETTINGS, 16), ...CELLS_ABAB.map((scenario) => ({ ...scenario, settings: { ...scenario.settings, detailNoise: DEFAULT_SETTINGS.detailNoise } }))],
+  scenarios: [...terrainScenarios(DETAIL_16_CAP_1024, true), ...biomeCases(DETAIL_16_CAP_1024), ...capAbab(DETAIL_16_CAP_1024, 16), ...CELLS_ABAB.map((scenario) => ({ ...scenario, settings: { ...scenario.settings, detailNoise: DETAIL_16_CAP_1024.detailNoise } }))],
 };
 
 /**
- * v9: terrain v8's cases unchanged, measured with the view-independent selection (culling no longer part of selection), so
- * the leaf counts, the budget and the cost of every case can differ from v8. Same case ids.
+ * v9: terrain v8's cases at the new default leaf cap of 4,096 (v8 ran at 1,024; the cells A/B too), measured with the
+ * view-independent selection (culling no longer part of selection), so the leaf counts, the budget and the cost of every case
+ * can differ from v8. Same case ids; the cap A/B keeps its own 1,024 and 512 caps.
  */
 const TERRAIN_V9: TestSuite<LodSurfaceTestSettings> = {
   ...TERRAIN_V8, version: 9,
-  title: 'LOD surface core: terrain with view-independent selection, culling only picks the drawn leaves (Plan 059)',
+  title: 'LOD surface core: terrain with view-independent selection at a 4096-leaf cap, culling only picks the drawn leaves (Plan 059)',
+  scenarios: [...terrainScenarios(DEFAULT_SETTINGS, true), ...biomeCases(DEFAULT_SETTINGS), ...capAbab(DEFAULT_SETTINGS, 16), ...CELLS_ABAB.map((scenario) => ({ ...scenario, settings: { ...scenario.settings, detailNoise: DEFAULT_SETTINGS.detailNoise, leafCap: DEFAULT_LEAF_CAP } }))],
 };
 
 /** Oldest first; the final entry is "Run latest test". Earlier versions are still run by their exact version. */

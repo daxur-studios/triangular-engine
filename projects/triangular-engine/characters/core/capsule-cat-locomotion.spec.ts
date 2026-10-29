@@ -19,6 +19,27 @@ describe('capsule-cat-locomotion', () => {
     expect(sample.tail.radius).toBeGreaterThan(0);
   });
 
+  it('swings lifted paws forward (+Z) and pushes grounded paws backward (-Z)', () => {
+    const early = sampleCapsuleCatLocomotion({
+      mode: 'goofy_walk',
+      elapsedSeconds: 0.08,
+      dna: DEFAULT_CAPSULE_CAT_DNA,
+    });
+    const later = sampleCapsuleCatLocomotion({
+      mode: 'goofy_walk',
+      elapsedSeconds: 0.18,
+      dna: DEFAULT_CAPSULE_CAT_DNA,
+    });
+
+    // Front-left paw is airborne and swinging forward
+    expect(early.frontLeft.p2.y).toBeGreaterThan(0.07);
+    expect(later.frontLeft.p2.z).toBeGreaterThan(early.frontLeft.p2.z);
+
+    // Front-right paw is grounded and pushing backward
+    expect(early.frontRight.p2.y).toBeCloseTo(0.07, 2);
+    expect(later.frontRight.p2.z).toBeLessThan(early.frontRight.p2.z);
+  });
+
   it('pitches the torso more and bounces higher during a bound than during a walk', () => {
     const walk = sampleSuspension('goofy_walk');
     const bound = sampleSuspension('bound_run');

@@ -280,6 +280,7 @@ export class CharactersLabPageComponent {
       facialController: this.facialController,
     });
     this.capsuleCatHeroActor.setLocomotion('goofy_walk');
+    this.capsuleCatHeroActor.root.rotation.y = -0.28;
     this.capsuleCatHeroGroup.add(
       this.capsuleCatHeroActor.root,
       this.createPedestalMesh(0.55),
@@ -406,9 +407,7 @@ export class CharactersLabPageComponent {
   }
 
   private buildCapsuleCatLineup(): void {
-    const cols = 4;
-    const spacingX = 1.45;
-    const rowZ = [-0.45, 0.75];
+    const spacingX = 1.55;
     const emotions: readonly ExtendedEmotionName[] = [
       'happy',
       'happy',
@@ -420,20 +419,23 @@ export class CharactersLabPageComponent {
     ];
 
     CAPSULE_CAT_PRESETS.forEach((preset, idx) => {
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      const x = (col - (cols - 1) * 0.5) * spacingX;
-      const z = rowZ[row] ?? 0;
+      // 4 in the back row (idx 0..3), 3 centered in the front row (idx 4..6)
+      const isBackRow = idx < 4;
+      const col = isBackRow ? idx : idx - 4;
+      const x = isBackRow
+        ? (col - 1.5) * spacingX
+        : (col - 1.0) * spacingX;
+      const z = isBackRow ? -0.65 : 0.65;
 
       const actor = new CapsuleCatActor({ dna: preset, autoBlink: true });
-      actor.root.rotation.y = -0.34;
+      actor.root.rotation.y = -0.38;
       actor.facialController.setExpression(emotions[idx] ?? 'happy', 1, 0);
       actor.setLocomotion(preset.gait, 0.9 + idx * 0.02);
       actor.update(idx * 0.19);
 
       const slot = new Group();
       slot.position.set(x, 0, z);
-      slot.add(actor.root, this.createPedestalMesh(0.5));
+      slot.add(actor.root, this.createPedestalMesh(0.52));
       this.capsuleCatLineupGroup.add(slot);
       this.capsuleCatLineupActors.push(actor);
     });
@@ -528,8 +530,8 @@ export class CharactersLabPageComponent {
     this.capsuleCatLayoutMode = mode;
     this.applyCapsuleLayoutVisibility();
     if (mode === 'lineup') {
-      this.cameraPosition.set([0, 1.85, 3.8]);
-      this.cameraTarget.set([0, 0.46, 0.15]);
+      this.cameraPosition.set([0, 2.35, 4.6]);
+      this.cameraTarget.set([0, 0.48, 0.0]);
     } else {
       this.setCameraFraming(this.cameraFraming);
     }
@@ -717,8 +719,8 @@ export class CharactersLabPageComponent {
       }
     } else if (isCats) {
       if (this.capsuleCatLayoutMode === 'lineup') {
-        this.cameraPosition.set([0, 2.35, 4.4]);
-        this.cameraTarget.set([0, 0.55, 0.2]);
+        this.cameraPosition.set([0, 2.35, 4.6]);
+        this.cameraTarget.set([0, 0.48, 0.0]);
       } else {
         this.setCameraFraming(this.cameraFraming);
       }
@@ -737,8 +739,8 @@ export class CharactersLabPageComponent {
     this.cameraFraming = framing;
     if (this.viewMode === 'capsule-cats') {
       if (this.capsuleCatLayoutMode === 'lineup') {
-        this.cameraPosition.set([0, 1.85, 3.8]);
-        this.cameraTarget.set([0, 0.46, 0.15]);
+        this.cameraPosition.set([0, 2.35, 4.6]);
+        this.cameraTarget.set([0, 0.48, 0.0]);
       } else if (framing === 'full-shot') {
         this.cameraPosition.set([1.15, 0.72, 1.45]);
         this.cameraTarget.set([0, 0.40, 0.05]);

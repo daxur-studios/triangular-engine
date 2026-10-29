@@ -1144,3 +1144,82 @@ Each case also reports `levelChangesAll`, which counts the frustum entries and e
 - 16,384 as "the cap never binds" is assumed; a case that reports `capHit` true would invalidate its `-cap16k` reading.
 - The sweep cases at v5 and the turn cases share settings otherwise, so a quiet turn with a busy sweep means the altitude
   swing, not the heading, drives the sweep's churn.
+
+
+## 2026-10-28: view-independent selection (baseline v7, terrain v9)
+
+### Measured (baseline v6 turn cases)
+
+During a pure camera turn at a fixed position, with the default 1,024 leaf cap and the frustum culling inside selection,
+the visible level changes were about 91-99 per second (flicker). With culling off: 0. With cap 16,384 and culling:
+0 visible changes but about 4,500 per second off-screen (`levelChangesAll`) and about 8,000 visible leaves. So the cause
+was that culling was part of selection: a culled node asked for no split and left the budget and balance competition, so
+the set the 1,024 leaves were ranked over changed with the heading. The hysteresis cannot see a turn (distance is fixed).
+
+### Changed
+
+- `lod-selector.ts`: split requests, the 2:1 balance and the leaf-budget ranking no longer depend on the frustum or the
+  heading by default. The frustum is evaluated for every node and only sets its `visible` flag, which decides which
+  selected leaves are drawn (`stats.drawn`, a subset of `stats.leaves`, the selected tree). The old behaviour stays as
+  `SelectorSettings.cullInSelection: true` (with `cull` on) for A/B. Hysteresis is unchanged.
+- Metrics: `stats.leaves` is the selected tree and `stats.drawn` the in-frustum subset (reported as `leaves` and
+  `drawnLeaves`); `levelChanges` (`visibleNewSplits + visibleMerges`) still counts changes among drawn patches only, and
+  `levelChangesAll` counts every node. With the new default a pure turn must read 0 on both.
+- Lab: the page has a "Legacy: cull inside selection" checkbox and an 8,192 leaf-cap button; `LodSurfaceTestSettings`
+  gains optional `cullInSelection` (absent = default; set only by the legacy case).
+- Suites: `lod-surface-baseline` v7 = v5's cases unchanged plus eight turn cases (8 s, quick 4 s) in the new default
+  mode: per pose (`plane-100km` low-200m, `sphere-600km` mid-5km) `turn-<domain>-<pose>`, `-cap4k`, `-cap8k` and
+  `-legacycull` (cap 1,024, `cullInSelection`). v6's `-cap16k` and `-nocull` controls are not repeated. `lod-surface-terrain`
+  v9 = v8's cases unchanged, measured under the new selection (so its leaf counts and costs can differ from v8); it is
+  the latest entry. Numbers of the earlier cases are not comparable across v6 and v7.
+- Specs (colocated): a pure turn at caps 1,024 / 4,096 / 8,192 makes no level change and selects the same leaves in both
+  poses; drawn leaves are a subset of selected ones; the legacy option still culls in selection (tree follows the heading,
+  fewer leaves); culling on or off selects the same tree by default. The reference selector spec covers both modes. The
+  hysteresis sweep-churn specs run in legacy selection, which is what their bounds were measured with. 189 of 189 lab specs pass.
+
+### Measured (baseline v7, turn cases)
+
+Quick runs in a visible browser with other apps also measuring, so the timings are rough. Level changes during a pure turn:
+0 at leaf caps 1,024, 4,096 and 8,192 (`levelChangesPerSecond` and `levelChangesAll`), against 94 and 97 per second for the
+legacy `-legacycull` reference (culling inside selection). Selection p95 about 0.2 / 0.7 / 1.2 ms and `gpuScenePass` about
+0.07 / 0.10-0.12 / 0.16-0.18 ms at 1,024 / 4,096 / 8,192.
+
+### Decision: default leaf cap 4,096
+
+With selection independent of the view the budget is spent partly off-screen, so the old 1,024 cap leaves less detail on
+screen than before. The owner chose 4,096 as the default (the 1,024 button stays for A/B): it keeps 0 level changes at
+about 0.7 ms selection p95 and 0.10-0.12 ms GPU scene pass. `DEFAULT_SETTINGS.leafCap` (`DEFAULT_LEAF_CAP`) is 4,096 and
+the lab page starts there. Terrain v9 has not been run, so it changed in place: it runs terrain v8's cases at the 4,096 cap
+(the cells A/B too; the cap A/B keeps its own 1,024 and 512 caps). Terrain v8 and older, and baseline v7 and older, are
+pinned to the 1,024 cap they were measured at, so their definitions and numbers are unchanged.
+
+### Not done / next
+
+- No saved results for terrain v9: the owner runs it and compares it with v8 (4,096 against 1,024 cap, view-independent
+  selection against frustum selection).
+- Selection ignoring the frustum means more leaves are selected than drawn when looking away; the cost of the unseen
+  leaves is only the CPU selection, not the draw, but the budget is now spent partly off-screen. Whether to bias the
+  budget toward the view (without making it heading-dependent frame to frame) is open.
+
+## 2026-10-29: terrain for games (plan step 3c, D16)
+
+### Decided
+
+- The owner chose to make the terrain usable by other games before the slope criterion and M2, for example a game on
+  a cell planet that needs 3D ground, then to measure it together with the planet material, atmosphere and clouds.
+- Components (D16): `<planet>` as a parent that provides radius, centre, sun and camera origin; `<planetTerrain>` and
+  `<flatTerrain>` for the ground; `<planetAtmosphere>` and clouds as siblings. Entry `triangular-engine/lod-surface`.
+  Promotion moves ahead of M2, which changes D8's timing.
+- Steps G1–G5 are in the plan (§Milestones, step 3c): promote, cell-planet heights, planet material, gameplay
+  queries, combined scene and suite.
+
+### Found
+
+- No clouds component exists in the library yet; G5 starts with a labelled placeholder.
+- `PlanetSurfaceMaterial` was built for the cell-planet globe; whether it accepts this terrain's displaced positions
+  and normals is unchecked, so G3 starts with a short spike.
+
+### Not done / next
+
+- Nothing built. Terrain v9 is still unrun.
+- G1 (promotion) and G2 (cell-planet heights) go first.

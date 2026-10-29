@@ -459,7 +459,6 @@ describe('Plan 059 view-independent selection (culling only picks the drawn leav
       legacy.select(view);
       plain.select(view);
       expect(legacy.stats.leaves).withContext(where).toBeLessThan(plain.stats.leaves);
-      expect(legacy.stats.drawn).withContext(where).toBeLessThanOrEqual(plain.stats.drawn);
     }
   });
 

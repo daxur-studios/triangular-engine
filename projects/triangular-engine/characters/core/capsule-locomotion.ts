@@ -348,12 +348,14 @@ export function sampleCapsuleLocomotion(
   const leftHipP0 = characterVector3(-hipOffsetX + bodySwayX, hipBaseY + bodyBounceY, 0);
   const rightHipP0 = characterVector3(hipOffsetX + bodySwayX, hipBaseY + bodyBounceY, 0);
 
-  // Foot targets along parametric arc: z = cos(phi) * strideLength, y = max(0, sin(phi)) * stepHeight
+  // Foot targets along parametric arc:
+  // In the swing phase (sin > 0), the foot lifts and swings forward from back to front (-cos goes from -1 to +1).
+  // In the stance phase (sin <= 0), the foot stays grounded and pushes backward from front to back (-cos goes from +1 to -1).
   const leftStepSin = Math.sin(leftPhase);
   const rightStepSin = Math.sin(rightPhase);
 
-  const leftFootZ = mode === 'idle' ? 0.02 : Math.cos(leftPhase) * strideLength;
-  const rightFootZ = mode === 'idle' ? -0.02 : Math.cos(rightPhase) * strideLength;
+  const leftFootZ = mode === 'idle' ? 0.02 : -Math.cos(leftPhase) * strideLength;
+  const rightFootZ = mode === 'idle' ? -0.02 : -Math.cos(rightPhase) * strideLength;
 
   const leftFootY =
     mode === 'float'
@@ -400,8 +402,8 @@ export function sampleCapsuleLocomotion(
   );
 
   // Counter-phase default wrist swing (left arm swings forward with right leg)
-  const leftArmSwing = Math.cos(rightPhase) * armSwingZ;
-  const rightArmSwing = Math.cos(leftPhase) * armSwingZ;
+  const leftArmSwing = -Math.cos(rightPhase) * armSwingZ;
+  const rightArmSwing = -Math.cos(leftPhase) * armSwingZ;
 
   const defaultLeftWrist = characterVector3(
     -(r + 0.16) + bodySwayX,

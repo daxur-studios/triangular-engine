@@ -220,7 +220,7 @@ function samplePawStep(
       target: characterVector3(
         socket.x * lateralSpread,
         pawAnkleY + Math.max(0, sin) * stepHeight,
-        socket.z + cos * stride * 0.35,
+        socket.z - cos * stride * 0.35,
       ),
     };
   }
@@ -242,7 +242,7 @@ function samplePawStep(
     target: characterVector3(
       socket.x * lateralSpread,
       pawAnkleY + lift,
-      socket.z + cos * stride,
+      socket.z - cos * stride,
     ),
   };
 }

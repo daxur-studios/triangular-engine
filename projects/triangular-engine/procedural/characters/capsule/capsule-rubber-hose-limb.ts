@@ -74,8 +74,10 @@ export class RubberHoseLimbMesh {
         const b = (i + 1) * ringVerts + j;
         const c = (i + 1) * ringVerts + (j + 1);
         const d = i * ringVerts + (j + 1);
-        indices.push(a, b, d);
-        indices.push(b, c, d);
+        // Counter-clockwise from outside the tube: winding must agree with the
+        // radial vertex normals written below or the limb renders inside out.
+        indices.push(a, d, b);
+        indices.push(b, d, c);
       }
     }
 

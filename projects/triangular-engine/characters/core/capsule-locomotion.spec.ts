@@ -64,6 +64,27 @@ describe('capsule-locomotion', () => {
     expect(Math.sign(walkSample.leftLeg.p2.z)).toBe(-Math.sign(walkSample.rightLeg.p2.z));
   });
 
+  it('swings the lifted foot forward (+Z) and pushes the grounded foot backward (-Z)', () => {
+    // Early in the stride cycle, left foot is in swing phase (air) and right foot is in stance phase (ground)
+    const early = sampleCapsuleLocomotion({
+      mode: 'walk',
+      elapsedSeconds: 0.08,
+      dna: DEFAULT_CAPSULE_DNA,
+    });
+    const later = sampleCapsuleLocomotion({
+      mode: 'walk',
+      elapsedSeconds: 0.18,
+      dna: DEFAULT_CAPSULE_DNA,
+    });
+
+    // Left foot is higher in the air and moving forward (+Z)
+    expect(early.leftLeg.p2.y).toBeGreaterThan(early.rightLeg.p2.y);
+    expect(later.leftLeg.p2.z).toBeGreaterThan(early.leftLeg.p2.z);
+
+    // Right foot is on the ground pushing backward (-Z)
+    expect(later.rightLeg.p2.z).toBeLessThan(early.rightLeg.p2.z);
+  });
+
   it('supports hand action overrides (wave, point, hold_gadget)', () => {
     const waving = sampleCapsuleLocomotion({
       mode: 'idle',

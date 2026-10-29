@@ -874,7 +874,7 @@ describe('Plan 059 suite', () => {
     let now = 0;
     let frames = 0;
     const host = {
-      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, detailNoise: 0, ...(zoom !== undefined ? { motion: 'zoom' as const } : {}) }),
+      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, detailNoise: 0, leafCap: 1024, ...(zoom !== undefined ? { motion: 'zoom' as const } : {}) }),
       setZoomProgress: (t: number | undefined) => { zoom = t; },
       renderedFrames: () => frames++,
       errors: () => '', resetErrors: () => undefined, backendIsWebGpu: () => true,
@@ -928,7 +928,7 @@ describe('Plan 059 suite', () => {
     let probes = 0;
     let now = 0;
     const host = {
-      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, detailNoise: 0, ...(sweepAt !== undefined ? { motion: 'sweep' as const } : {}) }),
+      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, detailNoise: 0, leafCap: 1024, ...(sweepAt !== undefined ? { motion: 'sweep' as const } : {}) }),
       setZoomProgress: () => undefined,
       setSweepTime: (t: number | undefined) => { sweepAt = t; if (t !== undefined) times.push(t); },
       renderedFrames: () => Math.floor(now / 16),
@@ -1054,11 +1054,21 @@ describe('Plan 059 suite versions and hysteresis', () => {
     for (const scenario of v7.scenarios.slice(0, v5.scenarios.length)) expect(scenario.settings.cullInSelection).toBeUndefined();
   });
 
-  it('runs terrain v9 as terrain v8 unchanged, as the latest suite, selecting without the frustum', () => {
+  it('runs terrain v9 as terrain v8 at the 4096 default cap, as the latest suite, selecting without the frustum', () => {
     const t8 = LOD_SURFACE_TEST_HISTORY.find((suite) => suite.id === 'lod-surface-terrain' && suite.version === 8)!;
     const t9 = LOD_SURFACE_TEST_HISTORY[LOD_SURFACE_TEST_HISTORY.length - 1];
     expect(`${t9.id}@${t9.version}`).toBe('lod-surface-terrain@9');
-    expect(t9.scenarios).toEqual(t8.scenarios);
+    expect(DEFAULT_SETTINGS.leafCap).toBe(4096);
+    expect(t9.title).toContain('4096');
+    expect(t9.scenarios.map((scenario) => scenario.id)).toEqual(t8.scenarios.map((scenario) => scenario.id));
+    // Terrain v8 and every older terrain / baseline version keep the 1,024 cap they were measured with.
+    for (const suite of LOD_SURFACE_TEST_HISTORY.filter((item) => item !== t9)) {
+      for (const scenario of suite.scenarios.filter((item) => !/^(turn-.*-cap(4k|8k|16k)|biome-cap-)/.test(item.id))) {
+        expect(scenario.settings.leafCap).withContext(`${suite.id}@${suite.version} ${scenario.id}`).toBe(1024);
+      }
+    }
+    for (const scenario of t9.scenarios.filter((item) => !item.id.startsWith('biome-cap-'))) expect(scenario.settings.leafCap).withContext(scenario.id).toBe(4096);
+    expect(t9.scenarios.filter((item) => item.id.startsWith('biome-cap-')).map((item) => item.settings.leafCap)).toEqual([1024, 512, 1024, 512]);
     for (const scenario of t9.scenarios) expect(scenario.settings.cullInSelection).withContext(scenario.id).toBeUndefined();
   });
 

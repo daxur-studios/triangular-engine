@@ -184,6 +184,9 @@ measured on the RTX 3080 before the next starts:
    21–32% (plane 110 to 83 against its no-hysteresis partner), 0 crack px; about 80 a second remain, see the runbook.*
    **3b. Biome-mix source and a triangle budget** (added 2026-10-26 by the owner, ahead of the slope criterion;
    proposal). Details below the list. *Built 2026-10-26: terrain v4 adds the biome source, traversals, target views and 2/4 px ABAB; 149 lab specs green and 20 headless cases have 0 crack px. The cap masked the floor comparison; terrain v5 replaces it with cap and patch-cell ABAB cases, adds a lighting toggle and traversal-position probes, and reframes the plane canyon. **2026-10-27 follow-up:** terrain v6 makes the canyon a 900 m deep cut with walls of about 400 m and an oblique 1,500 m pose down the cut (sphere likewise), with a thumbnail that reads as a canyon; 154 lab specs green, 0 crack px on both canyon cases. See the runbook for measurements and remaining review.*
+   **3c. Terrain for games** (added 2026-10-29 by the owner, ahead of the slope criterion; proposal, D16). Make the
+   terrain usable by other games, for example a game on a cell planet that needs 3D ground, and measure it together
+   with the planet material, atmosphere and clouds. Details below the list.
 4. **Slope criterion** (from M2), measured ABAB in the terrain suite, on the biome-mix source among others.
 5. **M5:** edits and the collider patch.
 6. **M6:** cliffs.
@@ -238,6 +241,47 @@ measured on the RTX 3080 before the next starts:
 - **The AMD iGPU as an early warning (proposal):** a headless run on the iGPU through a second Chrome install set to
   power saving, passed with `--chrome <path>`. It does not block the owner and is not a gate; it shows costs the RTX
   hides. First run checks that the adapter is the iGPU.
+
+**Step 3c in detail (proposal):**
+- **Components a game writes:**
+
+  ```html
+  <planet [radius]="radius" [sunDirection]="sun">
+    <planetTerrain [heights]="cellPlanetHeights(world)" [material]="surface" />
+    <planetAtmosphere [profile]="earth" />
+    <planetClouds [coverage]="0.4" />
+  </planet>
+  ```
+
+  - `<planet>`: a light parent that provides the radius, centre, sun direction and camera origin to its children
+    through dependency injection, so they are not repeated. Additive: `<planetAtmosphere>` keeps working on its own
+    and reads the parent only when it is present.
+  - `<planetTerrain>`: the 3D ground on a sphere: this plan's LOD (view-independent selection, culling at draw time,
+    the 4,096-leaf default), detail noise, a height source and a material.
+  - `<flatTerrain>`: the same ground on the bounded plane, for games that are not on a planet.
+  - The core (domain, selector, mesh, height sources) stays framework-free code with no component, for custom setups.
+  - The names follow `planetAtmosphere` and `planetView`, and avoid confusion with the older `<terrainSurface>` in
+    `triangular-engine/terrain`, which this plan does not touch (D1).
+- **Steps, each with headless specs:**
+  - **G1 Promote.** Move the core out of the lab into the new entry point `triangular-engine/lod-surface` (D8 name),
+    with `<planetTerrain>` and `<flatTerrain>`; the lab page then imports from the library. Public API kept
+    deliberate, TSDoc on public symbols, an entry README, the package README index, `docs/entry-points.md` and
+    `CHANGELOG.md`. The lab suites keep running unchanged.
+  - **G2 Cell-planet heights.** A height source built from a `triangular-engine/worldgen` cell planet (the existing
+    `cell-planet` lab source, made public), so a game passes its world and a height scale.
+  - **G3 Planet material.** `<planetTerrain>` draws with `PlanetSurfaceMaterial` from `triangular-engine/planet-material`,
+    so the ground matches the globe seen from orbit. **Main risk:** the material was built for the cell-planet globe
+    and our terrain displaces its own vertices; a short spike first checks whether the material accepts our position
+    and normal nodes, or what it needs.
+  - **G4 Gameplay queries.** Height and normal at a point from the CPU twin, so characters and vehicles can stand on
+    the ground; Jolt colliders stay with M5.
+  - **G5 Combined scene and suite.** A demo page with `<planet>`, `<planetTerrain>`, `<planetAtmosphere>` and clouds,
+    and a new suite (name open, for example `planet-scene`) with orbit, mid-altitude and ground poses, a descent and
+    a turn. Metrics: per-layer GPU pass ms, selection CPU ms, frame ms, triangles, draws. Clouds start as a labelled
+    placeholder; a real `<planetClouds>` is its own piece of work, since no clouds component exists yet.
+- **Order:** G1 and G2 first, so a game can start using the terrain; G3 next; the combined suite (G5) is meaningful
+  once G3 is in, though it can start earlier with the lab material.
+- **Open:** the `<planet>` parent's exact inputs; the new suite's name; whether `<planetClouds>` gets its own plan.
 
 After M6 the owner decides how water and terrain grow from here, and whether Plans 055 and
 057 adopt the core.
@@ -302,6 +346,7 @@ fine reference during a slow scripted zoom. Both are open to the review.
 
 - Start in `projects/demo-app/src/app/pages/lod-surface-lab/`. Promote the core to a new secondary entry point
   (name open, for example `triangular-engine/lod-surface`) once M2 passes, so its public API is deliberate.
+  *Changed 2026-10-29 (D16): promotion moves ahead of M2 as step 3c, with the components in §Milestones, step 3c.*
 - Water gets its own new entry point later (name open). The old `water/` module is retired or kept on WebGL under
   Plan 056; this plan does not touch it.
 
@@ -324,3 +369,4 @@ fine reference during a slow scripted zoom. Both are open to the review.
 | D13 | Water v0 look and motion bar (sines or Gerstner; acceptable transition motion) | **Decided** 2026-10-24 (owner): sines (Q = 0) first; the owner judges Gerstner and transition motion by eye at the M3 review; pops are fine until then |
 | D14 | Cliff detail by vector displacement of the sheet (M6, §Cliff detail), which brings sheet overhangs into scope while arches, caves and tunnels stay with Plan 055 | **Decided** 2026-10-25 (owner): accepted as M6; the slope criterion goes into M2 |
 | D15 | Milestone order | **Decided** 2026-10-25 (owner): terrain first (§Milestones, Order); water after M6 |
+| D16 | Terrain for games (step 3c): promote now, ahead of M2, which changes D8's "after M2"; components `<planet>`, `<planetTerrain>`, `<flatTerrain>`, with `<planetAtmosphere>` and clouds as siblings; entry `triangular-engine/lod-surface` | **Decided** 2026-10-29 (owner): names and the write-up approved; the parent's inputs, the suite name and clouds stay open |
