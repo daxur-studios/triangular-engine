@@ -1223,3 +1223,43 @@ pinned to the 1,024 cap they were measured at, so their definitions and numbers 
 
 - Nothing built. Terrain v9 is still unrun.
 - G1 (promotion) and G2 (cell-planet heights) go first.
+
+## 2026-10-29: G1, promotion to `triangular-engine/lod-surface`
+
+### Done
+
+- **Moved** from the lab into `lod-surface/core` (plain filesystem moves, behaviour unchanged): lod-domain, lod-lattice,
+  lod-selector, lod-leaf-pack, lod-height, lod-canyon, lod-height-bake, lod-height-noise, lod-height-terrain,
+  lod-detail-noise, lod-height-texture and lod-surface-mesh.
+- **Changed while moving:** the cliff fixture's ground point and heading are now `FIXTURE_GROUND` and
+  `FIXTURE_HEADING_RAD` in the library, so the core no longer imports the lab camera; `LodSurfaceMesh` takes an optional
+  `material` (the caller disposes it) and no longer owns the sky colour; `groundFrame` and `frustumNormals` (new
+  `lod-view.ts`) are shared with the lab camera.
+- **New in core:** `lod-height-bake-client.ts` (`createBakeClient`, `serveBakeRequests`, `answerBakeRequest`; the app keeps a
+  one-line worker file), `lod-terrain-body.ts` (`LodTerrainBody`, `TERRAIN_DEFAULTS`, `LodTerrainSettings`) and its spec.
+- **New components:** `<planetTerrain>` and `<flatTerrain>` with an `attachLodTerrain` helper (effect builds or configures
+  the body, `beforeRender$` selects and publishes stats; hidden on a non-WebGPU renderer). Specs cover creation, inputs
+  reaching the selector settings, defaults, camera-following and a supplied material.
+- **Stayed in the lab:** the page, camera poses, adapter, tests, the worker file, and the specs that exercise the lab
+  (they import from `triangular-engine/lod-surface/core`). `planet-surface-detail-spike/` and the older
+  `triangular-engine/terrain` entry are untouched. No suite version changed.
+- **Config:** `tsconfig.json` and the demo app's `tsconfig.app.json` paths, and `angular.json` includes the library specs.
+- **Docs:** `lod-surface/README.md`, the package README index, `docs/entry-points.md`, `CHANGELOG.md`, the skill's entry
+  list, and TSDoc on the public exports.
+
+### Public API
+
+- `triangular-engine/lod-surface`: `PlanetTerrainComponent`, `FlatTerrainComponent`.
+- `triangular-engine/lod-surface/core`: everything exported by the moved files plus `lod-view`, `lod-height-bake-client` and
+  `lod-terrain-body` (a deliberately wide surface for a preview; narrowing is open).
+
+### Results
+
+- Library specs (`../lod-surface/**/*.spec.ts`, ChromeHeadless): 12 of 12.
+- Lab specs (`**/lod-surface-lab/**/*.spec.ts`, ChromeHeadless): 189 of 189, as before the move.
+- `npm run build:triangular-engine` and `npx ng build demo-app` pass; the worker bundle holds no Angular declarations.
+
+### Not done / next
+
+- Terrain v9 is still unrun; G2 (cell-planet heights) is next.
+- Whether `core` should export less than every moved file is open.

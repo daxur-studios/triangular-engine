@@ -48,6 +48,7 @@
               "../planet-material/**/*.spec.ts",
               "../atmosphere/**/*.spec.ts",
               "../cloud-volumes/**/*.spec.ts",
+              "../lod-surface/**/*.spec.ts",
               "../gpu-data-flow/**/*.spec.ts",
               "../development-map/**/*.spec.ts"
             ]

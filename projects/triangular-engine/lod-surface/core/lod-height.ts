@@ -9,10 +9,12 @@ import type { DomainKind, Vec3 } from './lod-domain';
  */
 
 export type HeightSourceId = 'flat' | 'bumps' | 'noise' | 'bumps-baked' | 'cell-planet' | 'cliff' | 'biome-mix';
+/** Every source id, in menu order. */
 export const HEIGHT_SOURCES: readonly HeightSourceId[] = ['flat', 'bumps', 'noise', 'bumps-baked', 'cell-planet', 'cliff', 'biome-mix'];
 
 /** Sources read from a baked texture; they need a bake (`lod-height-bake.ts`) before they can be made. */
 export const BAKED_SOURCES: readonly HeightSourceId[] = ['noise', 'bumps-baked', 'cell-planet', 'cliff', 'biome-mix'];
+/** True for a source that needs a bake before it can be made (see {@link BAKED_SOURCES}). */
 export const isBakedSource = (id: HeightSourceId): boolean => BAKED_SOURCES.includes(id);
 
 /** Menu text of a source. */
@@ -23,6 +25,7 @@ export const HEIGHT_SOURCE_LABELS: Readonly<Record<HeightSourceId, string>> = {
 /** The cell planet is a sphere (its surface sampler has no plane); every other source works on both domains. */
 export const sourceSupports = (id: HeightSourceId, kind: DomainKind): boolean => id !== 'cell-planet' || kind === 'sphere';
 
+/** One sine of the static bumps source: a direction, wavelength, amplitude and phase. */
 export interface Bump {
   readonly axis: Vec3;
   readonly wavelengthM: number;
@@ -75,6 +78,7 @@ export interface NodeHeightRanges {
   nodeRange(root: number, level: number, i: number, j: number, out: [number, number]): void;
 }
 
+/** Heights of a body in metres along its base normal, with a CPU twin (`heightAt`), TSL nodes for the vertex stage (or a lattice read for baked sources), a global bound and optionally per-node height ranges. Make one with `createHeightSource` or `createTextureHeightSource`. */
 export interface HeightSource extends Partial<NodeHeightRanges> {
   readonly id: HeightSourceId;
   /** Largest |height| anywhere; the selector's fallback when the source gives no per-node range. */

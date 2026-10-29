@@ -5,9 +5,12 @@
  */
 
 export type DomainKind = 'plane' | 'sphere';
+/** Cube-face parameter warp of the sphere: `'equal-angle'` (tan, near-uniform cells) or `'none'` (linear, so cells shrink toward the cube corners). */
 export type CubeWarp = 'equal-angle' | 'none';
+/** Three numbers, x y z, in the domain frame (doubles). */
 export type Vec3 = [number, number, number];
 
+/** The base surface the terrain covers: a bounded square or a cube-sphere, in the scene frame with its centre at the origin. */
 export interface LodDomain {
   readonly kind: DomainKind;
   /** Plane: side of the square. Sphere: radius. Metres. */
@@ -15,19 +18,23 @@ export interface LodDomain {
   readonly warp: CubeWarp;
 }
 
+/** The lab and test suites' bodies: a 100 km plane and spheres of 10 km and 600 km radius. */
 export const DOMAIN_PRESETS = [
   { id: 'plane-100km', label: 'plane 100 km', domain: { kind: 'plane', sizeM: 100_000, warp: 'equal-angle' } },
   { id: 'sphere-10km', label: 'sphere 10 km', domain: { kind: 'sphere', sizeM: 10_000, warp: 'equal-angle' } },
   { id: 'sphere-600km', label: 'sphere 600 km', domain: { kind: 'sphere', sizeM: 600_000, warp: 'equal-angle' } },
 ] as const satisfies readonly { id: string; label: string; domain: LodDomain }[];
+/** Identifier of one of the {@link DOMAIN_PRESETS}. */
 export type DomainPresetId = (typeof DOMAIN_PRESETS)[number]['id'];
 
+/** The {@link LodDomain} of a preset with the given cube warp (ignored on the plane). */
 export function domainPreset(id: DomainPresetId, warp: CubeWarp = 'equal-angle'): LodDomain {
   const preset = DOMAIN_PRESETS.find((entry) => entry.id === id);
   if (!preset) throw new Error(`Unknown domain ${id}`);
   return { ...preset.domain, warp };
 }
 
+/** Quadtree roots of a domain: 1 for the plane, 6 (one per cube face) for the sphere. */
 export function rootCount(domain: LodDomain): number {
   return domain.kind === 'plane' ? 1 : 6;
 }
@@ -44,6 +51,7 @@ export const FACE_FRAMES: readonly { readonly n: Vec3; readonly u: Vec3; readonl
   { n: [0, 0, 1], u: [1, 0, 0], v: [0, 1, 0] },
   { n: [0, 0, -1], u: [-1, 0, 0], v: [0, 1, 0] },
 ];
+/** The plane's one face frame: normal +Y, U +X, V -Z. */
 export const PLANE_FRAME = FACE_FRAMES[2];
 
 /**
@@ -112,6 +120,7 @@ export function faceOfDirection(x: number, y: number, z: number): { face: number
 /** Edges: 0 south (v = 0), 1 east (u = 1), 2 north (v = 1), 3 west (u = 0). Bit e of an edge mask is edge e. */
 export const EDGE_STEP: readonly (readonly [number, number])[] = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 
+/** A quadtree cell by root, i and j; the output of {@link neighbourCell}. */
 export interface NeighbourCell {
   root: number;
   i: number;
@@ -146,4 +155,24 @@ export function neighbourCell(domain: LodDomain, root: number, level: number, i:
   out.i = Math.min(cells - 1, Math.max(0, Math.floor(((hit.s + 1) / 2) * cells)));
   out.j = Math.min(cells - 1, Math.max(0, Math.floor(((hit.t + 1) / 2) * cells)));
   return true;
+}
+
+const normalised = (v: Vec3): Vec3 => {
+  const length = Math.hypot(v[0], v[1], v[2]);
+  return [v[0] / length, v[1] / length, v[2] / length];
+};
+
+const crossOf = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+/**
+ * Local frame at a ground point: outward `up`, `east` and `north` (east x north = up). On the plane the frame is fixed
+ * (up +Y, east +X, north -Z) and `ground` is ignored; on the sphere `ground` is any direction from the centre (it is
+ * normalised); within 0.999 of the Y axis the reference vector switches to +Z so east stays defined.
+ */
+export function groundFrame(kind: DomainKind, ground: Vec3): { up: Vec3; east: Vec3; north: Vec3 } {
+  if (kind === 'plane') return { up: [0, 1, 0], east: [1, 0, 0], north: [0, 0, -1] };
+  const up = normalised(ground);
+  const reference: Vec3 = Math.abs(up[1]) > 0.999 ? [0, 0, 1] : [0, 1, 0];
+  const east = normalised(crossOf(reference, up));
+  return { up, east, north: crossOf(up, east) };
 }

@@ -1,7 +1,6 @@
-import { SWEEP_ALTITUDE_SHARE, SWEEP_PERIOD_S, SWEEP_YAW_RAD, frustumNormals, panView, poseView, resolveCamera, sweepPathView, turnPathView, TURN_PERIOD_S, TURN_YAW_RAD, type CameraView, type PoseId } from './lod-camera';
-import { domainPreset, neighbourCell, type LodDomain, type NeighbourCell } from './lod-domain';
-import { createHeightSource } from './lod-height';
-import { CAP_SLACK, LodSelector, PIXEL_FLOOR, maxLevelFor, type SelectorSettings, type SelectorView } from './lod-selector';
+import { frustumNormals } from 'triangular-engine/lod-surface/core';
+import { SWEEP_ALTITUDE_SHARE, SWEEP_PERIOD_S, SWEEP_YAW_RAD, panView, poseView, resolveCamera, sweepPathView, turnPathView, TURN_PERIOD_S, TURN_YAW_RAD, type CameraView, type PoseId } from './lod-camera';
+import { domainPreset, neighbourCell, type LodDomain, type NeighbourCell, createHeightSource, CAP_SLACK, LodSelector, PIXEL_FLOOR, maxLevelFor, type SelectorSettings, type SelectorView } from 'triangular-engine/lod-surface/core';
 
 /**
  * Plan 059: split/merge hysteresis of the distance criterion, the level-churn counters, and the scripted sweep path.

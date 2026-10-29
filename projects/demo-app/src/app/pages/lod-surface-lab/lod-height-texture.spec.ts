@@ -1,13 +1,4 @@
-import { domainPreset, neighbourCell, type CubeWarp, type DomainKind, type LodDomain, type NeighbourCell } from './lod-domain';
-import {
-  DEFAULT_BAKE_K, bakeBuffers, bakeHeights, bakeFaces, bakeSide, latticeOfPosition, pyramidRange, texelLattice, texelPoint, textureMegabytes,
-  type BakeLayout, type BakedHeights,
-} from './lod-height-bake';
-import { noiseAmplitudeM, noiseSampler, bakedBumpsSampler, samplerFor, valueNoise3 } from './lod-height-noise';
-import { createTextureHeightSource, latticeHeightF32, latticeSlopeF32, lerpF32 } from './lod-height-texture';
-import { createLodSurfaceMesh } from './lod-surface-mesh';
-import { cubeLattice, foldedGrid, gridLattice, leafLattice, MAX_LATTICE_STEPS } from './lod-lattice';
-import { LodSelector } from './lod-selector';
+import { domainPreset, neighbourCell, type CubeWarp, type DomainKind, type LodDomain, type NeighbourCell, DEFAULT_BAKE_K, bakeBuffers, bakeHeights, bakeFaces, bakeSide, latticeOfPosition, pyramidRange, texelLattice, texelPoint, textureMegabytes, type BakeLayout, type BakedHeights, noiseAmplitudeM, noiseSampler, bakedBumpsSampler, samplerFor, valueNoise3, createTextureHeightSource, latticeHeightF32, latticeSlopeF32, lerpF32, createLodSurfaceMesh, cubeLattice, foldedGrid, gridLattice, leafLattice, MAX_LATTICE_STEPS, LodSelector } from 'triangular-engine/lod-surface/core';
 
 const f = Math.fround;
 

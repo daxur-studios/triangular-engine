@@ -27,6 +27,7 @@ export const DETAIL_GAIN = 0.5;
 export const DETAIL_UNIT_BOUND = Array.from({ length: DETAIL_OCTAVES }, (_, o) => DETAIL_GAIN ** o).reduce((a, b) => a + b, 0);
 /** An octave whose wavelength is under this many vertex spacings contributes nothing; it is fully in from {@link DETAIL_FADE_FULL}. */
 export const DETAIL_FADE_ZERO = 2;
+/** Vertex spacings per wavelength from which an octave is fully in (see {@link DETAIL_FADE_ZERO}). */
 export const DETAIL_FADE_FULL = 4;
 
 const HASH_X = 0x27d4eb2d;

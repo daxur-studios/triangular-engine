@@ -35,6 +35,7 @@ export function latticeSteps(patchCells: number, maxLevel: number): number {
   return steps;
 }
 
+/** A leaf's place on its face's integer lattice, which all its vertices are exact functions of. */
 export interface LeafLattice {
   root: number;
   /** Lattice coordinates of the leaf's (0, 0) vertex. */
@@ -44,6 +45,7 @@ export interface LeafLattice {
   step: number;
 }
 
+/** The lattice placement of leaf (root, level, i, j) for the given patch size and deepest level; writes into `out` when given. */
 export function leafLattice(root: number, level: number, i: number, j: number, patchCells: number, maxLevel: number, out: LeafLattice = { root: 0, u0: 0, v0: 0, step: 1 }): LeafLattice {
   const step = 2 ** (maxLevel - level);
   out.root = root;
@@ -102,6 +104,7 @@ export interface LatticeAnchor {
   rel: Vec3;
 }
 
+/** An empty {@link LatticeAnchor}, to be filled by {@link anchorFor}. */
 export function newAnchor(): LatticeAnchor {
   return { t: [0, 0, 0], cube: [0, 0, 0], error: [0, 0, 0], cos: [1, 1, 1], rel: [0, 0, 0] };
 }

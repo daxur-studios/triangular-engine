@@ -15,6 +15,7 @@ import { MAX_LATTICE_STEPS, cubeComponent, cubeLattice } from './lod-lattice';
 /** Height of the base surface at a position in the domain frame (doubles), metres. */
 export type HeightSampler = (x: number, y: number, z: number) => number;
 
+/** What a height bake covers and how finely: the body, the cube warp and the texture size. */
 export interface BakeLayout {
   readonly kind: DomainKind;
   readonly warp: CubeWarp;
@@ -26,7 +27,9 @@ export interface BakeLayout {
 
 /** 1025 x 1025 texels per face. */
 export const DEFAULT_BAKE_K = 10;
+/** Smallest texture size exponent a bake accepts (4 texel cells per face side). */
 export const MIN_BAKE_K = 2;
+/** Largest texture size exponent a bake accepts (4,096 texel cells per face side). */
 export const MAX_BAKE_K = 12;
 
 /** Min and max of the heights over the texel cells of every face, coarser levels by 2 x 2 reduction. */
@@ -38,6 +41,7 @@ export interface HeightPyramid {
   readonly max: readonly Float32Array[];
 }
 
+/** A finished bake: the texels of every face, their min/max pyramid and the timings. Plain typed arrays, so it crosses `postMessage` by transfer. */
 export interface BakedHeights {
   readonly layout: BakeLayout;
   /** Texels per side, 2^k + 1. */
@@ -57,10 +61,12 @@ export interface BakedHeights {
   readonly pyramidMs: number;
 }
 
+/** Faces a bake covers: 1 for the plane, 6 for the sphere. */
 export function bakeFaces(kind: DomainKind): number {
   return kind === 'plane' ? 1 : 6;
 }
 
+/** Texels per face side for a size exponent `k`: 2^k + 1. */
 export const bakeSide = (k: number): number => 2 ** k + 1;
 
 /** Lattice steps per texel cell: texel i is lattice coordinate i * this. */
@@ -226,6 +232,7 @@ export function pyramidRange(pyramid: HeightPyramid, k: number, root: number, le
   out[1] = pyramid.max[l][n];
 }
 
+/** A clock in milliseconds; inject one to time a bake deterministically. */
 export type NowMs = () => number;
 
 /**
@@ -267,6 +274,7 @@ export function bakeHeights(layout: BakeLayout, sampler: HeightSampler, now: Now
 /** Probe points for the CPU-twin check: lattice points spread over the faces, none on a texel centre. */
 export const PROBE_COUNT = 64;
 
+/** Probe points of a bake and the sampler's own heights there, for checking the texture's CPU twin (see `twinErrors`). */
 export interface BakeProbes {
   /** Per probe: face, lattice coordinates (integers, 0..L, never a multiple of the texel step) and the sampler's own value there, metres. */
   readonly face: readonly number[];

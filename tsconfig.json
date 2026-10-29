@@ -87,6 +87,12 @@
         ],
         "triangular-engine/worldgen/render/core": [
           "projects/triangular-engine/worldgen/render/core/public-api"
+        ],
+        "triangular-engine/lod-surface": [
+          "projects/triangular-engine/lod-surface/public-api"
+        ],
+        "triangular-engine/lod-surface/core": [
+          "projects/triangular-engine/lod-surface/core/public-api"
         ]
     },
     "outDir": "./dist/out-tsc",

@@ -82,6 +82,7 @@ export function latticeSlopeF32(baked: BakedHeights, face: number, u: number, v:
   out[1] = f(f(f(f(1 - fracX) * f(c - a)) + f(fracX * f(d - b))) / unit);
 }
 
+/** A height source read from a baked texture: the vertex stage reads it by lattice point, and the CPU twin reads the same texels with the same float32 arithmetic. Dispose it to free the GPU texture. */
 export interface TextureHeightSource extends HeightSource {
   readonly baked: BakedHeights;
   readonly texture: DataArrayTexture;

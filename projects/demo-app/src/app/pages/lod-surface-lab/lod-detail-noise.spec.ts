@@ -1,12 +1,4 @@
-import { FACE_FRAMES, domainPreset, type LodDomain } from './lod-domain';
-import {
-  DETAIL_OCTAVES, DETAIL_UNIT_BOUND, detailAtLattice, detailBoundM, detailNoise, detailOctaveFade, detailTexelMetres, withDetailNoise,
-} from './lod-detail-noise';
-import { createHeightSource } from './lod-height';
-import { bakeHeights, type BakeLayout } from './lod-height-bake';
-import { noiseSampler } from './lod-height-noise';
-import { createTextureHeightSource } from './lod-height-texture';
-import { MAX_LATTICE_STEPS, cubeLattice, gridLattice, leafLattice } from './lod-lattice';
+import { FACE_FRAMES, domainPreset, type LodDomain, DETAIL_OCTAVES, DETAIL_UNIT_BOUND, detailAtLattice, detailBoundM, detailNoise, detailOctaveFade, detailTexelMetres, withDetailNoise, createHeightSource, bakeHeights, type BakeLayout, noiseSampler, createTextureHeightSource, MAX_LATTICE_STEPS, cubeLattice, gridLattice, leafLattice } from 'triangular-engine/lod-surface/core';
 import { DEFAULT_SETTINGS, LOD_SURFACE_TEST_HISTORY } from './lod-surface-tests';
 
 const plane = domainPreset('plane-100km');

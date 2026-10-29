@@ -1,7 +1,6 @@
 import { buildCellPlanetWorld, findCellNear, type ICellPlanetWorld, type IVec3 } from 'triangular-engine/worldgen';
-import { groundFrame, poseView } from './lod-camera';
 import type { HeightSampler } from './lod-height-bake';
-import type { DomainKind, Vec3 } from './lod-domain';
+import { groundFrame, type DomainKind, type Vec3 } from './lod-domain';
 
 /**
  * Plan 059 step 3 terrain sources for the baked texture: the cell planet (through the worldgen surface sampler) and a
@@ -27,7 +26,9 @@ export interface CellPlanetDescription {
  * elevation there is +0.43 with +1.45 within a few degrees, so every pose looks at real relief. A spec keeps it on land.
  */
 export const CELL_PLANET_SEED = 3;
+/** Voronoi cells of the lab's cell planet. */
 export const CELL_PLANET_CELLS = 1000;
+/** Relaxation iterations of the lab's cell planet. */
 export const CELL_PLANET_RELAXATION = 2;
 
 /**
@@ -41,6 +42,7 @@ export function cellPlanetHeightScaleM(sizeM: number): number {
   return Math.min(0.015 * sizeM, 1200);
 }
 
+/** The lab's cell planet description for a sphere of this radius: seed {@link CELL_PLANET_SEED}, {@link CELL_PLANET_CELLS} cells, and the height scale of {@link cellPlanetHeightScaleM}. */
 export function cellPlanetFor(sizeM: number): CellPlanetDescription {
   return { seed: CELL_PLANET_SEED, cellCount: CELL_PLANET_CELLS, relaxationIterations: CELL_PLANET_RELAXATION, heightScaleM: cellPlanetHeightScaleM(sizeM) };
 }
@@ -59,6 +61,7 @@ export function parseCellPlanet(value: unknown): CellPlanetDescription {
 /** What identifies the world itself (the height scale only multiplies its heights, so two scales share one world). */
 export const cellPlanetWorldKey = (d: CellPlanetDescription): string => `${d.seed}|${d.cellCount}|${d.relaxationIterations}`;
 
+/** A built cell planet world and what its build cost. */
 export interface BuiltCellPlanet {
   readonly world: ICellPlanetWorld;
   /** Wall time of the build that made this world, ms (paid once; later bakes of the same world reuse it). */
@@ -101,9 +104,21 @@ export function cellPlanetSampler(world: ICellPlanetWorld, heightScaleM: number)
   };
 }
 
+/**
+ * The fixture ground point per domain kind: the plane's x, z in metres off the root centre, or a direction near the
+ * three-face cube corner (1, 1, 1) on the sphere. The cliff fixture is placed from it, and the lab's camera poses stand on
+ * it, so a pose looks at the cliff's relief.
+ */
+export const FIXTURE_GROUND: Readonly<Record<DomainKind, Vec3>> = { plane: [1234, 0, -2345], sphere: [0.9, 0.85, 1] };
+
+/** Heading from local north at {@link FIXTURE_GROUND}, radians per domain kind: toward the cube corner on the sphere. */
+export const FIXTURE_HEADING_RAD: Readonly<Record<DomainKind, number>> = { plane: 0.6, sphere: -0.75 };
+
 /** The cliff: a 200 m step whose ramp is a smoothstep over 20 m of ground, 100 m ahead of where the poses stand. */
 export const CLIFF_HEIGHT_M = 200;
+/** Ground distance over which the cliff fixture's step rises, metres. */
 export const CLIFF_RAMP_M = 20;
+/** How far ahead of the fixture ground point the cliff fixture's line lies, metres. */
 export const CLIFF_AHEAD_M = 100;
 
 /** Smoothstep of the signed ground distance `s` across the ramp: 0 below -ramp/2, the full step above +ramp/2. C1, so bilinear and normals stay sane. */
@@ -124,13 +139,14 @@ export function cliffHeightAt(s: number): number {
  * and about one on the 10 km sphere (19.5 m). That stretch is what the slope criterion (M2) and vector displacement (M6) answer.
  */
 export function cliffSampler(layout: { readonly kind: DomainKind; readonly sizeM: number }): HeightSampler {
-  const view = poseView('eye-2m', { kind: layout.kind, sizeM: layout.sizeM, warp: 'equal-angle' });
-  const { up, east, north } = groundFrame(layout.kind, view.ground);
-  const ch = Math.cos(view.headingRad);
-  const sh = Math.sin(view.headingRad);
+  const ground = FIXTURE_GROUND[layout.kind];
+  const heading = FIXTURE_HEADING_RAD[layout.kind];
+  const { up, east, north } = groundFrame(layout.kind, ground);
+  const ch = Math.cos(heading);
+  const sh = Math.sin(heading);
   const along: Vec3 = [0, 1, 2].map((k) => ch * north[k] + sh * east[k]) as Vec3;
   if (layout.kind === 'plane') {
-    const p0: Vec3 = [view.ground[0] + CLIFF_AHEAD_M * along[0], view.ground[1] + CLIFF_AHEAD_M * along[1], view.ground[2] + CLIFF_AHEAD_M * along[2]];
+    const p0: Vec3 = [ground[0] + CLIFF_AHEAD_M * along[0], ground[1] + CLIFF_AHEAD_M * along[1], ground[2] + CLIFF_AHEAD_M * along[2]];
     return (x, y, z) => cliffHeightAt((x - p0[0]) * along[0] + (y - p0[1]) * along[1] + (z - p0[2]) * along[2]);
   }
   const radius = layout.sizeM;

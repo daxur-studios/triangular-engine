@@ -1,6 +1,4 @@
-import { domainPreset } from './lod-domain';
-import type { NodeHeightRanges } from './lod-height';
-import { LodSelector, type SelectorSettings, type SelectorView } from './lod-selector';
+import { domainPreset, type NodeHeightRanges, LodSelector, type SelectorSettings, type SelectorView } from 'triangular-engine/lod-surface/core';
 
 /**
  * Plan 059: the distance criterion measures to each node's split box (ground radius by height range), not to its bounding

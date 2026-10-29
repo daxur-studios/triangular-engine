@@ -1,26 +1,23 @@
 import { Component, DestroyRef, computed, inject, isDevMode, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { InstancedBufferGeometry, Matrix4, Mesh, PerspectiveCamera, PlaneGeometry, RenderTarget, Scene, SphereGeometry, Vector3 } from 'three';
+import { Color, InstancedBufferGeometry, Matrix4, Mesh, PerspectiveCamera, PlaneGeometry, RenderTarget, Scene, SphereGeometry, Vector3 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import { vec4 } from 'three/tsl';
 import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
 import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import {
-  POSES, biomePathView, frustumNormals, groundFrame, lookView, panView, poseView, resolveCamera, sweepPathView, turnPathView, zoomPathView, zoomView, type CameraView, type PoseId,
+  POSES, biomePathView, lookView, panView, poseView, resolveCamera, sweepPathView, turnPathView, zoomPathView, zoomView, type CameraView, type PoseId,
   type ResolvedCamera,
 } from './lod-camera';
 import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
-import { DOMAIN_PRESETS, domainPreset, type CubeWarp, type DomainPresetId, type LodDomain } from './lod-domain';
-import { withDetailNoise } from './lod-detail-noise';
-import { HEIGHT_SOURCES, HEIGHT_SOURCE_LABELS, createHeightSource, isBakedSource, sourceSupports, type HeightSource, type HeightSourceId } from './lod-height';
-import { DEFAULT_BAKE_K, textureMegabytes, percentile, twinErrors, type BakeLayout } from './lod-height-bake';
+import {
+  CAP_SLACK, DEFAULT_BAKE_K, DOMAIN_PRESETS, HEIGHT_SOURCES, HEIGHT_SOURCE_LABELS, LodSelector, PATCH_CELLS, PIXEL_FLOOR, cellPlanetFor, createHeightSource, createLodSurfaceMesh,
+  createTextureHeightSource, domainPreset, frustumNormals, groundFrame, isBakedSource, percentile, sourceSupports, textureMegabytes, twinErrors, withDetailNoise,
+  type BakeLayout, type BakedSourceId, type CellPlanetDescription, type CubeWarp, type DomainPresetId, type HeightSource, type HeightSourceId, type LodDomain, type LodMode,
+  type LodSurfaceMesh, type LodView, type PatchCells, type SelectorStats, type SelectorView, type TextureHeightSource,
+} from 'triangular-engine/lod-surface/core';
 import { bakeInWorker } from './lod-height-bake-client';
-import type { BakedSourceId } from './lod-height-noise';
-import { cellPlanetFor, type CellPlanetDescription } from './lod-height-terrain';
-import { createTextureHeightSource, type TextureHeightSource } from './lod-height-texture';
-import { CAP_SLACK, LodSelector, PATCH_CELLS, PIXEL_FLOOR, type LodMode, type PatchCells, type SelectorStats, type SelectorView } from './lod-selector';
-import { SKY, createLodSurfaceMesh, type LodSurfaceMesh, type LodView } from './lod-surface-mesh';
 import { createLodSurfaceTestAdapter, type LodSurfaceBakeInfo, type LodSurfaceTestHost } from './lod-surface-test-adapter';
 import { DEFAULT_SETTINGS, LOD_SURFACE_TEST_HISTORY, type LodSurfaceTestSettings } from './lod-surface-tests';
 
@@ -38,6 +35,8 @@ const FOV_DEG = 60;
 /** Leaves shrink by this share of their size when the injected gap is on. */
 const GAP_SHARE = 0.01;
 const THUMBNAIL_WIDTH = 240;
+/** Background colour of the lab. */
+const SKY = new Color(0x0b1220);
 /** Selection samples kept for the HUD's running mean. */
 const HUD_SAMPLES = 60;
 

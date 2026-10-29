@@ -1,9 +1,6 @@
 import type { TestScenario, TestSuite } from 'triangular-engine/testing';
 import type { PoseId } from './lod-camera';
-import type { CubeWarp, DomainPresetId } from './lod-domain';
-import type { HeightSourceId } from './lod-height';
-import type { LodMode, PatchCells } from './lod-selector';
-import type { LodView } from './lod-surface-mesh';
+import { type CubeWarp, type DomainPresetId, type HeightSourceId, type LodMode, type PatchCells, type LodView } from 'triangular-engine/lod-surface/core';
 
 /** Everything a Plan 059 lab case sets; also the snapshot a run restores. Plain JSON. */
 export interface LodSurfaceTestSettings {

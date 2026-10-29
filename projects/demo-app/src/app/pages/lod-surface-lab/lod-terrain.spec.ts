@@ -1,19 +1,7 @@
 import { validateTestHistory } from 'triangular-engine/testing';
 import { buildCellPlanetWorld } from 'triangular-engine/worldgen';
-import { CANYON_FLOOR_HALF, CANYON_WALL, canyonCentreSlope, canyonCentreV } from './lod-canyon';
+import { CANYON_FLOOR_HALF, CANYON_WALL, canyonCentreSlope, canyonCentreV, domainPreset, type CubeWarp, type DomainKind, type DomainPresetId, sourceSupports, type HeightSource, type HeightSourceId, PROBE_COUNT, bakeHeights, bakeFaces, bakeSide, latticeOfPosition, latticePoint, percentile, probeLattice, sampleProbes, texelLattice, texelPoint, twinErrors, type BakeLayout, type BakedHeights, bakeSourceFor, hash3, noiseSampler, runBake, samplerFor, valueNoise3, type BakedSourceId, CELL_PLANET_CELLS, CELL_PLANET_RELAXATION, CELL_PLANET_SEED, CLIFF_AHEAD_M, CLIFF_HEIGHT_M, CLIFF_RAMP_M, cellPlanetFor, cellPlanetHeightScaleM, cellPlanetSampler, cellPlanetWorld, cliffHeightAt, cliffSampler, parseCellPlanet, type CellPlanetDescription, createTextureHeightSource, latticeHeightF32 } from 'triangular-engine/lod-surface/core';
 import { biomePathView, canyonView, poseView, resolveCamera, type PoseId } from './lod-camera';
-import { domainPreset, type CubeWarp, type DomainKind, type DomainPresetId } from './lod-domain';
-import { sourceSupports, type HeightSource, type HeightSourceId } from './lod-height';
-import {
-  PROBE_COUNT, bakeHeights, bakeFaces, bakeSide, latticeOfPosition, latticePoint, percentile, probeLattice, sampleProbes, texelLattice, texelPoint, twinErrors,
-  type BakeLayout, type BakedHeights,
-} from './lod-height-bake';
-import { bakeSourceFor, hash3, noiseSampler, runBake, samplerFor, valueNoise3, type BakedSourceId } from './lod-height-noise';
-import {
-  CELL_PLANET_CELLS, CELL_PLANET_RELAXATION, CELL_PLANET_SEED, CLIFF_AHEAD_M, CLIFF_HEIGHT_M, CLIFF_RAMP_M, cellPlanetFor, cellPlanetHeightScaleM,
-  cellPlanetSampler, cellPlanetWorld, cliffHeightAt, cliffSampler, parseCellPlanet, type CellPlanetDescription,
-} from './lod-height-terrain';
-import { createTextureHeightSource, latticeHeightF32 } from './lod-height-texture';
 import { crackExpectation, LOD_SURFACE_TEST_HISTORY, TERRAIN_CASES } from './lod-surface-tests';
 
 const POSES: readonly PoseId[] = ['eye-2m', 'low-200m', 'mid-5km', 'horizon', 'orbit'];

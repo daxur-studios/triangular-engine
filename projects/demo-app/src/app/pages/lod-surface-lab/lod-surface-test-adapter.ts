@@ -1,8 +1,7 @@
 import type { GpuPassKind, IFrameSampleSummary } from 'triangular-engine';
 import { modeActionMs, type TestCheck, type TestContext, type TestMetric, type TestObservation, type TestRunAdapter, type TestScenario, type TestSetting } from 'triangular-engine/testing';
 import type { CrackCount } from './lod-crack-probe';
-import { percentile } from './lod-height-bake';
-import { CAP_SLACK, type SelectorStats } from './lod-selector';
+import { percentile, CAP_SLACK, type SelectorStats } from 'triangular-engine/lod-surface/core';
 import { crackExpectation, type LodSurfaceTestSettings } from './lod-surface-tests';
 
 /** What baking a texture height source cost (Plan 059 step 2); absent for analytic sources. */

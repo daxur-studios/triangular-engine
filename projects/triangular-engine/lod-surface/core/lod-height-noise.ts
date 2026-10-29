@@ -181,6 +181,7 @@ export function bakeSourceFor(id: BakedSourceId, layout: BakeLayout, planet: Cel
   }
 }
 
+/** The sampler of a baked source by name (without the world-build time that {@link bakeSourceFor} reports). */
 export function samplerFor(id: BakedSourceId, layout: BakeLayout, planet?: CellPlanetDescription): HeightSampler {
   return bakeSourceFor(id, layout, planet).sampler;
 }

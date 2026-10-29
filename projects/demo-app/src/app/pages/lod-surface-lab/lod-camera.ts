@@ -1,6 +1,4 @@
-import type { DomainKind, LodDomain, Vec3 } from './lod-domain';
-import { canyonCentreSlope, canyonCentreV } from './lod-canyon';
-import type { HeightSource } from './lod-height';
+import { FIXTURE_GROUND, FIXTURE_HEADING_RAD, canyonCentreSlope, canyonCentreV, groundFrame, type HeightSource, type LodDomain, type Vec3 } from 'triangular-engine/lod-surface/core';
 
 /**
  * Plan 059 lab camera: a ground point, an altitude above the surface there (from the height source's CPU twin), a
@@ -27,13 +25,11 @@ export const POSES: readonly { readonly id: PoseId; readonly label: string }[] =
 ];
 
 const DEG = Math.PI / 180;
-/** Off the root centre on the plane; near the three-face cube corner (1, 1, 1) on the sphere, heading toward it. */
-const PLANE_GROUND: Vec3 = [1234, 0, -2345];
-const SPHERE_GROUND: Vec3 = [0.9, 0.85, 1];
+/** The poses stand on the library's fixture ground point (off the root centre on the plane; near the cube corner on the sphere), which the cliff fixture is placed from. */
 
 export function poseView(id: PoseId, domain: LodDomain): CameraView {
-  const ground = domain.kind === 'plane' ? PLANE_GROUND : SPHERE_GROUND;
-  const headingRad = domain.kind === 'plane' ? 0.6 : -0.75;
+  const ground = FIXTURE_GROUND[domain.kind];
+  const headingRad = FIXTURE_HEADING_RAD[domain.kind];
   if (id === 'biome-canyon') return canyonView(domain);
   if (id === 'biome-mountain') return biomeView(domain, -0.04);
   switch (id) {
@@ -107,15 +103,6 @@ function cross(a: Vec3, b: Vec3): Vec3 {
   return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 }
 
-/** Local frame at a ground point: outward up, east and north (east x north = up). */
-export function groundFrame(kind: DomainKind, ground: Vec3): { up: Vec3; east: Vec3; north: Vec3 } {
-  if (kind === 'plane') return { up: [0, 1, 0], east: [1, 0, 0], north: [0, 0, -1] };
-  const up = normalise(ground);
-  const reference: Vec3 = Math.abs(up[1]) > 0.999 ? [0, 0, 1] : [0, 1, 0];
-  const east = normalise(cross(reference, up));
-  return { up, east, north: cross(up, east) };
-}
-
 export function resolveCamera(view: CameraView, domain: LodDomain, source: HeightSource): ResolvedCamera {
   const { up, east, north } = groundFrame(domain.kind, view.ground);
   const base: Vec3 = domain.kind === 'plane' ? [view.ground[0], 0, view.ground[2]] : [up[0] * domain.sizeM, up[1] * domain.sizeM, up[2] * domain.sizeM];
@@ -129,24 +116,6 @@ export function resolveCamera(view: CameraView, domain: LodDomain, source: Heigh
   const forward: Vec3 = [0, 1, 2].map((k) => cp * (ch * north[k] + sh * east[k]) + sp * up[k]) as Vec3;
   const right: Vec3 = [0, 1, 2].map((k) => ch * east[k] - sh * north[k]) as Vec3;
   return { position, forward, right, up: cross(right, forward), clearanceM: lift - source.heightAt(base[0], base[1], base[2]) };
-}
-
-/** Inward normals of the four side planes of a symmetric frustum (`SelectorView.frustum`). */
-export function frustumNormals(camera: ResolvedCamera, verticalFovRad: number, aspect: number, out: Float64Array): Float64Array {
-  const ay = verticalFovRad / 2;
-  const ax = Math.atan(Math.tan(ay) * aspect);
-  // Side planes in pairs: +angle and -angle about one axis share their sine and cosine. No allocation, called every frame.
-  const cx = Math.cos(ax);
-  const sx = Math.sin(ax);
-  const cy = Math.cos(ay);
-  const sy = Math.sin(ay);
-  for (let k = 0; k < 3; k++) {
-    out[k] = cx * camera.right[k] + sx * camera.forward[k];
-    out[3 + k] = -cx * camera.right[k] + sx * camera.forward[k];
-    out[6 + k] = cy * camera.up[k] + sy * camera.forward[k];
-    out[9 + k] = -cy * camera.up[k] + sy * camera.forward[k];
-  }
-  return out;
 }
 
 /** Turns the view: dx, dy in screen heights. */

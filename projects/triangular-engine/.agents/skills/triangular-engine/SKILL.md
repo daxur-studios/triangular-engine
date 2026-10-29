@@ -29,6 +29,7 @@ Use public package entry points in consumer apps; do not import internal source 
 - Post-processing: `triangular-engine/postprocessing`
 - Image compression adapter: `triangular-engine/image-compression`
 - TSL cell-planet surface material (WebGPURenderer): `triangular-engine/planet-material`
+- LOD terrain for games (WebGPURenderer): `triangular-engine/lod-surface`
 - Reusable browser test runner and contracts: `triangular-engine/testing`
 - Reusable development progress viewer: `triangular-engine/development-map`
 
@@ -54,6 +55,7 @@ in this repository. Each entry's TSDoc also shows in IDE hovers.
 | PMNDRS billboard and sparkles                    | `pmndrs/README.md`                                                   |
 | Planet atmosphere                                | `atmosphere/README.md`                                               |
 | Planet surface material (`WebGPURenderer`)       | `planet-material/README.md`                                          |
+| LOD terrain (`<planetTerrain>`, `<flatTerrain>`)    | `lod-surface/README.md`                                             |
 | Cell planets: 3D globe ↔ 2.5D map                | `worldgen/render/README.md`; generation in `worldgen/README.md`      |
 | Characters and facial animation                  | `characters/README.md`                                               |
 | Procedural flora and craft parts                 | `procedural/README.md`                                               |

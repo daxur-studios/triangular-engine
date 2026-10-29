@@ -34,7 +34,9 @@ import type { NodeHeightRanges } from './lod-height';
  */
 
 export type PatchCells = 16 | 32 | 64;
+/** The patch sizes offered: grid cells per leaf side. */
 export const PATCH_CELLS: readonly PatchCells[] = [16, 32, 64];
+/** The split criterion: `'distance'` (cells cover about `cellPixels` pixels) or `'fixed'` (one level everywhere, the uniform baseline). */
 export type LodMode = 'distance' | 'fixed';
 
 /** No ordinary request may ask for cells smaller than this many pixels (review round 2). */
@@ -48,6 +50,7 @@ export function maxLevelFor(patchCells: PatchCells): number {
   return Math.min(20, 24 - Math.log2(patchCells));
 }
 
+/** What a {@link LodSelector} is built from; changing any of it means a new selector. */
 export interface SelectorSettings {
   readonly domain: LodDomain;
   readonly patchCells: PatchCells;
@@ -80,6 +83,7 @@ export interface SelectorSettings {
   readonly hysteresis?: number;
 }
 
+/** The camera as the selector sees it, rewritten in place every frame. */
 export interface SelectorView {
   /** Camera position in the domain frame, doubles. */
   readonly camera: Vec3;
@@ -89,6 +93,7 @@ export interface SelectorView {
   readonly frustum: Float64Array;
 }
 
+/** Counters of the last selection: tree size, level churn and whether the cap bound. Overwritten by every `select`, so copy what you keep. */
 export interface SelectorStats {
   /** Leaves of the selected tree, drawn and culled. Independent of the view direction unless `cullInSelection`. */
   leaves: number;
@@ -137,6 +142,7 @@ const HOT = 8;
 /** {@link LodSelector.select} remembers the last view as camera (3), frustum (12) and pixel angle. */
 const VIEW_KEY = 16;
 
+/** The CPU quadtree selector: call `select(view)` every frame, then read `leaves`/`stats` or pass it to the mesh's `upload`. See the file header for the algorithm (2:1 balance, priority splitting under a leaf cap, hysteresis, edge masks). */
 export class LodSelector {
   readonly settings: SelectorSettings;
   readonly maxLevel: number;

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { BufferAttribute, Color, FrontSide, InstancedBufferAttribute, InstancedBufferGeometry, Mesh, Vector3 } from 'three';
-import { MeshBasicNodeMaterial } from 'three/webgpu';
+import { BufferAttribute, FrontSide, InstancedBufferAttribute, InstancedBufferGeometry, Mesh, Vector3 } from 'three';
+import { MeshBasicNodeMaterial, type NodeMaterial } from 'three/webgpu';
 import {
   attribute, cos, dot, float, floor, fract, fwidth, length, max, min, mix, mod, normalize, positionGeometry,
   smoothstep, step, uniform, uniformArray, varying, vec2, vec3, vec4,
@@ -28,6 +28,7 @@ import { maxLevelFor, type LodSelector, type PatchCells } from './lod-selector';
  * not the radius. R (...) is rewritten as R (dc / |c| - cA (dc . (2 cA + dc)) / (|c| |cA| (|c| + |cA|))).
  */
 
+/** Debug colouring of the default material: one colour per level (`'lod'`) or a neutral grey (`'shaded'`). */
 export type LodView = 'lod' | 'shaded';
 
 /**
@@ -42,11 +43,23 @@ const smallSin = (x: any): any => {
   return x.mul(inner);
 };
 
+/** What {@link createLodSurfaceMesh} needs to build the one-draw-call surface. */
 export interface LodSurfaceMeshOptions {
+  /** The body drawn: plane or cube-sphere, its size and the cube warp. */
   readonly domain: LodDomain;
+  /** Grid cells per leaf side; must be the selector's. */
   readonly patchCells: PatchCells;
+  /** Height source (with detail noise already wrapped by `withDetailNoise` when `detail` is set); baked sources are read by lattice point. */
   readonly source: HeightSource;
+  /** Instance slots: the selector's leaf cap plus {@link CAP_SLACK} and a few spare. */
   readonly capacity: number;
+  /**
+   * Material to draw with instead of the built-in debug material (LOD colours, sun lighting, patch bounds). The mesh sets
+   * its `positionNode` and nothing else, so colour, lighting and normals are the material's. It is not disposed by
+   * {@link LodSurfaceMesh.dispose}: its owner disposes it. The debug setters (`setView`, `setLighting`, `setBounds`,
+   * `setSun`) change only the built-in material and do nothing to a supplied one.
+   */
+  readonly material?: NodeMaterial;
   /**
    * Adds detail noise below the texel size (`lod-detail-noise.ts`) to the height, sized by a height texture of this many
    * texels per face side. Absent: no noise nodes are built. Its amplitude is set with `setDetailNoise`.
@@ -54,29 +67,38 @@ export interface LodSurfaceMeshOptions {
   readonly detail?: { readonly cells: number };
 }
 
+/** The drawn surface and its controls: one instanced mesh, one draw call. */
 export interface LodSurfaceMesh {
+  /** The mesh to add to the scene. Its vertices are relative to the camera position last passed to {@link upload}, so keep it at that position (`LodTerrainBody` does). */
   readonly mesh: Mesh;
   /** Same geometry and vertex stage, writing 1 to every drawn pixel: the crack probe's material. */
   readonly probeMaterial: MeshBasicNodeMaterial;
-  readonly material: MeshBasicNodeMaterial;
+  /** The material in use: the built-in debug material, or the one supplied in the options. */
+  readonly material: NodeMaterial;
   /**
    * Writes the drawn leaves for a camera position (doubles); returns the instance count. The leaf arrays are only
    * rewritten, and the GPU buffers only marked for upload, when the selection changed since the last call.
    */
   upload(selector: LodSelector, camera: Vec3): number;
+  /** Debug colouring of the built-in material. */
   setView(view: LodView): void;
+  /** Draws the dark outline of every leaf patch (built-in material). */
   setBounds(on: boolean): void;
+  /** Draws the material as a wireframe (works on a supplied material too). */
   setWireframe(on: boolean): void;
   /** Edge folding on (default) or off, for the probe's known-bad control. */
   setFolding(on: boolean): void;
   /** Shrinks every leaf toward its centre by this share of its size: a gap the crack probe must find. 0 = off. */
   setInjectedGap(share: number): void;
+  /** Direction to the sun in the domain frame, for the built-in material's lighting (normalised here). */
   setSun(direction: Vec3): void;
   /** Detail noise amplitude as a share of the texel size (needs the `detail` option; 0 adds nothing). */
   setDetailNoise(share: number): void;
   /** Angle one vertex spacing subtends (cell pixels times the pixel angle): the finest noise octaves fade out below two spacings per wavelength. */
   setDetailFade(spacingAngle: number): void;
+  /** Sun lighting on the built-in material (off: flat colour). */
   setLighting(on: boolean): void;
+  /** Releases the geometry and the built-in materials (not a supplied one). */
   dispose(): void;
 }
 
@@ -113,6 +135,11 @@ function gridGeometry(cells: number, capacity: number): InstancedBufferGeometry 
 /** Bit e of a 0..15 mask held in a float, as 0 or 1. */
 const bit = (mask: any, e: number) => mod(floor(mask.div(2 ** e)), 2);
 
+/**
+ * Builds the surface mesh: one shared grid drawn instanced, one instance per drawn leaf. Call {@link LodSurfaceMesh.upload}
+ * every frame with the selector and the camera position, and keep the mesh at that camera position so the camera-relative
+ * vertices land where they belong.
+ */
 export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurfaceMesh {
   const { domain, patchCells, source, capacity, detail } = options;
   const sphere = domain.kind === 'sphere';
@@ -266,9 +293,10 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const line = float(1).sub(smoothstep(0, fwidth(border).mul(1.5), border)).mul(uBounds);
   const colorNode = vec4(mix(base.mul(mix(float(1), light, uLighting)), vec3(0.05, 0.05, 0.08), line.mul(0.85)), 1);
 
-  const material = new MeshBasicNodeMaterial({ side: FrontSide });
+  const ownMaterial = options.material === undefined;
+  const material: NodeMaterial = options.material ?? new MeshBasicNodeMaterial({ side: FrontSide });
   material.positionNode = positionNode;
-  material.colorNode = colorNode;
+  if (ownMaterial) material.colorNode = colorNode;
   const probeMaterial = new MeshBasicNodeMaterial({ side: FrontSide });
   probeMaterial.positionNode = positionNode;
   probeMaterial.colorNode = vec4(1, 1, 1, 1);
@@ -318,7 +346,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     },
     setView(view) { uLodColour.value = view === 'lod' ? 1 : 0; },
     setBounds(on) { uBounds.value = on ? 1 : 0; },
-    setWireframe(on) { material.wireframe = on; material.needsUpdate = true; },
+    setWireframe(on) { (material as NodeMaterial & { wireframe: boolean }).wireframe = on; material.needsUpdate = true; },
     setFolding(on) { uFolding.value = on ? 1 : 0; },
     setInjectedGap(share) { uGap.value = share; },
     setLighting(on) { uLighting.value = on ? 1 : 0; },
@@ -327,7 +355,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     setSun(direction) { (uSun.value as Vector3).set(...direction).normalize(); },
     dispose() {
       geometry.dispose();
-      material.dispose();
+      if (ownMaterial) material.dispose();
       probeMaterial.dispose();
     },
   };
@@ -337,5 +365,3 @@ const setVector = (target: Vector3, v: Vec3): void => {
   target.set(v[0], v[1], v[2]);
 };
 
-/** Background colour of the lab. */
-export const SKY = new Color(0x0b1220);
