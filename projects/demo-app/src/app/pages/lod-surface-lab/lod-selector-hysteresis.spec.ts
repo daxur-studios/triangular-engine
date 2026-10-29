@@ -393,6 +393,90 @@ describe('Plan 059 turn path', () => {
   });
 });
 
+describe('Plan 059 view-independent selection (culling only picks the drawn leaves)', () => {
+  const CASES = [[plane, 'low-200m'], [sphere600, 'mid-5km']] as const;
+  const cellsOf = (selector: LodSelector, from: number, to: number) => {
+    const out: string[] = [];
+    for (let k = from; k < to; k++) {
+      const node = selector.leaves[k];
+      out.push(`${selector.root[node]}:${selector.level[node]}:${selector.i[node]}:${selector.j[node]}`);
+    }
+    return out;
+  };
+  const allCells = (selector: LodSelector) => cellsOf(selector, 0, selector.stats.leaves).sort();
+
+  /** Runs a pure turn (heading only) for two periods at 60 fps; returns churn after the first frame and the selected sets. */
+  function turn(domain: LodDomain, pose: PoseId, change: Partial<SelectorSettings>) {
+    const selector = new LodSelector(settingsFor(domain, { cull: true, leafCap: 1024, hysteresis: 0.15, ...change }));
+    selector.select(viewOfCamera(domain, turnPathView(domain, pose, 0)));
+    const first = allCells(selector);
+    let changes = 0;
+    let changesAll = 0;
+    let sameSet = true;
+    let subset = true;
+    let culledSome = false;
+    for (let frame = 1; frame <= 2 * TURN_PERIOD_S * 60; frame++) {
+      selector.select(viewOfCamera(domain, turnPathView(domain, pose, frame / 60)));
+      changes += selector.stats.visibleNewSplits + selector.stats.visibleMerges;
+      changesAll += selector.stats.newSplits + selector.stats.merges;
+      const selected = allCells(selector);
+      if (selected.length !== first.length || selected.some((cell, k) => cell !== first[k])) sameSet = false;
+      const drawn = new Set(cellsOf(selector, 0, selector.stats.drawn));
+      const all = new Set(selected);
+      for (const cell of drawn) if (!all.has(cell)) subset = false;
+      expect(selector.stats.drawn).toBeLessThanOrEqual(selector.stats.leaves);
+      if (selector.stats.drawn < selector.stats.leaves) culledSome = true;
+    }
+    return { changes, changesAll, sameSet, subset, culledSome };
+  }
+
+  it('makes no level change and selects the same leaves on a pure turn, at the default and larger caps', () => {
+    for (const [domain, pose] of CASES) {
+      for (const leafCap of [1024, 4096, 8192]) {
+        const result = turn(domain, pose, { leafCap });
+        const where = `${domain.kind} ${pose} cap ${leafCap}`;
+        expect(result.changesAll).withContext(where).toBe(0);
+        expect(result.changes).withContext(where).toBe(0);
+        expect(result.sameSet).withContext(where).toBeTrue();
+        expect(result.subset).withContext(where).toBeTrue();
+        expect(result.culledSome).withContext(where).toBeTrue();
+      }
+    }
+  });
+
+  it('still culls inside selection with cullInSelection, and the selection then follows the heading', () => {
+    for (const [domain, pose] of CASES) {
+      const result = turn(domain, pose, { cullInSelection: true });
+      const where = `${domain.kind} ${pose}`;
+      expect(result.culledSome).withContext(where).toBeTrue();
+      expect(result.subset).withContext(where).toBeTrue();
+      expect(result.sameSet).withContext(where).toBeFalse();
+      expect(result.changesAll).withContext(where).toBeGreaterThan(0);
+      // Culled nodes ask for nothing, so the legacy tree has fewer leaves than the default one at the same cap.
+      const legacy = new LodSelector(settingsFor(domain, { cull: true, cullInSelection: true, leafCap: 8192 }));
+      const plain = new LodSelector(settingsFor(domain, { cull: true, leafCap: 8192 }));
+      const view = viewOfCamera(domain, turnPathView(domain, pose, 0));
+      legacy.select(view);
+      plain.select(view);
+      expect(legacy.stats.leaves).withContext(where).toBeLessThan(plain.stats.leaves);
+      expect(legacy.stats.drawn).withContext(where).toBeLessThanOrEqual(plain.stats.drawn);
+    }
+  });
+
+  it('selects the same tree with culling on or off by default, and draws the in-frustum subset', () => {
+    for (const [domain, pose] of CASES) {
+      const on = new LodSelector(settingsFor(domain, { cull: true, leafCap: 1024 }));
+      const off = new LodSelector(settingsFor(domain, { cull: false, leafCap: 1024 }));
+      const view = viewOfCamera(domain, turnPathView(domain, pose, 0.7));
+      on.select(view);
+      off.select(view);
+      expect(allCells(on)).toEqual(allCells(off));
+      expect(off.stats.drawn).toBe(off.stats.leaves);
+      expect(on.stats.drawn).toBeLessThan(on.stats.leaves);
+    }
+  });
+});
+
 describe('Plan 059 sweep path', () => {
   it('is a pure function of the time: the same view every call, and the pose itself at the start', () => {
     for (const domain of [plane, sphere600]) {
@@ -432,7 +516,8 @@ describe('Plan 059 sweep path', () => {
 
   /** [visible, all] level changes of a 60 fps sweep over four periods: the first period, and the three later ones. */
   function sweepChurn(domain: LodDomain, pose: PoseId, cull: boolean, leafCap: number, hysteresis: number) {
-    const selector = new LodSelector(settingsFor(domain, { cull, leafCap, hysteresis }));
+    // Legacy selection (culling inside it): these measurements and bounds were made before selection became view-independent.
+    const selector = new LodSelector(settingsFor(domain, { cull, cullInSelection: cull, leafCap, hysteresis }));
     selector.select(viewOfCamera(domain, sweepPathView(domain, pose, 0)));
     const out = { first: 0, later: 0, firstAll: 0, laterAll: 0, capped: 0 };
     for (let frame = 1; frame <= 4 * SWEEP_PERIOD_S * 60; frame++) {

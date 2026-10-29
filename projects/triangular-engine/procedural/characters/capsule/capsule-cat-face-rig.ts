@@ -1,21 +1,24 @@
 /**
  * Cat head rig for the Capsule Doodle Space Cats:
- * - Twin rounded-cone ears with recessed inner-ear triangles
+ * - 3D Pointed cat ears with soft beveled contour & recessed inner-ear pink triangles
  * - Optional three-spike scruffy crown tuft
  * - Wide-set bulging googly eyes, gaze pupils, catchlights and hemisphere eyelids
- * - Small dark rounded-triangle nose button and curved cheek whiskers
+ * - Small dark rounded nose button and gracefully curved cheek whiskers
  *
  * The `:3` mouth itself is projected by `capsule-cat-body-material`.
  */
 
 import {
+  CapsuleGeometry,
   Color,
   ConeGeometry,
   DoubleSide,
+  ExtrudeGeometry,
   Group,
   Mesh,
   MeshStandardMaterial,
   QuadraticBezierCurve3,
+  Shape,
   SphereGeometry,
   TubeGeometry,
   Vector3,
@@ -60,47 +63,68 @@ function buildSingleCatEye(
 ): CapsuleCatEyeAssembly {
   const sign = side === 'left' ? -1 : 1;
   const r = dna.bodyRadius;
+  const eyeRadius = r * 0.28 * dna.eyeScale;
+
+  // Surface placement on the front hemisphere dome (z = bodyLength * 0.5)
   const angle = sign * dna.eyeSpacing;
-  const eyeRadius = r * 0.225 * dna.eyeScale;
+  const elevation = 0.34; // ~19.5 degrees elevation
+  const cosEl = Math.cos(elevation);
+  const sinEl = Math.sin(elevation);
+
+  const nx = cosEl * Math.sin(angle);
+  const ny = sinEl;
+  const nz = cosEl * Math.cos(angle);
+
+  const px = r * nx;
+  const py = r * ny;
+  const pz = dna.bodyLength * 0.5 + r * nz;
 
   const root = new Group();
   root.name = `capsule-cat-eye-${side}`;
-  root.position.set(
-    Math.sin(angle) * r * 1.0,
-    r * 0.27,
-    dna.bodyLength * 0.5 + Math.cos(angle) * r * 0.8,
-  );
-  root.rotation.y = angle * 0.35;
+  root.position.set(px, py, pz);
 
-  const scleraMesh = new Mesh(new SphereGeometry(eyeRadius, 24, 18), scleraMat);
-  scleraMesh.scale.set(1, 1, 0.82);
+  // Orient local +Z along the surface outward normal
+  const target = new Vector3(px + nx, py + ny, pz + nz);
+  root.lookAt(target);
+
+  // Sclera: bulging googly sphere seated slightly embedded into the head
+  const scleraGeo = new SphereGeometry(eyeRadius, 24, 20);
+  const scleraMesh = new Mesh(scleraGeo, scleraMat);
+  scleraMesh.position.set(0, 0, -eyeRadius * 0.2);
+  scleraMesh.scale.set(1, 1, 0.88);
   scleraMesh.castShadow = true;
   scleraMesh.receiveShadow = true;
   root.add(scleraMesh);
 
+  // Gaze pivot rotates pupil + catchlight along the front surface of the eye
   const gazePivot = new Group();
   gazePivot.name = `capsule-cat-eye-gaze-${side}`;
+  gazePivot.position.set(0, 0, -eyeRadius * 0.2);
   root.add(gazePivot);
 
-  const pupilMesh = new Mesh(new SphereGeometry(eyeRadius, 18, 14), pupilMat);
+  const pupilGeo = new SphereGeometry(eyeRadius, 18, 14);
+  const pupilMesh = new Mesh(pupilGeo, pupilMat);
   const pScale = dna.pupilScale;
-  pupilMesh.scale.set(pScale, pScale, pScale * 0.35);
-  pupilMesh.position.set(0, 0, eyeRadius * 0.8);
+  pupilMesh.scale.set(pScale, pScale, pScale * 0.24);
+  pupilMesh.position.set(0, 0, eyeRadius * 0.94);
   gazePivot.add(pupilMesh);
 
-  const catchMesh = new Mesh(new SphereGeometry(eyeRadius * 0.085, 10, 8), catchlightMat);
-  catchMesh.position.set(eyeRadius * 0.09, eyeRadius * 0.09, eyeRadius * 0.87);
+  const catchGeo = new SphereGeometry(eyeRadius * 0.09, 10, 8);
+  const catchMesh = new Mesh(catchGeo, catchlightMat);
+  catchMesh.position.set(eyeRadius * 0.12, eyeRadius * 0.12, eyeRadius * 0.98);
   gazePivot.add(catchMesh);
 
+  // Eyelids container
   const eyelidTiltGroup = new Group();
-  eyelidTiltGroup.scale.set(1, 1, 0.84);
+  eyelidTiltGroup.position.set(0, 0, -eyeRadius * 0.2);
   root.add(eyelidTiltGroup);
 
-  const lidRadius = eyeRadius * 1.045;
+  const lidRadius = eyeRadius * 1.05;
   const upperLidPivot = new Group();
-  upperLidPivot.rotation.x = -1.15;
+  // In rest state, fully retract upper eyelid so derpy googly eye is 100% visible
+  upperLidPivot.rotation.x = -1.35;
   const upperLidMesh = new Mesh(
-    new SphereGeometry(lidRadius, 22, 12, 0, Math.PI * 2, 0, Math.PI * 0.5),
+    new SphereGeometry(lidRadius, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.5),
     furMat,
   );
   upperLidMesh.castShadow = true;
@@ -108,9 +132,9 @@ function buildSingleCatEye(
   eyelidTiltGroup.add(upperLidPivot);
 
   const lowerLidPivot = new Group();
-  lowerLidPivot.rotation.x = 1.18;
+  lowerLidPivot.rotation.x = 1.35;
   const lowerLidMesh = new Mesh(
-    new SphereGeometry(lidRadius * 0.995, 22, 12, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5),
+    new SphereGeometry(lidRadius * 0.995, 24, 12, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5),
     furMat,
   );
   lowerLidPivot.add(lowerLidMesh);
@@ -127,6 +151,17 @@ function buildSingleCatEye(
   };
 }
 
+function buildCatEarShape(width: number, height: number): Shape {
+  const shape = new Shape();
+  const hw = width * 0.5;
+  shape.moveTo(-hw, 0);
+  shape.quadraticCurveTo(-hw * 0.85, height * 0.52, -hw * 0.12, height * 0.94);
+  shape.quadraticCurveTo(0, height, hw * 0.12, height * 0.94);
+  shape.quadraticCurveTo(hw * 0.85, height * 0.52, hw, 0);
+  shape.closePath();
+  return shape;
+}
+
 function buildEar(
   side: 'left' | 'right',
   dna: CapsuleCatCharacterDNA,
@@ -136,33 +171,52 @@ function buildEar(
   const sign = side === 'left' ? -1 : 1;
   const r = dna.bodyRadius;
   const scale = dna.earScale;
-  const earHeight = r * 0.58 * scale;
-  const earRadius = r * 0.23 * scale;
+  const earWidth = r * 0.44 * scale;
+  const earHeight = r * 0.56 * scale;
+  const earDepth = r * 0.12 * scale;
 
   const ear = new Group();
   ear.name = `capsule-cat-ear-${side}`;
-  ear.position.set(sign * r * 0.42, r * 0.84, dna.bodyLength * 0.5 + r * 0.5);
-  const baseX = 0.14;
-  const baseZ = -sign * 0.22;
-  ear.rotation.set(baseX, 0, baseZ);
+  // Perched on top-front head dome
+  ear.position.set(sign * r * 0.44, r * 0.82, dna.bodyLength * 0.5 + r * 0.32);
+
+  const baseX = -0.10;
+  const baseY = sign * 0.22;
+  const baseZ = -sign * 0.32;
+  ear.rotation.set(baseX, baseY, baseZ);
   ear.userData['baseX'] = baseX;
+  ear.userData['baseY'] = baseY;
   ear.userData['baseZ'] = baseZ;
 
-  const outer = new Mesh(new ConeGeometry(earRadius, earHeight, 18, 1), furMat);
+  // Outer beveled 3D cat ear
+  const outerShape = buildCatEarShape(earWidth, earHeight);
+  const outerGeo = new ExtrudeGeometry(outerShape, {
+    depth: earDepth,
+    bevelEnabled: true,
+    bevelSegments: 3,
+    steps: 1,
+    bevelSize: earWidth * 0.06,
+    bevelThickness: earDepth * 0.35,
+  });
+  outerGeo.center();
+  const outer = new Mesh(outerGeo, furMat);
   outer.castShadow = true;
   outer.receiveShadow = true;
   ear.add(outer);
 
-  const tip = new Mesh(new SphereGeometry(earRadius * 0.26, 12, 10), furMat);
-  tip.position.y = earHeight * 0.5;
-  ear.add(tip);
-
-  const inner = new Mesh(
-    new ConeGeometry(earRadius * 0.52, earHeight * 0.66, 12, 1),
-    innerEarMat,
-  );
-  inner.position.set(0, -earHeight * 0.02, earRadius * 0.46);
-  inner.scale.z = 0.35;
+  // Inner recessed pink triangle
+  const innerShape = buildCatEarShape(earWidth * 0.70, earHeight * 0.72);
+  const innerGeo = new ExtrudeGeometry(innerShape, {
+    depth: earDepth * 0.3,
+    bevelEnabled: true,
+    bevelSegments: 2,
+    steps: 1,
+    bevelSize: earWidth * 0.03,
+    bevelThickness: earDepth * 0.15,
+  });
+  innerGeo.center();
+  const inner = new Mesh(innerGeo, innerEarMat);
+  inner.position.set(0, -earHeight * 0.05, earDepth * 0.55);
   ear.add(inner);
 
   return ear;
@@ -175,19 +229,21 @@ function buildCrownTuft(
   const r = dna.bodyRadius;
   const group = new Group();
   group.name = 'capsule-cat-crown-tuft';
-  group.position.set(0, r * 0.92, dna.bodyLength * 0.5 + r * 0.32);
+  group.position.set(0, r * 0.94, dna.bodyLength * 0.5 + r * 0.28);
   group.visible = dna.tuft;
 
   const spikes = [
-    { x: -r * 0.09, h: r * 0.26, rz: 0.32 },
-    { x: 0, h: r * 0.34, rz: 0.02 },
-    { x: r * 0.09, h: r * 0.24, rz: -0.32 },
+    { x: -r * 0.1, h: r * 0.26, rz: 0.35, rx: 0.05 },
+    { x: 0, h: r * 0.36, rz: 0.02, rx: 0.08 },
+    { x: r * 0.1, h: r * 0.24, rz: -0.35, rx: 0.05 },
   ];
 
   for (const spike of spikes) {
-    const mesh = new Mesh(new ConeGeometry(r * 0.045, spike.h, 8, 1), tuftMat);
-    mesh.position.set(spike.x, spike.h * 0.4, 0);
+    const geo = new ConeGeometry(r * 0.05, spike.h, 10, 1);
+    const mesh = new Mesh(geo, tuftMat);
+    mesh.position.set(spike.x, spike.h * 0.45, 0);
     mesh.rotation.z = spike.rz;
+    mesh.rotation.x = spike.rx;
     mesh.castShadow = true;
     group.add(mesh);
   }
@@ -204,21 +260,22 @@ function buildWhiskers(
   const r = dna.bodyRadius;
   const group = new Group();
   group.name = `capsule-cat-whiskers-${side}`;
-  group.position.set(sign * r * 0.5, -r * 0.02, dna.bodyLength * 0.5 + r * 0.8);
+  // Attached to cheek pad beside snout
+  group.position.set(sign * r * 0.28, r * 0.04, dna.bodyLength * 0.5 + r * 0.92);
 
   const count = dna.whiskerCount;
-  const length = r * 0.48;
+  const length = r * 0.50;
   for (let i = 0; i < count; i++) {
     const t = count === 1 ? 0.5 : i / (count - 1);
-    const yOffset = (t - 0.5) * r * 0.26;
+    const yOffset = (t - 0.5) * r * 0.14;
+    // Curved whiskers arcing outwards, slightly downwards and backwards
     const curve = new QuadraticBezierCurve3(
       new Vector3(0, 0, 0),
-      new Vector3(sign * length * 0.55, r * 0.035, -r * 0.02),
-      new Vector3(sign * length, (t - 0.5) * r * 0.12 - r * 0.02, -r * 0.04),
+      new Vector3(sign * length * 0.55, -r * 0.01 + yOffset * 0.5, -r * 0.06),
+      new Vector3(sign * length, yOffset - r * 0.06, -r * 0.18),
     );
-    const mesh = new Mesh(new TubeGeometry(curve, 8, r * 0.011, 5, false), whiskerMat);
-    mesh.position.set(sign * r * 0.04, yOffset, 0);
-    mesh.rotation.z = sign * (-0.22 + t * 0.4);
+    const geo = new TubeGeometry(curve, 10, r * 0.012, 6, false);
+    const mesh = new Mesh(geo, whiskerMat);
     mesh.castShadow = true;
     group.add(mesh);
   }
@@ -252,23 +309,23 @@ export function buildCapsuleCatFaceRig(dna: CapsuleCatCharacterDNA): CapsuleCatF
     metalness: 0.02,
   });
   const pupilMat = new MeshStandardMaterial({
-    color: new Color('#18191c'),
+    color: new Color('#16171a'),
     roughness: 0.18,
     metalness: 0.05,
   });
   const catchlightMat = new MeshStandardMaterial({
     color: new Color('#ffffff'),
     emissive: new Color('#ffffff'),
-    emissiveIntensity: 0.45,
+    emissiveIntensity: 0.55,
     roughness: 0.1,
   });
   const noseMat = new MeshStandardMaterial({
-    color: new Color('#2a211d'),
+    color: new Color('#251c19'),
     roughness: 0.42,
     metalness: 0.02,
   });
   const whiskerMat = new MeshStandardMaterial({
-    color: new Color('#2c2622'),
+    color: new Color('#27201c'),
     roughness: 0.6,
     metalness: 0.0,
   });
@@ -286,13 +343,13 @@ export function buildCapsuleCatFaceRig(dna: CapsuleCatCharacterDNA): CapsuleCatF
   const leftWhiskers = buildWhiskers('left', dna, whiskerMat);
   const rightWhiskers = buildWhiskers('right', dna, whiskerMat);
 
-  // Rounded-triangle nose button on the snout centre.
-  const noseGeo = new ConeGeometry(r * 0.1, r * 0.11, 3, 1);
-  noseGeo.rotateZ(Math.PI);
-  noseGeo.scale(1, 1, 0.55);
+  // Smooth rounded dark nose button on the snout centre
+  const noseGeo = new CapsuleGeometry(r * 0.045, r * 0.05, 8, 12);
+  noseGeo.rotateZ(Math.PI * 0.5);
   const nose = new Mesh(noseGeo, noseMat);
   nose.name = 'capsule-cat-nose';
-  nose.position.set(0, r * 0.04, dna.bodyLength * 0.5 + r * 0.97);
+  nose.position.set(0, r * 0.08, dna.bodyLength * 0.5 + r * 0.985);
+  nose.scale.set(1.2, 0.9, 0.65);
   nose.castShadow = true;
 
   root.add(
@@ -309,9 +366,9 @@ export function buildCapsuleCatFaceRig(dna: CapsuleCatCharacterDNA): CapsuleCatF
   const applyEyePose = (eye: CapsuleCatEyeAssembly, pose: CapsuleEyeRigPose): void => {
     eye.gazePivot.rotation.set(pose.gazePitch * 0.75, pose.gazeYaw * 0.75, 0);
     const pScale = pose.pupilScale;
-    eye.pupilMesh.scale.set(pScale, pScale, pScale * 0.35);
-    eye.upperLidPivot.rotation.x = -1.15 + pose.upperLidAngle;
-    eye.lowerLidPivot.rotation.x = 1.18 - pose.lowerLidAngle;
+    eye.pupilMesh.scale.set(pScale, pScale, pScale * 0.24);
+    eye.upperLidPivot.rotation.x = -1.35 + pose.upperLidAngle * 1.5;
+    eye.lowerLidPivot.rotation.x = 1.35 - pose.lowerLidAngle * 1.3;
     eye.eyelidTiltGroup.rotation.z = pose.lidTiltZ;
   };
 
@@ -319,13 +376,23 @@ export function buildCapsuleCatFaceRig(dna: CapsuleCatCharacterDNA): CapsuleCatF
     applyEyePose(leftEye, projection.leftEye);
     applyEyePose(rightEye, projection.rightEye);
 
-    const perk01 = (projection.earPerk + 1) * 0.5;
+    // earPerk in [-1, 1]: alert = perk forward, fearful = flatten back & spread
     for (const ear of [leftEar, rightEar]) {
-      const baseX = (ear.userData['baseX'] as number) ?? 0.14;
-      ear.rotation.x = baseX - 0.48 + perk01 * 0.62;
+      const isLeft = ear.name.includes('left');
+      const sign = isLeft ? -1 : 1;
+      const baseX = (ear.userData['baseX'] as number) ?? -0.10;
+      const baseZ = (ear.userData['baseZ'] as number) ?? -sign * 0.32;
+      const perk = projection.earPerk;
+      if (perk >= 0) {
+        ear.rotation.x = baseX + perk * 0.32;
+        ear.rotation.z = baseZ;
+      } else {
+        ear.rotation.x = baseX + perk * 0.48;
+        ear.rotation.z = baseZ - sign * perk * 0.18;
+      }
     }
 
-    const spreadScale = 0.92 + projection.whiskerSpread * 0.22;
+    const spreadScale = 0.92 + projection.whiskerSpread * 0.24;
     leftWhiskers.scale.setScalar(spreadScale);
     rightWhiskers.scale.setScalar(spreadScale);
   };

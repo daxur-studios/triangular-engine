@@ -261,6 +261,7 @@ class ReferenceSelector {
 
   select(view: SelectorView): void {
     const { domain, patchCells, leafCap, cull, mode, fixedLevel } = this.settings;
+    const cullInSelection = this.settings.cullInSelection === true;
     interface Node { root: number; level: number; i: number; j: number; open: boolean; visible: boolean; priority: number }
     const maxLevel = maxLevelFor(patchCells);
     const treeCapacity = 2 * (leafCap + CAP_SLACK) + 64;
@@ -352,7 +353,7 @@ class ReferenceSelector {
     const activate = (root: number, level: number, i: number, j: number) => {
       const n: Node = { root, level, i, j, open: false, visible: false, priority: 0 };
       n.visible = visibleOf(n);
-      n.priority = n.visible ? priorityOf(n) : 0;
+      n.priority = n.visible || !cullInSelection ? priorityOf(n) : 0;
       nodes.set(key(root, level, i, j), n);
       order.push(n);
       push(n);
@@ -439,9 +440,9 @@ describe('Plan 059 selector against the plain reference', () => {
 
   for (const [label, domain] of [['plane', plane], ['sphere 600 km', sphere600]] as const) {
     for (const [mode, leafCap] of [['distance', 64], ['distance', 300], ['distance', 1024], ['fixed', 700]] as const) {
-      for (const cull of [true, false]) {
-        it(`picks the same leaves, masks, order and stats while the camera moves (${label}, ${mode}, cap ${leafCap}, cull ${cull})`, () => {
-          const settings = settingsFor(domain, { cull, leafCap, mode, fixedLevel: 4 });
+      for (const [cull, cullInSelection] of [[true, true], [true, false], [false, false]] as const) {
+        it(`picks the same leaves, masks, order and stats while the camera moves (${label}, ${mode}, cap ${leafCap}, cull ${cull}, in selection ${cullInSelection})`, () => {
+          const settings = settingsFor(domain, { cull, cullInSelection, leafCap, mode, fixedLevel: 4 });
           const selector = new LodSelector(settings, 2);
           const reference = new ReferenceSelector(settings);
           for (const pose of POSE_IDS) {
@@ -963,19 +964,19 @@ describe('Plan 059 suite', () => {
 });
 
 describe('Plan 059 suite versions and hysteresis', () => {
-  const [v1, v2, v3, v4, v5, v6, t1, t2, t3] = LOD_SURFACE_TEST_HISTORY;
+  const [v1, v2, v3, v4, v5, v6, v7, t1, t2, t3] = LOD_SURFACE_TEST_HISTORY;
   const idsOf = (suite: typeof v1) => suite.scenarios.map((scenario) => scenario.id);
 
   it('lists the versions oldest first with the latest terrain suite last', () => {
     expect(LOD_SURFACE_TEST_HISTORY.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
-      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-baseline@5', 'lod-surface-baseline@6', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4', 'lod-surface-terrain@5', 'lod-surface-terrain@6', 'lod-surface-terrain@7', 'lod-surface-terrain@8',
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-baseline@5', 'lod-surface-baseline@6', 'lod-surface-baseline@7', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4', 'lod-surface-terrain@5', 'lod-surface-terrain@6', 'lod-surface-terrain@7', 'lod-surface-terrain@8', 'lod-surface-terrain@9',
     ]);
   });
 
   it('keeps v1, v2 and terrain v1 at the single threshold they were measured with, and gives the later versions the lab default', () => {
     for (const suite of [v1, v2, t1]) for (const scenario of suite.scenarios) expect(scenario.settings.hysteresis).withContext(`${suite.id}@${suite.version} ${scenario.id}`).toBe(0);
     expect(DEFAULT_SETTINGS.hysteresis).toBe(0.15);
-    for (const suite of [v3, v4, v5, t2, t3]) {
+    for (const suite of [v3, v4, v5, v7, t2, t3]) {
       for (const scenario of suite.scenarios) {
         expect(scenario.settings.hysteresis).withContext(`${suite.id}@${suite.version} ${scenario.id}`).toBe(scenario.id.endsWith('-nohyst') ? 0 : 0.15);
       }
@@ -1030,6 +1031,35 @@ describe('Plan 059 suite versions and hysteresis', () => {
       expect(scenario.durationMs).toBe(8000);
       expect(scenario.quickMs).toBe(4000);
     }
+  });
+
+  it('adds the turn cases of baseline v7 (default selection at three caps, one legacy culling reference) and keeps v5 as it was', () => {
+    expect(v7.scenarios.slice(0, v5.scenarios.length)).toEqual(v5.scenarios);
+    const turns = v7.scenarios.slice(v5.scenarios.length);
+    expect(turns.map((scenario) => scenario.id)).toEqual([
+      'turn-plane-100km-low-200m', 'turn-plane-100km-low-200m-cap4k', 'turn-plane-100km-low-200m-cap8k', 'turn-plane-100km-low-200m-legacycull',
+      'turn-sphere-600km-mid-5km', 'turn-sphere-600km-mid-5km-cap4k', 'turn-sphere-600km-mid-5km-cap8k', 'turn-sphere-600km-mid-5km-legacycull',
+    ]);
+    expect(new Set(idsOf(v7)).size).toBe(idsOf(v7).length);
+    for (let k = 0; k < turns.length; k += 4) {
+      const [base, cap4k, cap8k, legacy] = turns.slice(k, k + 4);
+      expect(base.settings.leafCap).toBe(1024);
+      expect(base.settings.cull).toBeTrue();
+      expect(base.settings.cullInSelection).toBeUndefined();
+      expect(base.settings.motion).toBe('turn');
+      expect(cap4k.settings).toEqual({ ...base.settings, leafCap: 4096 });
+      expect(cap8k.settings).toEqual({ ...base.settings, leafCap: 8192 });
+      expect(legacy.settings).toEqual({ ...base.settings, cullInSelection: true });
+    }
+    for (const scenario of v7.scenarios.slice(0, v5.scenarios.length)) expect(scenario.settings.cullInSelection).toBeUndefined();
+  });
+
+  it('runs terrain v9 as terrain v8 unchanged, as the latest suite, selecting without the frustum', () => {
+    const t8 = LOD_SURFACE_TEST_HISTORY.find((suite) => suite.id === 'lod-surface-terrain' && suite.version === 8)!;
+    const t9 = LOD_SURFACE_TEST_HISTORY[LOD_SURFACE_TEST_HISTORY.length - 1];
+    expect(`${t9.id}@${t9.version}`).toBe('lod-surface-terrain@9');
+    expect(t9.scenarios).toEqual(t8.scenarios);
+    for (const scenario of t9.scenarios) expect(scenario.settings.cullInSelection).withContext(scenario.id).toBeUndefined();
   });
 
   it('runs the turn variants as the default case with only the leaf cap or the culling changed', () => {

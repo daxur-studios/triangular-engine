@@ -185,7 +185,7 @@ export class CapsuleCatActor {
 
     if (bodySizeChanged) {
       this.body.mesh.geometry.dispose();
-      const geometry = new CapsuleGeometry(next.bodyRadius, next.bodyLength, 24, 48);
+      const geometry = new CapsuleGeometry(next.bodyRadius, next.bodyLength, 32, 48);
       geometry.rotateX(Math.PI * 0.5);
       this.body.mesh.geometry = geometry;
     }
@@ -340,7 +340,7 @@ export class CapsuleCatActor {
     this.disposeLimbsAndPaws();
 
     const r = this.currentDna.bodyRadius;
-    const limbRadius = Math.max(0.03, r * 0.165);
+    const limbRadius = Math.max(0.035, r * 0.175);
     const pawRadius = r * 0.22;
 
     this.limbMaterial = new MeshStandardMaterial({

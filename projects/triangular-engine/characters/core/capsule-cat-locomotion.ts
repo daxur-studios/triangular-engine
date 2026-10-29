@@ -140,6 +140,38 @@ function gaitProfile(mode: CapsuleCatGaitMode, speed: number): CatGaitProfile {
   }
 }
 
+function transformLocalToWorld(
+  lx: number,
+  ly: number,
+  lz: number,
+  rx: number,
+  ry: number,
+  rz: number,
+  ox: number,
+  oy: number,
+  oz: number,
+): CharacterVector3 {
+  const cosX = Math.cos(rx);
+  const sinX = Math.sin(rx);
+  const y1 = ly * cosX - lz * sinX;
+  const z1 = ly * sinX + lz * cosX;
+  const x1 = lx;
+
+  const cosY = Math.cos(ry);
+  const sinY = Math.sin(ry);
+  const x2 = x1 * cosY + z1 * sinY;
+  const z2 = -x1 * sinY + z1 * cosY;
+  const y2 = y1;
+
+  const cosZ = Math.cos(rz);
+  const sinZ = Math.sin(rz);
+  const x3 = x2 * cosZ - y2 * sinZ;
+  const y3 = x2 * sinZ + y2 * cosZ;
+  const z3 = z2;
+
+  return characterVector3(x3 + ox, y3 + oy, z3 + oz);
+}
+
 function clampSpeed(speed: number): number {
   if (!Number.isFinite(speed)) return 1;
   return Math.max(0.3, Math.min(2, speed));
@@ -236,7 +268,7 @@ export function sampleCapsuleCatLocomotion(
   const pawAnkleY = 0.07;
   // The solver length is longer than the resting leg drop so a bounding cat can
   // extend its hind legs without the target being clamped.
-  const legLength = Math.max(0.3, r * 1.4 + 0.02);
+  const legLength = Math.max(0.36, r * 1.65 + 0.04);
   const legDrop = r * 0.9 + 0.02;
   const legAttachDrop = r * 0.52;
   const bodyCenterY = pawAnkleY + legDrop + legAttachDrop;
@@ -278,10 +310,52 @@ export function sampleCapsuleCatLocomotion(
   const floatLift = mode === 'float' ? 0.05 : 0;
   const lateralSpread = 1.08;
 
-  const frontLeftSocket = characterVector3(-lateral + bodySwayX, socketY + bodyBounceY, frontZ);
-  const frontRightSocket = characterVector3(lateral + bodySwayX, socketY + bodyBounceY, frontZ);
-  const backLeftSocket = characterVector3(-lateral + bodySwayX, socketY + bodyBounceY, backZ);
-  const backRightSocket = characterVector3(lateral + bodySwayX, socketY + bodyBounceY, backZ);
+  const bodyOrigin = characterVector3(bodySwayX, bodyCenterY + bodyBounceY, 0);
+
+  const frontLeftSocket = transformLocalToWorld(
+    -lateral,
+    -legAttachDrop,
+    frontZ,
+    bodyTiltX,
+    bodyYawY,
+    bodyRollZ,
+    bodyOrigin.x,
+    bodyOrigin.y,
+    bodyOrigin.z,
+  );
+  const frontRightSocket = transformLocalToWorld(
+    lateral,
+    -legAttachDrop,
+    frontZ,
+    bodyTiltX,
+    bodyYawY,
+    bodyRollZ,
+    bodyOrigin.x,
+    bodyOrigin.y,
+    bodyOrigin.z,
+  );
+  const backLeftSocket = transformLocalToWorld(
+    -lateral,
+    -legAttachDrop,
+    backZ,
+    bodyTiltX,
+    bodyYawY,
+    bodyRollZ,
+    bodyOrigin.x,
+    bodyOrigin.y,
+    bodyOrigin.z,
+  );
+  const backRightSocket = transformLocalToWorld(
+    lateral,
+    -legAttachDrop,
+    backZ,
+    bodyTiltX,
+    bodyYawY,
+    bodyRollZ,
+    bodyOrigin.x,
+    bodyOrigin.y,
+    bodyOrigin.z,
+  );
 
   const frontLeftStep = samplePawStep(
     phase + offsets.frontLeft,

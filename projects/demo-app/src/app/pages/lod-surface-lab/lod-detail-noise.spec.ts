@@ -190,7 +190,7 @@ describe('Plan 059 detail noise below the texel size', () => {
   it('runs every saved suite version with the noise off, and terrain v8 on the default', () => {
     expect(DEFAULT_SETTINGS.detailNoise).toBeGreaterThan(0);
     const find = (id: string, version: number) => LOD_SURFACE_TEST_HISTORY.find((suite) => suite.id === id && suite.version === version)!;
-    for (const suite of LOD_SURFACE_TEST_HISTORY.filter((item) => !(item.id === 'lod-surface-terrain' && item.version === 8))) {
+    for (const suite of LOD_SURFACE_TEST_HISTORY.filter((item) => !(item.id === 'lod-surface-terrain' && item.version >= 8))) {
       for (const scenario of suite.scenarios) expect(scenario.settings.detailNoise).withContext(`${suite.id}@${suite.version} ${scenario.id}`).toBe(0);
     }
     const t7 = find('lod-surface-terrain', 7);

@@ -426,6 +426,7 @@ export class CharactersLabPageComponent {
       const z = rowZ[row] ?? 0;
 
       const actor = new CapsuleCatActor({ dna: preset, autoBlink: true });
+      actor.root.rotation.y = -0.34;
       actor.facialController.setExpression(emotions[idx] ?? 'happy', 1, 0);
       actor.setLocomotion(preset.gait, 0.9 + idx * 0.02);
       actor.update(idx * 0.19);
@@ -527,8 +528,8 @@ export class CharactersLabPageComponent {
     this.capsuleCatLayoutMode = mode;
     this.applyCapsuleLayoutVisibility();
     if (mode === 'lineup') {
-      this.cameraPosition.set([0, 2.35, 4.4]);
-      this.cameraTarget.set([0, 0.55, 0.2]);
+      this.cameraPosition.set([0, 1.85, 3.8]);
+      this.cameraTarget.set([0, 0.46, 0.15]);
     } else {
       this.setCameraFraming(this.cameraFraming);
     }
@@ -736,20 +737,20 @@ export class CharactersLabPageComponent {
     this.cameraFraming = framing;
     if (this.viewMode === 'capsule-cats') {
       if (this.capsuleCatLayoutMode === 'lineup') {
-        this.cameraPosition.set([0, 2.35, 4.4]);
-        this.cameraTarget.set([0, 0.55, 0.2]);
+        this.cameraPosition.set([0, 1.85, 3.8]);
+        this.cameraTarget.set([0, 0.46, 0.15]);
       } else if (framing === 'full-shot') {
-        this.cameraPosition.set([1.05, 0.88, 1.95]);
-        this.cameraTarget.set([0, 0.46, 0]);
+        this.cameraPosition.set([1.15, 0.72, 1.45]);
+        this.cameraTarget.set([0, 0.40, 0.05]);
       } else if (framing === 'front') {
-        this.cameraPosition.set([0, 0.64, 1.42]);
-        this.cameraTarget.set([0, 0.44, 0]);
+        this.cameraPosition.set([0, 0.54, 1.05]);
+        this.cameraTarget.set([0, 0.48, 0.32]);
       } else if (framing === 'three-quarter') {
-        this.cameraPosition.set([0.72, 0.74, 1.3]);
-        this.cameraTarget.set([0, 0.44, 0]);
+        this.cameraPosition.set([0.65, 0.58, 0.95]);
+        this.cameraTarget.set([0, 0.46, 0.18]);
       } else {
-        this.cameraPosition.set([1.6, 0.58, 0.05]);
-        this.cameraTarget.set([0, 0.44, 0]);
+        this.cameraPosition.set([1.35, 0.48, 0.0]);
+        this.cameraTarget.set([0, 0.44, 0.0]);
       }
       return;
     }

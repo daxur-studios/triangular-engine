@@ -1,7 +1,9 @@
 /**
- * Rounded cat paws for the Capsule Doodle Space Cats. A paw is either bare fur
- * with three toe bumps, or a plump white space bootie with a grey ankle cuff.
- * The local origin is the ankle socket ($P_2$) and the sole rests near -Y.
+ * Rounded cat paws for the Capsule Doodle Space Cats.
+ *
+ * A paw is either bare fur with subtle cartoon toe clefts, or a plump white
+ * space bootie with a grey ankle cuff ring. The local origin is the ankle socket
+ * ($P_2$) and the sole rests near -Y.
  */
 
 import {
@@ -36,35 +38,39 @@ export function buildCapsuleCatPaw(
 
   const pawMat = new MeshStandardMaterial({
     color: new Color(initial.suited ? initial.bootieColor : initial.furColor),
-    roughness: initial.suited ? 0.5 : 0.72,
-    metalness: initial.suited ? 0.06 : 0.02,
+    roughness: initial.suited ? 0.48 : 0.70,
+    metalness: initial.suited ? 0.05 : 0.02,
   });
 
   const cuffMat = new MeshStandardMaterial({
     color: new Color(initial.cuffColor),
-    roughness: 0.48,
-    metalness: 0.2,
+    roughness: 0.45,
+    metalness: 0.22,
   });
 
-  const mainGeo = new SphereGeometry(radius, 16, 12);
-  mainGeo.scale(1.16, 0.94, 1.12);
+  // Main bean-shaped cartoon cat paw
+  const mainGeo = new SphereGeometry(radius, 20, 16);
+  mainGeo.scale(1.15, 0.86, 1.25);
   const main = new Mesh(mainGeo, pawMat);
-  main.position.set(0, -radius * 0.56, radius * 0.24);
+  main.position.set(0, -radius * 0.54, radius * 0.22);
   main.castShadow = true;
   main.receiveShadow = true;
   root.add(main);
 
-  const toeGeo = new SphereGeometry(radius * 0.34, 12, 10);
-  const toeOffsets = [-0.44, 0, 0.44];
+  // Soft rounded toe bumps that blend seamlessly into the front profile
+  const toeGeo = new SphereGeometry(radius * 0.38, 14, 12);
+  toeGeo.scale(1.0, 0.78, 1.05);
+  const toeOffsets = [-0.48, 0, 0.48];
   for (const offset of toeOffsets) {
     const toe = new Mesh(toeGeo, pawMat);
-    toe.position.set(offset * radius, -radius * 0.72, radius * 0.98);
-    toe.scale.set(1, 0.82, 1);
+    toe.position.set(offset * radius, -radius * 0.62, radius * 0.88);
     toe.castShadow = true;
+    toe.receiveShadow = true;
     root.add(toe);
   }
 
-  const cuffGeo = new TorusGeometry(radius * 0.7, radius * 0.16, 10, 20);
+  // Metallic ankle cuff ring for space booties
+  const cuffGeo = new TorusGeometry(radius * 0.72, radius * 0.16, 12, 24);
   cuffGeo.rotateX(Math.PI * 0.5);
   const cuff = new Mesh(cuffGeo, cuffMat);
   cuff.position.set(0, radius * 0.02, 0);
@@ -74,8 +80,8 @@ export function buildCapsuleCatPaw(
 
   const setAppearance = (appearance: CapsuleCatPawAppearance): void => {
     pawMat.color.set(appearance.suited ? appearance.bootieColor : appearance.furColor);
-    pawMat.roughness = appearance.suited ? 0.5 : 0.72;
-    pawMat.metalness = appearance.suited ? 0.06 : 0.02;
+    pawMat.roughness = appearance.suited ? 0.48 : 0.70;
+    pawMat.metalness = appearance.suited ? 0.05 : 0.02;
     cuffMat.color.set(appearance.cuffColor);
     cuff.visible = appearance.suited;
   };

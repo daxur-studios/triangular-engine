@@ -90,7 +90,9 @@ function createTaperedSplineLockGeometry(
       const b = (i + 1) * ringVerts + j;
       const c = (i + 1) * ringVerts + (j + 1);
       const d = i * ringVerts + (j + 1);
-      indices.push(a, b, d, b, c, d);
+      // Counter-clockwise from outside the tube: winding must agree with the
+      // radial vertex normals above or the lock renders inside out.
+      indices.push(a, d, b, b, d, c);
     }
   }
 

@@ -66,6 +66,12 @@ export interface SelectorSettings {
   /** Refine and draw only nodes whose bounds touch the view frustum. */
   readonly cull: boolean;
   /**
+   * Legacy A/B: when true (and {@link cull} is on) a node outside the frustum asks for no split and so drops out of the
+   * budget and balance competition, which makes selection depend on the heading. The default (absent or false) selects
+   * from distance alone; the frustum then only decides which selected leaves are drawn ({@link SelectorStats.drawn}).
+   */
+  readonly cullInSelection?: boolean;
+  /**
    * Split/merge hysteresis ratio, distance mode only (absent or 0: a single threshold and a plain ranking, as before). A node
    * split in the last tree stays split while its cells are less than `hysteresis` smaller than the split point (value >
    * 1 / (1 + hysteresis)). Under the leaf cap it also ranks `hysteresis` higher than its value (value * (1 + hysteresis)),
@@ -84,7 +90,9 @@ export interface SelectorView {
 }
 
 export interface SelectorStats {
+  /** Leaves of the selected tree, drawn and culled. Independent of the view direction unless `cullInSelection`. */
   leaves: number;
+  /** Selected leaves inside the frustum, which are the ones drawn (a subset of {@link leaves}); the level-change metrics count these. */
   drawn: number;
   /** Nodes split by their own request this frame, including ones kept split by hysteresis (not the balance splits). */
   splits: number;
@@ -539,7 +547,7 @@ export class LodSelector {
    */
   private activateRange(first: number, count: number): void {
     const { active, stamp, visible, priority, hot, normal, level, wasOpen, wasVisible, viewKey: key } = this;
-    const { cull, mode, fixedLevel } = this.settings;
+    const { cull, cullInSelection, mode, fixedLevel } = this.settings;
     const frame = this.frame;
     const keepValue = this.keepValue;
     const keepBoost = this.keepBoost;
@@ -558,12 +566,14 @@ export class LodSelector {
       const y = hot[h + 1] - key[1];
       const z = hot[h + 2] - key[2];
       const r = hot[h + 3];
-      if (cull && (key[3] * x + key[4] * y + key[5] * z < -r || key[6] * x + key[7] * y + key[8] * z < -r || key[9] * x + key[10] * y + key[11] * z < -r || key[12] * x + key[13] * y + key[14] * z < -r)) {
+      const outside = cull && (key[3] * x + key[4] * y + key[5] * z < -r || key[6] * x + key[7] * y + key[8] * z < -r || key[9] * x + key[10] * y + key[11] * z < -r || key[12] * x + key[13] * y + key[14] * z < -r);
+      if (outside && cullInSelection === true) {
         visible[node] = 0;
         priority[node] = 0;
         continue;
       }
-      visible[node] = 1;
+      // Default: the split request ignores the frustum; it only decides whether the leaf is drawn.
+      visible[node] = outside ? 0 : 1;
       let value = 0;
       if (mode === 'fixed') {
         const nodeLevel = level[node];

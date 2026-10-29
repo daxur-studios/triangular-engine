@@ -16,6 +16,11 @@ export interface LodSurfaceTestSettings {
   readonly cellPixels: number;
   readonly leafCap: number;
   readonly cull: boolean;
+  /**
+   * Legacy A/B (`SelectorSettings.cullInSelection`): true makes the frustum part of selection, as before baseline v7.
+   * Absent is the default, where selection ignores the view direction and culling only picks the drawn leaves.
+   */
+  readonly cullInSelection?: boolean;
   /** Split/merge hysteresis ratio of the distance criterion (`SelectorSettings.hysteresis`); 0 is the single threshold. */
   readonly hysteresis: number;
   readonly folding: boolean;
@@ -96,6 +101,21 @@ function baselineTurns(base: LodSurfaceTestSettings): TestScenario<LodSurfaceTes
     turn(`turn-${domain}-${pose}`, `turn · ${domain} · ${pose}`, { domain, pose }, base),
     turn(`turn-${domain}-${pose}-cap16k`, `turn · ${domain} · ${pose} · leaf cap ${TURN_UNCAPPED_LEAVES} (A/B)`, { domain, pose, leafCap: TURN_UNCAPPED_LEAVES }, base),
     turn(`turn-${domain}-${pose}-nocull`, `turn · ${domain} · ${pose} · culling off (A/B)`, { domain, pose, cull: false }, base),
+  ]);
+}
+
+/**
+ * The turn cases of baseline v7, run with the default selection (view-independent; culling only picks the drawn leaves):
+ * the default cap and two larger ones, per pose, plus one `-legacycull` reference at the default cap, which puts the frustum
+ * back into selection (`cullInSelection`) and so should reproduce v6's flicker. The default-mode cases should read 0 on
+ * `levelChangesPerSecond` and `levelChangesAll`; compare `leaves` (selected) with `drawnLeaves`.
+ */
+function baselineTurnsV7(base: LodSurfaceTestSettings): TestScenario<LodSurfaceTestSettings>[] {
+  return ([['plane-100km', 'low-200m'], ['sphere-600km', 'mid-5km']] as const).flatMap(([domain, pose]) => [
+    turn(`turn-${domain}-${pose}`, `turn · ${domain} · ${pose}`, { domain, pose }, base),
+    turn(`turn-${domain}-${pose}-cap4k`, `turn · ${domain} · ${pose} · leaf cap 4096`, { domain, pose, leafCap: 4096 }, base),
+    turn(`turn-${domain}-${pose}-cap8k`, `turn · ${domain} · ${pose} · leaf cap 8192`, { domain, pose, leafCap: 8192 }, base),
+    turn(`turn-${domain}-${pose}-legacycull`, `turn · ${domain} · ${pose} · legacy: culling in selection (A/B)`, { domain, pose, cullInSelection: true }, base),
   ]);
 }
 
@@ -299,6 +319,18 @@ const BASELINE_V6: TestSuite<LodSurfaceTestSettings> = {
 };
 
 /**
+ * v7: v5's cases and four turn cases per pose (see {@link baselineTurnsV7}), measured with the view-independent selection
+ * (the frustum no longer takes part in split, balance or budget decisions; it only chooses the drawn leaves). v6's
+ * `-cap16k` and `-nocull` controls are dropped: the default cap now plays their role. Numbers of the earlier cases are not
+ * comparable with v6, which selected with the frustum.
+ */
+const BASELINE_V7: TestSuite<LodSurfaceTestSettings> = {
+  ...BASELINE_V6, version: 7,
+  title: 'LOD surface core: cost, cracks, the zoom, the sweep and a pure turn with view-independent selection (Plan 059)',
+  scenarios: [...BASELINE_V5.scenarios, ...baselineTurnsV7(CELLS_16)],
+};
+
+/**
  * v8: terrain v7's cases with the detail noise on (the new default): a few octaves of noise below the texel size, so the
  * ground is no longer flat between texels and the lighting shows it. Same case ids; numbers are not comparable with v7
  * (more vertex work, and the node height ranges are wider by the noise bound).
@@ -309,5 +341,14 @@ const TERRAIN_V8: TestSuite<LodSurfaceTestSettings> = {
   scenarios: [...terrainScenarios(DEFAULT_SETTINGS, true), ...biomeCases(DEFAULT_SETTINGS), ...capAbab(DEFAULT_SETTINGS, 16), ...CELLS_ABAB.map((scenario) => ({ ...scenario, settings: { ...scenario.settings, detailNoise: DEFAULT_SETTINGS.detailNoise } }))],
 };
 
+/**
+ * v9: terrain v8's cases unchanged, measured with the view-independent selection (culling no longer part of selection), so
+ * the leaf counts, the budget and the cost of every case can differ from v8. Same case ids.
+ */
+const TERRAIN_V9: TestSuite<LodSurfaceTestSettings> = {
+  ...TERRAIN_V8, version: 9,
+  title: 'LOD surface core: terrain with view-independent selection, culling only picks the drawn leaves (Plan 059)',
+};
+
 /** Oldest first; the final entry is "Run latest test". Earlier versions are still run by their exact version. */
-export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, BASELINE_V5, BASELINE_V6, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3, TERRAIN_V4, TERRAIN_V5, TERRAIN_V6, TERRAIN_V7, TERRAIN_V8];
+export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, BASELINE_V5, BASELINE_V6, BASELINE_V7, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3, TERRAIN_V4, TERRAIN_V5, TERRAIN_V6, TERRAIN_V7, TERRAIN_V8, TERRAIN_V9];

@@ -33,7 +33,7 @@ import { DEFAULT_SETTINGS, LOD_SURFACE_TEST_HISTORY, type LodSurfaceTestSettings
  * placed relative to the camera from doubles. Reversed float depth, so 2 cm near planes and orbit views share a buffer.
  */
 
-const LEAF_CAPS = [256, 512, 1024, 2048, 4096, 16_384] as const;
+const LEAF_CAPS = [256, 512, 1024, 2048, 4096, 8192, 16_384] as const;
 const FOV_DEG = 60;
 /** Leaves shrink by this share of their size when the injected gap is on. */
 const GAP_SHARE = 0.01;
@@ -188,7 +188,11 @@ interface RendererLike {
         </label>
         <label class="feature">
           <input type="checkbox" [checked]="cull()" (change)="setCull($any($event.target).checked)" />
-          Frustum culling (refine and draw only what the camera sees)
+          Frustum culling (draw only what the camera sees)
+        </label>
+        <label class="feature">
+          <input type="checkbox" [checked]="cullInSelection()" (change)="setCullInSelection($any($event.target).checked)" />
+          Legacy: cull inside selection (refine only what the camera sees; flickers on a turn)
         </label>
         <label class="feature">
           <input type="checkbox" [checked]="folding()" (change)="setFolding($any($event.target).checked)" />
@@ -269,6 +273,7 @@ export class LodSurfaceLabPageComponent {
   readonly cellPixels = signal(DEFAULT_SETTINGS.cellPixels);
   readonly leafCap = signal(DEFAULT_SETTINGS.leafCap);
   readonly cull = signal(DEFAULT_SETTINGS.cull);
+  readonly cullInSelection = signal(false);
   readonly hysteresis = signal(DEFAULT_SETTINGS.hysteresis);
   readonly detailNoise = signal(DEFAULT_SETTINGS.detailNoise);
   readonly folding = signal(DEFAULT_SETTINGS.folding);
@@ -446,6 +451,7 @@ export class LodSurfaceLabPageComponent {
   setPatchCells(cells: PatchCells): void { this.patchCells.set(cells); this.rebuild(); }
   setWarp(warp: CubeWarp): void { this.warp.set(warp); this.rebuild(); }
   setCull(on: boolean): void { this.cull.set(on); this.rebuild(); }
+  setCullInSelection(on: boolean): void { this.cullInSelection.set(on); this.rebuild(); }
   setHysteresis(ratio: number): void { this.hysteresis.set(Math.max(0, ratio)); this.rebuild(); }
   setFolding(on: boolean): void { this.folding.set(on); this.surface?.setFolding(on); }
   setInjectedGap(share: number): void { this.injectedGap.set(share); this.surface?.setInjectedGap(share); }
@@ -503,7 +509,7 @@ export class LodSurfaceLabPageComponent {
   private readSettings(): LodSurfaceTestSettings {
     return {
       domain: this.domainId(), warp: this.warp(), source: this.sourceId(), patchCells: this.patchCells(), mode: this.mode(),
-      fixedLevel: this.fixedLevel(), cellPixels: this.cellPixels(), leafCap: this.leafCap(), cull: this.cull(), hysteresis: this.hysteresis(), folding: this.folding(),
+      fixedLevel: this.fixedLevel(), cellPixels: this.cellPixels(), leafCap: this.leafCap(), cull: this.cull(), ...(this.cullInSelection() ? { cullInSelection: true } : {}), hysteresis: this.hysteresis(), folding: this.folding(),
       injectedGap: this.injectedGap(), pose: this.poseId(), view: this.view(), wireframe: this.wireframe(), bounds: this.bounds(), lighting: this.lighting(), detailNoise: this.detailNoise(),
       ...(this.zoomProgress !== undefined ? { motion: this.biomeMotion ? 'biome-sweep' as const : 'zoom' as const } : this.sweepTime !== undefined ? { motion: 'sweep' as const } : this.turnTime !== undefined ? { motion: 'turn' as const } : {}),
     };
@@ -521,6 +527,7 @@ export class LodSurfaceLabPageComponent {
     this.cellPixels.set(settings.cellPixels);
     this.leafCap.set(settings.leafCap);
     this.cull.set(settings.cull);
+    this.cullInSelection.set(settings.cullInSelection === true);
     this.hysteresis.set(settings.hysteresis);
     this.frozen.set(false);
     this.rebuild();
@@ -553,7 +560,7 @@ export class LodSurfaceLabPageComponent {
     if (sizeChanged) this.freeView = poseView(this.poseId(), this.domain);
     this.selector = new LodSelector({
       domain: this.domain, patchCells: this.patchCells(), mode: this.mode(), fixedLevel: this.fixedLevel(), cellPixels: this.cellPixels(),
-      leafCap: this.leafCap(), heightBoundM: this.source.boundM, cull: this.cull(), hysteresis: this.hysteresis(),
+      leafCap: this.leafCap(), heightBoundM: this.source.boundM, cull: this.cull(), cullInSelection: this.cullInSelection(), hysteresis: this.hysteresis(),
       ...(this.source.nodeRange ? { heightRanges: { nodeRange: this.source.nodeRange.bind(this.source) } } : {}),
     });
     const capacity = this.leafCap() + CAP_SLACK + 6;
