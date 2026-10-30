@@ -436,7 +436,7 @@ surface mesh; nothing in the library changes until G6.
 - Equal Earth or equirectangular for the terrain's map (the cell planet defaults to Equal Earth).
 - Whether the map tiles sideways at morph 1 (Plan 055's D7).
 
-**G6 build plan (proposal, 2026-10-30, nothing built).** What moves from spike 5 into `triangular-engine/lod-surface`,
+**G6 build plan (2026-10-30; G6a, G6b and G6c built, G6d to G6f not started; see the runbook entries of that date).** What moves from spike 5 into `triangular-engine/lod-surface`,
 in steps with headless specs. The spike's code is the reference; it is ported and reviewed, not imported.
 - **G6a One map definition.** Right now two code paths define the map. Both blend from (lon R, lat R) to the target
   projection as `morph` rises, but they disagree in two ways.

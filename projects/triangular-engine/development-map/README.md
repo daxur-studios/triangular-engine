@@ -16,22 +16,38 @@ details. Inline SVG icons and short kind labels distinguish example pages, plans
 review items and related documents.
 
 ```ts
-import { DevelopmentMapComponent, type DevelopmentMapProject } from 'triangular-engine/development-map';
+import {
+  DevelopmentMapComponent,
+  buildDevelopmentMapProject,
+  type DevelopmentMapProject,
+  type EngineeringRecordsManifest,
+} from 'triangular-engine/development-map';
 
-readonly developmentMap: DevelopmentMapProject = loadProjectMap();
+// Zero-config: auto-derives branches, examples, and test evidence from manifest documents
+readonly developmentMap = computed<DevelopmentMapProject | null>(() => {
+  const manifest = this.manifest();
+  if (!manifest) return null;
+  return buildDevelopmentMapProject(manifest, {
+    projectTitle: 'My Project Development Map',
+    runs: this.testRuns(),
+  });
+});
 ```
 
 ```html
-<tri-development-map [project]="developmentMap" />
+@if (developmentMap(); as project) {
+  <tri-development-map [project]="project" />
+}
 ```
 
-Build an adapter that converts your own versioned document manifest, example
-catalog and result index to `DevelopmentMapProject`. Never derive developer
-approval from a plan review marker or checked box. Set `baselineState` to
-`confirmed` only after the developer explicitly confirms that exact snapshot;
-otherwise use `unconfirmed` and omit baseline progress and growth. Keep proposed,
-accepted, deferred and rejected scope changes visible as history, and do not
-count unaccepted changes in the current-scope denominator.
+Use `buildDevelopmentMapProject(manifest, options)` to automatically map the repository manifest
+and optional test results into `DevelopmentMapProject`. You can also supply custom `branches`
+for manual control.
+
+Plan documents can declare:
+- `branch`: visual branch title (defaults to title-cased `initiative_id`).
+- `example_id`, `example_title`, `example_href`: interactive example / lab route.
+- `evidence_suites`: test suite names whose saved index entries attach to the example card.
 
 Evidence contains summary values from the result index only. Keep raw result
 samples and compatible-run comparisons in the project's test-results view. Mark

@@ -1901,3 +1901,74 @@ would cost 25–36 ms. G6e must fix this before shipping a morph animation. Opti
 - a coarser step while the morph animates;
 - spreading the re-measurement over several frames;
 - a cheaper measure (about 5 µs per node now).
+
+## 2026-10-30: G6b: the bend in the library terrain's vertex stage
+
+Built by a Sonnet subagent and reviewed here. Library only (`lod-surface/core`); no component turns the morph on until G6e.
+
+**What was added.**
+- **`lod-morph-math.ts`: P2 is written once.** It is written over a small maths interface and runs three ways: as TSL
+  nodes, in doubles and in a float32 emulation. The specs therefore compare GPU, float32 and exact results from one
+  source.
+  - The map is the material's: Equal Earth blends `1 − m` with `m · 1.1607`, and equirectangular never blends.
+- **Pole stage.**
+  - A vertex nearer the projection's pole than the anchor is measured from the pole instead: the same lattice stage,
+    with the pole's lattice point sent as a float hi/lo pair.
+  - The exact pole vertex takes its leaf's longitude.
+  - This differs from the plan's wording, which asked for (vertex − anchor) + (anchor − pole).
+- **`lod-morph-frame.ts`:**
+  - The per-frame CPU work in doubles: anchor, angles, outline and pole origins.
+  - The CPU map and the unbend.
+  - Accepts `<planet>`'s `morphUniforms` structurally and reads them again on every use.
+- **`lod-morph-leaves.ts`:**
+  - Each leaf takes its side of the cut.
+  - A leaf at the cut is packed twice, so `instanceCapacity` is doubled.
+  - It marks torn leaves and pole-fan leaves.
+- **`lod-morph-stage.ts`:** the TSL vertex stage, plus the fragment discard outside the map outline.
+- **Mesh and body API:**
+  - On the mesh: `createLodSurfaceMesh({ morph })`, `setMorph`, `morphState`, `morphFrame`, `unbend` and
+    `setSkipPoleLeaves`.
+  - On `LodTerrainBody`: `setMorph`, `setMorphCulling('off' | 'bent-bounds')` and `setGeometryHook`.
+  - A plane domain is refused.
+- **Morph 0:** the morph option is off by default and the stage chooses with a `select`. A mesh spec shows the packed
+  arrays are identical with and without the option. Bit identity on the GPU is by construction; there is no headless
+  GPU check of it.
+- **Culling:** frustum culling is off above morph 0 by default, until G6e wires G6c's bent bounds through
+  `'bent-bounds'`.
+
+**Checks** (rerun here):
+- lod-surface specs: 232 of 232, headless.
+- Library build clean.
+- The agent also ran planet-material (119 of 119) and the demo-app development build, both passing.
+
+**Precision.**
+- **Near the camera:** the GPU stage matches doubles to 2.9–4.5e-7 relative error; the float32 emulation gives
+  2.6–4.0e-7.
+- **Seams:** a seam vertex is bit-identical across leaves with different leaf longitudes in the same window, in doubles
+  and float32.
+- **Pole zone** (float32 emulation, vertices 1 m to 1 km from the pole):
+  - Vertices 60 m or more from the camera are off by under 1 px.
+  - Closer than 60 m they are off by up to about 5 cm.
+  - The pole stage beats the anchor alone by one to two orders of magnitude where the anchor alone fails. For example,
+    600 km, morph 1, centre 20/35 drops from 17.5 to 2.1 px.
+  - Two cases stay above 1 px. 6,371 km, morph 1, centre 0/0 is 12.8 px (18.3 px with the anchor alone). The 600 km
+    case is the one above.
+- **GPU check:** four vertices 10 m from the pole (6,371 km, tilted centre, camera 1 km away) are under 0.01 px, all via
+  the pole stage.
+
+**Assessment.**
+- **Why it isn't fully fixed:** at morph 1 the map stretches the pole's neighbourhood across the whole top edge.
+  Anything a vertex there is off by is multiplied by roughly R over its distance from the pole, so float32 can't fully
+  fix it.
+- **What it affects:** only a camera within tens of metres of the projection's pole while the morph is well above 0.
+  G6d's fan replaces the pole leaves themselves; the residual stays in the leaves around them.
+- **Accepted for now.** G6f must judge the pole zone on the real GPU, and a double-float pole path stays open if that
+  view shows smearing.
+
+**Open, carried to G6d/G6e:**
+- The map maths is now copied twice inside core. `lod-morph-frame.ts` has it for G6b, and `lod-morph-metric.ts` has it
+  for G6c, along with its own projection basis and pole-corner helpers. Both copies are spec-checked against
+  `planetMapXY`, but the metric should reuse the frame module's copy.
+- `computeMorphFrame` allocates a few objects every frame.
+- Above morph 0 the shading normal is only the bent up direction (G6e).
+- The selector sees the unbent camera. G6c's stretch metric needs the camera in the measured frame, which G6e wires.

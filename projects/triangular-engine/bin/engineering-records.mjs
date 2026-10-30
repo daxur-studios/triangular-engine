@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import {
+  copyFile,
   mkdir,
   open,
   readFile,
@@ -589,6 +590,24 @@ function frontmatterList(text, field) {
     : [];
 }
 
+function parseStringList(text, fields, listKey, singleKey) {
+  const yamlList = frontmatterList(text, listKey);
+  if (yamlList.length) return yamlList;
+  const raw = fields[listKey];
+  if (raw && raw.startsWith("[") && raw.endsWith("]")) {
+    return raw
+      .slice(1, -1)
+      .split(",")
+      .map((item) => item.trim().replace(/^(['"])(.*)\1$/, "$2"))
+      .filter((item) => item.length > 0);
+  }
+  if (raw && raw.trim()) return [raw.trim().replace(/^(['"])(.*)\1$/, "$2")];
+  if (singleKey && fields[singleKey] && fields[singleKey].trim()) {
+    return [fields[singleKey].trim().replace(/^(['"])(.*)\1$/, "$2")];
+  }
+  return [];
+}
+
 function resolveRelation(root, sourceFile, href) {
   const [target, phase] = href.split("#");
   const absolute = target.startsWith("/")
@@ -633,6 +652,9 @@ async function readPlans(root, errors) {
         phases: [],
         progress: null,
         relations: [],
+        branch: null,
+        example: null,
+        evidenceSuites: [],
         _filename: filename,
         _text: text,
       });
@@ -758,6 +780,21 @@ async function readPlans(root, errors) {
     const done = Object.values(progress).filter(
       (state) => state === "done",
     ).length;
+    const branch = fields.branch?.trim() || null;
+    const exampleId = fields.example_id?.trim() || null;
+    const example = exampleId
+      ? {
+          id: exampleId,
+          title: fields.example_title?.trim() || fields.title,
+          href: fields.example_href?.trim() || `/examples/${exampleId}`,
+        }
+      : null;
+    const evidenceSuites = parseStringList(
+      text,
+      fields,
+      "evidence_suites",
+      "evidence_suite",
+    );
     documents.push({
       id: documentId ?? "",
       number: Number(idNumber ?? filenameNumber ?? 0),
@@ -771,6 +808,9 @@ async function readPlans(root, errors) {
       recordId: recordFields.record_id ?? null,
       scopeHash: review.scopeHash,
       mapped: true,
+      branch,
+      example,
+      evidenceSuites,
       review: {
         state: review.current ? "reviewed" : "unassessed",
         reviewed: review.reviewed ?? null,
@@ -1330,7 +1370,7 @@ function parseFlags(args) {
 }
 
 function help() {
-  return `Engineering document helper\n\n  npm run docs:records:next\n  npm run docs:records:new -- --title "Water scattering" --slug water-scattering\n  npm run docs:records:review -- docs/plans/NNN_topic.md agent\n  npm run docs:records:baseline -- docs/plans/NNN_topic.md --developer-confirmed\n  npm run docs:records:check\n  npm run docs:records:manifest [--output path]\n\nReview refreshes an agent assessment; it does not signify developer approval. Baseline confirmation requires explicit developer approval of the exact scope snapshot.`;
+  return `Engineering document helper\n\n  npm run docs:records:next\n  npm run docs:records:new -- --title "Water scattering" --slug water-scattering\n  npm run docs:records:review -- docs/plans/NNN_topic.md agent\n  npm run docs:records:baseline -- docs/plans/NNN_topic.md --developer-confirmed\n  npm run docs:records:check\n  npm run docs:records:manifest [--output path] [--export-docs dir]\n\nReview refreshes an agent assessment; it does not signify developer approval. Baseline confirmation requires explicit developer approval of the exact scope snapshot.`;
 }
 
 export async function main(
@@ -1399,6 +1439,34 @@ export async function main(
         console.log(`Wrote ${path.relative(projectRoot, output)}`);
       } else {
         console.log(serialized);
+      }
+      if (flags["export-docs"]) {
+        if (flags["export-docs"] === true)
+          throw new Error("--export-docs requires a directory path");
+        const exportDir = path.resolve(projectRoot, flags["export-docs"]);
+        await mkdir(exportDir, { recursive: true });
+        let exportedCount = 0;
+        for (const doc of manifest.documents) {
+          if (doc.plan) {
+            const planSrc = projectPath(projectRoot, doc.plan);
+            const planDest = path.join(exportDir, `${doc.id}.md`);
+            if (await exists(planSrc)) {
+              await copyFile(planSrc, planDest);
+              exportedCount++;
+            }
+          }
+          if (doc.record && doc.recordId) {
+            const recordSrc = projectPath(projectRoot, doc.record);
+            const recordDest = path.join(exportDir, `${doc.recordId}.md`);
+            if (await exists(recordSrc)) {
+              await copyFile(recordSrc, recordDest);
+              exportedCount++;
+            }
+          }
+        }
+        console.log(
+          `Exported ${exportedCount} document(s) to ${path.relative(projectRoot, exportDir)}`,
+        );
       }
       return 0;
     }

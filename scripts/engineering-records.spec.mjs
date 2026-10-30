@@ -460,7 +460,8 @@ test("validates relation targets and rejects dependency cycles while allowing re
 
 test("does not leave generated documents when the indexes cannot be updated", async () => {
   await rm(path.join(root, "docs", "runbook", "index.md"));
-  await assert.rejects(create("partial-pair"), /ENOENT/);
+  await mkdir(path.join(root, "docs", "runbook", "index.md"));
+  await assert.rejects(create("partial-pair"), /(?:EISDIR|EPERM|EEXIST)/);
   assert.deepEqual(
     (await readdir(path.join(root, "docs", "plans"))).filter((name) =>
       /^066_/.test(name),
@@ -532,4 +533,58 @@ test("the CLI creates and validates a separate consumer workspace through its ma
   assert.equal(exported.status, 0, exported.stderr);
   const output = JSON.parse(await readFile(path.join(root, "out", "map.json"), "utf8"));
   assert.equal(output.documents[0].scopeHistory.baseline.state, "unconfirmed");
+});
+
+test("manifest includes branch, example, and evidence metadata and exports documents", async () => {
+  const created = await create("procedural-branch", "Procedural branch");
+  const planFile = path.join(root, created.plan);
+  const original = await readFile(planFile, "utf8");
+  const withMetadata = original.replace(
+    "initiative_id: \"procedural-branch\"",
+    "initiative_id: \"procedural-branch\"\nbranch: \"Procedural Building\"\nexample_id: \"procedural-studio\"\nexample_title: \"Procedural Studio\"\nexample_href: \"/examples/studio\"\nevidence_suites:\n  - procedural-studio-tests\n  - procedural-perf",
+  );
+  await writeFile(planFile, withMetadata, "utf8");
+
+  const exported = spawnSync(
+    process.execPath,
+    [
+      SCRIPT,
+      "manifest",
+      "--root",
+      root,
+      "--output",
+      "public/manifest.json",
+      "--export-docs",
+      "public/docs",
+    ],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  assert.equal(exported.status, 0, exported.stderr);
+
+  const manifest = JSON.parse(
+    await readFile(path.join(root, "public", "manifest.json"), "utf8"),
+  );
+  const doc = manifest.documents.find((d) => d.id === "plan-001");
+  assert.ok(doc, "plan-001 should exist");
+  assert.equal(doc.branch, "Procedural Building");
+  assert.deepEqual(doc.example, {
+    id: "procedural-studio",
+    title: "Procedural Studio",
+    href: "/examples/studio",
+  });
+  assert.deepEqual(doc.evidenceSuites, [
+    "procedural-studio-tests",
+    "procedural-perf",
+  ]);
+
+  const planCopied = await readFile(
+    path.join(root, "public", "docs", "plan-001.md"),
+    "utf8",
+  );
+  assert.match(planCopied, /# Plan 001: Procedural branch/);
+  const recordCopied = await readFile(
+    path.join(root, "public", "docs", "er-001.md"),
+    "utf8",
+  );
+  assert.match(recordCopied, /# Engineering Record 001: Procedural branch/);
 });
