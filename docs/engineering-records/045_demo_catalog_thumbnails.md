@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Demo Catalog Thumbnails
 description: Decisions and implementation evidence for the demo preview catalog and engine portal capture control.
 timestamp: 2026-10-13T00:00:00Z

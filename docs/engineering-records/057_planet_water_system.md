@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Planet Water System
 description: Findings, decisions, race results and timings for the planet-scale ocean. Currently design notes only.
 timestamp: 2026-10-20T00:00:00Z

@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Page Test Sessions and Performance Comparison
 description: Findings, decisions and evidence for page-generic agent+human test sessions, shared scenarios and interactive performance comparison.
 timestamp: 2026-10-17T00:00:00Z

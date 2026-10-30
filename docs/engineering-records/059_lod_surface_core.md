@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: LOD Surface Core for Water and Terrain
 description: Findings, decisions, gates and timings for the shared LOD surface (plane and sphere) and its first users, water and low-detail terrain. Currently design notes only.
 timestamp: 2026-10-24T00:00:00Z

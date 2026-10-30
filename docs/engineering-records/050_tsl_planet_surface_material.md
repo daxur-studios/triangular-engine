@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: TSL Planet Surface Material
 description: Findings and decisions for porting the cell-planet surface to an extensible TSL material.
 timestamp: 2026-10-16T00:00:00Z

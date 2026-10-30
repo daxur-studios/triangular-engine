@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: WebGPURenderer as the Default Renderer
 description: Findings, decisions, test results and renderer comparisons for switching triangular-engine's default renderer to WebGPURenderer and removing Takram.
 timestamp: 2026-10-19T00:00:00Z

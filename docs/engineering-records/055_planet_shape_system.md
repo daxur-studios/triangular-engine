@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Planet Shape System
 description: Findings, decisions, race results and timings for terrain attempt 5.
 timestamp: 2026-10-19T00:00:00Z

@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Composite Cell Planet on WebGPURenderer
 description: Findings, decisions and evidence for putting a game's cell planet on WebGPURenderer and assembling surface, ocean, morph, atmosphere and clouds behind one component.
 timestamp: 2026-10-25T00:00:00Z

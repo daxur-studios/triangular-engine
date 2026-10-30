@@ -4,7 +4,7 @@ title: Planet Water System
 description: A measured, harness-first planet water system at 150-160 fps (ocean waves, beaches and shoreline, far-field detail, orbit-to-surface transitions, wakes, splashes and floating bodies, swappable styles, rivers, weather and ice hooks), chosen by a gated race between four surface contenders on the Plan 055 test track. Design only; nothing built.
 timestamp: 2026-10-20T00:00:00Z
 tags: [water, ocean, planet, waves, fft, gerstner, shoreline, beach, interaction, wake, buoyancy, styles, weather, ice, tsl, webgpu, performance, testing, floating-origin]
-runbook: /docs/runbook/057_planet_water_system.md
+record: /docs/engineering-records/057_planet_water_system.md
 performance: []
 ---
 

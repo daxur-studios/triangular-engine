@@ -4,7 +4,7 @@ title: Composite Cell Planet on WebGPURenderer
 description: Put a game's first planet on WebGPURenderer ahead of the engine-wide default flip, and give games one Angular component that assembles the cell-planet surface, ocean, morph, streamed material, atmosphere and clouds from the existing building blocks.
 timestamp: 2026-10-25T00:00:00Z
 tags: [cell-planet, planet-material, atmosphere, cloud-volumes, worldgen, webgpu, renderer, components, consumer-api]
-runbook: /docs/runbook/065_composite_cell_planet.md
+record: /docs/engineering-records/065_composite_cell_planet.md
 performance: []
 ---
 

@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Impostor Baker Testing
 description: Planning findings and implementation evidence for reusable tests on the octahedral impostor baker page.
 timestamp: 2026-10-25T00:00:00Z

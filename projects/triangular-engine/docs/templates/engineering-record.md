@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: "{{TITLE}}"
 description: "Dated decisions, findings and evidence for {{TITLE}}."
 timestamp: {{DATE}}T00:00:00Z

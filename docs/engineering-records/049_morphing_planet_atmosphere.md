@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Morphing Planet Atmosphere
 description: Findings and decisions for the new cell-planet atmosphere that follows the globe ↔ flat-map morph.
 timestamp: 2026-10-16T00:00:00Z

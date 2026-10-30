@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: "Test Cost Breakdown and Budget View"
 description: "Dated decisions, findings and evidence for Test Cost Breakdown and Budget View."
 timestamp: 2026-10-26T00:00:00Z

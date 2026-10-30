@@ -4,7 +4,7 @@ title: Engineering Records and Development Map
 description: Preserve numbered engineering history, formalize plan readiness, and build a reusable view of progress and test evidence.
 timestamp: 2026-10-25T00:00:00Z
 tags: [documentation, planning, engineering-records, testing, visualization]
-runbook: /docs/runbook/066_engineering_records_and_development_map.md
+record: /docs/engineering-records/066_engineering_records_and_development_map.md
 map_schema: 1
 document_id: plan-066
 initiative_id: engineering-records-development-map

@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Planet Surface Detail LOD
 description: Design notes and evidence for drawing trees, rocks, runways and other surface objects on the cell planet as meshes up close and as part of the surface material far away, lit and hazed by the same atmosphere.
 timestamp: 2026-10-25T00:00:00Z

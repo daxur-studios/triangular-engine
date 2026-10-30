@@ -4,7 +4,7 @@ title: Engine Docs Ship With Entry Points
 description: Move entry-specific triangular-engine guides into each secondary entry point's README, ship docs/ in the npm package, and make the root README an index.
 timestamp: 2026-10-25T00:00:00Z
 tags: [documentation, packaging, entry-points, agents]
-runbook: /docs/runbook/064_engine_docs_ship_with_entry_points.md
+record: /docs/engineering-records/064_engine_docs_ship_with_entry_points.md
 performance: []
 ---
 

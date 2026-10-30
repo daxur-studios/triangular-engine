@@ -4,7 +4,7 @@ title: "Procedural shape verification"
 description: "Deterministic shape, invariant and budget verification for agent-written procedural part generators."
 timestamp: 2026-10-27T00:00:00Z
 tags: [engineering-records, procedural, testing]
-runbook: /docs/runbook/068_procedural-shape-verification.md
+record: /docs/engineering-records/068_procedural-shape-verification.md
 map_schema: 1
 document_id: plan-068
 initiative_id: "procedural-shape-verification"

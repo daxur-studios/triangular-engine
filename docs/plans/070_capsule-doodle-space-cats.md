@@ -4,7 +4,7 @@ title: "Capsule Doodle Space Cats"
 description: "Four-legged parametric space cats for triangular-engine/characters and triangular-engine/procedural, plus the characters-lab integration."
 timestamp: 2026-10-28T00:00:00Z
 tags: [engineering-records]
-runbook: /docs/runbook/070_capsule-doodle-space-cats.md
+record: /docs/engineering-records/070_capsule-doodle-space-cats.md
 map_schema: 1
 document_id: plan-070
 initiative_id: "capsule-doodle-space-cats"

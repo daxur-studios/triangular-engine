@@ -4,7 +4,7 @@ title: "Triangular CLI and Consensus Reviews"
 description: "Provide a portable Triangular CLI for project documents, consensus reviews and testing workflows."
 timestamp: 2026-10-29T00:00:00Z
 tags: [engineering-records]
-runbook: /docs/runbook/071_triangular-cli-consensus-reviews.md
+record: /docs/engineering-records/071_triangular-cli-consensus-reviews.md
 map_schema: 1
 document_id: plan-071
 initiative_id: "triangular-cli-consensus-reviews"

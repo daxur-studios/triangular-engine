@@ -4,7 +4,7 @@ title: "{{TITLE_YAML}}"
 description: "{{DESCRIPTION_YAML}}"
 timestamp: {{DATE}}T00:00:00Z
 tags: [engineering-records]
-runbook: /docs/runbook/{{NUMBER}}_{{SLUG}}.md
+record: /{{RECORD_DIR}}/{{NUMBER}}_{{SLUG}}.md
 map_schema: 1
 document_id: plan-{{NUMBER}}
 initiative_id: "{{INITIATIVE_ID}}"
@@ -13,7 +13,7 @@ performance: []
 
 # Plan {{NUMBER}}: {{TITLE}}
 
-Status: **planned**. Evidence and decisions: [ER {{NUMBER}}](/docs/runbook/{{NUMBER}}_{{SLUG}}.md).
+Status: **planned**. Evidence and decisions: [ER {{NUMBER}}](/{{RECORD_DIR}}/{{NUMBER}}_{{SLUG}}.md).
 
 <!-- tri:scope -->
 

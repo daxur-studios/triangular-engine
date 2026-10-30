@@ -4,7 +4,7 @@ title: Planet Surface Detail LOD
 description: Draw trees, rocks, runways and other surface objects as meshes up close and as part of the planet surface material far away, with one lighting and atmosphere model for every form.
 timestamp: 2026-10-25T00:00:00Z
 tags: [cell-planet, planet-material, lod, impostor, scatter, atmosphere, tsl, webgpu]
-runbook: /docs/runbook/063_planet_surface_detail_lod.md
+record: /docs/engineering-records/063_planet_surface_detail_lod.md
 performance: []
 ---
 

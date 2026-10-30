@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Cloud Volumes
 description: Findings, decisions and timings for fast flyable 3D clouds on WebGPURenderer.
 timestamp: 2026-10-17T00:00:00Z

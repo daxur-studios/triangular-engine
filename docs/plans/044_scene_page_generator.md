@@ -4,7 +4,7 @@ title: Reusable Scene Page Schematic
 description: Add a standalone scene page generator with optional lazy routing.
 timestamp: 2026-10-13T00:00:00Z
 tags: [schematics, angular, scene]
-runbook: /docs/runbook/044_scene_page_generator.md
+record: /docs/engineering-records/044_scene_page_generator.md
 status: done
 ---
 

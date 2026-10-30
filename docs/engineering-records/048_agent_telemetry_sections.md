@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Agent Telemetry Sections
 description: Evidence for the page-supplied telemetry sections in the engine's Copy for Agent report.
 timestamp: 2026-10-14T12:00:00Z

@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Test Runner Batch Runs and a Deterministic Stop Rule
 description: Decisions, review outcomes and open questions for the batch runner, the stop rule and copy-all.
 timestamp: 2026-10-24T00:00:00Z

@@ -4,7 +4,7 @@ title: "Test Cost Breakdown and Budget View"
 description: "Proposal: a view of each saved browser test's cost by resource (GPU ms, CPU ms, triangles, draw calls, GPU MB) against a budget, and a labelled what-if that adds systems (terrain, surface material, sky, clouds), confirmed by a real combined-scene test."
 timestamp: 2026-10-26T00:00:00Z
 tags: [testing, results, budgets, performance, demo-app, proposal]
-runbook: /docs/runbook/067_test-cost-breakdown.md
+record: /docs/engineering-records/067_test-cost-breakdown.md
 map_schema: 1
 document_id: plan-067
 initiative_id: "test-cost-breakdown"

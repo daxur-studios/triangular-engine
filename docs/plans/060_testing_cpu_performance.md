@@ -4,7 +4,7 @@ title: Testing Entry for CPU Performance Work
 description: Named span timing, CPU micro-bench cases, shared helpers, runner fixes and a Node-safe core entry for triangular-engine/testing.
 timestamp: 2026-10-24T00:00:00Z
 tags: [testing, cpu, performance, tooling]
-runbook: /docs/runbook/060_testing_cpu_performance.md
+record: /docs/engineering-records/060_testing_cpu_performance.md
 performance: []
 ---
 

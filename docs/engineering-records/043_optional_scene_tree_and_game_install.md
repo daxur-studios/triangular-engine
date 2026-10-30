@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Optional Scene Tree and Game Install — Runbook
 description: Decisions and package-consumer evidence for the optional Material UI boundary.
 timestamp: 2026-10-13T00:00:00Z

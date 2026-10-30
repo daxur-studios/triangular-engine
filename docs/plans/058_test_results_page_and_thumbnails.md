@@ -4,7 +4,7 @@ title: Test Results Page and Case Thumbnails
 description: A browsable page of saved browser test runs (list, run detail with the change from a baseline, side-by-side compare) with small untimed thumbnails per case, built on the testing entry and its local receiver.
 timestamp: 2026-10-20T00:00:00Z
 tags: [testing, results, thumbnails, receiver, demo-app, tooling]
-runbook: /docs/runbook/058_test_results_page_and_thumbnails.md
+record: /docs/engineering-records/058_test_results_page_and_thumbnails.md
 performance: []
 ---
 

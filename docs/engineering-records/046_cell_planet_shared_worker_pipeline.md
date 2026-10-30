@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Shared Cell-Planet Worker Pipeline and Worldgen Extraction
 description: Implementation runbook and evidence for extracting canonical cell-planet worldgen and worker message processing into triangular-engine.
 timestamp: 2026-10-14T00:15:00Z

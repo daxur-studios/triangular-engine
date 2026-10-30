@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Terrain View Culling and Rotation Churn
 description: Evidence for the cell-planet terrain view-culling and rotation-churn changes.
 timestamp: 2026-10-14T12:00:00Z

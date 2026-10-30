@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Engine Docs Ship With Entry Points
 description: Dated decisions and checks for moving triangular-engine guides into entry-point READMEs and shipping docs/.
 timestamp: 2026-10-25T00:00:00Z

@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Procedural Creature Animation
 description: Findings, decisions and motion-quality evidence for procedural creature and stylized character animation.
 timestamp: 2026-10-17T00:00:00Z

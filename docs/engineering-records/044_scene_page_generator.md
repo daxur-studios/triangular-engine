@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Reusable Scene Page Schematic
 description: Implementation decisions and verification evidence for the scene-page generator.
 timestamp: 2026-10-13T00:00:00Z

@@ -4,7 +4,7 @@ title: TSL Planet Surface Material
 description: Port the cell-planet surface from GLSL onBeforeCompile patches to an extensible TSL PlanetSurfaceMaterial that runs on WebGPURenderer (WebGPU and its WebGL2 fallback) and that games can add layers, occluders and emissives to.
 timestamp: 2026-10-16T00:00:00Z
 tags: [tsl, webgpu, node-material, cell-planet, morph, terrain, materials, extensibility]
-runbook: /docs/runbook/050_tsl_planet_surface_material.md
+record: /docs/engineering-records/050_tsl_planet_surface_material.md
 ---
 
 # Plan 050: TSL Planet Surface Material

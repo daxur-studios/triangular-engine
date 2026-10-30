@@ -4,7 +4,7 @@ title: Cloud Volumes
 description: Fast, flyable 3D clouds in TSL on WebGPURenderer, using bounded density volumes with baked light and distance fields, lit by the Plan 049 atmosphere, shaped by noise, meshes or GPU particles, plus a cheap planet-scale shell for the far view.
 timestamp: 2026-10-17T00:00:00Z
 tags: [clouds, volumetric, raymarching, atmosphere, tsl, webgpu, performance, stylized]
-runbook: /docs/runbook/051_cloud_volumes.md
+record: /docs/engineering-records/051_cloud_volumes.md
 ---
 
 # Plan 051: Cloud Volumes

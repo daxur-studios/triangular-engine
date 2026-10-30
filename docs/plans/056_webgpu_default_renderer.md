@@ -4,7 +4,7 @@ title: WebGPURenderer as the Default Renderer
 description: Switch triangular-engine's default renderer from WebGLRenderer to WebGPURenderer, remove the Takram integration, port or retire every WebGL-only module, keep a consumer opt-out, and prove the switch with tests and a GPU-time comparison on both renderers.
 timestamp: 2026-10-19T00:00:00Z
 tags: [renderer, webgpu, webgl, tsl, migration, postprocessing, takram, performance, testing, breaking-change]
-runbook: /docs/runbook/056_webgpu_default_renderer.md
+record: /docs/engineering-records/056_webgpu_default_renderer.md
 performance: []
 ---
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import {
   copyFile,
   mkdir,
@@ -23,6 +24,14 @@ const RECORD_TEMPLATE = "docs/templates/engineering-record.md";
 const PLAN_INDEX_TEMPLATE = "docs/templates/plans-index.md";
 const RECORD_INDEX_TEMPLATE = "docs/templates/engineering-records-index.md";
 const PHASE = /^[a-z][a-z0-9-]*$/;
+
+function getRecordsDirName(root) {
+  if (existsSync(path.join(root, "docs", "engineering-records")))
+    return "docs/engineering-records";
+  if (existsSync(path.join(root, "docs", "runbook")))
+    return "docs/runbook";
+  return "docs/engineering-records";
+}
 const SHA256 = /^[a-f0-9]{64}$/;
 const ITEM_KINDS = new Set(["intent", "assumption", "investigation"]);
 const ITEM_STATES = new Set(["open", "deferred", "resolved"]);
@@ -621,15 +630,17 @@ function resolveRelation(root, sourceFile, href) {
 
 async function readPlans(root, errors) {
   const documents = [];
+  const recordsDirName = getRecordsDirName(root);
   const plansDir = path.join(root, "docs", "plans");
   const planIndex = await readFileIfPresent(path.join(plansDir, "index.md"));
   const recordIndex = await readFileIfPresent(
-    path.join(root, "docs", "runbook", "index.md"),
+    path.join(root, recordsDirName, "index.md"),
   );
   for (const filename of await markdownFiles(plansDir)) {
     const text = await readFile(filename, "utf8");
     const fields = frontmatter(text, filename, errors);
     const relative = path.relative(root, filename).split(path.sep).join("/");
+    const recordRef = fields.record || fields.runbook;
     if (fields.map_schema === undefined) {
       if (fields.type !== "Plan") continue;
       const stem = path.basename(filename, ".md");
@@ -644,7 +655,7 @@ async function readPlans(root, errors) {
         initiativeId: `legacy-${legacySlug}`,
         title: fields.title ?? stem,
         plan: `/${relative}`,
-        record: fields.runbook ?? null,
+        record: recordRef ?? null,
         recordId: null,
         scopeHash: null,
         mapped: false,
@@ -679,23 +690,23 @@ async function readPlans(root, errors) {
       errors.push(
         `${filename}: map_schema: 1 documents must retain type: Plan`,
       );
-    if (!fields.runbook)
+    if (!recordRef)
       errors.push(
-        `${filename}: reciprocal runbook reference is required during compatibility period`,
+        `${filename}: reciprocal record reference is required`,
       );
-    const recordPath = fields.runbook ? projectPath(root, fields.runbook) : "";
-    const recordRelative = fields.runbook
-      ? path.relative(path.join(root, "docs", "runbook"), recordPath)
+    const recordPath = recordRef ? projectPath(root, recordRef) : "";
+    const recordRelative = recordRef
+      ? path.relative(path.join(root, recordsDirName), recordPath)
       : "";
     if (
-      fields.runbook &&
+      recordRef &&
       (recordRelative === ".." ||
         recordRelative.startsWith(`..${path.sep}`) ||
         path.isAbsolute(recordRelative) ||
         !recordRelative.toLowerCase().endsWith(".md"))
     )
       errors.push(
-        `${filename}: runbook must point to an Engineering Record under docs/runbook`,
+        `${filename}: record must point to an Engineering Record under ${recordsDirName}`,
       );
     const documentId = fields.document_id;
     const idNumber = /^plan-(\d+)$/.exec(documentId ?? "")?.[1];
@@ -710,19 +721,19 @@ async function readPlans(root, errors) {
       Number(filenameNumber) !== Number(idNumber)
     )
       errors.push(`${filename}: filename number does not match document_id`);
-    const recordText = fields.runbook
+    const recordText = recordRef
       ? await readFileIfPresent(recordPath)
       : "";
     if (
-      fields.runbook &&
+      recordRef &&
       !frontmatterList(recordText, "plans").includes(`/${relative}`)
     )
       errors.push(
         `${filename}: Engineering Record must reciprocally list /${relative} in plans:`,
       );
-    if (fields.runbook && !/^type:\s*Runbook\s*$/m.test(recordText))
+    if (recordRef && !/^(?:type:\s*(?:EngineeringRecord|Runbook)\s*)$/m.test(recordText))
       errors.push(
-        `${filename}: paired Engineering Record must retain type: Runbook during the compatibility period`,
+        `${filename}: paired Engineering Record must retain type: EngineeringRecord`,
       );
     const recordFields = recordText
       ? frontmatter(recordText, recordPath, errors)
@@ -749,9 +760,9 @@ async function readPlans(root, errors) {
       errors.push(`${recordPath}: filename number does not match record_id`);
     if (!planIndex.includes(`(${`/${relative}`})`))
       errors.push(`${filename}: add the plan to docs/plans/index.md`);
-    if (fields.runbook && !recordIndex.includes(`(${fields.runbook})`))
+    if (recordRef && !recordIndex.includes(`(${recordRef})`))
       errors.push(
-        `${filename}: add the Engineering Record to docs/runbook/index.md`,
+        `${filename}: add the Engineering Record to ${recordsDirName}/index.md`,
       );
     const relations = scope
       ? parseRelations(scope, filename, errors).map((relation) => ({
@@ -804,7 +815,7 @@ async function readPlans(root, errors) {
         /## Intended outcome\s*\r?\n([\s\S]*?)(?=\r?\n## |$)/.exec(scope ?? "")?.[1]
           ?.trim() ?? "",
       plan: `/${relative}`,
-      record: fields.runbook ?? "",
+      record: recordRef ?? "",
       recordId: recordFields.record_id ?? null,
       scopeHash: review.scopeHash,
       mapped: true,
@@ -937,6 +948,7 @@ function templateValues({
   slug,
   initiativeId,
   date,
+  recordsDirName = "docs/engineering-records",
 }) {
   const yaml = (value) => value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   return {
@@ -948,6 +960,7 @@ function templateValues({
     SLUG: slug,
     INITIATIVE_ID: initiativeId,
     DATE: date,
+    RECORD_DIR: recordsDirName,
   };
 }
 
@@ -969,7 +982,8 @@ function numericPrefix(filename) {
 
 export async function nextNumber(root = DEFAULT_ROOT) {
   let highest = 0;
-  for (const folder of ["docs/plans", "docs/runbook"])
+  const recordsDirName = getRecordsDirName(root);
+  for (const folder of ["docs/plans", recordsDirName])
     for (const filename of await markdownFiles(path.join(root, folder))) {
       const prefix = numericPrefix(path.basename(filename));
       if (prefix) highest = Math.max(highest, Number(prefix));
@@ -1030,12 +1044,12 @@ async function atomicWrite(filename, content) {
   }
 }
 
-function addIndexRow(source, row, number, kind, filename) {
+function addIndexRow(source, row, number, kind, filename, recordsDirName = "docs/engineering-records") {
   const lines = source.split(/\r?\n/);
   const separator = lines.findIndex((line) => /^\|\s*:?-{2,}/.test(line));
   if (separator < 0)
     throw new Error(`${filename}: expected a Markdown index table`);
-  const pathPrefix = kind === "plan" ? "/docs/plans/" : "/docs/runbook/";
+  const pathPrefix = kind === "plan" ? "/docs/plans/" : `/${recordsDirName}/`;
   if (source.includes(pathPrefix + `${String(number).padStart(3, "0")}_`))
     return source;
   let insertion = lines.findIndex(
@@ -1076,21 +1090,23 @@ async function readOrCreateIndex(filename, templateFilename, templateRoot, date)
 }
 
 async function updateIndexes(root, number, title, stem, date, templateRoot) {
+  const recordsDirName = getRecordsDirName(root);
   const planIndex = path.join(root, "docs", "plans", "index.md");
-  const recordIndex = path.join(root, "docs", "runbook", "index.md");
+  const recordIndex = path.join(root, recordsDirName, "index.md");
   const [oldPlan, oldRecord] = await Promise.all([
     readOrCreateIndex(planIndex, PLAN_INDEX_TEMPLATE, templateRoot, date),
     readOrCreateIndex(recordIndex, RECORD_INDEX_TEMPLATE, templateRoot, date),
   ]);
   const padded = String(number).padStart(3, "0");
   const planPath = `/docs/plans/${stem}.md`;
-  const recordPath = `/docs/runbook/${stem}.md`;
+  const recordPath = `/${recordsDirName}/${stem}.md`;
   const nextPlan = addIndexRow(
     oldPlan,
     `| [${title}](${planPath}) | planned | [ER ${padded}](${recordPath}) |`,
     number,
     "plan",
     planIndex,
+    recordsDirName,
   );
   const nextRecord = addIndexRow(
     oldRecord,
@@ -1098,6 +1114,7 @@ async function updateIndexes(root, number, title, stem, date, templateRoot) {
     number,
     "record",
     recordIndex,
+    recordsDirName,
   );
   if (nextPlan !== oldPlan) await atomicWrite(planIndex, nextPlan);
   try {
@@ -1126,12 +1143,14 @@ export async function createPair({
     throw new Error("--initiative must be a lowercase stable slug");
   if (/[\r\n]/.test(description))
     throw new Error("Provide a one-line --description");
+  const recordsDirName = getRecordsDirName(root);
   const valuesBase = {
     title: title.trim(),
     slug,
     initiativeId,
     description: description.trim() || title.trim(),
     date,
+    recordsDirName,
   };
   const planTemplate = await readFile(
     path.join(templateRoot, PLAN_TEMPLATE),
@@ -1142,7 +1161,7 @@ export async function createPair({
     "utf8",
   );
   const plansDir = path.join(root, "docs", "plans");
-  const recordsDir = path.join(root, "docs", "runbook");
+  const recordsDir = path.join(root, recordsDirName);
   await Promise.all([
     mkdir(plansDir, { recursive: true }),
     mkdir(recordsDir, { recursive: true }),
@@ -1305,7 +1324,8 @@ export async function confirmScopeBaseline({
   const scope = block(text, "scope", filename, errors);
   const phases = scope ? parsePhases(scope, filename, errors) : [];
   if (errors.length) throw new Error(errors.join("\n"));
-  const recordPath = fields.runbook ? projectPath(root, fields.runbook) : "";
+  const recordRef = fields.record || fields.runbook;
+  const recordPath = recordRef ? projectPath(root, recordRef) : "";
   if (!recordPath) throw new Error("The plan needs a paired Engineering Record.");
   let recordText = await readFile(recordPath, "utf8");
   const recordFields = frontmatter(recordText, recordPath, errors);

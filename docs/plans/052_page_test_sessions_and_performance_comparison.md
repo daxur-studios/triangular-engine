@@ -4,7 +4,7 @@ title: Page Test Sessions and Performance Comparison
 description: Prove unattended headless GPU replay on the cloud lab, then generalize shared page scenarios, suites, validity gates and compact evidence for agents, CI and the human fallback.
 timestamp: 2026-10-18T00:00:00Z
 tags: [testing, playwright, agent, page-test, performance, telemetry, demo, scenarios, suite]
-runbook: /docs/runbook/052_page_test_sessions_and_performance_comparison.md
+record: /docs/engineering-records/052_page_test_sessions_and_performance_comparison.md
 performance:
   - id: cloud-runner-smoke-v1
     url: http://triangular-demo.localhost:4200/cloud-volumes-lab?testSuite=cloud-runner-smoke&testVersion=1&testProfile=human-observed&testAutoStart=1

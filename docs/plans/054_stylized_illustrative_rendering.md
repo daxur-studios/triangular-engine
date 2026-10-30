@@ -4,7 +4,7 @@ title: Stylized Illustrative Planet & Scene Rendering
 description: TSL lighting stages, crisp Voronoi cell borders/palettes, bathymetric water ramps, chiseled geological normals, stylized foliage, and illuminated plume volumes to achieve a digital-illustration aesthetic on WebGPURenderer.
 timestamp: 2026-10-17T00:00:00Z
 tags: [stylized, rendering, tsl, webgpu, cell-planet, water, geology, clouds, scatter, lighting]
-runbook: /docs/runbook/054_stylized_illustrative_rendering.md
+record: /docs/engineering-records/054_stylized_illustrative_rendering.md
 performance:
   - id: illustrative-terrain-look-v1
     url: http://triangular-demo.localhost:4200/illustrative-cell-planet?testSuite=illustrative-terrain-look&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1

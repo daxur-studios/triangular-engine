@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: "Capsule Doodle Space Cats"
 description: "Dated decisions, findings and evidence for Capsule Doodle Space Cats."
 timestamp: 2026-10-28T00:00:00Z

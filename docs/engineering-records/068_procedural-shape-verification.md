@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: "Procedural shape verification"
 description: "Dated decisions, findings and evidence for Procedural shape verification."
 timestamp: 2026-10-27T00:00:00Z

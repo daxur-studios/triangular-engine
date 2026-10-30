@@ -4,7 +4,7 @@ title: Impostor Baker Testing
 description: Add reusable functional and diagnostic performance scenarios for the octahedral impostor baker demo page.
 timestamp: 2026-10-25T00:00:00Z
 tags: [impostor, testing, performance, demo]
-runbook: /docs/runbook/062_impostor_baker_testing.md
+record: /docs/engineering-records/062_impostor_baker_testing.md
 performance:
   - id: impostor-baker-cost-v1
     url: http://triangular-demo.localhost:4200/impostor-baker?testSuite=impostor-baker-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1

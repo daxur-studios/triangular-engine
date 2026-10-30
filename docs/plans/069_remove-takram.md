@@ -4,7 +4,7 @@ title: "Remove Takram integration from the engine"
 description: "Remove every Takram dependency from triangular-engine; keep the demo code, excluded from compilation."
 timestamp: 2026-10-28T00:00:00Z
 tags: [engineering-records]
-runbook: /docs/runbook/069_remove-takram.md
+record: /docs/engineering-records/069_remove-takram.md
 map_schema: 1
 document_id: plan-069
 initiative_id: "remove-takram"

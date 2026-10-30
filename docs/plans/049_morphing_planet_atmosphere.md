@@ -4,7 +4,7 @@ title: Morphing Planet Atmosphere
 description: A new, fast, LUT-driven atmosphere (scattering, sky, aerial perspective, sky objects, limb glow) for the cell planet in globe, flat-map and mid-morph states, from 100 km to Earth-sized planets, written once in TSL on an extensible TSL planet material.
 timestamp: 2026-10-16T00:00:00Z
 tags: [atmosphere, scattering, sky, cell-planet, morph, rendering, performance, webgpu, tsl]
-runbook: /docs/runbook/049_morphing_planet_atmosphere.md
+record: /docs/engineering-records/049_morphing_planet_atmosphere.md
 performance:
   - id: bent-atmosphere-look-v1
     url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1

@@ -4,7 +4,7 @@ title: Test Runner Batch Runs and a Deterministic Stop Rule
 description: Run an ordered batch of tests as fast as the page allows, stop each steady measurement on data rather than a chosen duration, and copy every summary at once.
 timestamp: 2026-10-24T00:00:00Z
 tags: [testing, performance, tooling, runner]
-runbook: /docs/runbook/061_test_runner_batch_and_stop_rule.md
+record: /docs/engineering-records/061_test_runner_batch_and_stop_rule.md
 performance: []
 ---
 

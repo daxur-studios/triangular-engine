@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Test Results Page and Case Thumbnails
 description: Decisions, checks and open items for the saved-run browser page and untimed per-case thumbnails.
 timestamp: 2026-10-20T00:00:00Z

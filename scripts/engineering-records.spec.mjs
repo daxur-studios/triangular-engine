@@ -87,7 +87,7 @@ test("allocates after the highest plan or record number and creates reciprocal i
     plan,
     /title: "Water \\| scattering"|title: "Water \| scattering"/,
   );
-  assert.match(plan, /runbook: \/docs\/runbook\/107_water-scattering\.md/);
+  assert.match(plan, /record: \/docs\/(?:engineering-records|runbook)\/107_water-scattering\.md/);
   assert.match(record, /- \/docs\/plans\/107_water-scattering\.md/);
   assert.match(record, /record_id: er-107/);
   assert.match(

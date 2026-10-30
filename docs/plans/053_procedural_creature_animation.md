@@ -4,7 +4,7 @@ title: Procedural Creature Animation
 description: Make procedural creatures and stylized characters move believably without hand keyframing, by generating the skeleton first, deriving the mesh and skin weights from it, driving it with low-dimensional procedural motion (stepping IK, springs, look-at), and measuring motion quality with numbers and filmstrips that agents can act on.
 timestamp: 2026-10-17T00:00:00Z
 tags: [animation, procedural, creatures, characters, ik, skinning, metaballs, agents, testing]
-runbook: /docs/runbook/053_procedural_creature_animation.md
+record: /docs/engineering-records/053_procedural_creature_animation.md
 ---
 
 # Plan 053: Procedural Creature Animation

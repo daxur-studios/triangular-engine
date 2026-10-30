@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: "Triangular CLI and Consensus Reviews"
 description: "Dated decisions, findings and evidence for the portable Triangular CLI and consensus review workflow."
 timestamp: 2026-10-29T00:00:00Z

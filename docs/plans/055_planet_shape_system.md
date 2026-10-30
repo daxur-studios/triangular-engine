@@ -4,7 +4,7 @@ title: Planet Shape System
 description: Terrain attempt 5. A measured, harness-first planet surface for stylized planetary terrain at 160 fps, with real-time edits, overhangs and the sphere-to-map morph, chosen by a gated race between three contenders.
 timestamp: 2026-10-19T00:00:00Z
 tags: [terrain, planet, lod, raymarching, sdf, tsl, webgpu, performance, testing, morph, cell-planet]
-runbook: /docs/runbook/055_planet_shape_system.md
+record: /docs/engineering-records/055_planet_shape_system.md
 performance: []
 ---
 

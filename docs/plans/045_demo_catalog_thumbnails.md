@@ -4,7 +4,7 @@ title: Demo Catalog Thumbnails
 description: Add persisted scene previews to demo and spike catalogs with capture controls in the engine portal.
 timestamp: 2026-10-13T00:00:00Z
 status: done
-runbook: /docs/runbook/045_demo_catalog_thumbnails.md
+record: /docs/engineering-records/045_demo_catalog_thumbnails.md
 tags: [demo, thumbnails, portal]
 ---
 

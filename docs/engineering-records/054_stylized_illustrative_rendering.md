@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Stylized Illustrative Planet & Scene Rendering
 description: Visual breakdown, shader math, and design decisions for achieving a digital-painting / illustrative aesthetic in triangular-engine.
 timestamp: 2026-10-17T00:00:00Z

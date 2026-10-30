@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: "Remove Takram integration from the engine"
 description: "Dated decisions, findings and evidence for removing the Takram integration from triangular-engine."
 timestamp: 2026-10-28T00:00:00Z

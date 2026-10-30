@@ -4,7 +4,7 @@ title: Optional Scene Tree and Game Install
 description: Remove Material from core, declare required peers, and prove the packed engine in a fresh Angular consumer.
 timestamp: 2026-10-13T00:00:00Z
 status: done
-runbook: /docs/runbook/043_optional_scene_tree_and_game_install.md
+record: /docs/engineering-records/043_optional_scene_tree_and_game_install.md
 tags: [packaging, material, scaffolding, scene-tree]
 ---
 

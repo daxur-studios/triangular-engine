@@ -4,7 +4,7 @@ title: LOD Surface Core for Water and Terrain
 description: A fresh, WebGPU-only, performance-tested level-of-detail surface (a height over a plane or a sphere, drawn as one instanced grid whose density follows pluggable criteria), shown first on a flat and a sphere lab page, then used by a new water surface and later by low-detail terrain. Review and owner decisions done. M1 lab built (demo-app `/lod-surface-lab`, suite `lod-surface-baseline` v2, 62 headless specs green) with bit-identical seam vertices; v2 on the RTX 3080 shows 0 crack pixels in every ordinary case and GPU scene pass p95 under 0.3 ms. After the selector rework, selection CPU p95 is 0.1 ms on still poses and 0.2 ms while zooming, exactly at the 0.2 ms budget on a 0.1 ms timer; jitter and AMD runs remain. Spike S1 not started. Cliff detail decided (D14): slope criterion in M2, vector displacement as M6. Order changed to terrain first (D15): close M1, height texture, a terrain suite with the cell planet, then slope, edits and cliffs; water later.
 timestamp: 2026-10-24T00:00:00Z
 tags: [lod, mesh, quadtree, sphere, plane, water, terrain, webgpu, tsl, performance, testing]
-runbook: /docs/runbook/059_lod_surface_core.md
+record: /docs/engineering-records/059_lod_surface_core.md
 performance:
   - id: lod-surface-baseline-v1
     url: http://triangular-demo.localhost:4200/lod-surface-lab?testSuite=lod-surface-baseline&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1

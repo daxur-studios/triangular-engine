@@ -1,5 +1,5 @@
 ---
-type: Runbook
+type: EngineeringRecord
 title: Testing Entry for CPU Performance Work
 description: Decisions and checks for CPU span timing, micro-bench cases and the Node-safe core of the testing entry.
 timestamp: 2026-10-24T00:00:00Z
