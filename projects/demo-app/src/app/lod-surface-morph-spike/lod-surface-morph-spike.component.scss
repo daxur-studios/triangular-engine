@@ -107,3 +107,12 @@ tr.fail td {
 tr.control td {
   font-style: italic;
 }
+
+.controls {
+  border: 0;
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}

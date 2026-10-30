@@ -81,7 +81,7 @@ export const SPIKES: readonly ISpikeItem[] = [
     number: '5',
     title: 'LOD surface globe-to-map morph (precision and the map cut)',
     route: '/lod-surface-morph-spike',
-    status: 'pending',
+    status: 'passed',
     hypothesis:
       'Bending the Plan 059 LOD terrain from globe to map, with the CPU bending each leaf\'s origin in doubles and the GPU bending only the offset inside the leaf, keeps vertex jitter under a pixel 2 m above the ground at morph 0.5 and 1 on the 600 km and 6,371 km spheres, and the fragment cull at the map\'s cut leaves no visible gap (Plan 059 D11 risks 1 and 2, before G6).',
     description:

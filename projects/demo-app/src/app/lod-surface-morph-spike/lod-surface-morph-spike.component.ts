@@ -3,11 +3,16 @@ import {
   Component,
   DestroyRef,
   inject,
+  isDevMode,
+  computed,
   signal,
 } from '@angular/core';
 import { Color } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
+import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import {
+  FAN_RAY_OPTIONS,
+  LOD_METRICS,
   MORPH_POSE_IDS,
   createLodSurfaceMorphSpikeScene,
   type ILodSurfaceMorphSpikeDiagnostics,
@@ -17,9 +22,21 @@ import {
   type MorphSpikeState,
   type CrackProbeOptions,
   type CrackRow,
+  type LodMetric,
   type ProbeOptions,
   type ProbeResult,
 } from './core';
+import { createMorphSpikeTestAdapter, type MorphSpikeTestHost } from './morph-spike-test-adapter';
+import { MORPH_SPIKE_TEST_HISTORY, type MorphSpikeTestSettings } from './morph-spike-tests';
+
+/** Diagnostics samples (every 500 ms) the page waits for the renderer's device before it lets a test run start anyway. */
+const DEVICE_WAIT_SAMPLES = 10;
+
+/** The slice of the renderer the page's test environment reads. */
+interface RendererLike {
+  readonly backend?: { readonly isWebGPUBackend?: boolean; readonly device?: { readonly adapterInfo?: unknown } };
+  readonly domElement?: { readonly width: number; readonly height: number };
+}
 
 /** The test handle on `window`: run the precision probe and set the spike's state from the console or a test. */
 export interface LodMorphSpikeWindowApi {
@@ -52,7 +69,7 @@ declare global {
  */
 @Component({
   selector: 'app-lod-surface-morph-spike',
-  imports: [EngineModule],
+  imports: [EngineModule, TestRunnerComponent],
   templateUrl: './lod-surface-morph-spike.component.html',
   styleUrl: './lod-surface-morph-spike.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -74,6 +91,11 @@ export class LodSurfaceMorphSpikeComponent {
   readonly morphPresets = [0, 1e-4, 0.5, 1];
   readonly poseIds = MORPH_POSE_IDS;
   readonly methods: MorphMethod[] = ['p2', 'naive'];
+  readonly lodMetrics: readonly LodMetric[] = LOD_METRICS;
+  /** Leaf caps the page offers (the mesh holds up to 16,384). */
+  readonly leafCaps: readonly number[] = [4096, 8192, 16_384];
+  /** Rays per full turn the pole fan offers. */
+  readonly fanRayOptions: readonly number[] = FAN_RAY_OPTIONS;
 
   readonly state = signal<MorphSpikeState>(undefined as unknown as MorphSpikeState);
   readonly diagnostics = signal<ILodSurfaceMorphSpikeDiagnostics | undefined>(undefined);
@@ -84,10 +106,42 @@ export class LodSurfaceMorphSpikeComponent {
   readonly crackStatus = signal('');
   readonly crackRunning = signal(false);
 
+  /** Browser tests (`triangular-engine/testing`): the suite history, the adapter over the probes, and the dev-only launch link. */
+  readonly testHistory = MORPH_SPIKE_TEST_HISTORY;
+  readonly allowTestAutoStart = isDevMode();
+  /** A test run is in progress: the controls are locked so it cannot be changed under the probe. */
+  readonly runnerBusy = signal(false);
+  /**
+   * The renderer has its GPU device: the test runner reads `gpu.*` once when a run starts, and a run that starts between the backend
+   * object and its device records the adapter as unknown. Gives up waiting after `DEVICE_WAIT_SAMPLES` samples (a browser that
+   * reports no adapter info), so the page is never held back for good.
+   */
+  private readonly rendererReady = signal(false);
+  private deviceWaits = 0;
+  /** The scene has drawn a frame, so a probe has a renderer and a compiled pipeline. */
+  readonly sceneReady = computed(() => this.diagnostics() !== undefined && this.rendererReady());
+  readonly testAdapter: TestRunAdapter<MorphSpikeTestSettings, MorphSpikeState>;
+
   constructor() {
     this.engine.scene.background = new Color('#12181f');
-    this.scene = createLodSurfaceMorphSpikeScene(this.engine, (diagnostics) => this.diagnostics.set(diagnostics));
+    this.scene = createLodSurfaceMorphSpikeScene(this.engine, (diagnostics) => {
+      const backend = (this.engine.renderer as unknown as RendererLike).backend;
+      if (!this.rendererReady() && (backend?.device?.adapterInfo !== undefined || backend?.isWebGPUBackend === false || ++this.deviceWaits > DEVICE_WAIT_SAMPLES)) {
+        this.rendererReady.set(true);
+      }
+      this.diagnostics.set(diagnostics);
+    });
     this.state.set(this.scene.getState());
+    const host: MorphSpikeTestHost = {
+      read: () => this.scene.getState(),
+      apply: (patch) => this.update(patch),
+      ready: () => this.sceneReady(),
+      backendIsWebGpu: () => (this.engine.renderer as unknown as RendererLike).backend?.isWebGPUBackend === true,
+      runProbe: (options) => this.runProbe(options),
+      runCrackProbe: (options) => this.runCrackProbe(options),
+      environment: () => this.testEnvironment(),
+    };
+    this.testAdapter = createMorphSpikeTestAdapter(host);
     const api: LodMorphSpikeWindowApi = {
       lastProbe: [],
       lastCrackProbe: [],
@@ -106,6 +160,23 @@ export class LodSurfaceMorphSpikeComponent {
   update(patch: Partial<MorphSpikeState>): void {
     this.scene.setState(patch);
     this.state.set(this.scene.getState());
+  }
+
+  onTestProgress(progress: TestProgress | null): void {
+    this.runnerBusy.set(progress !== null);
+  }
+
+  private testEnvironment(): Record<string, TestSetting> {
+    const renderer = this.engine.renderer as unknown as RendererLike;
+    return {
+      backend: renderer.backend === undefined ? 'none' : renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2',
+      ...describeRendererGpu(renderer as Parameters<typeof describeRendererGpu>[0]),
+      'canvas.drawingBufferWidth': renderer.domElement?.width ?? 0,
+      'canvas.drawingBufferHeight': renderer.domElement?.height ?? 0,
+      devicePixelRatio: globalThis.devicePixelRatio ?? 1,
+      'gpu.deviceReady': renderer.backend?.device !== undefined,
+      'gpu.adapterInfoPresent': renderer.backend?.device?.adapterInfo !== undefined,
+    };
   }
 
   setMorph(value: number): void {

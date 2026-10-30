@@ -15,6 +15,7 @@ import {
   pixelRay,
   rayHits,
   reliefLambdaCap,
+  rimAnalysis,
   type CameraRig,
 } from './morph-crack-probe';
 import { POLE_EDGE_AHEAD_M, computeMorphFrame, poleEdgeLatitudeDeg, poseOf, polarLatticeVectors, projectionBasis, referenceVertex, outlineDistancesAt, unwrapToSide, type MorphFrame, type MorphPose, type MorphView } from './morph-frame';
@@ -277,6 +278,50 @@ describe('morph crack probe: the outline model and the analytic mask', () => {
     leaky[(1 * width + 2) * 4] = 255;
     const leak = classifyCracks(leaky, width, height, model, rig, {}, covered);
     expect(leak.leakPx).toBeGreaterThan(0);
+  });
+
+  it('rimAnalysis: a missing strip along the top edge is a rim hole whose offset is its height; a pinhole in the ground is interior', () => {
+    const w = 16;
+    const h = 12;
+    // The map covers rows 3 .. 11; space above. Drawn: everything covered except the first `missing` rows below the edge.
+    const build = (missing: number, pinhole = false) => {
+      const mask = new Uint8Array(w * h);
+      const drawn = new Uint8Array(w * h);
+      for (let y = 3; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          mask[y * w + x] = 1;
+          if (y >= 3 + missing) drawn[y * w + x] = 1;
+        }
+      }
+      if (pinhole) drawn[8 * w + 8] = 0;
+      // The lab's rule on this image: a missing pixel with no uncovered pixel among its eight neighbours is a hole.
+      const cracks: number[] = [];
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const p = y * w + x;
+          if (!mask[p] || drawn[p]) continue;
+          let near = false;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx >= 0 && nx < w && ny >= 0 && ny < h && !mask[ny * w + nx]) near = true;
+          }
+          if (!near) cracks.push(p);
+        }
+      }
+      return rimAnalysis(mask, drawn, cracks, w, h);
+    };
+    const clean = build(0);
+    expect(clean).toEqual(jasmine.objectContaining({ holesRim: 0, holesInterior: 0, rimOffsetMaxPx: 0, rimOffsetP95Px: 0, rimColumns: w }));
+    const strip = build(4);
+    expect(strip.rimOffsetMaxPx).toBe(4);
+    expect(strip.rimOffsetP95Px).toBe(4);
+    expect(strip.holesInterior).toBe(0);
+    expect(strip.holesRim).toBe(3 * w);
+    const pin = build(0, true);
+    expect(pin.holesInterior).toBe(1);
+    expect(pin.holesRim).toBe(0);
+    expect(pin.rimOffsetMaxPx).toBe(0);
   });
 
   it("the lab's counting: a backstop pixel next to the background is masked, an enclosed one is a crack", () => {

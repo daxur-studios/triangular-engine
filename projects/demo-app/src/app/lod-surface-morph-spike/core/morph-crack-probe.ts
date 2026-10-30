@@ -1,6 +1,7 @@
 import { equalEarthRow } from 'triangular-engine/atmosphere';
 import type { MorphFrame, MorphPose, MorphPoseId } from './morph-frame';
 import type { MorphPack } from './morph-leaves';
+import type { LodMetric } from './morph-stretch';
 
 /**
  * Plan 059 morph spike, part 2: the crack probe. The lab's probe (`pages/lod-surface-lab/lod-crack-probe.ts`) draws a backstop
@@ -319,6 +320,20 @@ export interface CrackImageResult {
   readonly elsewhere: number;
   /** Holes beside the outline (the lab's masked pixels): not counted. */
   readonly masked: number;
+  /**
+   * The holes split by where they are: `holesRim` are hole pixels in a run of missing surface that reaches the exact outline where
+   * the outside is space (the drawn rim of the world lies short of the exact rim: a silhouette error), `holesInterior` the others
+   * (space seen through the ground). They add up to `holes`.
+   */
+  readonly holesInterior: number;
+  readonly holesRim: number;
+  /**
+   * For every image column where the exact outline has a boundary next to space (top or bottom edge of the map), the pixels between
+   * that boundary and the first drawn pixel into the map; the largest and the 95th percentile over those columns, and how many columns.
+   */
+  readonly rimOffsetMaxPx: number;
+  readonly rimOffsetP95Px: number;
+  readonly rimColumns: number;
   /** Pixels the probe material drew, pixels the exact rays say the map covers, and drawn pixels with all eight neighbours outside the outline. */
   readonly drawnPx: number;
   readonly coveredPx: number;
@@ -329,6 +344,72 @@ export interface CrackImageResult {
   readonly flipY: boolean;
   /** The hole pixels (indices y * width + x), only with `keepHoles`. */
   readonly holePixels?: readonly number[];
+}
+
+/** Rim offset of each column and the split of the holes, see {@link CrackImageResult.holesRim}. */
+export function rimAnalysis(
+  mask: Uint8Array, drawn: Uint8Array, cracks: readonly number[], width: number, height: number,
+): { holesInterior: number; holesRim: number; rimOffsetMaxPx: number; rimOffsetP95Px: number; rimColumns: number } {
+  // Runs of missing surface (covered, not drawn; eight-connected) that touch the outside: a missing pixel with an uncovered neighbour.
+  const n = width * height;
+  const label = new Int32Array(n).fill(-1);
+  const touches: boolean[] = [];
+  const stack: number[] = [];
+  for (let start = 0; start < n; start++) {
+    if (!mask[start] || drawn[start] || label[start] >= 0) continue;
+    const id = touches.length;
+    touches.push(false);
+    label[start] = id;
+    stack.push(start);
+    while (stack.length) {
+      const p = stack.pop()!;
+      const x = p % width;
+      const y = (p - x) / width;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= height) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= width || (dx === 0 && dy === 0)) continue;
+          const q = ny * width + nx;
+          if (!mask[q]) touches[id] = true;
+          else if (!drawn[q] && label[q] < 0) {
+            label[q] = id;
+            stack.push(q);
+          }
+        }
+      }
+    }
+  }
+  let holesRim = 0;
+  for (const p of cracks) if (label[p] >= 0 && touches[label[p]]) holesRim++;
+  const offsets: number[] = [];
+  for (let x = 0; x < width; x++) {
+    let worst = 0;
+    let boundary = false;
+    for (let y = 0; y < height; y++) {
+      const p = y * width + x;
+      if (!mask[p]) continue;
+      if (y > 0 && !mask[p - width]) {
+        boundary = true;
+        let run = 0;
+        for (let yy = y; yy < height && mask[yy * width + x] && !drawn[yy * width + x]; yy++) run++;
+        worst = Math.max(worst, run);
+      }
+      if (y < height - 1 && !mask[p + width]) {
+        boundary = true;
+        let run = 0;
+        for (let yy = y; yy >= 0 && mask[yy * width + x] && !drawn[yy * width + x]; yy--) run++;
+        worst = Math.max(worst, run);
+      }
+    }
+    if (boundary) offsets.push(worst);
+  }
+  offsets.sort((a, b) => a - b);
+  const p95 = offsets.length ? offsets[Math.min(offsets.length - 1, Math.ceil(0.95 * offsets.length) - 1)] : 0;
+  return {
+    holesInterior: cracks.length - holesRim, holesRim, rimOffsetMaxPx: offsets.length ? offsets[offsets.length - 1] : 0, rimOffsetP95Px: p95, rimColumns: offsets.length,
+  };
 }
 
 /**
@@ -405,8 +486,9 @@ export function classifyCracks(
       if (!beside) leakPx++;
     }
   }
+  const rim = rimAnalysis(mask, drawn, cracks, width, height);
   return {
-    holes: cracks.length, cut, pole, elsewhere, masked, drawnPx, coveredPx, leakPx,
+    holes: cracks.length, cut, pole, elsewhere, masked, ...rim, drawnPx, coveredPx, leakPx,
     agreement: Math.max(upright, reversed), flipY, holePixels: options.keepHoles ? cracks : undefined,
   };
 }
@@ -467,6 +549,13 @@ export interface CrackCase {
   readonly centreLatDeg?: number;
   /** Fields of the view's pose to replace (for a probe of a pose that is not a preset). */
   readonly poseOverride?: Partial<MorphPose>;
+  /** The LOD metric of the case's selector (default 'sphere'). */
+  readonly lodMetric?: LodMetric;
+  /** The selector's leaf cap (default the terrain default, 4,096). */
+  readonly leafCap?: number;
+  /** The pole fan (iteration 4): the pole leaves are drawn as a CPU-built polar mesh with `fanRays` rays per full turn (default off). */
+  readonly poleFan?: boolean;
+  readonly fanRays?: number;
 }
 
 /** One row of the result. */
@@ -475,6 +564,22 @@ export interface CrackRow extends CrackImageResult {
   readonly morph: number;
   readonly view: MorphPoseId;
   readonly control?: CrackControl;
+  /** The case's projection centre and LOD metric, as run (absent: the defaults, centre 0, 0 and 'sphere'). */
+  readonly centreLonDeg?: number;
+  readonly centreLatDeg?: number;
+  readonly lodMetric?: LodMetric;
+  readonly leafCap?: number;
+  /** The pole fan as run (absent: off) and its rays per full turn. */
+  readonly poleFan?: boolean;
+  readonly fanRays?: number;
+  /** With the fan: pole leaves replaced, its vertices and triangles, and the CPU milliseconds of its build. */
+  readonly fanLeaves?: number;
+  readonly fanVertices?: number;
+  readonly fanTriangles?: number;
+  readonly fanBuildMs?: number;
+  /** With `diagnosePole`: why the case has pole holes, and how many remain at `DIAGNOSE_LEAF_CAP` leaves. */
+  readonly poleCause?: PoleCause;
+  readonly poleHolesAtBigCap?: number;
   /** Leaves the selector drew, instances drawn (leaves plus duplicates), duplicates, leaves with a pole in their cap, torn instances, instances dropped for capacity. */
   readonly leaves: number;
   readonly instances: number;
@@ -517,12 +622,43 @@ export interface CrackProbeOptions {
   readonly centreLatDeg?: number;
   /** Fields of every view's pose to replace (for example a latitude or pitch). */
   readonly poseOverride?: Partial<MorphPose>;
+  /** The LOD metric of every case's selector (default 'sphere'; 'stretch' measures leaves at their morphed position). */
+  readonly lodMetric?: LodMetric;
+  /** The selector's leaf cap of every case (default 4,096; the spike's mesh holds up to 16,384). */
+  readonly leafCap?: number;
+  /** true: the pole leaves are drawn as the pole fan (see {@link CrackCase.poleFan}); `fanRays` rays per full turn (default 1,024). */
+  readonly poleFan?: boolean;
+  readonly fanRays?: number;
+  /** false: run only the controls, not the plain matrix (default true). */
+  readonly matrix?: boolean;
   /** Called with each case's probe image (RGBA8, the probe material over black) before it is classified. */
   readonly onImage?: (c: CrackCase, rgba: ArrayLike<number>, width: number, height: number) => void;
   /** true: each row lists its hole pixels (`holePixels`). */
   readonly keepHoles?: boolean;
+  /**
+   * true: a matrix case that has pole holes is drawn again with a larger leaf cap (`DIAGNOSE_LEAF_CAP`), and its row says which of
+   * the two causes it is (`poleCause`): the budget (the cap ran out) or the geometry (the pole edge of a pole leaf spans a fixed
+   * longitude range at every level, so more leaves do not shorten the cells along it).
+   */
+  readonly diagnosePole?: boolean;
   /** Called after each row. */
   readonly onProgress?: (done: number, total: number, row: CrackRow) => void;
+}
+
+/** The leaf cap of the second draw of `diagnosePole` (the spike mesh's maximum). */
+export const DIAGNOSE_LEAF_CAP = 16_384;
+
+/** Which cause the pole holes of a case have: see {@link poleCauseOf}. */
+export type PoleCause = 'none' | 'budget' | 'geometry' | 'both';
+
+/**
+ * Tells the cause of a case's pole holes from the count at its own cap (`base`) and at the larger cap (`big`): none without
+ * holes; the budget if the larger cap closes them; the geometry if it leaves nearly all (at least 90 %); both if it closes some.
+ */
+export function poleCauseOf(base: number, big: number): PoleCause {
+  if (base <= 0) return 'none';
+  if (big <= 0) return 'budget';
+  return big >= 0.9 * base ? 'geometry' : 'both';
 }
 
 /** The matrix of part 2: both radii, morph 0, 0.5 and 1, the six views. */
@@ -546,8 +682,8 @@ export async function runCrackProbe(host: CrackHost, options: CrackProbeOptions 
   const views = options.views ?? CRACK_DEFAULTS.views;
   const widthPx = options.widthPx ?? CRACK_DEFAULTS.widthPx;
   const cases: CrackCase[] = [];
-  const centre = { centreLonDeg: options.centreLonDeg ?? 0, centreLatDeg: options.centreLatDeg ?? 0, poseOverride: options.poseOverride };
-  for (const radiusM of radii) for (const view of views) for (const morph of morphs) cases.push({ radiusM, morph, view, ...centre });
+  const centre = { centreLonDeg: options.centreLonDeg ?? 0, centreLatDeg: options.centreLatDeg ?? 0, poseOverride: options.poseOverride, lodMetric: options.lodMetric, leafCap: options.leafCap, poleFan: options.poleFan, fanRays: options.fanRays };
+  if (options.matrix !== false) for (const radiusM of radii) for (const view of views) for (const morph of morphs) cases.push({ radiusM, morph, view, ...centre });
   if (options.controls !== false) {
     for (const radiusM of radii) {
       for (const view of CRACK_DEFAULTS.gapViews) {
@@ -573,9 +709,18 @@ export async function runCrackProbe(host: CrackHost, options: CrackProbeOptions 
       const image = classifyCracks(rgba, widthPx, heightPx, model, rig, { nearEdgePx: options.nearEdgePx, keepHoles: options.keepHoles });
       const expectsHoles = controlExpectsHoles(c.control);
       const ok = expectsHoles === undefined ? (c.morph === 0 ? image.holes === 0 : undefined) : expectsHoles ? image.holes > 0 : image.holes === 0;
+      let poleExtra: Pick<CrackRow, 'poleCause' | 'poleHolesAtBigCap'> = {};
+      if (options.diagnosePole && !c.control && image.pole > 0 && (c.leafCap ?? 0) < DIAGNOSE_LEAF_CAP) {
+        const bigCase: CrackCase = { ...c, leafCap: DIAGNOSE_LEAF_CAP };
+        const big = host.prepare(bigCase);
+        const bigRgba = await host.draw(widthPx, Math.max(1, Math.round(widthPx / big.aspect)));
+        const bigImage = classifyCracks(bigRgba, widthPx, Math.max(1, Math.round(widthPx / big.aspect)), model, cameraRig(big.frame, big.fovDeg, widthPx / Math.max(1, Math.round(widthPx / big.aspect))), { nearEdgePx: options.nearEdgePx });
+        poleExtra = { poleCause: poleCauseOf(image.pole, bigImage.pole), poleHolesAtBigCap: bigImage.pole };
+      } else if (options.diagnosePole && !c.control) poleExtra = { poleCause: 'none' };
       const row: CrackRow = {
-        ...c, ...image, leaves: pack.leaves, instances: pack.instances, duplicates: pack.duplicates, poleLeaves: pack.poleLeaves,
+        ...c, ...image, ...poleExtra, leaves: pack.leaves, instances: pack.instances, duplicates: pack.duplicates, poleLeaves: pack.poleLeaves,
         torn: pack.torn, dropped: pack.dropped, widthPx, heightPx, ok, ms: performance.now() - began,
+        ...(pack.fan ? { fanLeaves: pack.fan.leaves, fanVertices: pack.fan.vertices, fanTriangles: pack.fan.triangles, fanBuildMs: pack.fan.buildMs } : {}),
       };
       rows.push(row);
       options.onProgress?.(rows.length, cases.length, row);

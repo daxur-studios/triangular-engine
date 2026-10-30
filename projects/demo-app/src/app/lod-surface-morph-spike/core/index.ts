@@ -4,4 +4,6 @@ export * from './morph-math';
 export * from './morph-probe';
 export * from './morph-surface-mesh';
 export * from './morph-leaves';
+export * from './morph-fan';
 export * from './morph-crack-probe';
+export * from './morph-stretch';

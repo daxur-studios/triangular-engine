@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { BufferAttribute, DoubleSide, InstancedBufferAttribute, InstancedBufferGeometry, Mesh, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, DoubleSide, InstancedBufferAttribute, InstancedBufferGeometry, Mesh, Vector3 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
   abs, asin, atan, attribute, cos, cross, dFdx, dFdy, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize,
@@ -16,6 +16,7 @@ import {
   type PatchCells,
 } from 'triangular-engine/lod-surface/core';
 import type { MorphFrame } from './morph-frame';
+import { buildPoleFan, FAN_DEFAULT_RAYS, type FanBuild } from './morph-fan';
 import { packMorphLeaves, type MorphPack } from './morph-leaves';
 import {
   ANCHOR_SCALAR_KEYS,
@@ -409,6 +410,9 @@ export function gridGeometry(cells: number, capacity: number): InstancedBufferGe
   return geometry;
 }
 
+/** The fan's Float32 positions are relative to the camera of its build: it is rebuilt when the camera moved this share of the distance to the nearest fan vertex. */
+const FAN_REBUILD_SHARE = 0.02;
+
 /** The morph spike's drawn surface. */
 export interface MorphSurfaceMesh {
   /** Add to the scene; `upload` puts it at the bent camera. */
@@ -424,6 +428,13 @@ export interface MorphSurfaceMesh {
   setGap(share: number): void;
   setRelief(kappa: number, maxLambdaUnits: number): void;
   setWireframe(on: boolean): void;
+  /**
+   * The pole fan (iteration 4, `morph-fan.ts`): on, the leaves that hold a pole of the projection are left out of the instanced
+   * draw above morph 0 and drawn as `fan.mesh` (a CPU-built polar mesh, `rays` meridians per full turn). Morph 0 never uses it.
+   */
+  setPoleFan(on: boolean, rays?: number): void;
+  /** The fan's meshes: add `mesh` to the page's scene (it is placed at the bent camera of its build); `probeMesh` is the same geometry with the probe material, for the crack probe's scene. */
+  readonly fan: { readonly mesh: Mesh; readonly probeMesh: Mesh; readonly material: MeshBasicNodeMaterial; readonly probeMaterial: MeshBasicNodeMaterial };
   dispose(): void;
 }
 
@@ -475,24 +486,58 @@ export function createMorphSurfaceMesh(options: { domain: LodDomain; patchCells:
   mesh.frustumCulled = false;
   mesh.name = 'Morph spike surface';
 
+  // The pole fan: a plain mesh whose positions are already camera-relative Float32 (relative to the camera of the build; the mesh
+  // sits at that camera). It has no outline clip: the fan is built inside the map (longitude -pi .. pi, or the leaf's own range).
+  const fanLight = abs(dot(normalize(cross(dFdx(positionView), dFdy(positionView))), normalize(vec3(0.3, 0.6, 0.75)))).mul(0.75).add(0.25);
+  const fanMaterial = new MeshBasicNodeMaterial({ side: DoubleSide });
+  fanMaterial.colorNode = vec4(vec3(0.95, 0.55, 0.2).mul(fanLight), 1);
+  const fanProbeMaterial = new MeshBasicNodeMaterial({ side: DoubleSide });
+  fanProbeMaterial.colorNode = vec4(1, 1, 1, 1);
+  fanProbeMaterial.toneMapped = false;
+  const emptyFan = (): BufferGeometry => {
+    const g = new BufferGeometry();
+    g.setAttribute('position', new BufferAttribute(new Float32Array(9), 3));
+    g.setIndex(new BufferAttribute(new Uint32Array(3), 1));
+    g.setDrawRange(0, 0);
+    return g;
+  };
+  let fanGeometry = emptyFan();
+  const fanMesh = new Mesh(fanGeometry, fanMaterial);
+  fanMesh.frustumCulled = false;
+  fanMesh.name = 'Morph spike pole fan';
+  fanMesh.visible = false;
+  const fanProbeMesh = new Mesh(fanGeometry, fanProbeMaterial);
+  fanProbeMesh.frustumCulled = false;
+  fanProbeMesh.visible = false;
+  let poleFan = false;
+  let fanRays = FAN_DEFAULT_RAYS;
+  let fanBuild: FanBuild | undefined;
+  let fanKey = '';
+  let fanFrom: LodSelector | undefined;
+  let fanVersion = -1;
+  let heightOfFan = 0;
+
   const attributes = ['aLeaf', 'aInfo', 'aCap'].map((name) => geometry.getAttribute(name) as InstancedBufferAttribute);
   const [leafData, infoData, capData] = attributes.map((attr) => attr.array as Float32Array);
   let packedFrom: LodSelector | undefined;
   let packedVersion = -1;
   let packedKey = '';
   let pack: MorphPack = { instances: 0, leaves: 0, duplicates: 0, poleLeaves: 0, torn: 0, dropped: 0 };
+  let packWithFan: MorphPack = pack;
 
   return {
     mesh,
     material,
     probeMaterial,
     upload(selector, frame) {
-      const key = `${frame.view.centreLonDeg}|${frame.view.centreLatDeg}|${frame.view.radiusM}|${frame.view.morph > 0}`;
+      const fanOn = poleFan && frame.view.morph > 0;
+      const key = `${frame.view.centreLonDeg}|${frame.view.centreLatDeg}|${frame.view.radiusM}|${frame.view.morph > 0}|${fanOn}`;
       if (selector !== packedFrom || selector.version !== packedVersion || key !== packedKey) {
         packedFrom = selector;
         packedVersion = selector.version;
         packedKey = key;
-        pack = packMorphLeaves(selector, domain, patchCells, capacity, frame.basis, frame.view.morph, leafData, infoData, true, capData);
+        pack = packMorphLeaves(selector, domain, patchCells, capacity, frame.basis, frame.view.morph, leafData, infoData, true, capData, fanOn);
+        packWithFan = pack;
         for (const attr of attributes) {
           attr.updateRanges.length = 0;
           attr.updateRanges.push({ start: 0, count: Math.max(1, pack.instances) * LEAF_STRIDE });
@@ -500,23 +545,66 @@ export function createMorphSurfaceMesh(options: { domain: LodDomain; patchCells:
         }
         geometry.instanceCount = pack.instances;
       }
+      // The fan is rebuilt when the selection, the projection (centre, radius, morph, height), its rays or the camera moved far enough
+      // (a few percent of its distance to the nearest vertex: the Float32 positions are relative to the camera of the build) changed.
+      if (fanOn) {
+        const k = `${frame.view.centreLonDeg}|${frame.view.centreLatDeg}|${frame.view.radiusM}|${frame.view.morph}|${fanRays}|${heightOfFan}`;
+        const moved = fanBuild ? Math.hypot(frame.camBody[0] - fanBuild.origin[0], frame.camBody[1] - fanBuild.origin[1], frame.camBody[2] - fanBuild.origin[2]) : Infinity;
+        if (!fanBuild || selector !== fanFrom || selector.version !== fanVersion || k !== fanKey || moved > FAN_REBUILD_SHARE * fanBuild.nearestM) {
+          fanFrom = selector;
+          fanVersion = selector.version;
+          fanKey = k;
+          fanBuild = buildPoleFan(selector, domain, patchCells, capacity, frame, fanRays, heightOfFan);
+          const next = new BufferGeometry();
+          next.setAttribute('position', new BufferAttribute(fanBuild.positions.length ? fanBuild.positions : new Float32Array(9), 3));
+          next.setIndex(new BufferAttribute(fanBuild.index.length ? fanBuild.index : new Uint32Array(3), 1));
+          if (!fanBuild.index.length) next.setDrawRange(0, 0);
+          fanMesh.geometry = next;
+          fanProbeMesh.geometry = next;
+          fanGeometry.dispose();
+          fanGeometry = next;
+          packWithFan = { ...pack, fan: fanBuild.stats };
+        } else if (packWithFan.instances !== pack.instances || packWithFan.leaves !== pack.leaves) {
+          packWithFan = { ...pack, fan: fanBuild.stats };
+        }
+        fanMesh.position.set(fanBuild.origin[0], fanBuild.origin[1], fanBuild.origin[2]);
+        fanProbeMesh.position.copy(fanMesh.position);
+        fanMesh.visible = fanProbeMesh.visible = fanBuild.stats.triangles > 0;
+      } else {
+        fanMesh.visible = fanProbeMesh.visible = false;
+        fanBuild = undefined;
+        packWithFan = pack;
+      }
       vertex.setFrame(frame);
       mesh.position.set(frame.camBody[0], frame.camBody[1], frame.camBody[2]);
-      return pack;
+      return packWithFan;
     },
+    setPoleFan(on, rays) {
+      poleFan = on;
+      if (rays !== undefined) fanRays = rays;
+    },
+    fan: { mesh: fanMesh, probeMesh: fanProbeMesh, material: fanMaterial, probeMaterial: fanProbeMaterial },
     setMethod: (method) => vertex.setMethod(method),
-    setHeight: (metres) => vertex.setHeight(metres),
+    setHeight: (metres) => {
+      heightOfFan = metres;
+      vertex.setHeight(metres);
+    },
     setFolding: (on) => vertex.setFolding(on),
     setGap: (share) => vertex.setGap(share),
     setRelief: (kappa, maxLambdaUnits) => vertex.setRelief(kappa, maxLambdaUnits),
     setWireframe(on) {
       material.wireframe = on;
       material.needsUpdate = true;
+      fanMaterial.wireframe = on;
+      fanMaterial.needsUpdate = true;
     },
     dispose() {
       geometry.dispose();
+      fanGeometry.dispose();
       material.dispose();
       probeMaterial.dispose();
+      fanMaterial.dispose();
+      fanProbeMaterial.dispose();
     },
   };
 }

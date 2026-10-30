@@ -423,6 +423,10 @@ surface mesh; nothing in the library changes until G6.
   - **Morph 0:** the output must be bit-equal to today's.
 - **Out of scope:** bent-bound culling and morphed LOD error (the spike turns culling off and selects from the unbent
   camera), shadows, normals under the morph, picking.
+- **Result (2026-10-30, Engineering Record parts 1–3, suite `lod-surface-morph` v4):** precision and the cut pass. G6
+  takes two more requirements from it: the selector measures error in the morphed view (a stretch metric), and the
+  leaves that contain the map's pole get an angular tessellation (about 1,024 rays per turn), generated on the GPU or
+  amortised rather than rebuilt on the CPU per frame.
 
 **Open:**
 - ~~Which option.~~ B, chosen 2026-10-29.

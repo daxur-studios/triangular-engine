@@ -8,12 +8,23 @@
         leaves: {{ d.leaves }} · instances: {{ d.instances }} · duplicates: {{ d.duplicates }} · triangles: {{ d.triangles.toLocaleString() }} · draw calls: {{ d.drawCalls }} ·
         deepest level: {{ d.deepestLevel }}
       </span>
+      @if (d.fanVertices !== undefined) {
+        <span>
+          pole fan: {{ d.fanVertices.toLocaleString() }} vertices · {{ d.fanTriangles?.toLocaleString() }} triangles · last build {{ d.fanBuildMs?.toFixed(1) }} ms
+        </span>
+      }
       <span>
         camera lon {{ d.cameraLonDeg.toFixed(2) }}° · lat {{ d.cameraLatDeg.toFixed(2) }}° · altitude
         {{ fmt(d.altitudeM) }} m · k {{ d.curvature.toExponential(3) }}
       </span>
     }
 
+    <tri-test-runner
+      [suites]="testHistory" [adapter]="testAdapter" [available]="sceneReady()"
+      [allowAutoStart]="allowTestAutoStart" [resultSink]="true" (progressChange)="onTestProgress($event)" />
+    <p>Keep the tab visible while a test runs; the probes pause the page's frame and the controls lock.</p>
+
+    <fieldset class="controls" [disabled]="runnerBusy()">
     <div class="row">
       <span class="label">radius</span>
       @for (r of radii; track r.value) {
@@ -66,6 +77,31 @@
     </div>
 
     <div class="row">
+      <span class="label">LOD metric</span>
+      @for (m of lodMetrics; track m) {
+        <button [class.active]="s.lodMetric === m" (click)="update({ lodMetric: m })">
+          {{ m === 'sphere' ? 'sphere (library)' : 'stretch (morphed leaf)' }}
+        </button>
+      }
+    </div>
+
+    <div class="row">
+      <span class="label">leaf cap</span>
+      @for (c of leafCaps; track c) {
+        <button [class.active]="s.leafCap === c" (click)="update({ leafCap: c })">{{ c }}</button>
+      }
+    </div>
+
+    <div class="row">
+      <span class="label">pole fan</span>
+      <button [class.active]="!s.poleFan" (click)="update({ poleFan: false })">off</button>
+      <button [class.active]="s.poleFan" (click)="update({ poleFan: true })">on</button>
+      @for (n of fanRayOptions; track n) {
+        <button [class.active]="s.fanRays === n" (click)="update({ fanRays: n })">{{ n }} rays</button>
+      }
+    </div>
+
+    <div class="row">
       <span class="label">height offset</span>
       @for (h of [0, 500]; track h) {
         <button [class.active]="s.heightM === h" (click)="update({ heightM: h })">{{ h }} m</button>
@@ -81,6 +117,7 @@
       <button [disabled]="crackRunning() || probeRunning()" (click)="runCrackProbe()">Run crack probe</button>
       <span>{{ crackStatus() }}</span>
     </div>
+    </fieldset>
     <p>
       Morph 0 draws the current terrain unchanged. The probe compares the GPU's camera-relative vertices with a
       double-precision reference for both methods, 600 km and 6,371 km, four 2 m poses. Own-sheet error outside the pole cap (1°)
@@ -130,18 +167,19 @@
     <table>
       <thead>
         <tr>
-          <th>R km</th><th>morph</th><th>view</th><th>control</th><th>leaves</th><th>inst</th><th>dup</th><th>pole lv</th><th>torn</th><th>dropped</th>
-          <th>holes cut</th><th>holes pole</th><th>holes else</th><th>holes</th><th>masked</th><th>leak px</th><th>covered px</th><th>IoU</th><th>ok</th>
+          <th>R km</th><th>morph</th><th>view</th><th>control</th><th>LOD</th><th>cap</th><th>leaves</th><th>inst</th><th>dup</th><th>pole lv</th><th>torn</th><th>dropped</th>
+          <th>holes cut</th><th>holes pole</th><th>holes else</th><th>holes</th><th>interior</th><th>rim</th><th>rim off max</th><th>rim off p95</th><th>masked</th><th>leak px</th><th>covered px</th><th>IoU</th><th>ok</th><th>pole cause</th><th>fan rays</th><th>fan vertices</th><th>fan triangles</th><th>fan ms</th>
         </tr>
       </thead>
       <tbody>
         @for (r of crackRows(); track $index) {
           <tr [class.fail]="r.ok === false" [class.control]="!!r.control">
-            <td>{{ r.radiusM / 1000 }}</td><td>{{ r.morph }}</td><td>{{ r.view }}</td><td>{{ r.control ?? '' }}</td>
+            <td>{{ r.radiusM / 1000 }}</td><td>{{ r.morph }}</td><td>{{ r.view }}</td><td>{{ r.control ?? '' }}</td><td>{{ r.lodMetric ?? 'sphere' }}</td><td>{{ r.leafCap ?? '' }}</td>
             <td>{{ r.leaves }}</td><td>{{ r.instances }}</td><td>{{ r.duplicates }}</td><td>{{ r.poleLeaves }}</td><td>{{ r.torn }}</td><td>{{ r.dropped }}</td>
-            <td>{{ r.cut }}</td><td>{{ r.pole }}</td><td>{{ r.elsewhere }}</td><td>{{ r.holes }}</td><td>{{ r.masked }}</td>
+            <td>{{ r.cut }}</td><td>{{ r.pole }}</td><td>{{ r.elsewhere }}</td><td>{{ r.holes }}</td><td>{{ r.holesInterior }}</td><td>{{ r.holesRim }}</td><td>{{ r.rimOffsetMaxPx }}</td><td>{{ r.rimOffsetP95Px }}</td><td>{{ r.masked }}</td>
             <td>{{ r.leakPx }}</td><td>{{ r.coveredPx }}</td><td>{{ r.agreement.toFixed(4) }}</td>
-            <td>{{ r.ok === undefined ? '' : r.ok }}</td>
+            <td>{{ r.ok === undefined ? '' : r.ok }}</td><td>{{ r.poleCause && r.poleCause !== 'none' ? r.poleCause + ' (' + r.poleHolesAtBigCap + ' at 16k)' : '' }}</td>
+            <td>{{ r.poleFan ? r.fanRays : '' }}</td><td>{{ r.fanVertices ?? '' }}</td><td>{{ r.fanTriangles ?? '' }}</td><td>{{ r.fanBuildMs === undefined ? '' : r.fanBuildMs.toFixed(1) }}</td>
           </tr>
         }
       </tbody>

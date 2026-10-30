@@ -12,10 +12,12 @@ import {
   type LatticeAnchor,
   type LodDomain,
 } from 'triangular-engine/lod-surface/core';
-import { MORPH_POSES, computeMorphFrame, poseOf, type MorphFrame, type MorphPose, type MorphPoseId, type MorphView } from './morph-frame';
+import { MORPH_POSES, computeMorphFrame, poseOf, projectionBasis, type MorphFrame, type MorphPose, type MorphPoseId, type MorphView } from './morph-frame';
+import { FAN_DEFAULT_RAYS } from './morph-fan';
 import { instanceCapacity, type MorphPack } from './morph-leaves';
 import { createMorphSurfaceMesh, type MorphMethod, type MorphSurfaceMesh } from './morph-surface-mesh';
 import { runMorphProbe, type ProbeOptions, type ProbeRenderer, type ProbeResult } from './morph-probe';
+import { installStretchMetric, type LodMetric } from './morph-stretch';
 import { CRACK_DEFAULTS, RELIEF_KAPPA, reliefLambdaCap, runCrackProbe, type CrackCase, type CrackHost, type CrackProbeOptions, type CrackRow } from './morph-crack-probe';
 
 export interface ILodSurfaceMorphSpikeDiagnostics {
@@ -34,6 +36,10 @@ export interface ILodSurfaceMorphSpikeDiagnostics {
   readonly altitudeM: number;
   /** The unwrap-side window of the camera's leaf and the frame's curvature, for the readout. */
   readonly curvature: number;
+  /** The pole fan's cost when it is on (vertices, triangles, CPU milliseconds of its last build); undefined otherwise. */
+  readonly fanVertices?: number;
+  readonly fanTriangles?: number;
+  readonly fanBuildMs?: number;
 }
 
 /** The knobs of the spike; `setState` takes a partial. */
@@ -49,6 +55,23 @@ export interface MorphSpikeState {
   /** Overrides of the preset pose's fields (cleared when `poseId` is set). */
   poseOverride: Partial<MorphPose>;
   method: MorphMethod;
+  /**
+   * The LOD metric: 'sphere' (the library's selector, distances and cell sizes on the unbent sphere; the default) or 'stretch' (each
+   * candidate leaf measured at its morphed position, see `morph-stretch.ts`).
+   */
+  lodMetric: LodMetric;
+  /**
+   * The selector's leaf cap (default the terrain default, 4,096). The spike's mesh holds up to {@link MAX_SPIKE_LEAF_CAP}; a larger cap
+   * is for measuring whether a hole is a budget problem.
+   */
+  leafCap: number;
+  /**
+   * The pole fan (iteration 4, `morph-fan.ts`): the leaves that hold a pole of the projection are drawn as a CPU-built polar mesh
+   * instead of instances (default false). Never active at morph 0.
+   */
+  poleFan: boolean;
+  /** Rays per full turn of the pole fan (256, 1,024 or 4,096). */
+  fanRays: number;
   wireframe: boolean;
   /** Height of every vertex above the base surface, metres (a constant offset along the bent up). */
   heightM: number;
@@ -70,6 +93,8 @@ export interface ILodSurfaceMorphSpikeSceneHandle {
 }
 
 const FOV_DEG = 60;
+/** The largest `leafCap` the spike's mesh has room for. */
+export const MAX_SPIKE_LEAF_CAP = 16_384;
 const STEPS = latticeSteps(TERRAIN_DEFAULTS.patchCells, maxLevelFor(TERRAIN_DEFAULTS.patchCells));
 const DEFAULT_STATE: MorphSpikeState = {
   radiusM: 6_371_000,
@@ -79,6 +104,10 @@ const DEFAULT_STATE: MorphSpikeState = {
   poseId: 'mid-2m',
   poseOverride: {},
   method: 'p2',
+  lodMetric: 'sphere',
+  leafCap: TERRAIN_DEFAULTS.leafCap,
+  poleFan: false,
+  fanRays: FAN_DEFAULT_RAYS,
   wireframe: false,
   heightM: 0,
 };
@@ -100,14 +129,17 @@ export function createLodSurfaceMorphSpikeScene(
 ): ILodSurfaceMorphSpikeSceneHandle {
   const state: MorphSpikeState = { ...DEFAULT_STATE, poseOverride: {} };
   // Room for the duplicates: a view can add at most one second instance per leaf.
-  const capacity = instanceCapacity(TERRAIN_DEFAULTS.leafCap + CAP_SLACK + 6);
+  const capacity = instanceCapacity(MAX_SPIKE_LEAF_CAP + CAP_SLACK + 6);
   const surface: MorphSurfaceMesh = createMorphSurfaceMesh({
     domain: domainOf(state.radiusM), patchCells: TERRAIN_DEFAULTS.patchCells, capacity,
   });
   engine.scene.add(surface.mesh);
+  engine.scene.add(surface.fan.mesh);
 
-  let selector = newSelector(state.radiusM);
+  let selector = newSelector(state.radiusM, state.lodMetric, state.leafCap, () => state);
   let selectorRadius = state.radiusM;
+  let selectorMetric: LodMetric = state.lodMetric;
+  let selectorCap = state.leafCap;
   const anchor = newAnchor();
   const frustum = new Float64Array(12);
   const right = new Vector3();
@@ -122,12 +154,19 @@ export function createLodSurfaceMorphSpikeScene(
     return { kind: 'sphere', sizeM: radiusM, warp: 'equal-angle' };
   }
 
-  function newSelector(radiusM: number): LodSelector {
-    return new LodSelector({
+  /** The selector of a radius and metric; 'stretch' measures in the bent frame with the morph, centre and radius `params` gives. */
+  function newSelector(
+    radiusM: number, metric: LodMetric, leafCap: number, params: () => { morph: number; radiusM: number; centreLonDeg: number; centreLatDeg: number },
+  ): LodSelector {
+    const sel = new LodSelector({
       domain: domainOf(radiusM), patchCells: TERRAIN_DEFAULTS.patchCells, mode: 'distance', fixedLevel: 5,
-      cellPixels: TERRAIN_DEFAULTS.cellPixels, leafCap: TERRAIN_DEFAULTS.leafCap, heightBoundM: 0, cull: false,
+      cellPixels: TERRAIN_DEFAULTS.cellPixels, leafCap: Math.min(MAX_SPIKE_LEAF_CAP, leafCap), heightBoundM: 0, cull: false,
       hysteresis: TERRAIN_DEFAULTS.hysteresis,
     });
+    if (metric === 'stretch') {
+      installStretchMetric(sel, projectionBasis, domainOf(radiusM), STEPS, TERRAIN_DEFAULTS.patchCells, TERRAIN_DEFAULTS.cellPixels, params);
+    }
+    return sel;
   }
 
   function currentPose(): MorphPose {
@@ -146,7 +185,7 @@ export function createLodSurfaceMorphSpikeScene(
    * camera's field of view and planes are set when it is a perspective camera; `aspect` is the camera's.
    */
   function stepFrame(
-    camera: Camera, view: MorphView, sel: LodSelector, anchorOut: LatticeAnchor, aspect: number, heightPx: number, passes: number,
+    camera: Camera, view: MorphView, sel: LodSelector, anchorOut: LatticeAnchor, aspect: number, heightPx: number, passes: number, metric: LodMetric = 'sphere',
   ): { frame: MorphFrame; pack: MorphPack } {
     const domain = domainOf(view.radiusM);
     const frame = computeMorphFrame(view, domain, STEPS, anchorOut);
@@ -169,7 +208,7 @@ export function createLodSurfaceMorphSpikeScene(
     const fov = (FOV_DEG * Math.PI) / 180;
     frustumNormals(frame.axes, fov, aspect, frustum);
     for (let pass = 0; pass < passes; pass++) {
-      sel.select({ camera: frame.selectorCamera, pixelAngle: (2 * Math.tan(fov / 2)) / heightPx, frustum });
+      sel.select({ camera: metric === 'stretch' ? frame.camBody : frame.selectorCamera, pixelAngle: (2 * Math.tan(fov / 2)) / heightPx, frustum });
     }
     const pack = surface.upload(sel, frame);
     return { frame, pack };
@@ -177,9 +216,11 @@ export function createLodSurfaceMorphSpikeScene(
 
   const tick = engine.tick$.subscribe(() => {
     if (probeBusy) return;
-    if (state.radiusM !== selectorRadius) {
-      selector = newSelector(state.radiusM);
+    if (state.radiusM !== selectorRadius || state.lodMetric !== selectorMetric || state.leafCap !== selectorCap) {
+      selector = newSelector(state.radiusM, state.lodMetric, state.leafCap, () => state);
       selectorRadius = state.radiusM;
+      selectorMetric = state.lodMetric;
+      selectorCap = state.leafCap;
     }
     const view = currentView();
     const camera = engine.camera;
@@ -191,7 +232,8 @@ export function createLodSurfaceMorphSpikeScene(
     surface.setFolding(true);
     surface.setGap(0);
     surface.setRelief(0, 0);
-    const { frame, pack } = stepFrame(camera, view, selector, anchor, aspect, height, 1);
+    surface.setPoleFan(state.poleFan, state.fanRays);
+    const { frame, pack } = stepFrame(camera, view, selector, anchor, aspect, height, 1, selectorMetric);
 
     const nowMs = performance.now();
     if (nowMs - lastSampleMs >= 500) {
@@ -199,7 +241,8 @@ export function createLodSurfaceMorphSpikeScene(
       const info: any = (engine.renderer as any).info?.render;
       onDiagnostics({
         drawCalls: info?.drawCalls ?? info?.calls ?? 0,
-        triangles: pack.instances * 2 * TERRAIN_DEFAULTS.patchCells ** 2,
+        triangles: pack.instances * 2 * TERRAIN_DEFAULTS.patchCells ** 2 + (pack.fan?.triangles ?? 0),
+        ...(pack.fan ? { fanVertices: pack.fan.vertices, fanTriangles: pack.fan.triangles, fanBuildMs: pack.fan.buildMs } : {}),
         leaves: pack.leaves,
         instances: pack.instances,
         duplicates: pack.duplicates,
@@ -225,6 +268,7 @@ export function createLodSurfaceMorphSpikeScene(
       const mesh = new Mesh(surface.mesh.geometry, surface.probeMaterial);
       mesh.frustumCulled = false;
       scene.add(mesh);
+      scene.add(surface.fan.probeMesh);
       probeParts = { scene, mesh, camera: new PerspectiveCamera(FOV_DEG, 16 / 9, 0.02, 1e9) };
     }
     const parts = probeParts;
@@ -242,6 +286,7 @@ export function createLodSurfaceMorphSpikeScene(
         surface.setMethod('p2');
         surface.setFolding(c.control !== 'folding-off');
         surface.setGap(c.control === 'gap' ? CRACK_DEFAULTS.gapShare : 0);
+        surface.setPoleFan(c.poleFan === true, c.fanRays ?? FAN_DEFAULT_RAYS);
         const view: MorphView = {
           radiusM: c.radiusM, morph: c.morph, centreLonDeg: c.centreLonDeg ?? 0, centreLatDeg: c.centreLatDeg ?? 0,
           pose: { ...poseOf(c.view, c.radiusM, c.morph), ...c.poseOverride }, groundHeightM: 0,
@@ -254,7 +299,10 @@ export function createLodSurfaceMorphSpikeScene(
         }
         const aspect = 16 / 9;
         const heightPx = Math.max(1, Math.round((options?.widthPx ?? CRACK_DEFAULTS.widthPx) / aspect));
-        const { frame, pack } = stepFrame(parts.camera, view, newSelector(c.radiusM), probeAnchor, aspect, heightPx, PROBE_SELECT_PASSES);
+        const metric = c.lodMetric ?? 'sphere';
+        const { frame, pack } = stepFrame(
+          parts.camera, view, newSelector(c.radiusM, metric, c.leafCap ?? TERRAIN_DEFAULTS.leafCap, () => view), probeAnchor, aspect, heightPx, PROBE_SELECT_PASSES, metric,
+        );
         parts.mesh.position.copy(surface.mesh.position);
         return { frame, pack, aspect, fovDeg: FOV_DEG };
       },
@@ -283,6 +331,7 @@ export function createLodSurfaceMorphSpikeScene(
         surface.setFolding(true);
         surface.setGap(0);
         surface.setRelief(0, 0);
+        surface.setPoleFan(state.poleFan, state.fanRays);
       },
     };
     try {
@@ -317,6 +366,7 @@ export function createLodSurfaceMorphSpikeScene(
     dispose() {
       tick.unsubscribe();
       engine.scene.remove(surface.mesh);
+      engine.scene.remove(surface.fan.mesh);
       probeParts?.target?.dispose();
       surface.dispose();
     },

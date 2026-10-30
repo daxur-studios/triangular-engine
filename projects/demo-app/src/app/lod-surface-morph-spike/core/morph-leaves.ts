@@ -9,6 +9,7 @@ import {
   type Vec3,
 } from 'triangular-engine/lod-surface/core';
 import { latticeDirection, unwrapToSide, type MorphBasis } from './morph-frame';
+import type { FanStats } from './morph-fan';
 
 /**
  * Plan 059 morph spike, part 2, the CPU half of the cut: which leaves reach the map's cut, how they are packed (one instance
@@ -100,14 +101,14 @@ export function analyseLeaf(basis: MorphBasis, domain: LodDomain, steps: number,
   return { centreLon, side: centreLon >= 0 ? 1 : -1, lo, hi, reachesCut, containsPole, centre };
 }
 
-/** The pole's lattice position (u, v: lattice units on its face) for each pole of the basis that lies on `face`. */
-function poleLattices(basis: MorphBasis, steps: number, face: number, warp: LodDomain['warp']): { u: number; v: number }[] {
-  const out: { u: number; v: number }[] = [];
+/** The pole's lattice position (u, v: lattice units on its face; `sign` +1 for the basis' up pole, -1 for the down pole) for each pole of the basis that lies on `face`. */
+export function poleLattices(basis: MorphBasis, steps: number, face: number, warp: LodDomain['warp']): { u: number; v: number; sign: 1 | -1 }[] {
+  const out: { u: number; v: number; sign: 1 | -1 }[] = [];
   for (const sign of [1, -1]) {
     const pole = faceOfDirection(basis.up[0] * sign, basis.up[1] * sign, basis.up[2] * sign);
     if (pole.face !== face) continue;
     const lattice = (c: number): number => (warp === 'none' ? c * steps : (Math.atan(c) / (Math.PI / 4)) * steps);
-    out.push({ u: (lattice(pole.s) + steps) / 2, v: (lattice(pole.t) + steps) / 2 });
+    out.push({ u: (lattice(pole.s) + steps) / 2, v: (lattice(pole.t) + steps) / 2, sign: sign as 1 | -1 });
   }
   return out;
 }
@@ -164,6 +165,11 @@ export function leafTorn(basis: MorphBasis, steps: number, face: number, u0: num
   return false;
 }
 
+/** A leaf the pole fan replaces: a pole of the basis at its corner or strictly inside it. */
+export function isPoleFanLeaf(basis: MorphBasis, steps: number, face: number, u0: number, v0: number, span: number, warp: LodDomain['warp'] = 'equal-angle'): boolean {
+  return leafPoleCorner(basis, steps, face, u0, v0, span, warp) !== undefined || leafTorn(basis, steps, face, u0, v0, span, warp);
+}
+
 /** What one pack of the selector's leaves produced. */
 export interface MorphPack {
   /** Instances written (leaves plus duplicates, minus any dropped for capacity). */
@@ -178,6 +184,10 @@ export interface MorphPack {
   readonly torn: number;
   /** Instances that did not fit in the capacity. */
   readonly dropped: number;
+  /** With `skipPoleLeaves`: the pole leaves left out of the instances (a pole fan draws them). */
+  readonly skipped?: number;
+  /** The pole fan's counts, when the surface built one (see `morph-fan.ts`). */
+  readonly fan?: FanStats;
 }
 
 /** Slack instances: the most a view can add by duplication is one per leaf, so the instance capacity is twice the leaf capacity. */
@@ -196,7 +206,7 @@ export function instanceCapacity(leafCapacity: number): number {
  */
 export function packMorphLeaves(
   selector: LodSelector, domain: LodDomain, patchCells: PatchCells, capacity: number, basis: MorphBasis, morph: number,
-  leafData: Float32Array, infoData: Float32Array, duplicate = true, capData?: Float32Array,
+  leafData: Float32Array, infoData: Float32Array, duplicate = true, capData?: Float32Array, skipPoleLeaves = false,
 ): MorphPack {
   const maxLevel = maxLevelFor(patchCells);
   const steps = latticeSteps(patchCells, maxLevel);
@@ -207,6 +217,7 @@ export function packMorphLeaves(
   let poleLeaves = 0;
   let torn = 0;
   let dropped = 0;
+  let skipped = 0;
   const emit = (k: number, node: number, u0: number, v0: number, step: number, sigma: number, poleLon: number, cap?: readonly [number, number, number, number]): void => {
     if (instances >= capacity) {
       dropped++;
@@ -242,6 +253,10 @@ export function packMorphLeaves(
       emit(k, node, u0, v0, step, sigma, 0);
       continue;
     }
+    if (skipPoleLeaves && isPoleFanLeaf(basis, steps, face, u0, v0, span, domain.warp)) {
+      skipped++;
+      continue;
+    }
     const a = analyseLeaf(basis, domain, steps, face, u0, v0, span);
     if (a.containsPole) poleLeaves++;
     const sides: number[] = a.reachesCut && duplicate ? [1, -1] : [a.side];
@@ -255,7 +270,7 @@ export function packMorphLeaves(
       emit(k, node, u0, v0, step, isTorn ? 2 * sigma : sigma, leafLon, edges && corner ? [edges.x, edges.y, corner.cx, corner.cy] : undefined);
     }
   }
-  return { instances, leaves: leafCount, duplicates, poleLeaves, torn, dropped };
+  return { instances, leaves: leafCount, duplicates, poleLeaves, torn, dropped, ...(skipPoleLeaves ? { skipped } : {}) };
 }
 
 /** Whether a leaf at the packed `sigma` sits in a window that holds longitude `lon` (a helper for the specs): `lon` unwrapped lies in the window. */

@@ -1686,3 +1686,62 @@ sphere-based selector does not refine them. That and the tilted-centre holes are
 
 **Not yet tested:** culling with bent bounds, normals, the frame cost, and the selector measuring error in the
 morphed view.
+
+## 2026-10-30: Morph spike part 3: saved suite, stretch-aware selection and the pole fan close the pole edge
+
+The owner saw failing rows in the spike's probe tables with no way to keep them. The probes now run as the browser
+suite `lod-surface-morph` (functional, `<tri-test-runner>` on the spike page, results saved by the receiver). Four
+versions were added in one session, each run headless on the NVIDIA GPU (`headless-hardware`, noisy load):
+`npm run test:run -- --url "http://triangular-demo.localhost:4200/lod-surface-morph-spike" --suite lod-surface-morph --version 4 --profile headless-hardware --noisy`.
+Results: `artifacts/test-runs/lod-surface-morph@v1` to `@v4` (v4 run 2026-10-30T09-57-53).
+
+**What each version added.**
+- **v1:** precision and crack probes as scenarios, plus a selector option `lodMetric: 'stretch'` that measures each
+  candidate leaf at its morphed position (corners, edge midpoints and centre through the double-precision morph map;
+  the cell length is the larger of the morphed cell edge and the morphed chord sag turned into pixels).
+- **v2:** a leaf-cap option (up to 16,384, a `LodSelector` constructor option, no library change), a pole-cause
+  diagnosis (redraw at 16,384 leaves: budget, geometry or both), the folding-off control at 6,371 km mid-2m marked as
+  expected silent (its relief cannot exceed 40% of the 2 m altitude), and the GPU adapter recorded in the result.
+- **v3:** holes split into interior (space visible through the ground) and rim (a missing run touching the exact
+  outline), and a per-column rim offset. The real-case check became: interior 0, cut 0, rim offset at most 1 px.
+- **v4:** the pole fan (below) and an N sweep.
+
+**Findings (6,371 km and 600 km, pole-200m at morph 0.5 unless stated).**
+- **Every hole the sphere selector left was rim, not interior.** The thin lines of part 2 are the strip along the
+  map's pole edge: the drawn rim sits 12–15 px (centred) to 53 px (tilted centre) below the exact rim. Interior holes
+  were 0 in every case of every version.
+- **The stretch-aware selector fixes 600 km and most of 6,371 km.** 600 km: 0 holes at both centres. 6,371 km: rim
+  offset 4 px (centred) and 3 px (tilted); a 16,384 cap brings the centred case to 2 px and leaves the tilted case
+  unchanged. Cost at a view with no leaf pressure: orbit-map at morph 0.5 goes from 96 to 228 leaves.
+- **The remaining cause is geometry, not budget.** A leaf touching the pole keeps a pole edge spanning 90° of longitude
+  at every level (5,589 km on the bent map at 6,371 km), so subdividing never shortens it. Its rings stay laterally
+  coarse (177 km chords on a bent cylinder of radius about 12,742 km); the chords sag below the true surface and the
+  first visible ground is 10–17 m inside the exact pole edge. Raising the pole cap from 4 to 64 segments changed
+  nothing, because the cap row is hidden behind the sagging rings.
+- **The pole fan closes the rim.** The leaves that contain the map's pole (four quarter fans at a corner, or one closed
+  fan when the pole is inside a leaf, as with a tilted centre) are skipped in the instanced draw and replaced by a
+  polar grid built on the CPU in doubles: rays are meridians, rings run linear then geometric down to about 1 m from
+  the pole, and the outer ring is the leaf's own boundary samples (plus points on their chords), so neighbours see no
+  new vertices. Positions go through the exact morph map, camera-relative, into Float32.
+
+| Pole fan (6,371 km, stretch, cap 4,096) | Centred: rim offset | Tilted: rim offset | Fan vertices / triangles | CPU rebuild |
+|---|---|---|---|---|
+| None | 4 px | 3 px | – | – |
+| 256 rays | 4 px | 3 px | 14–16k / 27–31k | 5–6.5 ms |
+| 1,024 rays | ≤ 1 px, 0 holes | ≤ 1 px, 0 holes | 28–53k / 52–101k | 12–32 ms |
+| 4,096 rays | ≤ 1 px, 0 holes | 0 px, 0 holes | 175–199k / 333–380k | 57–77 ms |
+
+- **Seams stay closed with the fan on** (1,024 rays): crack-orbit-map-fan, crack-mid-fan and crack-cut-fan have 0
+  holes at morph 0, 0.5 and 1 on both radii. The fan is never built at morph 0, which stays bit-identical.
+- **Precision is unchanged:** P2 worst 0.063 px outside the 1° pole cap; naive p99 up to 260 px.
+
+**Verdict.** The spike's hypothesis holds: the anchor-relative bend keeps 2 m views under a pixel and the cut leaves
+no gap. Two further requirements for G6 came out of it:
+1. The selector must measure error in the morphed view (the stretch metric); the sphere metric leaves rims 12–53 px off.
+2. The leaves containing the map's pole need an angular tessellation (about 1,024 rays per turn for 1 px at 6,371 km).
+   The spike rebuilds it on the CPU (12–32 ms when the selection, morph or camera changes by more than 2%), which is
+   too slow for a frame; G6 should generate it on the GPU or amortise it.
+
+**Still not tested:** culling with bent bounds, normals and shading under the morph (the fan's coloured material was
+never seen on screen), the frame cost, a fan leaf that straddles the cut (needs a second copy shifted by 2π), and the
+owner's visual check of the page.
