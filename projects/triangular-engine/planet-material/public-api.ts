@@ -6,6 +6,7 @@
 export * from './ordered-slots';
 export * from './projection-nodes';
 export * from './planet-morph-nodes';
+export * from './planet-map';
 export * from './planet-context';
 export * from './planet-surface-layers';
 export * from './planet-surface-material';

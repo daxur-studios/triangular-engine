@@ -11,6 +11,7 @@ import { Color } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import {
+  FAN_MODES,
   FAN_RAY_OPTIONS,
   LOD_METRICS,
   MORPH_POSE_IDS,
@@ -22,6 +23,10 @@ import {
   type MorphSpikeState,
   type CrackProbeOptions,
   type CrackRow,
+  type FanProbeOptions,
+  type FanProbeRow,
+  type FanRebuildOptions,
+  type FanRebuildRow,
   type LodMetric,
   type ProbeOptions,
   type ProbeResult,
@@ -49,6 +54,12 @@ export interface LodMorphSpikeWindowApi {
   runCrackProbe(options?: CrackProbeOptions): Promise<CrackRow[]>;
   /** The rows of the last crack probe run. */
   lastCrackProbe: CrackRow[];
+  /** Runs the fan precision probe (iteration 5): the vertex-stage fan's positions against a double reference, in pixels. */
+  runFanProbe(options?: FanProbeOptions): Promise<FanProbeRow[]>;
+  /** Runs the scripted camera move and morph change with each fan mode and counts the fan's rebuilds. */
+  runFanRebuild(options?: FanRebuildOptions): Promise<FanRebuildRow[]>;
+  lastFanProbe: FanProbeRow[];
+  lastFanRebuild: FanRebuildRow[];
 }
 
 declare global {
@@ -96,6 +107,8 @@ export class LodSurfaceMorphSpikeComponent {
   readonly leafCaps: readonly number[] = [4096, 8192, 16_384];
   /** Rays per full turn the pole fan offers. */
   readonly fanRayOptions: readonly number[] = FAN_RAY_OPTIONS;
+  /** The fans the page offers: 'cpu' (iteration 4) and 'vertex' (iteration 5, the vertex stage evaluates the positions). */
+  readonly fanModes = FAN_MODES;
 
   readonly state = signal<MorphSpikeState>(undefined as unknown as MorphSpikeState);
   readonly diagnostics = signal<ILodSurfaceMorphSpikeDiagnostics | undefined>(undefined);
@@ -105,6 +118,8 @@ export class LodSurfaceMorphSpikeComponent {
   readonly crackRows = signal<CrackRow[]>([]);
   readonly crackStatus = signal('');
   readonly crackRunning = signal(false);
+  readonly fanStatus = signal('');
+  readonly fanRunning = signal(false);
 
   /** Browser tests (`triangular-engine/testing`): the suite history, the adapter over the probes, and the dev-only launch link. */
   readonly testHistory = MORPH_SPIKE_TEST_HISTORY;
@@ -139,14 +154,20 @@ export class LodSurfaceMorphSpikeComponent {
       backendIsWebGpu: () => (this.engine.renderer as unknown as RendererLike).backend?.isWebGPUBackend === true,
       runProbe: (options) => this.runProbe(options),
       runCrackProbe: (options) => this.runCrackProbe(options),
+      runFanProbe: (options) => this.runFanProbe(options),
+      runFanRebuild: (options) => this.runFanRebuild(options),
       environment: () => this.testEnvironment(),
     };
     this.testAdapter = createMorphSpikeTestAdapter(host);
     const api: LodMorphSpikeWindowApi = {
       lastProbe: [],
       lastCrackProbe: [],
+      lastFanProbe: [],
+      lastFanRebuild: [],
       runProbe: (options) => this.runProbe(options),
       runCrackProbe: (options) => this.runCrackProbe(options),
+      runFanProbe: (options) => this.runFanProbe(options),
+      runFanRebuild: (options) => this.runFanRebuild(options),
       setState: (patch) => this.update(patch),
       getState: () => this.scene.getState(),
     };
@@ -247,6 +268,35 @@ export class LodSurfaceMorphSpikeComponent {
       throw error;
     } finally {
       this.crackRunning.set(false);
+    }
+  }
+
+  async runFanProbe(options?: FanProbeOptions): Promise<FanProbeRow[]> {
+    const rows = await this.runFanTask('fan precision', (onProgress) => this.scene.runFanProbe({ ...options, onProgress: (d, t, r) => { onProgress(d, t); options?.onProgress?.(d, t, r); } }));
+    if (window.__lodMorphSpike) window.__lodMorphSpike.lastFanProbe = rows;
+    return rows;
+  }
+
+  async runFanRebuild(options?: FanRebuildOptions): Promise<FanRebuildRow[]> {
+    const rows = await this.runFanTask('fan rebuilds', (onProgress) => this.scene.runFanRebuild({ ...options, onProgress: (d, t, r) => { onProgress(d, t); options?.onProgress?.(d, t, r); } }));
+    if (window.__lodMorphSpike) window.__lodMorphSpike.lastFanRebuild = rows;
+    return rows;
+  }
+
+  /** One of the fan probes with the page's status line. */
+  private async runFanTask<T>(name: string, run: (onProgress: (done: number, total: number) => void) => Promise<T[]>): Promise<T[]> {
+    if (this.fanRunning()) throw new Error('A fan probe is already running');
+    this.fanRunning.set(true);
+    this.fanStatus.set(`${name}: running…`);
+    try {
+      const rows = await run((done, total) => this.fanStatus.set(`${name}: ${done} / ${total}`));
+      this.fanStatus.set(`${name}: done, ${rows.length} rows`);
+      return rows;
+    } catch (error) {
+      this.fanStatus.set(`${name}: failed: ${String(error)}`);
+      throw error;
+    } finally {
+      this.fanRunning.set(false);
     }
   }
 

@@ -13,7 +13,10 @@ import {
   type LodDomain,
 } from 'triangular-engine/lod-surface/core';
 import { MORPH_POSES, computeMorphFrame, poseOf, projectionBasis, type MorphFrame, type MorphPose, type MorphPoseId, type MorphView } from './morph-frame';
-import { FAN_DEFAULT_RAYS } from './morph-fan';
+import { FAN_DEFAULT_RAYS, fanContext, fanLeafSignature, fanLeavesOf, type FanMode } from './morph-fan';
+import { createFanKernel } from './morph-fan-vertex';
+import { runFanProbe, type FanProbeOptions, type FanProbeRow } from './morph-fan-probe';
+import { runFanRebuildProbe, type FanRebuildHost, type FanRebuildOptions, type FanRebuildRow } from './morph-fan-rebuild';
 import { instanceCapacity, type MorphPack } from './morph-leaves';
 import { createMorphSurfaceMesh, type MorphMethod, type MorphSurfaceMesh } from './morph-surface-mesh';
 import { runMorphProbe, type ProbeOptions, type ProbeRenderer, type ProbeResult } from './morph-probe';
@@ -40,6 +43,9 @@ export interface ILodSurfaceMorphSpikeDiagnostics {
   readonly fanVertices?: number;
   readonly fanTriangles?: number;
   readonly fanBuildMs?: number;
+  /** The pole fan in use ('cpu' or 'vertex') and the builds of it since the page started (the vertex-stage fan must not build for a camera move). */
+  readonly fanMode?: FanMode;
+  readonly fanRebuilds?: number;
 }
 
 /** The knobs of the spike; `setState` takes a partial. */
@@ -72,6 +78,11 @@ export interface MorphSpikeState {
   poleFan: boolean;
   /** Rays per full turn of the pole fan (256, 1,024 or 4,096). */
   fanRays: number;
+  /**
+   * Which pole fan is drawn: 'cpu' (iteration 4: positions built on the CPU in doubles, rebuilt for the camera and the morph) or 'vertex'
+   * (iteration 5: the vertex stage evaluates the positions, rebuilt only when the pole leaves, the projection centre or the rays change).
+   */
+  fanMode: FanMode;
   wireframe: boolean;
   /** Height of every vertex above the base surface, metres (a constant offset along the bent up). */
   heightM: number;
@@ -89,6 +100,10 @@ export interface ILodSurfaceMorphSpikeSceneHandle {
    * matrix and counts holes inside the map's outline. The page's own frame is paused while it runs and restored afterwards.
    */
   runCrackProbe(options?: CrackProbeOptions): Promise<CrackRow[]>;
+  /** Runs the fan precision probe (see `morph-fan-probe.ts`): the vertex-stage fan's positions read back from the GPU against the double reference. */
+  runFanProbe(options?: FanProbeOptions): Promise<FanProbeRow[]>;
+  /** Runs the scripted camera move and morph change with each fan mode and counts the fan's rebuilds (see `morph-fan-rebuild.ts`). */
+  runFanRebuild(options?: FanRebuildOptions): Promise<FanRebuildRow[]>;
   dispose(): void;
 }
 
@@ -108,11 +123,14 @@ const DEFAULT_STATE: MorphSpikeState = {
   leafCap: TERRAIN_DEFAULTS.leafCap,
   poleFan: false,
   fanRays: FAN_DEFAULT_RAYS,
+  fanMode: 'cpu',
   wireframe: false,
   heightM: 0,
 };
 /** The probe selects this many times per case, so that the hysteresis and the budget settle. */
 const PROBE_SELECT_PASSES = 3;
+/** Vertices the fan precision kernel holds (the 1,024-ray fan has about 40,000; 4,096 rays about 150,000). */
+const FAN_KERNEL_CAPACITY = 262_144;
 
 /**
  * Plan 059 morph spike: the LOD sphere drawn bent between globe (morph 0) and map (morph 1), with the camera placed
@@ -135,6 +153,7 @@ export function createLodSurfaceMorphSpikeScene(
   });
   engine.scene.add(surface.mesh);
   engine.scene.add(surface.fan.mesh);
+  engine.scene.add(surface.vertexFan.mesh);
 
   let selector = newSelector(state.radiusM, state.lodMetric, state.leafCap, () => state);
   let selectorRadius = state.radiusM;
@@ -233,6 +252,7 @@ export function createLodSurfaceMorphSpikeScene(
     surface.setGap(0);
     surface.setRelief(0, 0);
     surface.setPoleFan(state.poleFan, state.fanRays);
+    surface.setFanMode(state.fanMode);
     const { frame, pack } = stepFrame(camera, view, selector, anchor, aspect, height, 1, selectorMetric);
 
     const nowMs = performance.now();
@@ -242,7 +262,7 @@ export function createLodSurfaceMorphSpikeScene(
       onDiagnostics({
         drawCalls: info?.drawCalls ?? info?.calls ?? 0,
         triangles: pack.instances * 2 * TERRAIN_DEFAULTS.patchCells ** 2 + (pack.fan?.triangles ?? 0),
-        ...(pack.fan ? { fanVertices: pack.fan.vertices, fanTriangles: pack.fan.triangles, fanBuildMs: pack.fan.buildMs } : {}),
+        ...(pack.fan ? { fanVertices: pack.fan.vertices, fanTriangles: pack.fan.triangles, fanBuildMs: pack.fan.buildMs, fanMode: pack.fan.mode ?? 'cpu', fanRebuilds: surface.fanCounters().rebuilds } : {}),
         leaves: pack.leaves,
         instances: pack.instances,
         duplicates: pack.duplicates,
@@ -269,6 +289,7 @@ export function createLodSurfaceMorphSpikeScene(
       mesh.frustumCulled = false;
       scene.add(mesh);
       scene.add(surface.fan.probeMesh);
+      scene.add(surface.vertexFan.probeMesh);
       probeParts = { scene, mesh, camera: new PerspectiveCamera(FOV_DEG, 16 / 9, 0.02, 1e9) };
     }
     const parts = probeParts;
@@ -287,6 +308,8 @@ export function createLodSurfaceMorphSpikeScene(
         surface.setFolding(c.control !== 'folding-off');
         surface.setGap(c.control === 'gap' ? CRACK_DEFAULTS.gapShare : 0);
         surface.setPoleFan(c.poleFan === true, c.fanRays ?? FAN_DEFAULT_RAYS);
+        surface.setFanMode(c.fanMode ?? 'cpu');
+        surface.resetFanCounters();
         const view: MorphView = {
           radiusM: c.radiusM, morph: c.morph, centreLonDeg: c.centreLonDeg ?? 0, centreLatDeg: c.centreLatDeg ?? 0,
           pose: { ...poseOf(c.view, c.radiusM, c.morph), ...c.poseOverride }, groundHeightM: 0,
@@ -332,12 +355,112 @@ export function createLodSurfaceMorphSpikeScene(
         surface.setGap(0);
         surface.setRelief(0, 0);
         surface.setPoleFan(state.poleFan, state.fanRays);
+        surface.setFanMode(state.fanMode);
       },
     };
     try {
       return await runCrackProbe(host, options);
     } finally {
       host.restore();
+      probeBusy = false;
+    }
+  }
+
+  /** A camera and anchor of the fan probes' own, so that the page's camera is not touched. */
+  let fanProbeCamera: PerspectiveCamera | undefined;
+  let fanKernel: ReturnType<typeof createFanKernel> | undefined;
+  const FAN_PROBE_ASPECT = 16 / 9;
+  const FAN_PROBE_HEIGHT_PX = 1080;
+
+  /** The fan put back as the page has it, after a probe that set it. */
+  function restoreFan(): void {
+    surface.setPoleFan(state.poleFan, state.fanRays);
+    surface.setFanMode(state.fanMode);
+    surface.setHeight(state.heightM);
+  }
+
+  async function fanPrecisionProbe(options?: FanProbeOptions): Promise<FanProbeRow[]> {
+    if (probeBusy) throw new Error('A probe is already running');
+    const renderer = engine.renderer as any;
+    await renderer.init?.();
+    if (!renderer.backend?.isWebGPUBackend) throw new Error('The fan precision probe needs the WebGPU renderer');
+    fanProbeCamera ??= new PerspectiveCamera(FOV_DEG, FAN_PROBE_ASPECT, 0.02, 1e9);
+    fanKernel ??= createFanKernel(renderer, surface.vertexFan, FAN_KERNEL_CAPACITY);
+    const camera = fanProbeCamera;
+    const kernel = fanKernel;
+    const probeAnchor = newAnchor();
+    probeBusy = true;
+    try {
+      surface.setHeight(0);
+      surface.setMethod('p2');
+      surface.setFolding(true);
+      surface.setGap(0);
+      surface.setRelief(0, 0);
+      surface.setPoleFan(true, options?.rays ?? FAN_DEFAULT_RAYS);
+      surface.setFanMode('vertex');
+      return await runFanProbe({
+        prepare(c) {
+          const view: MorphView = {
+            radiusM: c.radiusM, morph: c.morph, centreLonDeg: c.centreLonDeg, centreLatDeg: c.centreLatDeg,
+            pose: { ...poseOf(c.view, c.radiusM, c.morph), ...(c.altitudeM !== undefined ? { altitudeM: c.altitudeM } : {}) }, groundHeightM: 0,
+          };
+          const sel = newSelector(c.radiusM, 'stretch', TERRAIN_DEFAULTS.leafCap, () => view);
+          // stepFrame also puts the frame's uniforms in place (the lattice anchor and the fan's), which the kernel's dispatch reads.
+          const { frame } = stepFrame(camera, view, sel, probeAnchor, FAN_PROBE_ASPECT, FAN_PROBE_HEIGHT_PX, PROBE_SELECT_PASSES, 'stretch');
+          const domain = domainOf(c.radiusM);
+          const leaves = fanLeavesOf(sel, domain, TERRAIN_DEFAULTS.patchCells, capacity, frame.basis);
+          return { frame, leaves, ctx: fanContext(domain, TERRAIN_DEFAULTS.patchCells, frame.basis, c.radiusM, c.morph) };
+        },
+        run: (data) => kernel.run(data),
+      }, options);
+    } finally {
+      restoreFan();
+      probeBusy = false;
+    }
+  }
+
+  async function fanRebuildRun(options?: FanRebuildOptions): Promise<FanRebuildRow[]> {
+    if (probeBusy) throw new Error('A probe is already running');
+    fanProbeCamera ??= new PerspectiveCamera(FOV_DEG, FAN_PROBE_ASPECT, 0.02, 1e9);
+    const camera = fanProbeCamera;
+    const rebuildAnchor = newAnchor();
+    let sel: LodSelector | undefined;
+    let frames = 0;
+    probeBusy = true;
+    const host: FanRebuildHost = {
+      begin(mode, rays) {
+        surface.setHeight(0);
+        surface.setMethod('p2');
+        surface.setFolding(true);
+        surface.setGap(0);
+        surface.setRelief(0, 0);
+        surface.setPoleFan(true, rays);
+        surface.setFanMode(mode);
+        surface.resetFanCounters();
+        sel = undefined;
+        frames = 0;
+      },
+      frame(step) {
+        const view: MorphView = {
+          radiusM: step.radiusM, morph: step.morph, centreLonDeg: step.centreLonDeg, centreLatDeg: step.centreLatDeg, pose: step.pose, groundHeightM: 0,
+        };
+        // The sphere metric: the selection does not read the morph, so a morph change cannot change the leaf set.
+        sel ??= newSelector(step.radiusM, 'sphere', TERRAIN_DEFAULTS.leafCap, () => view);
+        const { frame, pack } = stepFrame(camera, view, sel, rebuildAnchor, FAN_PROBE_ASPECT, FAN_PROBE_HEIGHT_PX, frames++ === 0 ? PROBE_SELECT_PASSES : 1, 'sphere');
+        const leaves = fanLeavesOf(sel, domainOf(step.radiusM), TERRAIN_DEFAULTS.patchCells, capacity, frame.basis);
+        const counters = surface.fanCounters();
+        return {
+          rebuilds: counters.rebuilds, buildMsTotal: counters.buildMsTotal, signature: fanLeafSignature(leaves),
+          vertices: pack.fan?.vertices ?? 0, triangles: pack.fan?.triangles ?? 0,
+        };
+      },
+      end() {
+        restoreFan();
+      },
+    };
+    try {
+      return await runFanRebuildProbe(host, options);
+    } finally {
       probeBusy = false;
     }
   }
@@ -363,10 +486,13 @@ export function createLodSurfaceMorphSpikeScene(
       return runMorphProbe(renderer as ProbeRenderer, options);
     },
     runCrackProbe: crackProbe,
+    runFanProbe: fanPrecisionProbe,
+    runFanRebuild: fanRebuildRun,
     dispose() {
       tick.unsubscribe();
       engine.scene.remove(surface.mesh);
       engine.scene.remove(surface.fan.mesh);
+      engine.scene.remove(surface.vertexFan.mesh);
       probeParts?.target?.dispose();
       surface.dispose();
     },

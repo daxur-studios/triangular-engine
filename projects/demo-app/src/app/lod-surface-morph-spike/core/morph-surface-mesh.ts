@@ -16,7 +16,10 @@ import {
   type PatchCells,
 } from 'triangular-engine/lod-surface/core';
 import type { MorphFrame } from './morph-frame';
-import { buildPoleFan, FAN_DEFAULT_RAYS, type FanBuild } from './morph-fan';
+import {
+  FAN_DEFAULT_RAYS, buildFanSpecs, buildPoleFan, fanContext, fanLeafSignature, fanLeavesOf, type FanBuild, type FanMode, type FanStats,
+} from './morph-fan';
+import { createVertexFanStage, packVertexFan, type VertexFanStage } from './morph-fan-vertex';
 import { packMorphLeaves, type MorphPack } from './morph-leaves';
 import {
   ANCHOR_SCALAR_KEYS,
@@ -89,6 +92,9 @@ export interface MorphVertex {
   /** Writes the frame's uniforms: anchor, projection, bent camera. */
   setFrame(frame: MorphFrame): void;
   setMethod(method: MorphMethod): void;
+  /** The anchor as nodes (what `p2Position` reads) and the height uniform: what the vertex-stage pole fan (`morph-fan-vertex.ts`) builds on. */
+  readonly anchor: MorphAnchor<any>;
+  readonly height: any;
   /** Height above the base surface, metres, the same for every vertex (the spike has no relief). */
   setHeight(metres: number): void;
   /** Edge folding on (default) or off: the crack probe's first known-bad control. */
@@ -203,6 +209,8 @@ export function createMorphVertex(domain: LodDomain, patchCells: PatchCells): Mo
 
   return {
     radius: anchor.radius,
+    anchor,
+    height: uHeight,
     build(grid, leaf, info, cap, flag) {
       const mask = info.y;
       // The longitude the exact pole vertex takes: with a pole corner (`cap.z` >= 0) the corner's copies take the longitude of their edge
@@ -413,6 +421,15 @@ export function gridGeometry(cells: number, capacity: number): InstancedBufferGe
 /** The fan's Float32 positions are relative to the camera of its build: it is rebuilt when the camera moved this share of the distance to the nearest fan vertex. */
 const FAN_REBUILD_SHARE = 0.02;
 
+/** Fan builds counted by a surface mesh. */
+export interface FanCounters {
+  /** Builds (CPU fan builds, or vertex-stage fan topology builds) since the last reset. */
+  readonly rebuilds: number;
+  /** CPU milliseconds of all those builds, and of the last one. */
+  readonly buildMsTotal: number;
+  readonly lastBuildMs: number;
+}
+
 /** The morph spike's drawn surface. */
 export interface MorphSurfaceMesh {
   /** Add to the scene; `upload` puts it at the bent camera. */
@@ -433,6 +450,17 @@ export interface MorphSurfaceMesh {
    * draw above morph 0 and drawn as `fan.mesh` (a CPU-built polar mesh, `rays` meridians per full turn). Morph 0 never uses it.
    */
   setPoleFan(on: boolean, rays?: number): void;
+  /**
+   * Which fan the pole leaves are drawn as: 'cpu' (iteration 4: positions built on the CPU in doubles, rebuilt when the camera or the
+   * morph moves) or 'vertex' (iteration 5: only topology and per-vertex descriptions are built, and only when the pole leaf set, the
+   * projection centre, the radius or the rays change; the vertex stage evaluates the positions, `morph-fan-vertex.ts`).
+   */
+  setFanMode(mode: FanMode): void;
+  /** Builds of the fan (either mode) since the last reset and what they cost on the CPU: the vertex-stage fan must stay at 0 through a camera move and a morph change. */
+  fanCounters(): FanCounters;
+  resetFanCounters(): void;
+  /** The vertex-stage fan's stage, meshes and materials: add `vertexFan.mesh` to the page's scene and `vertexFan.probeMesh` to the crack probe's. */
+  readonly vertexFan: VertexFanStage;
   /** The fan's meshes: add `mesh` to the page's scene (it is placed at the bent camera of its build); `probeMesh` is the same geometry with the probe material, for the crack probe's scene. */
   readonly fan: { readonly mesh: Mesh; readonly probeMesh: Mesh; readonly material: MeshBasicNodeMaterial; readonly probeMaterial: MeshBasicNodeMaterial };
   dispose(): void;
@@ -516,6 +544,16 @@ export function createMorphSurfaceMesh(options: { domain: LodDomain; patchCells:
   let fanFrom: LodSelector | undefined;
   let fanVersion = -1;
   let heightOfFan = 0;
+  let fanMode: FanMode = 'cpu';
+  const vertexFan = createVertexFanStage(vertex, TSL_LIB);
+  let vfFrom: LodSelector | undefined;
+  let vfVersion = -1;
+  let vfSignature = '';
+  let vfStats: FanStats | undefined;
+  let counters: FanCounters = { rebuilds: 0, buildMsTotal: 0, lastBuildMs: 0 };
+  const count = (ms: number): void => {
+    counters = { rebuilds: counters.rebuilds + 1, buildMsTotal: counters.buildMsTotal + ms, lastBuildMs: ms };
+  };
 
   const attributes = ['aLeaf', 'aInfo', 'aCap'].map((name) => geometry.getAttribute(name) as InstancedBufferAttribute);
   const [leafData, infoData, capData] = attributes.map((attr) => attr.array as Float32Array);
@@ -545,9 +583,10 @@ export function createMorphSurfaceMesh(options: { domain: LodDomain; patchCells:
         }
         geometry.instanceCount = pack.instances;
       }
-      // The fan is rebuilt when the selection, the projection (centre, radius, morph, height), its rays or the camera moved far enough
+      // The CPU fan is rebuilt when the selection, the projection (centre, radius, morph, height), its rays or the camera moved far enough
       // (a few percent of its distance to the nearest vertex: the Float32 positions are relative to the camera of the build) changed.
-      if (fanOn) {
+      // The vertex-stage fan is rebuilt only when the pole leaves, the projection centre, the radius or the rays change.
+      if (fanOn && fanMode === 'cpu') {
         const k = `${frame.view.centreLonDeg}|${frame.view.centreLatDeg}|${frame.view.radiusM}|${frame.view.morph}|${fanRays}|${heightOfFan}`;
         const moved = fanBuild ? Math.hypot(frame.camBody[0] - fanBuild.origin[0], frame.camBody[1] - fanBuild.origin[1], frame.camBody[2] - fanBuild.origin[2]) : Infinity;
         if (!fanBuild || selector !== fanFrom || selector.version !== fanVersion || k !== fanKey || moved > FAN_REBUILD_SHARE * fanBuild.nearestM) {
@@ -555,6 +594,7 @@ export function createMorphSurfaceMesh(options: { domain: LodDomain; patchCells:
           fanVersion = selector.version;
           fanKey = k;
           fanBuild = buildPoleFan(selector, domain, patchCells, capacity, frame, fanRays, heightOfFan);
+          count(fanBuild.stats.buildMs);
           const next = new BufferGeometry();
           next.setAttribute('position', new BufferAttribute(fanBuild.positions.length ? fanBuild.positions : new Float32Array(9), 3));
           next.setIndex(new BufferAttribute(fanBuild.index.length ? fanBuild.index : new Uint32Array(3), 1));
@@ -563,18 +603,48 @@ export function createMorphSurfaceMesh(options: { domain: LodDomain; patchCells:
           fanProbeMesh.geometry = next;
           fanGeometry.dispose();
           fanGeometry = next;
-          packWithFan = { ...pack, fan: fanBuild.stats };
+          packWithFan = { ...pack, fan: { ...fanBuild.stats, rebuilds: counters.rebuilds } };
         } else if (packWithFan.instances !== pack.instances || packWithFan.leaves !== pack.leaves) {
-          packWithFan = { ...pack, fan: fanBuild.stats };
+          packWithFan = { ...pack, fan: { ...fanBuild.stats, rebuilds: counters.rebuilds } };
         }
         fanMesh.position.set(fanBuild.origin[0], fanBuild.origin[1], fanBuild.origin[2]);
         fanProbeMesh.position.copy(fanMesh.position);
         fanMesh.visible = fanProbeMesh.visible = fanBuild.stats.triangles > 0;
+        vertexFan.mesh.visible = vertexFan.probeMesh.visible = false;
+      } else if (fanOn) {
+        fanMesh.visible = fanProbeMesh.visible = false;
+        fanBuild = undefined;
+        const centreKey = `${frame.view.centreLonDeg}|${frame.view.centreLatDeg}|${frame.view.radiusM}|${fanRays}`;
+        if (selector !== vfFrom || selector.version !== vfVersion || !vfStats || !vfSignature.startsWith(centreKey + '|')) {
+          vfFrom = selector;
+          vfVersion = selector.version;
+          const leaves = fanLeavesOf(selector, domain, patchCells, capacity, frame.basis);
+          const signature = `${centreKey}|${fanLeafSignature(leaves)}`;
+          if (signature !== vfSignature || !vfStats) {
+            vfSignature = signature;
+            const began = performance.now();
+            const specs = buildFanSpecs(fanContext(domain, patchCells, frame.basis, frame.view.radiusM, frame.view.morph), leaves, fanRays);
+            const data = packVertexFan(specs);
+            vertexFan.upload(data);
+            const ms = performance.now() - began;
+            count(ms);
+            vfStats = {
+              leaves: specs.corner + specs.interior, corner: specs.corner, interior: specs.interior, rays: fanRays, vertices: specs.vertexCount,
+              triangles: specs.index.length / 3, buildMs: ms, mode: 'vertex',
+            };
+          }
+        }
+        packWithFan = { ...pack, fan: { ...vfStats!, rebuilds: counters.rebuilds } };
+        vertexFan.mesh.position.set(frame.camBody[0], frame.camBody[1], frame.camBody[2]);
+        vertexFan.probeMesh.position.copy(vertexFan.mesh.position);
+        vertexFan.mesh.visible = vertexFan.probeMesh.visible = vfStats!.triangles > 0;
       } else {
         fanMesh.visible = fanProbeMesh.visible = false;
+        vertexFan.mesh.visible = vertexFan.probeMesh.visible = false;
         fanBuild = undefined;
         packWithFan = pack;
       }
+      vertexFan.setFrame(frame);
       vertex.setFrame(frame);
       mesh.position.set(frame.camBody[0], frame.camBody[1], frame.camBody[2]);
       return packWithFan;
@@ -583,6 +653,14 @@ export function createMorphSurfaceMesh(options: { domain: LodDomain; patchCells:
       poleFan = on;
       if (rays !== undefined) fanRays = rays;
     },
+    setFanMode(mode) {
+      fanMode = mode;
+    },
+    fanCounters: () => counters,
+    resetFanCounters() {
+      counters = { rebuilds: 0, buildMsTotal: 0, lastBuildMs: 0 };
+    },
+    vertexFan,
     fan: { mesh: fanMesh, probeMesh: fanProbeMesh, material: fanMaterial, probeMaterial: fanProbeMaterial },
     setMethod: (method) => vertex.setMethod(method),
     setHeight: (metres) => {
@@ -605,6 +683,7 @@ export function createMorphSurfaceMesh(options: { domain: LodDomain; patchCells:
       probeMaterial.dispose();
       fanMaterial.dispose();
       fanProbeMaterial.dispose();
+      vertexFan.dispose();
     },
   };
 }

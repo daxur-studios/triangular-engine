@@ -5,5 +5,8 @@ export * from './morph-probe';
 export * from './morph-surface-mesh';
 export * from './morph-leaves';
 export * from './morph-fan';
+export * from './morph-fan-vertex';
+export * from './morph-fan-probe';
+export * from './morph-fan-rebuild';
 export * from './morph-crack-probe';
 export * from './morph-stretch';

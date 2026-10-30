@@ -10,7 +10,7 @@
       </span>
       @if (d.fanVertices !== undefined) {
         <span>
-          pole fan: {{ d.fanVertices.toLocaleString() }} vertices · {{ d.fanTriangles?.toLocaleString() }} triangles · last build {{ d.fanBuildMs?.toFixed(1) }} ms
+          pole fan ({{ d.fanMode }}): {{ d.fanVertices.toLocaleString() }} vertices · {{ d.fanTriangles?.toLocaleString() }} triangles · last build {{ d.fanBuildMs?.toFixed(1) }} ms · builds {{ d.fanRebuilds }}
         </span>
       }
       <span>
@@ -99,6 +99,16 @@
       @for (n of fanRayOptions; track n) {
         <button [class.active]="s.fanRays === n" (click)="update({ fanRays: n })">{{ n }} rays</button>
       }
+    </div>
+
+    <div class="row">
+      <span class="label">fan type</span>
+      @for (m of fanModes; track m) {
+        <button [class.active]="s.fanMode === m" (click)="update({ fanMode: m })">{{ m === 'cpu' ? 'CPU fan (orange)' : 'vertex-stage fan (teal)' }}</button>
+      }
+      <button [disabled]="fanRunning() || runnerBusy()" (click)="runFanProbe()">fan precision</button>
+      <button [disabled]="fanRunning() || runnerBusy()" (click)="runFanRebuild()">fan rebuilds</button>
+      <span>{{ fanStatus() }}</span>
     </div>
 
     <div class="row">

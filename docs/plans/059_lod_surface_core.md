@@ -282,7 +282,8 @@ measured on the RTX 3080 before the next starts:
     own piece of work, with a labelled placeholder until then. `<planet>` carries the morph state (D11, option B);
     the terrain draws morph 0 only until G6.
   - **G6 Globe-to-map morph** (D11, option B). After a spike on precision and the map's cut, the terrain bends with
-    the shared morph state; §Globe-to-map morph has the contract.
+    the shared morph state; §Globe-to-map morph has the contract and the G6 build plan (G6a–G6f, proposed
+    2026-10-30).
 - **Order:** G1 and G2 first, so a game can start using the terrain; G3 next; the combined suite (G5) is meaningful
   once G3 is in, though it can start earlier with the lab material. Then the morph spike, then G6.
 - **G5 `<planet>` inputs (approved by the owner 2026-10-29; built, see the runbook):**
@@ -434,6 +435,72 @@ surface mesh; nothing in the library changes until G6.
   seen from altitude.
 - Equal Earth or equirectangular for the terrain's map (the cell planet defaults to Equal Earth).
 - Whether the map tiles sideways at morph 1 (Plan 055's D7).
+
+**G6 build plan (proposal, 2026-10-30, nothing built).** What moves from spike 5 into `triangular-engine/lod-surface`,
+in steps with headless specs. The spike's code is the reference; it is ported and reviewed, not imported.
+- **G6a One map definition.** Right now two code paths define the map. Both blend from (lon R, lat R) to the target
+  projection as `morph` rises, but they disagree in two ways.
+  - **Equal Earth width:** `planet-morph-nodes` (the globe material, through `setPlanetMapExtent`) makes the Equal
+    Earth map 2πR wide. `blendedProjection` in `atmosphere/bent-planet.ts` (the atmosphere's CPU twin, and the
+    spike) makes it about 1.16 times narrower.
+  - **Equirectangular:** the material can target it (2πR by πR, which is (lon R, lat R) itself, so there is no blend
+    at all). `blendedProjection` cannot.
+  - **Why it matters:** a game that draws the morph globe far away and the terrain near it, as `<planet [world]>`
+    allows, needs one map. So one CPU function in the library gives map x, y for (lon, lat, morph, projection, R).
+    The terrain's vertex stage and the globe material agree with it.
+  - **Spec:** compares the CPU function with the TSL at sample points, morph 0.25, 0.5 and 1, both projections.
+  - **No behaviour change in G6a:** the spike keeps `blendedProjection`. Equal Earth width is a constant factor, so
+    its precision results carry over. G6b ports the bend onto the new function.
+  - **The atmosphere** moves to the same map when the terrain and atmosphere morph together (G6e). Its morph is
+    still being developed (owner, 2026-10-30), so G6 changes only its map width, nothing else in it.
+- **G6b The bend in the terrain's vertex stage.** Port the anchor-relative bend (`morph-math`, `morph-frame`), the
+  cut (each leaf takes a side, a leaf at the cut is drawn twice, the instance buffer doubles, and fragments outside
+  the map's outline are discarded) and the pole-vertex longitude.
+  - **Inputs:** uniforms only, from `<planet>`'s `morphUniforms`.
+  - **Morph 0:** a `select` gives today's position bit for bit. Falsifier: the v9 suite and every G1–G5 spec are
+    unchanged. The extra vertex work at morph 0 is measured, and two pipelines are used only if it shows.
+  - **Specs:** ported from the spike's `morph-math`, `morph-leaves` and `morph-surface-mesh` specs.
+- **G6c The selector measures in the morphed view.** The spike patches `LodSelector`'s private arrays
+  (`installStretchMetric`). G6 adds a supported per-node geometry hook instead, selected by morph.
+  - **Bent culling:** the stretch geometry already gives a bent centre, normal and radius, so culling uses bent
+    bounds once the height range pads them. The spike had culling off, so this is new: a spec, plus drawn leaves
+    measured at orbit, morph 0.5.
+  - **Morph animation:** the spike refreshes every node whenever `morph` changes, so a sweep refreshes the whole tree
+    every frame. Proposed: refresh when morph moves by more than a step (about 0.01) and lean on the selector's
+    hysteresis. Measured as selection CPU p95 during a sweep.
+  - **At morph 0:** the sphere metric is used, and selection matches today's exactly.
+- **G6d The pole fan.** The spike rebuilds it on the CPU in doubles, camera-relative: 12–40 ms whenever the camera,
+  morph or selection changes. That is too slow for a frame. Proposed:
+  - **Build:** the CPU builds only the fan's topology and its rays' (longitude, colatitude) samples, and only when
+    the set of pole leaves or their edge masks change (rarely; a worker if needed). The vertex stage maps them through
+    the anchor-relative bend, so camera, morph and centre move with no rebuild.
+  - **Measure first:** the fan's precision in the vertex stage is unmeasured, so a suite case measures it on the spike
+    page first (`lod-surface-morph` v6), against the CPU fan. The fallback, if it fails, is the CPU fan built relative
+    to the pole and refreshed per morph step.
+  - **Also covered:** a fan leaf that straddles the cut (a second copy shifted by 2π, untested in the spike) and the
+    equirectangular pole.
+  - Needs decision 2.
+- **G6e Material and components.**
+  - **Material:** `TerrainPlanetMaterial` takes the shared morph uniforms instead of constants, as item 7 says.
+    `morphedPosition` becomes the bent position. `bodyFixedLocal` and `radialDirection` stay on the sphere, so cells
+    do not slide. The shading normal is bent, following the globe material's convention.
+  - **Shadows:** off while morph is above 0.
+  - **`<planetTerrain>`:** drops its phase-`morph` report. Standalone, it takes `morph`, `projection` and
+    `projectionCentre`.
+  - **Docs:** TSDoc, the entry README and `CHANGELOG.md`.
+- **G6f Suite.** `planet-scene` v2 adds morph 0, 0.5 and 1 at orbit and at 2 m, and a scripted sweep.
+  - **Metrics:** holes and rim offset (the spike's crack probe, moved into a shared demo-app folder), drawn leaves,
+    selection CPU, GPU pass, and fan vertices.
+  - **Runs:** headless for correctness, then a visible NVIDIA run for timings.
+- **Order:** G6a first; G6b and G6c can run in parallel after it; the v6 fan measurement runs alongside them, then
+  G6d; G6e after G6b; G6f last. Picking (item 9) and tiling stay out.
+- **Decisions (2026-10-30).** The owner left these to the agent. The atmosphere's morph is still in development, so
+  it should not set the map. The terrain is the better-tested side.
+  1. **The map:** the globe material's (2πR wide, with the target projection chosen by type). The atmosphere follows
+     in G6e, with a CHANGELOG entry.
+  2. **The pole fan:** measure the vertex-stage fan first (`lod-surface-morph` v6), then build G6d.
+  3. **The open items above:** design for the 2 m view the spike tested, with no closest-zoom limit; support both
+     projections; no sideways tiling in G6.
 
 ## Suite (proposed): `lod-surface-baseline` v1
 

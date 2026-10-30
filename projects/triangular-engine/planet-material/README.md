@@ -53,6 +53,13 @@ Geometry needs the attributes the stages read: `aFlatPos` / `aFlatNorm` (the fla
 | `createPlanetMorphUniforms`, `planetMorphGraph`, `createPlanetContext` | Stage 1 pieces, to build a different material from the same graph |
 | `IPlanetStageOverride`, `PlanetSurfaceMaterial.setStageOverride` | Supply stage 1 for a mesh that is not the morph globe ([below](#using-the-material-on-another-mesh)) |
 | `equirectangularFlat`, `equalEarthFlat`, `seam*` | The projection and seam `Fn`s |
+| `planetMapXY`, `planetMapExtents`, `planetMapRowHalfWidth`, `planetMapRows`, `PLANET_MAP_EQUAL_EARTH_SCALE` | The material's map on the CPU in doubles ([below](#the-map-on-the-cpu)) |
+
+## The map on the CPU
+
+`planetMapXY(lon, lat, morph, projection, radius)` is the map `(x, y)` in metres that the morph material bends, as plain doubles: `mix((R lon, R lat), flat, morph)`, where `flat` is the equirectangular map (`(R lon, R lat)` itself, so the blend does nothing) or the Equal Earth map, fitted so the equator spans `2 pi R`. Use it where something must agree with the globe material (a terrain's vertex stage, a marker, a cut or outline clip) instead of keeping a second copy. `lon` and `lat` are the projected longitude and latitude, relative to the projection centre. `planetMapRowHalfWidth(lat, ...)` is where the cut meridian lands at that row (a point is inside the outline when `|x|` is at most that), `planetMapExtents` the equator's half-width and the poles' half-height, and `planetMapRows` the outline by row.
+
+Equal Earth here is `PLANET_MAP_EQUAL_EARTH_SCALE` (about 1.1607) times the unit-sphere form (`planetEqualEarthRow`) in both x and y, so at morph 1 it is `2 pi R` wide and about `3.06 R` tall, against `2 pi R` by `pi R` for equirectangular. The atmosphere's `blendedProjection` uses the unit form and is narrower by that constant.
 
 ## Using the material on another mesh
 

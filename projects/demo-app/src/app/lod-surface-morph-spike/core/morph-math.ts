@@ -205,6 +205,16 @@ export function p2Position(L: MorphLib, A: MorphAnchor<any>, du: V3<any>, sigma:
   // along the window's seam (the quarter-map leaves around a pole that sit on the +-90 degree meridians), which the window tears.
   const lo = leafLon ? leafLon.sub(PI) : sigma.mul(HALF_PI).sub(PI);
   const wrapN = L.floor(lo.sub(lam0).div(TWO_PI)).add(1);
+  return p2FromAngles(L, A, ds, dphi, dlam0, wrapN, h);
+}
+
+/**
+ * The second half of P2: the position from the vertex's exact offsets from the anchor. `ds` = sin(lat) - sin(latA), `dphi` = lat - latA,
+ * `dlam0` = lon - lonA before the unwrap and `wrapN` the unwrap's integer (the vertex's longitude is `lamA + dlam0 + 2 pi wrapN`).
+ * `p2Position` derives them from the lattice's direction difference; the vertex-stage pole fan (`morph-fan-vertex.ts`) builds them from
+ * double-float differences of the polar coordinates the CPU hands over, which a pole fan vertex needs because it has no lattice direction.
+ */
+export function p2FromAngles(L: MorphLib, A: MorphAnchor<any>, ds: any, dphi: any, dlam0: any, wrapN: any, h: any): P2Result {
   const dlam = dlam0.add(wrapN.mul(TWO_PI));
 
   // Equal Earth: theta = asin(M sin(lat)), by differences of sin(theta) = M sin(lat).

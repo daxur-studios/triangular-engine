@@ -1,14 +1,21 @@
 import { TERRAIN_DEFAULTS } from 'triangular-engine/lod-surface/core';
 import type { TestCheck, TestMetric, TestObservation, TestScenario, TestSuite } from 'triangular-engine/testing';
-import { CRACK_DEFAULTS, DIAGNOSE_LEAF_CAP, PROBE_DEFAULTS, type CrackRow, type LodMetric, type MorphPoseId, type ProbeResult } from './core';
+import {
+  CRACK_DEFAULTS, DIAGNOSE_LEAF_CAP, FAN_PROBE_DEFAULTS, FAN_REBUILD_DEFAULTS, PROBE_DEFAULTS, fanProbeCases,
+  type CrackRow, type FanMode, type FanProbePose, type FanProbeRow, type FanRebuildRow, type LodMetric, type MorphPoseId, type ProbeResult,
+} from './core';
 
 /**
  * Everything a morph spike case sets. Plain JSON: it is saved with the result and the page runs it through the probes it already
  * has (`runProbe`, `runCrackProbe`); a case never drives the page's own controls.
  */
 export interface MorphSpikeTestSettings {
-  /** `precision`: the GPU vertex precision probe (`runProbe`); `crack`: the crack probe (`runCrackProbe`). */
-  readonly kind: 'precision' | 'crack';
+  /**
+   * `precision`: the GPU vertex precision probe (`runProbe`); `crack`: the crack probe (`runCrackProbe`); `fan-precision` (v6): the vertex-stage
+   * pole fan's positions read back from the GPU against a double reference (`runFanProbe`); `fan-rebuild` (v6): the scripted camera move and
+   * morph change that counts the fan's rebuilds (`runFanRebuild`).
+   */
+  readonly kind: 'precision' | 'crack' | 'fan-precision' | 'fan-rebuild';
   readonly radii: readonly number[];
   readonly morphs: readonly number[];
   /** The poses: the crack probe's views, or the precision probe's 2 m poses. */
@@ -41,7 +48,34 @@ export interface MorphSpikeTestSettings {
    */
   readonly poleFan?: boolean;
   readonly fanRays?: number;
+  /**
+   * Crack kind (v5): the scenario is a comparison baseline, the selector or fan setting the G6 design rejects. It passes when it has no hole
+   * inside the ground and the probe still measures the rim error it exists to show (`rimOffsetMaxPx` over `RIM_OFFSET_LIMIT_PX`), instead of
+   * the rim check.
+   */
+  readonly baseline?: boolean;
+  /**
+   * Crack kind (v6): which pole fan draws the pole leaves, `'cpu'` (iteration 4, the default; absent in v4 and v5) or `'vertex'` (iteration 5: the vertex
+   * stage evaluates the positions). The judgement is the same as the CPU fan's.
+   */
+  readonly fanMode?: FanMode;
+  /** Fan kinds (v6): the poses (a preset, optionally at another altitude) and the projection centres of the matrix; `radii` and `morphs` as in the other kinds. */
+  readonly fanPoses?: readonly FanProbePose[];
+  readonly fanCentres?: readonly { readonly lonDeg: number; readonly latDeg: number }[];
+  /** `fan-precision`: the largest vertex error, in pixels, a case may have (see {@link FAN_PRECISION_LIMIT_PX}). */
+  readonly precisionLimitPx?: number;
+  /** `fan-rebuild`: the fan modes to run (the vertex-stage fan is judged, the CPU fan is the control that shows the counter works) and the frames of each moving phase. */
+  readonly fanModes?: readonly FanMode[];
+  readonly rebuildFrames?: number;
 }
+
+/**
+ * Largest error, in pixels, a vertex of the vertex-stage fan may have against the double-precision placement of the same description. One
+ * pixel is the plan's vertex goal and the limit of the existing P2 precision check; a fan vertex that is off by a pixel is a step against the
+ * leaves the fan sits next to (the rim check's limit is the same pixel). Unlike the instanced P2 check this one includes the pole cap, because the
+ * fan exists to make that region right.
+ */
+export const FAN_PRECISION_LIMIT_PX = 1;
 
 /** Largest rim offset (pixels) a v3 real case may have: the plan's goal is a vertex error under a pixel. */
 export const RIM_OFFSET_LIMIT_PX = 1;
@@ -172,8 +206,69 @@ const MORPH_SPIKE_V4: TestSuite<MorphSpikeTestSettings> = {
   ],
 };
 
+/** The scenarios of v4 that are comparison baselines: they show the defect the pole fan fixes, so v5 judges them differently. */
+const BASELINE_IDS: ReadonlySet<string> = new Set([
+  'crack-pole-200m', 'crack-tilted', 'crack-pole-200m-stretch', 'crack-tilted-stretch', 'crack-pole-200m-stretch-cap16k',
+  'crack-tilted-stretch-cap16k', 'crack-pole-200m-fan-256', 'crack-tilted-fan-256',
+]);
+
+/**
+ * v5: the v4 scenarios with the same settings and the same measurement, but the eight comparison baselines (the sphere and stretch metrics
+ * without the fan, and the fan with 256 rays) are marked `baseline` and labelled so. Judgement only: a baseline passes when it has no hole
+ * inside the ground and still shows the rim error, instead of failing every run for showing the defect the fan fixes.
+ */
+const MORPH_SPIKE_V5: TestSuite<MorphSpikeTestSettings> = {
+  ...MORPH_SPIKE_V4,
+  version: 5,
+  scenarios: MORPH_SPIKE_V4.scenarios.map((scenario) => (BASELINE_IDS.has(scenario.id)
+    ? { ...scenario, label: `Baseline: ${scenario.label.replace(/ \(known open:[^)]*\)/, '')}`, settings: { ...scenario.settings, baseline: true } }
+    : scenario)),
+};
+
+const vertexFanCrack = (id: string, label: string, change: Partial<MorphSpikeTestSettings>): TestScenario<MorphSpikeTestSettings> =>
+  fanCrack(id, label, { fanMode: 'vertex', ...change });
+
+/**
+ * v6: the v5 scenarios unchanged, plus the vertex-stage pole fan (iteration 5): the five crack cases the CPU fan has at 1,024 rays (the pole
+ * edge at 200 m and the tilted centre with the stretch metric, the seam views) drawn by the vertex-stage fan under the same judge (no hole
+ * inside the ground, none at the cut, rim offset within `RIM_OFFSET_LIMIT_PX`); a precision scenario that reads the fan's positions back
+ * from the GPU and compares them with the double placement of the same descriptions (both radii, morph 0.5 and 1, the centred and the tilted
+ * centre, the pole view at 200 m and at 2 m, the 2 m pole preset) with a limit of {@link FAN_PRECISION_LIMIT_PX}; and a rebuild scenario that
+ * moves the camera and the morph under the vertex-stage fan (judged: 0 builds) and the CPU fan (the control: it must build).
+ */
+const MORPH_SPIKE_V6: TestSuite<MorphSpikeTestSettings> = {
+  ...MORPH_SPIKE_V5,
+  version: 6,
+  scenarios: [
+    ...MORPH_SPIKE_V5.scenarios,
+    vertexFanCrack('crack-pole-200m-fan-vertex', 'Cracks: pole edge at 200 m, stretch metric, vertex-stage pole fan (1,024 rays)', { views: ['pole-200m'], lodMetric: 'stretch' }),
+    vertexFanCrack('crack-tilted-fan-vertex', 'Cracks: tilted centre, orbit and pole edge, stretch metric, vertex-stage pole fan (1,024 rays)', {
+      ...TILTED_CENTRE, views: ['orbit-map', 'pole-200m'], lodMetric: 'stretch',
+    }),
+    vertexFanCrack('crack-orbit-map-fan-vertex', 'Cracks: orbit over the map with the vertex-stage pole fan (seams must stay closed)', { views: ['orbit-map'] }),
+    vertexFanCrack('crack-mid-fan-vertex', 'Cracks: mid-height views with the vertex-stage pole fan (seams must stay closed)', { views: ['mid-200m', 'mid-2m'] }),
+    vertexFanCrack('crack-cut-fan-vertex', 'Cracks: the cut with the vertex-stage pole fan (seams must stay closed)', { views: ['cut-east-2m', 'cut-west-2m'] }),
+    {
+      id: 'fan-vertex-precision', label: 'Vertex-stage pole fan: GPU positions against the double placement, under one pixel (pole view at 200 m and 2 m)',
+      settings: {
+        ...CRACK_BASE, kind: 'fan-precision', radii: FAN_PROBE_DEFAULTS.radii, morphs: FAN_PROBE_DEFAULTS.morphs, views: [], matrix: false, lodMetric: 'stretch',
+        fanRays: 1024, fanPoses: FAN_PROBE_DEFAULTS.poses, fanCentres: FAN_PROBE_DEFAULTS.centres, precisionLimitPx: FAN_PRECISION_LIMIT_PX,
+      },
+      durationMs: 1000,
+    },
+    {
+      id: 'fan-vertex-rebuilds', label: 'Pole fan rebuilds: none for a camera move or a morph change with the vertex-stage fan (the CPU fan is the control)',
+      settings: {
+        ...CRACK_BASE, kind: 'fan-rebuild', radii: [6_371_000], morphs: [0.5], views: ['pole-200m'], matrix: false,
+        fanRays: 1024, fanCentres: FAN_REBUILD_DEFAULTS.centres, fanModes: FAN_REBUILD_DEFAULTS.modes, rebuildFrames: FAN_REBUILD_DEFAULTS.frames,
+      },
+      durationMs: 1000,
+    },
+  ],
+};
+
 /** Every version of the suite, oldest first. */
-export const MORPH_SPIKE_TEST_HISTORY: readonly TestSuite<MorphSpikeTestSettings>[] = [MORPH_SPIKE_V1, MORPH_SPIKE_V2, MORPH_SPIKE_V3, MORPH_SPIKE_V4];
+export const MORPH_SPIKE_TEST_HISTORY: readonly TestSuite<MorphSpikeTestSettings>[] = [MORPH_SPIKE_V1, MORPH_SPIKE_V2, MORPH_SPIKE_V3, MORPH_SPIKE_V4, MORPH_SPIKE_V5, MORPH_SPIKE_V6];
 
 /** How many rows a crack scenario's probe run returns (mirrors `runCrackProbe`'s case list). */
 export function expectedCrackCases(settings: MorphSpikeTestSettings): number {
@@ -194,7 +289,7 @@ export function crackRowText(row: CrackRow): string {
   return `${km} km ${row.view} m${row.morph}${row.control ? ` ${row.control}` : ''} ${row.lodMetric ?? 'sphere'}: holes ${row.holes} `
     + `(cut ${row.cut}, pole ${row.pole}, else ${row.elsewhere}; interior ${row.holesInterior ?? '?'}, rim ${row.holesRim ?? '?'}, rim offset max ${row.rimOffsetMaxPx ?? '?'} p95 ${row.rimOffsetP95Px ?? '?'} px), leaves ${row.leaves}, instances ${row.instances}`
     + (row.leafCap ? `, cap ${row.leafCap}` : '')
-    + (row.fanVertices !== undefined ? `, fan ${row.fanRays ?? '?'} rays ${row.fanLeaves ?? '?'} leaves ${row.fanVertices} vertices ${row.fanTriangles} triangles ${row.fanBuildMs?.toFixed(1)} ms` : '')
+    + (row.fanVertices !== undefined ? `, fan ${row.fanRays ?? '?'} rays ${row.fanLeaves ?? '?'} leaves ${row.fanVertices} vertices ${row.fanTriangles} triangles ${row.fanBuildMs?.toFixed(1)} ms${row.fanMode === 'vertex' ? ' (vertex stage)' : ''}` : '')
     + (row.poleCause && row.poleCause !== 'none' ? `, pole cause ${row.poleCause} (${row.poleHolesAtBigCap} pole holes at ${DIAGNOSE_LEAF_CAP} leaves)` : '');
 }
 
@@ -212,6 +307,8 @@ export function crackObservation(rows: readonly CrackRow[], settings: MorphSpike
   const expected = expectedCrackCases(settings);
   const dirty = real.filter((r) => r.holes !== 0);
   const rimDirty = real.filter((r) => (r.holesInterior ?? r.holes) !== 0 || r.cut !== 0 || (r.rimOffsetMaxPx ?? 0) > RIM_OFFSET_LIMIT_PX);
+  const rimShown = real.filter((r) => (r.rimOffsetMaxPx ?? 0) > RIM_OFFSET_LIMIT_PX);
+  const interiorDirty = real.filter((r) => (r.holesInterior ?? r.holes) !== 0);
   const dropped = real.filter((r) => r.dropped !== 0);
   const silentRows = holeControls.filter((r) => r.holes <= 0);
   const tolerated = (r: CrackRow): boolean => settings.knownSilentControls === true && expectedSilent(r);
@@ -226,14 +323,23 @@ export function crackObservation(rows: readonly CrackRow[], settings: MorphSpike
       detail: rows.filter((r) => r.coveredPx <= 0).map(crackRowText).join(' | ') || `${rows.length} cases`,
     },
     ...(real.length ? [
-      settings.rimCheck ? {
+      ...(settings.baseline ? [{
+        name: 'No hole inside the ground in the real cases (holesInterior == 0)', passed: interiorDirty.length === 0,
+        detail: interiorDirty.length ? `${interiorDirty.length} of ${real.length} cases: ${list(interiorDirty)}` : `${real.length} cases, no interior hole`,
+      } satisfies TestCheck, {
+        name: `Baseline: the rim error this scenario exists to show is still measured (some real case has rimOffsetMaxPx > ${RIM_OFFSET_LIMIT_PX})`,
+        passed: rimShown.length > 0,
+        detail: rimShown.length
+          ? `Comparison baseline (the selector or fan setting the G6 design rejects); the probe still sees the defect in ${rimShown.length} of ${real.length} cases: ${list(rimShown)}`
+          : `${real.length} cases, worst rim offset ${maxOf(real.map((r) => r.rimOffsetMaxPx ?? 0))} px: the baseline no longer shows the defect; re-examine the probe or the baseline`,
+      } satisfies TestCheck] : settings.rimCheck ? [{
         name: `No hole inside the ground and the drawn rim within ${RIM_OFFSET_LIMIT_PX} px of the exact rim in the real cases (holesInterior == 0, rimOffsetMaxPx <= ${RIM_OFFSET_LIMIT_PX})`,
         passed: rimDirty.length === 0,
         detail: rimDirty.length ? `${rimDirty.length} of ${real.length} cases: ${list(rimDirty)}` : `${real.length} cases, no interior hole, worst rim offset ${maxOf(real.map((r) => r.rimOffsetMaxPx ?? 0))} px`,
-      } : {
+      } satisfies TestCheck] : [{
         name: 'No holes inside the map outline in the real cases (holes == 0)', passed: dirty.length === 0,
         detail: dirty.length ? `${dirty.length} of ${real.length} cases: ${list(dirty)}` : `${real.length} cases, 0 holes`,
-      },
+      } satisfies TestCheck]),
       {
         name: 'No instance dropped for capacity', passed: dropped.length === 0,
         detail: dropped.length ? list(dropped) : `${real.length} cases`,
@@ -269,6 +375,7 @@ export function crackObservation(rows: readonly CrackRow[], settings: MorphSpike
     { ...per('fanVertices', 'count', 'Per real case with the pole fan on: vertices of the fan (the pole leaves it replaced)', (r) => r.fanVertices ?? 0, real.filter((r) => r.fanVertices !== undefined)), optional: true },
     { ...per('fanTriangles', 'count', 'Per real case with the pole fan on: triangles of the fan', (r) => r.fanTriangles ?? 0, real.filter((r) => r.fanVertices !== undefined)), optional: true },
     { ...per('fanBuildMs', 'ms', 'Per real case with the pole fan on: CPU milliseconds of the fan build (doubles, then Float32), one rebuild', (r) => r.fanBuildMs ?? 0, real.filter((r) => r.fanVertices !== undefined)), optional: true },
+    { ...per('fanRebuilds', 'count', 'Per real case with the pole fan on: builds of the fan during the case (the case builds a fresh fan; 0: an earlier case had the same pole leaves)', (r) => r.fanRebuilds ?? 0, real.filter((r) => r.fanVertices !== undefined)), optional: true },
     { ...per('controlHoles', 'count', 'Per gap or folding-off control case: holes the probe found (they must be above 0)', (r) => r.holes, holeControls), optional: true },
   ];
 
@@ -286,12 +393,15 @@ export function crackObservation(rows: readonly CrackRow[], settings: MorphSpike
       mostInstances: maxOf(rows.map((r) => r.instances)),
       leafCap: settings.leafCap ?? TERRAIN_DEFAULTS.leafCap,
       poleFan: settings.poleFan === true,
+      fanMode: settings.poleFan ? settings.fanMode ?? 'cpu' : 'none',
+      baseline: settings.baseline === true,
       fanRays: settings.poleFan ? settings.fanRays ?? 1024 : 0,
       poleCauses: [...new Set(real.filter((r) => r.poleCause && r.poleCause !== 'none').map((r) => r.poleCause))].join(',') || 'none',
       expectedSilentControls: knownSilent.length ? knownSilent.map(crackRowText).join(' | ') : 'none',
       rows: rows.map(crackRowText).join(' | '),
     },
     limitations: [
+      ...(settings.baseline ? ['A baseline scenario is a comparison, not a case to fix: it passes while the probe still sees the rim error it shows and no hole inside the ground.'] : []),
       'A hole is a pixel the probe material left black inside the map outline; the outline model is analytic, so a row near the pole edge depends on the 6 px mask.',
       'The leaf cap (4,096 unless the scenario sets one) binds at the pole views: both metrics report the leaves they could afford, not the leaves they asked for.',
       'A hole run that touches the exact outline is a rim hole: the drawn rim of the world lies short of the exact rim (a silhouette error), not space seen through the ground; the rim offset measures it per image column.',
@@ -339,6 +449,144 @@ export function precisionObservation(rows: readonly ProbeResult[]): TestObservat
     limitations: [
       'The error is vertex position against a double-precision CPU reference read back from the GPU; it is not a rendered-image comparison.',
       'Errors inside the 1 degree pole cap are reported in the page\'s table (all max px) but do not decide the pass.',
+    ],
+  };
+}
+
+/** The options the fan precision probe is run with for a scenario (the adapter and the case count read the same). */
+export function fanProbeOptionsOf(settings: MorphSpikeTestSettings): { radii: readonly number[]; morphs: readonly number[]; poses?: readonly FanProbePose[]; centres?: readonly { lonDeg: number; latDeg: number }[]; rays?: number } {
+  return { radii: settings.radii, morphs: settings.morphs, poses: settings.fanPoses, centres: settings.fanCentres, rays: settings.fanRays };
+}
+
+/** How many rows the fan precision probe returns for a scenario. */
+export function expectedFanProbeCases(settings: MorphSpikeTestSettings): number {
+  return fanProbeCases(fanProbeOptionsOf(settings)).length;
+}
+
+/** How many rows the fan rebuild run returns for a scenario: radii x centres x modes. */
+export function expectedFanRebuildCases(settings: MorphSpikeTestSettings): number {
+  return settings.radii.length * (settings.fanCentres ?? FAN_REBUILD_DEFAULTS.centres).length * (settings.fanModes ?? FAN_REBUILD_DEFAULTS.modes).length;
+}
+
+const sig = (x: number): string => (x === 0 ? '0' : x < 0.001 ? x.toExponential(2) : x.toPrecision(3));
+
+/** One fan precision row as a short text. */
+export function fanProbeRowText(r: FanProbeRow): string {
+  return `${r.label}: ${r.leaves} leaves (${r.corner} corner, ${r.interior} interior) ${r.vertices} vertices, max ${sig(r.all.maxErrPx)} px p99 ${sig(r.all.p99ErrPx)} px `
+    + `(polar ${sig(r.polar.maxErrPx)}, boundary ${sig(r.chord.maxErrPx)}, own sheet ${sig(r.own.maxErrPx)}), worst ${r.worst.kind} at ${sig(r.worst.distM)} m, nearest ${sig(r.nearestM)} m`
+    + (r.nonFinite ? `, ${r.nonFinite} non-finite` : '');
+}
+
+/** The checks and metrics of the fan precision scenario from the probe's rows. Pure. */
+export function fanPrecisionObservation(rows: readonly FanProbeRow[], settings: MorphSpikeTestSettings): TestObservation {
+  const limit = settings.precisionLimitPx ?? FAN_PRECISION_LIMIT_PX;
+  const expected = expectedFanProbeCases(settings);
+  const over = rows.filter((r) => r.all.maxErrPx > limit);
+  const broken = rows.filter((r) => r.vertices <= 0 || r.leaves <= 0 || r.nonFinite !== 0);
+  const checks: TestCheck[] = [
+    { name: 'The probe ran every case', passed: rows.length === expected && rows.length > 0, detail: `${rows.length} rows, ${expected} expected` },
+    {
+      name: 'Every case built a fan and the GPU returned finite positions for all its vertices', passed: rows.length > 0 && broken.length === 0,
+      detail: broken.length ? broken.slice(0, MAX_LISTED).map(fanProbeRowText).join(' | ') : `${rows.length} cases, ${rows.reduce((n, r) => n + r.vertices, 0)} vertices`,
+    },
+    {
+      name: 'The cases cover the corner pole (centred projection) and the interior pole (tilted projection)',
+      passed: rows.some((r) => r.corner > 0) && rows.some((r) => r.interior > 0),
+      detail: `${rows.filter((r) => r.corner > 0).length} rows with a corner pole leaf, ${rows.filter((r) => r.interior > 0).length} with an interior one`,
+    },
+    {
+      name: `Every fan vertex is within ${limit} px of the double-precision placement of its description (boundary samples, polar rings and the pole)`,
+      passed: rows.length > 0 && over.length === 0,
+      detail: over.length ? over.slice(0, MAX_LISTED).map(fanProbeRowText).join(' | ') : `worst ${sig(maxOf(rows.map((r) => r.all.maxErrPx)))} px over ${rows.length} cases`,
+    },
+  ];
+  const metric = (name: string, unit: string, source: string, pick: (r: FanProbeRow) => number): TestMetric => ({
+    name, unit, source, samples: rows.map(pick), unavailableReason: rows.length ? undefined : 'No rows',
+  });
+  const worstRow = rows.reduce<FanProbeRow | undefined>((a, b) => (a && a.all.maxErrPx >= b.all.maxErrPx ? a : b), undefined);
+  return {
+    metrics: [
+      metric('maxErrPx', 'px', 'Per case: the largest error of any fan vertex, GPU position against the double placement, in pixels (error / distance x focal length)', (r) => r.all.maxErrPx),
+      metric('p99ErrPx', 'px', 'Per case: the 99th percentile of the same errors', (r) => r.all.p99ErrPx),
+      metric('polarMaxErrPx', 'px', 'Per case: the largest error of the polar vertices (rings between the boundary and the pole, and the pole itself)', (r) => r.polar.maxErrPx),
+      metric('boundaryMaxErrPx', 'px', 'Per case: the largest error of the boundary vertices (the leaf\'s own samples and the chord points between them)', (r) => r.chord.maxErrPx),
+      metric('ownSheetMaxErrPx', 'px', 'Per case: the largest error of the vertices on the camera\'s own sheet of the map', (r) => r.own.maxErrPx),
+      metric('maxErrM', 'm', 'Per case: the largest error in metres', (r) => r.all.maxErrM),
+      metric('nearestVertexM', 'm', 'Per case: distance from the camera to the nearest fan vertex', (r) => r.nearestM),
+      metric('vertices', 'count', 'Per case: fan vertices', (r) => r.vertices),
+      metric('buildMs', 'ms', 'Per case: CPU milliseconds of the fan\'s descriptions and pack (the fan\'s only CPU work)', (r) => r.buildMs),
+    ],
+    checks,
+    details: {
+      cases: rows.length,
+      limitPx: limit,
+      worstCase: worstRow ? fanProbeRowText(worstRow) : 'none',
+      rows: rows.map(fanProbeRowText).join(' | '),
+    },
+    limitations: [
+      'The reference is the CPU fan\'s own placement of the same descriptions (doubles, the exact map), given the float32 values the GPU is given (the window and pole longitudes reach the vertex stage as float32 attributes, like those of the instanced leaves); the error is the vertex stage\'s arithmetic, not a rendered image.',
+      'The pixel is the distance to the vertex times the angle of one pixel (60 degree field of view, 1080 rows), as in the P2 precision check; unlike that check the pole cap is included.',
+      'The boundary vertices run the lattice vertex stage, so their error is the instanced leaves\' own P2 error plus the float32 lerp between two ends; the polar vertices are the fan\'s new arithmetic.',
+    ],
+  };
+}
+
+/** One fan rebuild row as a short text. */
+export function fanRebuildRowText(r: FanRebuildRow): string {
+  return `${r.mode} fan ${r.radiusM / 1000} km centre ${r.centreLonDeg},${r.centreLatDeg} ${r.rays} rays ${r.vertices} vertices: first build ${r.initial.rebuilds} (${r.initial.buildMs.toFixed(1)} ms), `
+    + `camera move ${r.camera.rebuilds} builds in ${r.camera.frames} frames (${r.camera.buildMs.toFixed(1)} ms), morph change ${r.morph.rebuilds} in ${r.morph.frames} frames (${r.morph.buildMs.toFixed(1)} ms), `
+    + `centre change ${r.centre.rebuilds} (${r.centre.buildMs.toFixed(1)} ms), pole leaf set changed ${r.moveLeafSetChanges} times while moving`;
+}
+
+/** The checks and metrics of the fan rebuild scenario from the run's rows. Pure. */
+export function fanRebuildObservation(rows: readonly FanRebuildRow[], settings: MorphSpikeTestSettings): TestObservation {
+  const expected = expectedFanRebuildCases(settings);
+  const vertex = rows.filter((r) => r.mode === 'vertex');
+  const cpu = rows.filter((r) => r.mode === 'cpu');
+  const unbuilt = rows.filter((r) => r.vertices <= 0 || r.initial.rebuilds !== 1);
+  const moved = rows.filter((r) => r.moveLeafSetChanges !== 0);
+  const rebuilt = vertex.filter((r) => r.moveRebuilds !== 0);
+  const idle = cpu.filter((r) => r.moveRebuilds <= 0);
+  const checks: TestCheck[] = [
+    { name: 'The run covered every mode, radius and centre', passed: rows.length === expected && rows.length > 0, detail: `${rows.length} rows, ${expected} expected` },
+    {
+      name: 'Every fan was built once by its first frame and has vertices', passed: rows.length > 0 && unbuilt.length === 0,
+      detail: unbuilt.length ? unbuilt.map(fanRebuildRowText).join(' | ') : `${rows.length} rows`,
+    },
+    {
+      name: 'The scripted camera move and morph change kept the pole leaf set (a rebuild for a changed leaf set would be justified, so the script must not change it)',
+      passed: rows.length > 0 && moved.length === 0,
+      detail: moved.length ? moved.map(fanRebuildRowText).join(' | ') : `${rows.length} rows, the pole leaf set never changed while moving`,
+    },
+    ...(vertex.length ? [{
+      name: 'The vertex-stage fan was not rebuilt by the camera move or the morph change (0 builds)', passed: rebuilt.length === 0,
+      detail: rebuilt.length ? rebuilt.map(fanRebuildRowText).join(' | ') : vertex.map(fanRebuildRowText).join(' | '),
+    } satisfies TestCheck] : []),
+    ...(cpu.length ? [{
+      name: 'Control: the CPU fan is rebuilt while the camera and the morph move (the counter sees builds)', passed: idle.length === 0,
+      detail: idle.length ? `no build counted: ${idle.map(fanRebuildRowText).join(' | ')}` : cpu.map(fanRebuildRowText).join(' | '),
+    } satisfies TestCheck] : []),
+  ];
+  const metric = (name: string, unit: string, source: string, set: readonly FanRebuildRow[], pick: (r: FanRebuildRow) => number): TestMetric => ({
+    name, unit, source, samples: set.map(pick), unavailableReason: set.length ? undefined : 'No such rows', optional: true,
+  });
+  return {
+    metrics: [
+      metric('vertexFanMoveRebuilds', 'count', 'Per vertex-stage fan row: builds during the camera move and the morph change together (must be 0)', vertex, (r) => r.moveRebuilds),
+      metric('vertexFanMoveBuildMs', 'ms', 'Per vertex-stage fan row: CPU milliseconds of those builds', vertex, (r) => r.moveBuildMs),
+      metric('vertexFanFirstBuildMs', 'ms', 'Per vertex-stage fan row: CPU milliseconds of the first build (descriptions and pack)', vertex, (r) => r.initial.buildMs),
+      metric('vertexFanCentreRebuilds', 'count', 'Per vertex-stage fan row: builds when the projection centre moved by 5 degrees of longitude (reported, not judged)', vertex, (r) => r.centre.rebuilds),
+      metric('cpuFanMoveRebuilds', 'count', 'Per CPU fan row: builds during the camera move and the morph change together', cpu, (r) => r.moveRebuilds),
+      metric('cpuFanMoveBuildMs', 'ms', 'Per CPU fan row: CPU milliseconds of those builds', cpu, (r) => r.moveBuildMs),
+      metric('cpuFanBuildMsPerRebuild', 'ms', 'Per CPU fan row: CPU milliseconds of one build while moving', cpu, (r) => r.moveBuildMsPerRebuild),
+      metric('fanVertices', 'count', 'Per row: vertices of the fan', rows, (r) => r.vertices),
+    ],
+    checks,
+    details: { rows: rows.map(fanRebuildRowText).join(' | '), frames: settings.rebuildFrames ?? FAN_REBUILD_DEFAULTS.frames },
+    limitations: [
+      'A build is counted where the surface mesh builds the fan: the CPU fan\'s positions, or the vertex-stage fan\'s descriptions and attribute upload. The selection and the instanced leaves are drawn every frame in both modes and are not counted.',
+      'The script uses the sphere metric, whose selection does not read the morph, and moves the camera round the pole at nearly the same distance, so the pole leaf set holds; a camera that crosses a level boundary of a pole leaf changes the leaf set and the vertex-stage fan then rebuilds for that reason alone.',
+      'A projection-centre change rebuilds the vertex-stage fan too: its polar longitudes and colatitudes are measured in the projection basis, which the camera and the morph do not change. It is reported, not judged.',
     ],
   };
 }

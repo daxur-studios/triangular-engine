@@ -1,5 +1,6 @@
 import { equalEarthRow } from 'triangular-engine/atmosphere';
 import type { MorphFrame, MorphPose, MorphPoseId } from './morph-frame';
+import type { FanMode } from './morph-fan';
 import type { MorphPack } from './morph-leaves';
 import type { LodMetric } from './morph-stretch';
 
@@ -556,6 +557,8 @@ export interface CrackCase {
   /** The pole fan (iteration 4): the pole leaves are drawn as a CPU-built polar mesh with `fanRays` rays per full turn (default off). */
   readonly poleFan?: boolean;
   readonly fanRays?: number;
+  /** Which fan draws the pole leaves (default 'cpu', iteration 4; 'vertex': the vertex-stage fan of iteration 5). */
+  readonly fanMode?: FanMode;
 }
 
 /** One row of the result. */
@@ -572,6 +575,9 @@ export interface CrackRow extends CrackImageResult {
   /** The pole fan as run (absent: off) and its rays per full turn. */
   readonly poleFan?: boolean;
   readonly fanRays?: number;
+  readonly fanMode?: FanMode;
+  /** With the fan: builds of the fan since the page's counters were reset at the start of the case (a fresh case builds once). */
+  readonly fanRebuilds?: number;
   /** With the fan: pole leaves replaced, its vertices and triangles, and the CPU milliseconds of its build. */
   readonly fanLeaves?: number;
   readonly fanVertices?: number;
@@ -629,6 +635,8 @@ export interface CrackProbeOptions {
   /** true: the pole leaves are drawn as the pole fan (see {@link CrackCase.poleFan}); `fanRays` rays per full turn (default 1,024). */
   readonly poleFan?: boolean;
   readonly fanRays?: number;
+  /** Which fan draws the pole leaves: 'cpu' (default) or 'vertex' (the vertex-stage fan). */
+  readonly fanMode?: FanMode;
   /** false: run only the controls, not the plain matrix (default true). */
   readonly matrix?: boolean;
   /** Called with each case's probe image (RGBA8, the probe material over black) before it is classified. */
@@ -682,7 +690,7 @@ export async function runCrackProbe(host: CrackHost, options: CrackProbeOptions 
   const views = options.views ?? CRACK_DEFAULTS.views;
   const widthPx = options.widthPx ?? CRACK_DEFAULTS.widthPx;
   const cases: CrackCase[] = [];
-  const centre = { centreLonDeg: options.centreLonDeg ?? 0, centreLatDeg: options.centreLatDeg ?? 0, poseOverride: options.poseOverride, lodMetric: options.lodMetric, leafCap: options.leafCap, poleFan: options.poleFan, fanRays: options.fanRays };
+  const centre = { centreLonDeg: options.centreLonDeg ?? 0, centreLatDeg: options.centreLatDeg ?? 0, poseOverride: options.poseOverride, lodMetric: options.lodMetric, leafCap: options.leafCap, poleFan: options.poleFan, fanRays: options.fanRays, fanMode: options.fanMode };
   if (options.matrix !== false) for (const radiusM of radii) for (const view of views) for (const morph of morphs) cases.push({ radiusM, morph, view, ...centre });
   if (options.controls !== false) {
     for (const radiusM of radii) {
@@ -720,7 +728,7 @@ export async function runCrackProbe(host: CrackHost, options: CrackProbeOptions 
       const row: CrackRow = {
         ...c, ...image, ...poleExtra, leaves: pack.leaves, instances: pack.instances, duplicates: pack.duplicates, poleLeaves: pack.poleLeaves,
         torn: pack.torn, dropped: pack.dropped, widthPx, heightPx, ok, ms: performance.now() - began,
-        ...(pack.fan ? { fanLeaves: pack.fan.leaves, fanVertices: pack.fan.vertices, fanTriangles: pack.fan.triangles, fanBuildMs: pack.fan.buildMs } : {}),
+        ...(pack.fan ? { fanLeaves: pack.fan.leaves, fanVertices: pack.fan.vertices, fanTriangles: pack.fan.triangles, fanBuildMs: pack.fan.buildMs, fanRebuilds: pack.fan.rebuilds } : {}),
       };
       rows.push(row);
       options.onProgress?.(rows.length, cases.length, row);

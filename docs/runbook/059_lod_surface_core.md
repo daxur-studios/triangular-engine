@@ -1745,3 +1745,56 @@ no gap. Two further requirements for G6 came out of it:
 **Still not tested:** culling with bent bounds, normals and shading under the morph (the fan's coloured material was
 never seen on screen), the frame cost, a fan leaf that straddles the cut (needs a second copy shifted by 2π), and the
 owner's visual check of the page.
+
+### Suite v5: the baselines no longer fail the run (2026-10-30)
+
+The owner's visible-browser run of v4 (13:17, NVIDIA) matched the headless numbers exactly and was red only for its
+eight comparison baselines (sphere metric, stretch without the fan, 256-ray fan), which v4 judged by the real-case rim
+check. v5 keeps the same scenarios and measurement but marks those eight `baseline`: a baseline passes when it has no
+interior hole and still shows a rim offset over 1 px, so the probe is proven to see the defect the fan removes, and the
+run is green when the fix holds. v5 headless-hardware (13:24, NVIDIA): auto pass, numbers as in the table above.
+
+## 2026-10-30: G6 build plan proposed, nothing built
+
+The owner's visible-browser run of `lod-surface-morph` v5 (17:47, NVIDIA, noisy load) passed: no failed checks, and
+every fan case had 0 holes and a rim within 1 px. Result:
+`lod-surface-morph@v5/2026-10-30T17-47-10-984Z_visible-browser_46869e56-e3b0c442.json`. On the owner's go-ahead the
+plan now has a G6 build plan (§Globe-to-map morph, steps G6a–G6f) and three decisions for the owner.
+
+Two findings from reading the code while writing it:
+- **The two map definitions disagree on more than the Equal Earth width.** Both blend from (lon R, lat R) to the target
+  projection as morph rises. The globe material can also target equirectangular, but `blendedProjection` cannot. The
+  spike followed `blendedProjection`, so the equirectangular map was never measured.
+- **The spike's stretch metric refreshes every node whenever morph changes,** so a morph sweep re-measures the whole
+  tree every frame. No sweep was measured; G6c proposes refreshing per morph step.
+
+**Decisions (owner, same day):** the owner left the three decisions to the agent and pointed out that the
+atmosphere's morph is still in development. Chosen: the globe material's map is the truth (the atmosphere follows in
+G6e); the vertex-stage pole fan is measured first (v6); design for 2 m; support both projections; no tiling.
+
+Library code is unchanged, and nothing is committed.
+
+## 2026-10-30: G6a: the globe material's map as a CPU function
+
+Built by a Sonnet subagent and reviewed here. Library behaviour is unchanged: this step only adds the function.
+
+- **New:** `planet-material/planet-map.ts`, pure TypeScript.
+  - `planetMapXY(lon, lat, morph, projection, radius)`: the material's dynamic-mode map,
+    `mix((R lon, R lat), flat, morph)`.
+  - `planetMapRowHalfWidth`, `planetMapExtents` and `planetMapRows`, for the cut and the outline clip.
+  - `PLANET_MAP_EQUAL_EARTH_SCALE` = π / rawXMax = 1.1607.
+  - `planetEqualEarthRow`, the unit-sphere form.
+- **Where it lives:** planet-material imports no other engine entry, and atmosphere and lod-surface already import
+  it, so this is the one home with no cycle.
+- **Verified (headless):** planet-material 119/119 (22 new), atmosphere 212/212 (4 new), library build clean.
+  - **Against the TSL:** the specs evaluate the TSL map lines and the whole `planetBentSurfaceNodes` graph (dynamic,
+    identity basis) through `gpu-eval.testing.ts` on WebGL2. Both projections, morph 0.25, 0.5 and 1, 49 points
+    each, within 2e-4 R; float32 `asin` alone is about 1e-4 R off.
+  - **Against the existing twins:** `recoverStaticEquirectXY` and `bendPlanetSurfacePoint` agree.
+- **The atmosphere's map is exactly 1 / 1.1607 of the material's**, in x and y. Moving it over in G6e is one
+  constant.
+- **The material's Equal Earth map is not 2:1:** at morph 1 it is 2πR wide at the equator and 3.06 R tall, and its
+  pole line is 1.185 πR wide. Equirectangular is 2πR by πR, with full-width pole lines at every morph.
+- **For G6b:** the function takes longitude and latitude in the projection basis, so the caller turns the body point
+  into them. `lod-surface/core` already imports three in its mesh files, so importing planet-material from there is
+  fine, but the height-bake worker's import graph must not pull it in.

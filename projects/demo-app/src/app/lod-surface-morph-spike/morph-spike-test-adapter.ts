@@ -1,6 +1,8 @@
 import type { TestContext, TestRunAdapter, TestScenario, TestSetting } from 'triangular-engine/testing';
-import type { CrackCase, CrackProbeOptions, CrackRow, MorphSpikeState, ProbeOptions, ProbeResult } from './core';
-import { crackObservation, precisionObservation, type MorphSpikeTestSettings } from './morph-spike-tests';
+import type { CrackCase, CrackProbeOptions, CrackRow, FanProbeOptions, FanProbeRow, FanRebuildOptions, FanRebuildRow, MorphSpikeState, ProbeOptions, ProbeResult } from './core';
+import {
+  crackObservation, fanPrecisionObservation, fanProbeOptionsOf, fanRebuildObservation, precisionObservation, type MorphSpikeTestSettings,
+} from './morph-spike-tests';
 
 /** The page as the adapter sees it: the spike's own handles, nothing else. */
 export interface MorphSpikeTestHost {
@@ -13,6 +15,10 @@ export interface MorphSpikeTestHost {
   backendIsWebGpu(): boolean;
   runProbe(options: ProbeOptions): Promise<ProbeResult[]>;
   runCrackProbe(options: CrackProbeOptions): Promise<CrackRow[]>;
+  /** The vertex-stage pole fan's precision probe (v6). */
+  runFanProbe(options: FanProbeOptions): Promise<FanProbeRow[]>;
+  /** The scripted camera move and morph change that counts the pole fan's rebuilds (v6). */
+  runFanRebuild(options: FanRebuildOptions): Promise<FanRebuildRow[]>;
   environment(): Readonly<Record<string, TestSetting>>;
 }
 
@@ -90,12 +96,24 @@ export function createMorphSpikeTestAdapter(host: MorphSpikeTestHost): TestRunAd
         const observation = precisionObservation(rows);
         return { ...observation, checks: [backend, ...(observation.checks ?? [])] };
       }
+      if (settings.kind === 'fan-precision') {
+        const rows = await host.runFanProbe(fanProbeOptionsOf(settings));
+        const observation = fanPrecisionObservation(rows, settings);
+        return { ...observation, checks: [backend, ...(observation.checks ?? [])] };
+      }
+      if (settings.kind === 'fan-rebuild') {
+        const rows = await host.runFanRebuild({
+          radii: settings.radii, centres: settings.fanCentres, modes: settings.fanModes, rays: settings.fanRays, frames: settings.rebuildFrames,
+        });
+        const observation = fanRebuildObservation(rows, settings);
+        return { ...observation, checks: [backend, ...(observation.checks ?? [])] };
+      }
       keep.image = undefined;
       const rows = await host.runCrackProbe({
         radii: settings.radii, morphs: settings.morphs, views: settings.views, widthPx: settings.widthPx,
         centreLonDeg: settings.centreLonDeg, centreLatDeg: settings.centreLatDeg, lodMetric: settings.lodMetric,
         matrix: settings.matrix, controls: settings.controls, leafCap: settings.leafCap, diagnosePole: settings.diagnosePole,
-        poleFan: settings.poleFan, fanRays: settings.fanRays,
+        poleFan: settings.poleFan, fanRays: settings.fanRays, fanMode: settings.fanMode,
         onImage: (c, rgba, width, height) => {
           const score = thumbnailScore(c);
           if (score > (keep.image?.score ?? 0)) keep.image = { score, c, rgba: Uint8ClampedArray.from(rgba), width, height };
