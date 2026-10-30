@@ -1390,7 +1390,7 @@ function parseFlags(args) {
 }
 
 function help() {
-  return `Engineering document helper\n\n  npm run docs:records:next\n  npm run docs:records:new -- --title "Water scattering" --slug water-scattering\n  npm run docs:records:review -- docs/plans/NNN_topic.md agent\n  npm run docs:records:baseline -- docs/plans/NNN_topic.md --developer-confirmed\n  npm run docs:records:check\n  npm run docs:records:manifest [--output path] [--export-docs dir]\n\nReview refreshes an agent assessment; it does not signify developer approval. Baseline confirmation requires explicit developer approval of the exact scope snapshot.`;
+  return `Engineering document helper\n\n  npm run docs:records:next\n  npm run docs:records:new -- --title "Water scattering" --slug water-scattering\n  npm run docs:records:review -- docs/plans/NNN_topic.md agent\n  npm run docs:records:baseline -- docs/plans/NNN_topic.md --developer-confirmed\n  npm run docs:records:check\n  npm run docs:records:manifest [--output path] [--export-docs dir]\n  npm run docs:records:map [--output path] [--export-docs dir]\n\nReview refreshes an agent assessment; it does not signify developer approval. Baseline confirmation requires explicit developer approval of the exact scope snapshot.`;
 }
 
 export async function main(
@@ -1447,9 +1447,13 @@ export async function main(
     );
     return 0;
   }
-  if (command === "check" || command === "manifest") {
+  if (command === "check" || command === "manifest" || command === "map") {
     const { manifest, errors } = await inspectDocuments(projectRoot);
-    if (command === "manifest") {
+    if (command === "manifest" || command === "map") {
+      if (command === "map") {
+        if (!flags.output) flags.output = "public/development-map/manifest.json";
+        if (!flags["export-docs"]) flags["export-docs"] = "public/development-map/docs";
+      }
       const serialized = `${JSON.stringify({ ...manifest, diagnostics: errors }, null, 2)}\n`;
       if (flags.output === true) throw new Error("--output requires a file path");
       if (flags.output) {

@@ -47,7 +47,7 @@ function sourceRecordsHelper() {
 }
 
 function help() {
-  return `Triangular CLI\n\n  triangular docs consensus new ...\n  triangular docs consensus prompt <id> ...\n  triangular docs consensus add-response <id> ...\n  triangular docs consensus check <id>\n  triangular docs records <new|next|review|baseline|check|manifest> ...\n  triangular docs plan new ...       Create a paired Plan and Engineering Record\n  triangular docs record new ...     Create a paired Plan and Engineering Record\n  triangular testing <run|summary|receiver|baseline> ...\n\nAll commands use the current directory by default. Pass --root <directory> to target another project.`;
+  return `Triangular CLI\n\n  triangular docs consensus new ...\n  triangular docs consensus prompt <id> ...\n  triangular docs consensus add-response <id> ...\n  triangular docs consensus check <id>\n  triangular docs records <new|next|review|baseline|check|manifest|map> ...\n  triangular docs plan new ...       Create a paired Plan and Engineering Record\n  triangular docs record new ...     Create a paired Plan and Engineering Record\n  triangular docs map                Export manifest and documents for the development map\n  triangular testing <run|summary|receiver|baseline> ...\n\nAll commands use the current directory by default. Pass --root <directory> to target another project.`;
 }
 
 export async function main(args = process.argv.slice(2)) {
@@ -61,7 +61,7 @@ export async function main(args = process.argv.slice(2)) {
     const [kind, ...commandArgs] = scoped.args;
     if (kind === "consensus")
       return consensusMain(commandArgs, scoped.root);
-    if (kind === "records" || kind === "plan" || kind === "record") {
+    if (kind === "records" || kind === "plan" || kind === "record" || kind === "map") {
       if ((kind === "plan" || kind === "record") && commandArgs[0] !== "new") {
         console.error("Use `triangular docs plan new` or `triangular docs record new`; both create a paired Plan and Engineering Record.");
         return 2;
@@ -69,7 +69,9 @@ export async function main(args = process.argv.slice(2)) {
       const argsForHelper =
         kind === "plan" || kind === "record"
           ? ["new", ...commandArgs.slice(1)]
-          : commandArgs;
+          : kind === "map"
+            ? ["map", ...commandArgs]
+            : commandArgs;
       return spawnNode(sourceRecordsHelper(), [
         ...argsForHelper,
         "--root",
