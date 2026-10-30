@@ -92,6 +92,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'lod-surface-morph-spike',
+    loadComponent: () =>
+      import('./lod-surface-morph-spike/lod-surface-morph-spike.component').then(
+        ({ LodSurfaceMorphSpikeComponent }) => LodSurfaceMorphSpikeComponent,
+      ),
+  },
+  {
     path: 'spikes',
     loadComponent: () =>
       import('./pages/spikes-index/spikes-index.component').then(

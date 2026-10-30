@@ -1,0 +1,109 @@
+.diagnostics {
+  background: rgb(8 14 23 / 82%);
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 0.5rem;
+  color: #dce9f5;
+  display: grid;
+  font: 12px/1.5 ui-monospace, monospace;
+  gap: 0.4rem;
+  left: 1rem;
+  max-width: 26rem;
+  padding: 0.75rem 0.9rem;
+  position: absolute;
+  top: 1rem;
+  z-index: 10;
+}
+
+strong {
+  color: white;
+}
+
+.row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.label {
+  color: #a9bccd;
+  min-width: 5.5rem;
+}
+
+input[type='range'] {
+  flex: 1;
+  min-width: 8rem;
+}
+
+button {
+  background: rgb(255 255 255 / 8%);
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 0.3rem;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0.3rem 0.55rem;
+
+  &.active {
+    background: #3d7bd6;
+    border-color: #3d7bd6;
+    color: white;
+  }
+
+  &:disabled {
+    cursor: wait;
+    opacity: 0.6;
+  }
+}
+
+p {
+  color: #a9bccd;
+  margin: 0;
+}
+
+.probe,
+.cracks {
+  background: rgb(8 14 23 / 90%);
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 0.5rem;
+  bottom: 1rem;
+  color: #dce9f5;
+  font: 11px/1.4 ui-monospace, monospace;
+  max-height: 45vh;
+  overflow: auto;
+  position: absolute;
+  right: 1rem;
+  z-index: 10;
+}
+
+.cracks {
+  bottom: 1rem;
+  left: 1rem;
+  right: auto;
+  max-width: 60vw;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 0.15rem 0.45rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+th {
+  background: rgb(8 14 23);
+  position: sticky;
+  top: 0;
+}
+
+tr.fail td {
+  color: #ff9d8a;
+}
+
+tr.control td {
+  font-style: italic;
+}

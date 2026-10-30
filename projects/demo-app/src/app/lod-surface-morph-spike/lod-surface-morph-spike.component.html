@@ -1,0 +1,150 @@
+<scene />
+
+@if (state(); as s) {
+  <aside class="diagnostics">
+    <strong>LOD surface globe-to-map morph · anchor-relative bend under a pixel at 2 m</strong>
+    @if (diagnostics(); as d) {
+      <span>
+        leaves: {{ d.leaves }} · instances: {{ d.instances }} · duplicates: {{ d.duplicates }} · triangles: {{ d.triangles.toLocaleString() }} · draw calls: {{ d.drawCalls }} ·
+        deepest level: {{ d.deepestLevel }}
+      </span>
+      <span>
+        camera lon {{ d.cameraLonDeg.toFixed(2) }}° · lat {{ d.cameraLatDeg.toFixed(2) }}° · altitude
+        {{ fmt(d.altitudeM) }} m · k {{ d.curvature.toExponential(3) }}
+      </span>
+    }
+
+    <div class="row">
+      <span class="label">radius</span>
+      @for (r of radii; track r.value) {
+        <button [class.active]="s.radiusM === r.value" (click)="update({ radiusM: r.value })">{{ r.label }}</button>
+      }
+    </div>
+
+    <div class="row">
+      <span class="label">morph {{ s.morph.toPrecision(4) }}</span>
+      <input
+        type="range" min="0" max="1" step="0.0005" [value]="s.morph"
+        (input)="setMorph($any($event.target).valueAsNumber)"
+      />
+    </div>
+    <div class="row">
+      @for (m of morphPresets; track m) {
+        <button [class.active]="s.morph === m" (click)="setMorph(m)">{{ m }}</button>
+      }
+    </div>
+
+    <div class="row">
+      <span class="label">projection centre lon {{ s.centreLonDeg }}°</span>
+      <input
+        type="range" min="-180" max="180" step="1" [value]="s.centreLonDeg"
+        (input)="setNumber('centreLonDeg', $event)"
+      />
+    </div>
+    <div class="row">
+      <span class="label">projection centre lat {{ s.centreLatDeg }}°</span>
+      <input
+        type="range" min="-90" max="90" step="1" [value]="s.centreLatDeg"
+        (input)="setNumber('centreLatDeg', $event)"
+      />
+    </div>
+
+    <div class="row">
+      <span class="label">pose</span>
+      @for (id of poseIds; track id) {
+        <button [class.active]="s.poseId === id" (click)="setPose(id)">{{ id }}</button>
+      }
+    </div>
+
+    <div class="row">
+      <span class="label">method</span>
+      @for (m of methods; track m) {
+        <button [class.active]="s.method === m" (click)="update({ method: m })">
+          {{ m === 'p2' ? 'P2 anchor-relative' : 'N naive float' }}
+        </button>
+      }
+    </div>
+
+    <div class="row">
+      <span class="label">height offset</span>
+      @for (h of [0, 500]; track h) {
+        <button [class.active]="s.heightM === h" (click)="update({ heightM: h })">{{ h }} m</button>
+      }
+      <button [class.active]="s.wireframe" (click)="toggleWireframe()">Wireframe</button>
+    </div>
+
+    <div class="row">
+      <button [disabled]="probeRunning()" (click)="runProbe()">Run precision probe</button>
+      <span>{{ probeStatus() }}</span>
+    </div>
+    <div class="row">
+      <button [disabled]="crackRunning() || probeRunning()" (click)="runCrackProbe()">Run crack probe</button>
+      <span>{{ crackStatus() }}</span>
+    </div>
+    <p>
+      Morph 0 draws the current terrain unchanged. The probe compares the GPU's camera-relative vertices with a
+      double-precision reference for both methods, 600 km and 6,371 km, four 2 m poses. Own-sheet error outside the pole cap (1°)
+      decides the pass (hover "all max px" for the pole bands); <code>window.__lodMorphSpike.runProbe()</code> returns the rows.
+      The crack probe draws each view with the probe material over a black clear and counts the holes inside the map's outline
+      (cut, pole edges, elsewhere); <code>window.__lodMorphSpike.runCrackProbe()</code> returns the rows. It pauses the page's frame.
+    </p>
+  </aside>
+}
+
+@if (probeRows().length > 0) {
+  <section class="probe">
+    <table>
+      <thead>
+        <tr>
+          <th>R km</th><th>morph</th><th>pose</th><th>method</th><th>h m</th>
+          <th>max m</th><th>max px</th><th>p99 m</th><th>p99 px</th>
+          <th>worst dist m</th><th>worst lat°</th><th>cap max px</th><th>cap worst dist m / lat°</th><th>all max px</th><th>wrap ≠</th><th>extra</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (r of probeRows(); track $index) {
+          <tr [class.fail]="!r.underPixelOutsideCap">
+            <td>{{ r.radiusM / 1000 }}</td><td>{{ r.morph }}</td><td>{{ r.pose }}</td><td>{{ r.method }}</td>
+            <td>{{ r.heightM }}</td>
+            <td>{{ fmt(r.maxErrM) }}</td><td>{{ fmt(r.maxErrPx) }}</td>
+            <td>{{ fmt(r.p99ErrM) }}</td><td>{{ fmt(r.p99ErrPx) }}</td>
+            <td>{{ fmt(r.worstDistM) }}</td><td>{{ r.worstLatDeg.toFixed(2) }}</td>
+            <td>{{ fmt(r.maxErrPxOutsideCap) }}</td>
+            <td>{{ fmt(r.worstOutsideCap.distM) }} / {{ r.worstOutsideCap.latDeg.toFixed(2) }}</td>
+            <td [title]="bandsText(r)">{{ fmt(r.allMaxErrPx) }}</td><td>{{ r.wrapMismatch }}</td>
+            <td>
+              @if (r.bitEqualToday !== undefined) { bit-equal today: {{ r.bitEqualToday }} }
+              @if (r.jump; as j) {
+                jump {{ fmt(j.gpuMaxM) }} m / {{ fmt(j.gpuMaxPx) }} px (ref {{ fmt(j.refMaxM) }} m / {{ fmt(j.refMaxPx) }} px)
+              }
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </section>
+}
+
+@if (crackRows().length > 0) {
+  <section class="cracks">
+    <table>
+      <thead>
+        <tr>
+          <th>R km</th><th>morph</th><th>view</th><th>control</th><th>leaves</th><th>inst</th><th>dup</th><th>pole lv</th><th>torn</th><th>dropped</th>
+          <th>holes cut</th><th>holes pole</th><th>holes else</th><th>holes</th><th>masked</th><th>leak px</th><th>covered px</th><th>IoU</th><th>ok</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (r of crackRows(); track $index) {
+          <tr [class.fail]="r.ok === false" [class.control]="!!r.control">
+            <td>{{ r.radiusM / 1000 }}</td><td>{{ r.morph }}</td><td>{{ r.view }}</td><td>{{ r.control ?? '' }}</td>
+            <td>{{ r.leaves }}</td><td>{{ r.instances }}</td><td>{{ r.duplicates }}</td><td>{{ r.poleLeaves }}</td><td>{{ r.torn }}</td><td>{{ r.dropped }}</td>
+            <td>{{ r.cut }}</td><td>{{ r.pole }}</td><td>{{ r.elsewhere }}</td><td>{{ r.holes }}</td><td>{{ r.masked }}</td>
+            <td>{{ r.leakPx }}</td><td>{{ r.coveredPx }}</td><td>{{ r.agreement.toFixed(4) }}</td>
+            <td>{{ r.ok === undefined ? '' : r.ok }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </section>
+}

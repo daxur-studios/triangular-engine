@@ -1566,3 +1566,123 @@ with the atmosphere attached, the 20 km pose sits above the scaled air (black sk
 - At the 2 m pose on 600 km the selector hits the 4,096-leaf cap (3,799 unmet splits), and the view is washed out
   white (the pose lands on an ice cell; exposure not checked). Both need the owner's look.
 - Nothing is committed.
+
+## 2026-10-29: `planet-scene` v1 first visible runs (owner, NVIDIA)
+
+The owner committed G5 (`ca131293`, `c40a6ee0`) and ran the suite visibly on the RTX 3080 Laptop GPU, WebGPU, quick
+mode, one repetition, drawing buffer 2560×1308. Result: `planet-scene@v1/2026-10-29T17-57-38-464Z_visible-browser_quick_c40a6ee0-e3b0c442.json`
+(an earlier `orbit`-only run on `c0afb711` matches it).
+
+| Case | Leaves (drawn) | Triangles | GPU pass total med / p95 (ms) |
+|---|---|---|---|
+| `orbit` | 1,197 (1,197) | 613k | 0.48 / 0.48 |
+| `orbit-atmosphere-off` | 1,197 (1,197) | 613k | 0.32 / 0.33 |
+| `mid-20km` | 4,095 (1,160) | 594k | 0.78 / 1.06 |
+| `ground` (invalid, see below) | 4,095 (2,049) | 1,049k | 0.83 / 0.84 |
+| `ground-atmosphere-off` | 4,095 (2,049) | 1,049k | 0.56 / 0.56 |
+| `descent` | 4,095 (1,993) | 1,020k | 1.14 / 2.04 (max 2.62) |
+| `yaw-360` | 4,095 (2,049) | 1,049k | 1.13 / 1.34 |
+
+- **The atmosphere costs about 0.16 ms from orbit and 0.27 ms on the ground** (pass-total differences of the partner
+  cases), plus about 0.2 ms of fullscreen passes while the camera moves (`descent`, `yaw-360`).
+- **Frame interval is 6.1 ms median in every case,** which looks like display pacing; selection CPU is about 0 ms median, 1.6 ms max
+  in `descent`. Three draw calls with the atmosphere, two without.
+- **`ground` is invalid because its quick window hit its 4 s cap without the GPU series settling, twice** (the full run
+  and a rerun alone, `2026-10-29T18-38-18-841Z`). The scene itself is steady: `ready` passed, the median is the same in
+  both runs (0.78 ms scene pass, 0.83 ms total), and in the agent's pane at the 2 m pose the camera holds still
+  (513.03 m above the sphere, the ground there 511 m up) and the froxel table does not re-render. The cause is bursts of
+  heavy GPU frames (scene pass about 1.05 ms, output pass 0.30 ms instead of 0.05, both in the same frames): 1.8 % of
+  frames in the first run, 19 % in the rerun, and 28 % in `mid-20km`, which still settled. A burst that lands in one
+  block moves that block's p95 past the library's 10 % tolerance. The variation between runs points at the laptop GPU
+  (clocks or contention at about 15 % load), not the atmosphere; the tolerances are library-wide (plan 061), so the case
+  is not tuned. Read `ground` from a standard-mode run (fixed window).
+- **`ground`, standard mode (valid, 4.0 s fixed window,
+  `2026-10-29T20-36-58-945Z_visible-browser_c40a6ee0-e3b0c442.json`):** GPU pass total 0.84 / 0.84 ms (median / p95),
+  max 1.39; scene pass 0.79 / 0.80, output pass 0.05 / 0.05; frame interval 6.1 / 6.7 ms. 4,095 leaves, 2,085 drawn,
+  1.07 M triangles, three draw calls. The medians match both quick runs. The heavy frames show only in the max, so they
+  are rare in this window. The run recorded `gpu-busy-before-start`, with 72 % GPU load: another process was using the
+  GPU, which fits the burst explanation.
+- **The leaf cap is the open issue:** from 20 km down the selector holds 4,095 leaves (cap 4,096); at `ground` it is
+  capped at level 20 with 3,799 unmet splits. GPU time leaves plenty of room, so the cap, not the frame budget, limits
+  detail at 600 km. The white 2 m view still needs a visual look.
+
+## 2026-10-29: Morph spike part 1: anchor-relative bend measured on the GPU
+
+Spike 5, `/lod-surface-morph-spike` (plan §Globe-to-map morph, "Morph spike"). Part 1 copies the surface mesh into the
+spike and bends it in the vertex stage, as exact differences from the per-frame anchor ("P2"). The method is in the
+plan. Built by a Sonnet subagent and reviewed here. Library code is unchanged.
+
+**Probe.** A compute pass runs the same vertex function on every grid vertex of the selected leaves (leaf cap 1,024,
+about 296k vertices per case) and reads back the camera-relative positions. A CPU reference in doubles uses the GPU's own
+height, so height-source rounding is excluded. Pixels are `|err| / (distance x pixel angle)`, at 60° and 1,080 px. The
+cases are 600 km and 6,371 km, morph 0 / 1e-4 / 0.5 / 1, and the camera 2 m up at mid latitude (35°), next to the cut
+(179.9° from the centre), near a pole (89.5°) and at the projection centre, plus a 500 m height offset. The control is a
+naive absolute float bend ("N"). The run was in the agent's browser pane, on an RTX 3080 Laptop GPU with WebGPU.
+
+**Results:**
+- **P2 is under a pixel everywhere except on the vertices exactly at a pole.** Outside a 1° pole cap the worst case is
+  0.039 px (the pole pose, morph 1); every other case is under 0.004 px. The 99th percentile is about 3e-4 px in every
+  case. Between 0.01° and 1° from the pole the worst is 0.56 px, in the pole pose at morph 1.
+- **The vertices exactly at a pole are wrong by up to the whole pole line** (6–10 per case, up to 9,800 px). The map's
+  pole is a segment, and a pole vertex has no longitude: `atan2(0, 0)` returns an arbitrary angle. That is the
+  projection's singularity, not precision; it needs treatment like the cut (part 2).
+- **The naive control fails as expected:** its 99th percentile is 20–130 px near the camera at both radii. At 2 m on
+  6,371 km at morph 0.5 the pane shows flat ground broken into metre-sized facets, while P2 shows clean flat ground.
+- **Morph 0 is bit-equal to today's output.** The `select` passes today's position through; this checks the wiring
+  inside the spike's copy, not the library shader.
+- **No jump at morph 1e-4:** the GPU's change from the morph-0 draw matches the reference's own change (0.32 / 0.32 px
+  at mid latitude, 280 / 280 px next to the cut, where the map really moves).
+- **Equal Earth scaling differs between the two existing implementations.** `planet-morph-nodes` scales the map to
+  2πR wide, about 1.16 times `blendedProjection`'s unit-sphere Equal Earth times R. The spike follows
+  `blendedProjection`; G6 must make one match the other.
+
+**Not yet tested:** the cut (duplicate leaves and the outline clip), the pole vertex, seams under the crack probe,
+culling with bent bounds, LOD error in the morphed view, normals, and the frame cost.
+
+## 2026-10-30: Morph spike part 2: the cut passes, the pole edge at partial morph does not
+
+Part 2 adds the map's cut, the pole vertex and a crack probe to spike 5. Built by the same Sonnet subagent and reviewed
+here. Library code is unchanged. Both probes were rerun after its last edits, in the agent's browser pane on the RTX
+3080 Laptop GPU; the numbers match the subagent's own run on the AMD iGPU (pole-200m at morph 0.5: 13,910 against
+13,911 holes).
+
+**Method.**
+- **The cut.** Each leaf has a side and a longitude window centred on the leaf (`lo = leafLon - π`), so no triangle
+  spans more than π. A leaf that reaches the cut is drawn twice, once per side, and a fragment clip against the map's
+  outline (exact edge distances) removes the part beyond the cut. The instance buffer holds twice the leaf cap.
+- **The pole vertex** takes its leaf's centre longitude, and each pole corner gets a 4-segment cap that fills the
+  map's pole line.
+- **The crack probe** renders the probe material offscreen, reads it back and compares it with an exact CPU ray mask of
+  the map's surface. A hole is a pixel the mask covers and the render leaves empty; holes are split into next to the
+  cut, near a pole and elsewhere. A 1 px band along the mask's edge is not counted (`masked`). Two controls must find
+  holes: a gap (leaves shrunk slightly) and folding off over synthetic relief, each with a twin that keeps folding on
+  and must stay clean.
+
+**Results (centre at 0°, 0°; 600 km and 6,371 km give the same picture):**
+- **The cut leaves no gap.** cut-east-2m and cut-west-2m: 0 holes at morph 0.5 and 1 on both radii, with 286 duplicate
+  leaves. orbit-map: 0 holes at morph 0, 0.5 and 1 (20 duplicates); the edge band left uncounted is 16 / 76 / 12 px.
+- **Seams hold everywhere else tested.** mid-2m and mid-200m: 0 holes at every morph on both radii, 25–34
+  duplicates. The torn-leaf discard never fired.
+- **Morph 0 is clean:** 0 holes in every view, no duplicates.
+- **The pole edge at morph 0.5 fails.** pole-200m: 13,910 holes on 600 km (5,120 near the pole, 8,791 elsewhere,
+  agreement 0.957) and 9,914 on 6,371 km (5,120 near the pole, 4,794 elsewhere). The 5,120 near-pole holes are five
+  full image rows along the pole edge. The pane shows thin dark lines across the ground running parallel to the pole
+  edge, which looks like cracks between rows of leaves rather than one missing strip. The same view at morph 1 has
+  0 holes. Not yet isolated; the leading suspect is chord sag on leaves the half-blended map stretches sideways near
+  the pole (plan item 5): the selector measures leaves on the sphere, so near the pole it draws leaves far coarser than
+  the map needs, and their straight edges no longer meet their finer neighbours' edges.
+- **The controls work:** the gap control finds 1,740 holes (orbit-map) and 4,295–4,937 (mid-200m); folding off over
+  relief finds 24–110 holes in 3 of 4 cases, and every folding-on twin is clean. The fourth case, mid-2m on 6,371 km,
+  finds none: at 2 m on the large sphere the folding error is under a pixel.
+- **A tilted projection centre is worse and was not diagnosed.** In the subagent's run with the centre at lon 20°,
+  lat 35°, orbit-map had 216–320 holes and pole-200m 52,845 (agreement 0.845).
+- **Precision still holds after the part 2 edits:** P2 outside a 1° pole cap is at most 0.039 px; morph 0 matches
+  today's output; the jump at morph 1e-4 matches the reference.
+
+**Verdict so far.** The two risks the spike was opened for are retired for a centred projection: the anchor-relative
+bend keeps 2 m views under a pixel on both radii, and the cut closes. A third problem showed up that the plan had as
+item 5 (LOD error in the morphed view): near the pole at partial morph the map stretches leaves sideways and the
+sphere-based selector does not refine them. That and the tilted-centre holes are open.
+
+**Not yet tested:** culling with bent bounds, normals, the frame cost, and the selector measuring error in the
+morphed view.

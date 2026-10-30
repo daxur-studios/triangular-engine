@@ -403,6 +403,27 @@ them.
   comes next, then a step G6 builds the morph.
 - **C. Build it before G5.** G5 waits for it.
 
+**Morph spike (started 2026-10-29, `/lod-surface-morph-spike`, spike 5).** It tests risks 1 and 2 on a copy of the
+surface mesh; nothing in the library changes until G6.
+- **Change to item 4.** A per-leaf bent frame gives the two leaves that share an edge vertex different arithmetic, so
+  that vertex is no longer bit-identical and item 3 breaks: far seams would open by a fraction of a pixel and show as
+  sparkle. The spike tests the anchor instead, as L7 does: every vertex is the exact difference from the per-frame
+  anchor, through the projection and the bend, computed with difference forms (sin of a difference, the bend's
+  `sinc`/`vers` forms, polynomial differences for Equal Earth). Large angles come from the CPU in doubles as uniforms,
+  and the GPU takes no large-angle trig. A vertex depends only on its lattice point and on uniforms, so seams stay
+  bit-identical. The bend gives `up = k G + z`, so the height term is a difference too.
+- **The cut.** A leaf takes a side, east or west, from the sign of its centre's longitude, and unwraps its longitudes
+  into that side's window, so it never spans the map. A leaf near the cut is drawn twice, once per side. Fragments
+  outside the map's outline are discarded, using an edge distance taken from the anchor's.
+- **Measured:**
+  - **Precision:** a compute pass runs the same vertex function on sample lattice points and reads them back, against
+    a CPU reference in doubles. Inputs: 600 km and 6,371 km; morph 0, 1e-4, 0.5 and 1; the camera 2 m up at mid
+    latitude, at the cut, near a pole and at the projection centre. A naive full float bend is the control.
+  - **Seams and cut:** the crack probe at morph 0.5 and 1, with the outside of the map masked.
+  - **Morph 0:** the output must be bit-equal to today's.
+- **Out of scope:** bent-bound culling and morphed LOD error (the spike turns culling off and selects from the unbent
+  camera), shadows, normals under the morph, picking.
+
 **Open:**
 - ~~Which option.~~ B, chosen 2026-10-29.
 - The closest zoom on the map, which sets the precision target: a tactical view near the ground, or a strategic map
