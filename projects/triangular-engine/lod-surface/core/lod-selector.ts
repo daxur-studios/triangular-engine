@@ -31,6 +31,10 @@ import type { NodeHeightRanges } from './lod-height';
  * it (edge mask bit set) and, by the 2:1 balance, that leaf is the parent's neighbour across the same edge. So the
  * balance check while splitting and the edge masks cost a few array reads per edge. A view identical to the last one
  * returns without redoing the tree ({@link LodSelector.version} says whether the leaves changed).
+ *
+ * Node geometry (centre, normal, bounds, cell length) is the domain's own unless a {@link NodeGeometryHook} supplies it
+ * ({@link LodSelector.setGeometryHook}): that is how a bent surface is selected in its own frame (`lod-morph-metric.ts`).
+ * Changing the hook's state is {@link LodSelector.invalidateGeometry}; nodes are measured again as they join the next tree.
  */
 
 export type PatchCells = 16 | 32 | 64;
@@ -91,6 +95,54 @@ export interface SelectorView {
   readonly pixelAngle: number;
   /** Inward normals of the four side planes of the frustum, which pass through the camera: x, y, z per plane. */
   readonly frustum: Float64Array;
+}
+
+/**
+ * A node's geometry as the selector's split and cull tests read it, in the frame of {@link SelectorView.camera}. The selector
+ * owns one instance and passes it to {@link NodeGeometryHook.measure} to fill in; nothing is allocated per node.
+ */
+export interface NodeGeometry {
+  /** The surface point under the node's centre (becomes {@link LodSelector.center}). */
+  readonly ground: Vec3;
+  /** Unit normal of the surface there (becomes {@link LodSelector.normal}); the axis of the split box. */
+  readonly normal: Vec3;
+  /**
+   * Centre of the node's bounding sphere and split box: `ground` moved along `normal` to the middle of the node's height range
+   * (the same rule as the default geometry).
+   */
+  readonly centre: Vec3;
+  /** Radius of the bounding sphere around `centre` that holds every displaced point of the node: what frustum culling tests. */
+  boundRadius: number;
+  /** Radius of the split box across `normal`, metres. */
+  across: number;
+  /** Half the split box's height along `normal`, metres. */
+  alongHalf: number;
+  /** The node's longest edge, metres ({@link LodSelector.edge}). */
+  leafEdge: number;
+  /**
+   * The cell length the distance criterion compares with the target (`cellPixels` * pixel angle * gap): the node is too
+   * coarse while this exceeds the target. The default geometry's is the leaf's longest edge over the patch cells. The
+   * selector sets it to 0 at the deepest level, whatever the hook says.
+   */
+  cellEdge: number;
+}
+
+/**
+ * Supplies a node's geometry instead of the selector's own (a domain point, its normal and chord lengths). It is how a bent
+ * surface (the globe-to-map morph) is selected in its own frame: the hook places the node where the surface puts it and
+ * returns the cell length it has there. Install it with {@link LodSelector.setGeometryHook}; without one the selection is
+ * the default, bit for bit.
+ *
+ * `measure` runs when a node is made, and again when {@link LodSelector.invalidateGeometry} (or a new hook) has made its
+ * geometry stale and the node next joins a tree. It must not allocate, and must be a pure function of the node and of state
+ * that changes only together with an `invalidateGeometry` call. The view's camera must be in the frame the hook returns.
+ */
+export interface NodeGeometryHook {
+  /**
+   * Fills `out` for node (`root`, `level`, `i`, `j`). The node's displaced points lie between `heightLo` and `heightHi`
+   * (metres along the surface normal): widen `centre`, `boundRadius`, `across` and `alongHalf` to hold that range.
+   */
+  measure(root: number, level: number, i: number, j: number, heightLo: number, heightHi: number, out: NodeGeometry): void;
 }
 
 /** Counters of the last selection: tree size, level churn and whether the cap bound. Overwritten by every `select`, so copy what you keep. */
@@ -233,6 +285,15 @@ export class LodSelector {
   private readonly pointNormal: Vec3 = [0, 0, 0];
   private readonly corner: Vec3 = [0, 0, 0];
   private readonly range: [number, number] = [0, 0];
+  /** The active {@link NodeGeometryHook}, or undefined for the default geometry. */
+  private geometryHook: NodeGeometryHook | undefined;
+  /** Geometry generation: a node whose {@link geoStamp} differs is measured again when it next joins a tree. */
+  private geometryVersion = 0;
+  /** Generation each node's geometry was measured in. */
+  private readonly geoStamp: Int32Array;
+  private readonly geometry: NodeGeometry = { ground: [0, 0, 0], normal: [0, 0, 0], centre: [0, 0, 0], boundRadius: 0, across: 0, alongHalf: 0, leafEdge: 0, cellEdge: 0 };
+  /** Nodes measured again because their geometry was stale (first measurements not counted): the cost of {@link invalidateGeometry}. */
+  geometryRefreshes = 0;
 
   /**
    * @param poolTrees Node pool size in trees, at least 2: after a reclaim the pool holds the last tree and must still
@@ -268,6 +329,7 @@ export class LodSelector {
     this.neighbourJ = new Uint32Array(capacity * 4);
     this.nb = new Int32Array(capacity * 4);
     this.stamp = new Int32Array(capacity + 2);
+    this.geoStamp = new Int32Array(capacity);
     this.hot = new Float64Array(capacity * HOT);
     this.live = new Uint8Array(capacity);
     this.freeBlocks = new Int32Array(capacity >> 2);
@@ -278,6 +340,32 @@ export class LodSelector {
     this.masks = new Uint8Array(settings.leafCap + CAP_SLACK + 6);
     this.culledLeaves = new Int32Array(settings.leafCap + CAP_SLACK + 6);
     this.culledMasks = new Uint8Array(settings.leafCap + CAP_SLACK + 6);
+  }
+
+  /**
+   * Installs (or, with `undefined`, removes) the per-node geometry hook and makes every node's geometry stale: each is
+   * measured again by the new source when it next joins a tree, and the next {@link select} rebuilds the tree even for an
+   * unchanged view. Removing the hook returns the default geometry exactly. No new selector is needed.
+   */
+  setGeometryHook(hook: NodeGeometryHook | undefined): void {
+    if (hook === this.geometryHook) return;
+    this.geometryHook = hook;
+    this.invalidateGeometry();
+  }
+
+  /** The installed geometry hook, if any. */
+  get hook(): NodeGeometryHook | undefined {
+    return this.geometryHook;
+  }
+
+  /**
+   * Marks all node geometry stale (the hook's state changed). Nodes are measured again lazily as they join the next tree, so
+   * the cost is one `measure` per node of that tree, and a pooled node outside it waits until it is needed. The next
+   * {@link select} rebuilds even for an unchanged view.
+   */
+  invalidateGeometry(): void {
+    this.geometryVersion++;
+    this.hasViewKey = false;
   }
 
   /** Selects the tree for a view and fills {@link leaves}, {@link masks} and {@link stats}. */
@@ -560,8 +648,14 @@ export class LodSelector {
     const maxLevel = this.maxLevel;
     const pixelScale = this.pixelScale;
     let n = this.activeCount;
+    const geoStamp = this.geoStamp;
+    const geometryVersion = this.geometryVersion;
     for (let node = first; node < first + count; node++) {
       active[n++] = node;
+      if (geoStamp[node] !== geometryVersion) {
+        this.geometryRefreshes++;
+        this.measureNode(node);
+      }
       // Split in the last tree: open there, and in that tree (stamped one rebuild ago; older flags are stale).
       const kept = wasOpen[node] === 1 && stamp[node] === frame - 1;
       wasOpen[node] = kept ? 1 : 0;
@@ -627,6 +721,58 @@ export class LodSelector {
     this.open[node] = 0;
     this.wasOpen[node] = 0;
     this.wasVisible[node] = 0;
+    this.measureNode(node);
+    const domain = this.settings.domain;
+    const cell = this.cell;
+    for (let e = 0; e < 4; e++) {
+      const n = node * 4 + e;
+      const found = neighbourCell(domain, root, level, i, j, e, cell);
+      this.neighbourRoot[n] = found ? cell.root : NO_NEIGHBOUR;
+      this.neighbourI[n] = cell.i;
+      this.neighbourJ[n] = cell.j;
+      this.nb[n] = found ? this.unlinked : this.none;
+    }
+  }
+
+  /** Sets a node's geometry (centre, normal, bounds, cell length) from the hook, or the domain's own without one. */
+  private measureNode(node: number): void {
+    this.geoStamp[node] = this.geometryVersion;
+    const hook = this.geometryHook;
+    if (hook === undefined) {
+      this.domainGeometry(node);
+      return;
+    }
+    const level = this.level[node];
+    const ranges = this.settings.heightRanges;
+    const range = this.range;
+    if (ranges) ranges.nodeRange(this.root[node], level, this.i[node], this.j[node], range);
+    else {
+      range[0] = -this.settings.heightBoundM;
+      range[1] = this.settings.heightBoundM;
+    }
+    const g = this.geometry;
+    hook.measure(this.root[node], level, this.i[node], this.j[node], range[0], range[1], g);
+    const c = node * 3;
+    const h = node * HOT;
+    for (let k = 0; k < 3; k++) {
+      this.center[c + k] = g.ground[k];
+      this.normal[c + k] = g.normal[k];
+      this.hot[h + k] = g.centre[k];
+    }
+    this.radius[node] = g.boundRadius;
+    this.edge[node] = g.leafEdge;
+    this.hot[h + 3] = g.boundRadius;
+    this.hot[h + 4] = level >= this.maxLevel ? 0 : g.cellEdge;
+    this.hot[h + 5] = g.across;
+    this.hot[h + 6] = g.alongHalf;
+  }
+
+  /** The domain's own geometry: centre, normal, chord lengths and, when known, the height range. */
+  private domainGeometry(node: number): void {
+    const root = this.root[node];
+    const level = this.level[node];
+    const i = this.i[node];
+    const j = this.j[node];
     const domain = this.settings.domain;
     const size = 1 / 2 ** level;
     const { point, pointNormal, corner } = this;
@@ -673,15 +819,6 @@ export class LodSelector {
     this.edge[node] = edge;
     this.hot[h + 3] = this.radius[node];
     this.hot[h + 4] = level >= this.maxLevel ? 0 : edge / this.settings.patchCells;
-    const cell = this.cell;
-    for (let e = 0; e < 4; e++) {
-      const n = node * 4 + e;
-      const found = neighbourCell(domain, root, level, i, j, e, cell);
-      this.neighbourRoot[n] = found ? cell.root : NO_NEIGHBOUR;
-      this.neighbourI[n] = cell.i;
-      this.neighbourJ[n] = cell.j;
-      this.nb[n] = found ? this.unlinked : this.none;
-    }
   }
 
   private push(node: number, value: number): void {

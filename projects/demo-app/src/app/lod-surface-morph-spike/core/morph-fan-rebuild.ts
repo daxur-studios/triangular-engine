@@ -96,10 +96,14 @@ export const FAN_REBUILD_DEFAULTS = {
   frames: 60,
 };
 
-/** The camera pose of frame `i` of `n` of the camera phase: round the pole, 40 degrees of longitude, the altitude from 200 m to 150 m. */
+/** Frames the pole leaf set must hold unchanged before the camera phase starts, and the most frames waited for that. */
+export const FAN_SETTLE_FRAMES = 6;
+export const FAN_SETTLE_LIMIT = 80;
+
+/** The camera pose of frame `i` of `n` of the camera phase: round the pole, 15 degrees of longitude, the altitude from 200 m to 170 m, the heading turning 30 degrees. */
 export function cameraStepPose(base: MorphPose, i: number, n: number): MorphPose {
   const t = n <= 1 ? 0 : i / (n - 1);
-  return { ...base, lonDeg: base.lonDeg + 40 * t, altitudeM: base.altitudeM - 50 * t, headingDeg: base.headingDeg + 30 * t };
+  return { ...base, lonDeg: base.lonDeg + 15 * t, altitudeM: base.altitudeM - 30 * t, headingDeg: base.headingDeg + 30 * t };
 }
 
 /** The morph of frame `i` of `n` of the morph phase: 0.5 to 1 in the first half, back to 0.25 in the second. */
@@ -138,6 +142,12 @@ export async function runFanRebuildProbe(host: FanRebuildHost, options: FanRebui
           };
           const step: FanRebuildStep = { radiusM, morph: 0.5, centreLonDeg: centre.lonDeg, centreLatDeg: centre.latDeg, pose: base };
           const initial = run(step, 1, () => base, () => 0.5, () => 0);
+          // The selector refines over the first frames; the camera phase starts once the pole leaf set has held for a few frames.
+          for (let settled = 0, guard = 0; settled < FAN_SETTLE_FRAMES && guard < FAN_SETTLE_LIMIT; guard++) {
+            const before = state.signature;
+            run(step, 1, () => base, () => 0.5, () => 0);
+            settled = state.signature === before ? settled + 1 : 0;
+          }
           const camera = run(step, frames, (i) => cameraStepPose(base, i, frames), () => 0.5, () => 0);
           const morph = run(step, frames, () => base, (i) => morphStepValue(i, frames), () => 0);
           const centrePhase = run(step, 3, () => base, () => 0.5, (i) => 5 * (i > 0 ? 1 : 0));

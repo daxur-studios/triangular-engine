@@ -195,6 +195,26 @@ update(dt: number): void {
 - On a plane a query outside the square is clamped to the nearest edge point. The sphere's exact centre has no direction; `up` is then +Y.
 - Cost: five `heightAt` calls, about 1 to 4 microseconds per call in Node (see runbook 059, G4).
 
+## Morph-aware selection (preview)
+
+For the globe-to-map morph, `lod-surface/core` has a per-node geometry hook on `LodSelector` (`setGeometryHook`, `invalidateGeometry`) and `StretchMetric`, a hook that measures each node on the bent, stretched surface instead of the sphere (a pole corner of the projection is a whole edge of the map, so the sphere metric would call it small and far). With no hook, or at morph 0, the selection is the default one. Each frame: `metric.update({ morph })` (node geometry is re-measured only when the morph moves by a step, 0.01 by default, or the projection, radius or projection centre changes), then select with the camera from `metric.selectionPoint(direction, altitude)` and a frustum built from that camera. This is the CPU half; the terrain does not use it yet (wired up in G6e), so `<planetTerrain>` still draws the sphere while `morph` is above 0.
+
+## Globe-to-map morph in the surface mesh (preview)
+
+`createLodSurfaceMesh({ ..., morph: true })` (and `LodTerrainSettings.morph` for `LodTerrainBody`) builds the globe-to-map bend into the vertex stage of a sphere surface. It is a preview: `<planetTerrain>` does not use it yet, because the morph also needs the selector's bent bounds (G6c, `StretchMetric`), the pole fan (G6d) and the planet material, normals and shadows on the bent surface (G6e). Without the option the shader is exactly today's. With it, and morph 0, the drawn position is today's too, through a `select` on a uniform; above 0 it is the bent map position.
+
+```ts
+const body = new LodTerrainBody({ ...settings, morph: true });
+body.setMorph(planet.morphUniforms);            // or { morph: 0.5, projection: 'equal-earth', projectionCentre: { lonDeg, latDeg } }
+// each frame: body.update(camera, viewportHeightPx) — the camera is the bent camera (the one that sees the bent surface)
+```
+
+- **Inputs.** `setMorph` takes a `LodMorphSettings` or `<planet>`'s `morphUniforms` (`IPlanetMorphUniforms`, read again on every update, so animating `uMorph` is all it takes). The CPU needs the morph, the projection and the centre in doubles for the per-frame anchor; the GPU reads uniforms only, so changing them recompiles nothing. The map is `planetMapXY`: Equal Earth scaled by `PLANET_MAP_EQUAL_EARTH_SCALE` (1.1607) in x and y; equirectangular is `(R lon, R lat)` at every morph and never blends.
+- **Precision.** Vertices are placed from their offset to a per-frame anchor (the lattice point nearest the camera) by difference forms, with the large angles computed on the CPU in doubles (`computeMorphFrame`). Within about 1 km of a pole of the projection a second lattice stage measures from the pole. Seam vertices depend only on their lattice point and the frame, so neighbouring leaves agree bit for bit. In float32 emulation a vertex 1 m to 1 km from the pole stays under 1 px at 2 m altitude when the camera is 60 m or more away; closer than that the error floor is the float32 resolution of the vertex's longitude, a few centimetres at 6,371 km (see `lod-morph-pole.spec.ts`).
+- **The cut.** The map is cut at the meridian opposite the projection centre. Each leaf is drawn on the side of its centre; a leaf that reaches the cut is drawn twice (once per side), so the instance capacity is doubled, and fragments outside the map's outline are discarded. `surface.morphPack` reports the duplicates, torn leaves and drops.
+- **Culling.** Above morph 0 frustum culling is off (temporary): the selector would cull against the unbent globe. `body.setMorphCulling('bent-bounds')` keeps the frustum for when the selector's bent bounds (`StretchMetric` via `body.setGeometryHook`) are in place. In both modes the selector sees the unbent camera (`surface.unbend`).
+- **For G6d and G6e.** `surface.morphFrame` (the last frame's anchor and outline values), `surface.setSkipPoleLeaves(true)` (leave out the leaves a pole fan draws; `isPoleFanLeaf`), `createMorphStage` and `p2FromAngles` (build a fan's vertices from polar differences), the `lod-morph-*` modules of `lod-surface/core`, and `surface.nodes.bentUp` (the bend's up, for the material).
+
 ## Not included
 
-Ray hits against the ground (cliffs, overhangs), physics colliders (Plan 059 M5), the terrain's globe-to-map bend (step G6; `<planet>` already carries the morph state) and a `<planetClouds>` wrapper are later steps or separate work. The older `triangular-engine/terrain` entry is a different system and is unchanged.
+Ray hits against the ground (cliffs, overhangs), physics colliders (Plan 059 M5), the terrain's globe-to-map bend in the components (step G6e; the selection half is in `StretchMetric` above, the mesh half is the preview above, and `<planet>` already carries the morph state) and a `<planetClouds>` wrapper are later steps or separate work. The older `triangular-engine/terrain` entry is a different system and is unchanged.

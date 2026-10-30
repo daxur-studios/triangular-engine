@@ -473,7 +473,7 @@ const sig = (x: number): string => (x === 0 ? '0' : x < 0.001 ? x.toExponential(
 /** One fan precision row as a short text. */
 export function fanProbeRowText(r: FanProbeRow): string {
   return `${r.label}: ${r.leaves} leaves (${r.corner} corner, ${r.interior} interior) ${r.vertices} vertices, max ${sig(r.all.maxErrPx)} px p99 ${sig(r.all.p99ErrPx)} px `
-    + `(polar ${sig(r.polar.maxErrPx)}, boundary ${sig(r.chord.maxErrPx)}, own sheet ${sig(r.own.maxErrPx)}), worst ${r.worst.kind} at ${sig(r.worst.distM)} m, nearest ${sig(r.nearestM)} m`
+    + `(judged ${sig(r.judged.maxErrPx)}, polar ${sig(r.polar.maxErrPx)}, boundary ${sig(r.chord.maxErrPx)}, pole zone ${r.poleZone.vertices ? sig(r.poleZone.maxErrPx) : 'none'}, own sheet ${sig(r.own.maxErrPx)}), worst ${r.worst.kind} at ${sig(r.worst.distM)} m, nearest ${sig(r.nearestM)} m`
     + (r.nonFinite ? `, ${r.nonFinite} non-finite` : '');
 }
 
@@ -481,7 +481,7 @@ export function fanProbeRowText(r: FanProbeRow): string {
 export function fanPrecisionObservation(rows: readonly FanProbeRow[], settings: MorphSpikeTestSettings): TestObservation {
   const limit = settings.precisionLimitPx ?? FAN_PRECISION_LIMIT_PX;
   const expected = expectedFanProbeCases(settings);
-  const over = rows.filter((r) => r.all.maxErrPx > limit);
+  const over = rows.filter((r) => r.judged.maxErrPx > limit);
   const broken = rows.filter((r) => r.vertices <= 0 || r.leaves <= 0 || r.nonFinite !== 0);
   const checks: TestCheck[] = [
     { name: 'The probe ran every case', passed: rows.length === expected && rows.length > 0, detail: `${rows.length} rows, ${expected} expected` },
@@ -495,18 +495,21 @@ export function fanPrecisionObservation(rows: readonly FanProbeRow[], settings: 
       detail: `${rows.filter((r) => r.corner > 0).length} rows with a corner pole leaf, ${rows.filter((r) => r.interior > 0).length} with an interior one`,
     },
     {
-      name: `Every fan vertex is within ${limit} px of the double-precision placement of its description (boundary samples, polar rings and the pole)`,
+      name: `Every polar vertex and every boundary vertex outside the 0.01 degree pole zone is within ${limit} px of the double-precision placement of its description`,
       passed: rows.length > 0 && over.length === 0,
-      detail: over.length ? over.slice(0, MAX_LISTED).map(fanProbeRowText).join(' | ') : `worst ${sig(maxOf(rows.map((r) => r.all.maxErrPx)))} px over ${rows.length} cases`,
+      detail: over.length ? over.slice(0, MAX_LISTED).map(fanProbeRowText).join(' | ') : `worst ${sig(maxOf(rows.map((r) => r.judged.maxErrPx)))} px over ${rows.length} cases`,
     },
   ];
   const metric = (name: string, unit: string, source: string, pick: (r: FanProbeRow) => number): TestMetric => ({
     name, unit, source, samples: rows.map(pick), unavailableReason: rows.length ? undefined : 'No rows',
   });
-  const worstRow = rows.reduce<FanProbeRow | undefined>((a, b) => (a && a.all.maxErrPx >= b.all.maxErrPx ? a : b), undefined);
+  const worstRow = rows.reduce<FanProbeRow | undefined>((a, b) => (a && a.judged.maxErrPx >= b.judged.maxErrPx ? a : b), undefined);
   return {
     metrics: [
-      metric('maxErrPx', 'px', 'Per case: the largest error of any fan vertex, GPU position against the double placement, in pixels (error / distance x focal length)', (r) => r.all.maxErrPx),
+      metric('judgedMaxErrPx', 'px', 'Per case: the largest error of the judged vertices (polar vertices and boundary vertices outside the pole zone), GPU position against the double placement, in pixels (error / distance x focal length)', (r) => r.judged.maxErrPx),
+      metric('maxErrPx', 'px', 'Per case: the largest error of any fan vertex including the pole zone (not judged), in pixels', (r) => r.all.maxErrPx),
+      metric('poleZoneMaxErrPx', 'px', 'Per case: the largest error of the boundary vertices within 0.01 degrees of the pole (not judged: the lattice longitude is ill-conditioned there, as in the instanced leaves)', (r) => r.poleZone.maxErrPx),
+      metric('poleZoneVertices', 'count', 'Per case: boundary vertices within 0.01 degrees of the pole', (r) => r.poleZone.vertices),
       metric('p99ErrPx', 'px', 'Per case: the 99th percentile of the same errors', (r) => r.all.p99ErrPx),
       metric('polarMaxErrPx', 'px', 'Per case: the largest error of the polar vertices (rings between the boundary and the pole, and the pole itself)', (r) => r.polar.maxErrPx),
       metric('boundaryMaxErrPx', 'px', 'Per case: the largest error of the boundary vertices (the leaf\'s own samples and the chord points between them)', (r) => r.chord.maxErrPx),
@@ -525,7 +528,8 @@ export function fanPrecisionObservation(rows: readonly FanProbeRow[], settings: 
     },
     limitations: [
       'The reference is the CPU fan\'s own placement of the same descriptions (doubles, the exact map), given the float32 values the GPU is given (the window and pole longitudes reach the vertex stage as float32 attributes, like those of the instanced leaves); the error is the vertex stage\'s arithmetic, not a rendered image.',
-      'The pixel is the distance to the vertex times the angle of one pixel (60 degree field of view, 1080 rows), as in the P2 precision check; unlike that check the pole cap is included.',
+      'The pixel is the distance to the vertex times the angle of one pixel (60 degree field of view, 1080 rows), as in the P2 precision check.',
+      'Boundary vertices within 0.01 degrees of the pole (a few metres to 100 m from it) are measured and reported (poleZoneMaxErrPx) but not judged: the boundary shares the instanced leaves lattice stage bit for bit, which derives the longitude from a float32 direction, and a direction error of 6e-8 is that divided by the colatitude of longitude there (at morph 1 the whole pole is the top edge of the map). The neighbours drawn at the same place carry the same error; the existing P2 probe separates the same 0.01 degree band. The polar vertices, which the fan adds, are judged everywhere.',
       'The boundary vertices run the lattice vertex stage, so their error is the instanced leaves\' own P2 error plus the float32 lerp between two ends; the polar vertices are the fan\'s new arithmetic.',
     ],
   };

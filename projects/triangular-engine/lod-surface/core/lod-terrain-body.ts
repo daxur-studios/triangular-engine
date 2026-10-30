@@ -6,7 +6,8 @@ import { createGroundSample, groundAt, type GroundSample } from './lod-ground-qu
 import { DEFAULT_BAKE_K } from './lod-height-bake';
 import type { HeightSource } from './lod-height';
 import type { TextureHeightSource } from './lod-height-texture';
-import { CAP_SLACK, LodSelector, PIXEL_FLOOR, type PatchCells, type SelectorStats, type SelectorView } from './lod-selector';
+import type { LodMorphSettings, MorphUniformsLike } from './lod-morph-frame';
+import { CAP_SLACK, LodSelector, PIXEL_FLOOR, type NodeGeometryHook, type PatchCells, type SelectorStats, type SelectorView } from './lod-selector';
 import { createLodSurfaceMesh, type LodSurfaceMesh, type LodView } from './lod-surface-mesh';
 import { frustumNormals, type CameraAxes } from './lod-view';
 
@@ -53,7 +54,24 @@ export interface LodTerrainSettings {
   readonly cull: boolean;
   /** Material to draw with instead of the built-in debug material; see `LodSurfaceMeshOptions.material`. */
   readonly material?: NodeMaterial;
+  /**
+   * Preview (Plan 059 G6b, sphere only): builds the globe-to-map morph into the surface mesh (`LodSurfaceMeshOptions.morph`). Changing it
+   * rebuilds the mesh. Drive it with {@link LodTerrainBody.setMorph}. `<planetTerrain>` does not set it yet (G6e).
+   */
+  readonly morph?: boolean;
 }
+
+/**
+ * How {@link LodTerrainBody.update} treats frustum culling above morph 0. The selector's own bounds describe the globe, not the bent
+ * ground, so a frustum test with them would drop leaves that are on screen.
+ *
+ * - `'off'` (default, temporary): nothing is culled, and the selector is given the camera's position on the unbent globe, so a
+ *   view of the whole map draws every leaf the budget allows.
+ * - `'bent-bounds'`: the frustum test is kept and the selector gets the bent camera as it is. Only correct while a
+ *   {@link NodeGeometryHook} that bounds the nodes in the bent frame is installed ({@link LodTerrainBody.setGeometryHook}, `StretchMetric`
+ *   of `lod-morph-metric.ts`).
+ */
+export type LodMorphCulling = 'off' | 'bent-bounds';
 
 /** The camera's world position and axes, which {@link LodTerrainBody.update} reads from a `PerspectiveCamera`. */
 const AXES: { right: Vec3; up: Vec3; forward: Vec3 } = { right: [1, 0, 0], up: [0, 1, 0], forward: [0, 0, -1] };
@@ -93,6 +111,10 @@ export class LodTerrainBody {
   private wireframe = false;
   private bounds = true;
   private sun: Vec3 = [0.4, 0.8, 0.45];
+  private morphSource: LodMorphSettings | MorphUniformsLike | undefined;
+  private morphCulling: LodMorphCulling = 'off';
+  private geometryHook: NodeGeometryHook | undefined;
+  private readonly unbent: Vec3 = [0, 0, 0];
 
   constructor(settings: LodTerrainSettings) {
     this.object.name = 'LOD terrain';
@@ -134,8 +156,10 @@ export class LodTerrainBody {
       leafCap: settings.leafCap, heightBoundM: this.source.boundM, cull: settings.cull, hysteresis: settings.hysteresis,
       ...(this.source.nodeRange ? { heightRanges: { nodeRange: this.source.nodeRange.bind(this.source) } } : {}),
     });
+    if (this.geometryHook) this.selector.setGeometryHook(this.geometryHook);
     const capacity = settings.leafCap + CAP_SLACK + 6;
-    const key = [domain.kind, domain.sizeM, domain.warp, settings.patchCells, capacity, settings.detailNoise > 0, detailCells].join('|');
+    const morph = settings.morph === true && domain.kind === 'sphere';
+    const key = [domain.kind, domain.sizeM, domain.warp, settings.patchCells, capacity, settings.detailNoise > 0, detailCells, morph].join('|');
     if (this.surface && key === this.builtKey && heights === this.builtHeights && settings.material === this.builtMaterial) {
       this.surface.setDetailNoise(settings.detailNoise);
       return;
@@ -146,7 +170,9 @@ export class LodTerrainBody {
       domain, patchCells: settings.patchCells, source: this.source, capacity,
       ...(settings.detailNoise > 0 ? { detail: { cells: detailCells } } : {}),
       ...(settings.material ? { material: settings.material } : {}),
+      ...(morph ? { morph } : {}),
     });
+    if (morph) this.surface.setMorph(this.morphSource);
     this.surface.setView(this.view);
     this.surface.setLighting(this.lighting);
     this.surface.setBounds(this.bounds);
@@ -200,6 +226,29 @@ export class LodTerrainBody {
   }
 
   /**
+   * Preview (needs `LodTerrainSettings.morph`; ignored without it): the globe-to-map morph state, as `LodSurfaceMesh.setMorph`: a
+   * {@link LodMorphSettings} object, or `<planet>`'s `morphUniforms`, which are read again each {@link update}. Kept across mesh rebuilds.
+   */
+  setMorph(source: LodMorphSettings | MorphUniformsLike | undefined): void {
+    this.morphSource = source;
+    if (this.settings.morph && this.settings.domain.kind === 'sphere') this.surface.setMorph(source);
+  }
+
+  /** How frustum culling is treated above morph 0 (see {@link LodMorphCulling}). Default `'off'`. */
+  setMorphCulling(mode: LodMorphCulling): void {
+    this.morphCulling = mode;
+  }
+
+  /**
+   * Installs the selector's {@link NodeGeometryHook} (the bent bounds of G6c). Kept across {@link configure}, which remakes the selector.
+   * Together with {@link setMorphCulling} `'bent-bounds'` the selector then works in the bent frame.
+   */
+  setGeometryHook(hook: NodeGeometryHook | undefined): void {
+    this.geometryHook = hook;
+    this.selector.setGeometryHook(hook);
+  }
+
+  /**
    * One frame: reads the camera's world position, axes and field of view, selects leaves for them, uploads the drawn ones and
    * moves {@link object} to the camera. Call it after the camera has settled for the frame (the engine's `beforeRender$`).
    *
@@ -222,7 +271,16 @@ export class LodTerrainBody {
     const view = this.selectorView;
     view.pixelAngle = (2 * tanHalf) / Math.max(1, viewportHeightPx);
     frustumNormals(AXES as CameraAxes, 2 * Math.atan(tanHalf), camera.aspect, this.frustum);
+    // Above morph 0 the surface is bent while the selector's bounds describe the globe: by default nothing is culled (a zero frustum
+    // never rejects a node) and the selector sees the camera over the unbent globe. With bent bounds it sees the bent camera.
+    const morphing = this.settings.morph === true && this.surface.morphState.morph > 0;
+    if (morphing && this.morphCulling === 'off') {
+      this.frustum.fill(0);
+      this.surface.unbend(position, this.unbent);
+      view.camera = this.unbent;
+    }
     this.selector.select(view);
+    view.camera = position;
     this.surface.setDetailFade(Math.max(this.settings.cellPixels, PIXEL_FLOOR) * view.pixelAngle);
     this.surface.upload(this.selector, position);
     this.object.position.set(position[0], position[1], position[2]);

@@ -460,6 +460,9 @@ in steps with headless specs. The spike's code is the reference; it is ported an
   - **Morph 0:** a `select` gives today's position bit for bit. Falsifier: the v9 suite and every G1–G5 spec are
     unchanged. The extra vertex work at morph 0 is measured, and two pipelines are used only if it shows.
   - **Specs:** ported from the spike's `morph-math`, `morph-leaves` and `morph-surface-mesh` specs.
+  - **Near the projection's pole (from v6):** within about 1 km of the pole, the float32 lattice stage gives an
+    ill-conditioned longitude, up to 9,471 px at morph 1. So the bend takes the vertex's offset from the pole as
+    (vertex − anchor) + (anchor − pole), with the anchor-to-pole vector sent in doubles. That zone is judged too.
 - **G6c The selector measures in the morphed view.** The spike patches `LodSelector`'s private arrays
   (`installStretchMetric`). G6 adds a supported per-node geometry hook instead, selected by morph.
   - **Bent culling:** the stretch geometry already gives a bent centre, normal and radius, so culling uses bent
@@ -479,7 +482,8 @@ in steps with headless specs. The spike's code is the reference; it is ported an
     to the pole and refreshed per morph step.
   - **Also covered:** a fan leaf that straddles the cut (a second copy shifted by 2π, untested in the spike) and the
     equirectangular pole.
-  - Needs decision 2.
+  - **Measured 2026-10-30 (v6):** the vertex-stage fan has 0 holes and a rim within 1 px. It never rebuilds on a
+    camera move or a morph change, and a rebuild takes 8–12 ms. Chosen for G6d.
 - **G6e Material and components.**
   - **Material:** `TerrainPlanetMaterial` takes the shared morph uniforms instead of constants, as item 7 says.
     `morphedPosition` becomes the bent position. `bodyFixedLocal` and `radialDirection` stay on the sphere, so cells

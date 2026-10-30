@@ -1,6 +1,6 @@
-import { FAN_DEFAULT_RAYS, FAN_SPEC_STRIDE, SPEC, buildFanSpecs, placeFanSpecs, type FanLeaf } from './morph-fan';
+import { FAN_DEFAULT_RAYS, FAN_SPEC_STRIDE, SPEC, buildFanSpecs, placeFanSpecs, type FanLeaf, type FanSpecs } from './morph-fan';
 import { packVertexFan, type VertexFanData } from './morph-fan-vertex';
-import type { MorphFrame, MorphPoseId } from './morph-frame';
+import { latticeDirection, type MorphFrame, type MorphPoseId } from './morph-frame';
 import type { StretchContext } from './morph-stretch';
 
 /**
@@ -58,10 +58,18 @@ export interface FanProbeRow extends FanProbeCase {
   readonly polar: FanErrorStats;
   readonly chord: FanErrorStats;
   readonly own: FanErrorStats;
+  /**
+   * The boundary vertices by their angular distance from the pole ({@link FAN_POLE_BANDS}, the lower edges in radians): within `poleZoneRad` of the
+   * pole the lattice stage the boundary shares with its neighbours cannot place the longitude (see {@link FAN_POLE_ZONE_RAD}).
+   */
+  readonly chordBands: readonly { readonly fromRad: number; readonly toRad: number; readonly stats: FanErrorStats }[];
+  /** The boundary vertices inside the pole zone, and the polar and boundary vertices outside it together (the ones the check judges). */
+  readonly poleZone: FanErrorStats;
+  readonly judged: FanErrorStats;
   /** Vertices whose position the GPU returned as NaN or infinity. */
   readonly nonFinite: number;
   /** The worst vertex (by pixels): its kind, distance from the camera, error in metres and pixels. */
-  readonly worst: { readonly kind: 'polar' | 'chord'; readonly distM: number; readonly errM: number; readonly errPx: number };
+  readonly worst: { readonly kind: 'polar' | 'chord'; readonly distM: number; readonly errM: number; readonly errPx: number; readonly where?: string };
   /** Distance from the camera to the nearest fan vertex, metres. */
   readonly nearestM: number;
   /** CPU milliseconds of the descriptions and of the pack. */
@@ -95,6 +103,17 @@ export const FAN_PROBE_DEFAULTS = {
 };
 
 const PI = Math.PI;
+
+/**
+ * The angular distance from the pole (radians) inside which the boundary vertices are reported but not judged: 0.01 degrees, the band the P2
+ * precision probe also separates (`poleBands`). A lattice vertex there is a few metres (600 km radius: 100 m) from the pole, and the longitude
+ * the lattice stage derives for it from the float32 direction is ill-conditioned (an error of 6e-8 in a direction component is 6e-8 / colatitude
+ * of longitude, and near the pole the map's x is that longitude times the radius), exactly as in the instanced leaves the boundary is drawn by.
+ */
+export const FAN_POLE_ZONE_RAD = (0.01 * Math.PI) / 180;
+
+/** The bands the boundary vertices are binned into, lower edges in radians; the last is open. */
+export const FAN_POLE_BANDS: readonly number[] = [0, 1e-5, FAN_POLE_ZONE_RAD, 10 * FAN_POLE_ZONE_RAD];
 
 /** The label of a case: `radius km view[ at altitude] m<morph> centre`. */
 export function fanProbeLabel(c: FanProbeCase): string {
@@ -158,6 +177,15 @@ export async function runFanProbe(host: FanProbeHost, options: FanProbeOptions =
     const polar = new Stats();
     const chord = new Stats();
     const own = new Stats();
+    const bands = FAN_POLE_BANDS.map(() => new Stats());
+    const zone = new Stats();
+    const judged = new Stats();
+    const cell = (l: FanLeaf): number => l.span / ctx.patchCells;
+    const colatOfEnd = (l: FanLeaf, gx: number, gy: number): number => {
+      const unit = latticeDirection(l.face, l.u0 + gx * cell(l), l.v0 + gy * cell(l), ctx.steps, ctx.domain);
+      const up = ctx.basis.up;
+      return Math.acos(Math.min(1, Math.max(-1, unit[0] * up[0] + unit[1] * up[1] + unit[2] * up[2])));
+    };
     let nonFinite = 0;
     let nearest = Infinity;
     let worst: FanProbeRow['worst'] = { kind: 'chord', distM: 0, errM: 0, errPx: -1 };
@@ -181,12 +209,35 @@ export async function runFanProbe(host: FanProbeHost, options: FanProbeOptions =
       const lon = isPolar ? specs.data[o + SPEC.LON] : specs.data[o + SPEC.REFA];
       all.add(errPx, errM);
       (isPolar ? polar : chord).add(errPx, errM);
+      let colat: number;
+      if (isPolar) colat = specs.data[o + SPEC.C];
+      else {
+        const l = specs.leaves[specs.data[o + SPEC.LEAF]];
+        const w = specs.data[o + SPEC.W];
+        const ca = colatOfEnd(l, specs.data[o + SPEC.GXA], specs.data[o + SPEC.GYA]);
+        colat = w === 0 ? ca : ca + (colatOfEnd(l, specs.data[o + SPEC.GXB], specs.data[o + SPEC.GYB]) - ca) * w;
+      }
+      if (!isPolar) {
+        let band = 0;
+        while (band + 1 < FAN_POLE_BANDS.length && colat >= FAN_POLE_BANDS[band + 1]) band++;
+        bands[band].add(errPx, errM);
+      }
+      (!isPolar && colat < FAN_POLE_ZONE_RAD ? zone : judged).add(errPx, errM);
       if (Math.abs(lon - frame.lambdaC) <= PI) own.add(errPx, errM);
-      if (errPx > worst.errPx) worst = { kind: isPolar ? 'polar' : 'chord', distM: dist, errM, errPx };
+      if (errPx > worst.errPx) {
+        const at = (k: number): number => specs.data[o + k];
+        const where = isPolar
+          ? 'polar leaf ' + at(SPEC.LEAF) + ' lon ' + at(SPEC.LON).toFixed(6) + ' c ' + at(SPEC.C).toExponential(3)
+          : 'chord leaf ' + at(SPEC.LEAF) + ' A ' + at(SPEC.GXA) + ',' + at(SPEC.GYA) + ' ref ' + at(SPEC.REFA).toFixed(6) + ' B ' + at(SPEC.GXB) + ',' + at(SPEC.GYB) + ' w ' + at(SPEC.W).toFixed(4)
+            + ' poleLon ' + at(SPEC.POLE_LON) + ' gpu ' + [gx, gy, gz].map((x) => x.toFixed(3)).join(',') + ' ref ' + [rx, ry, rz].map((x) => x.toFixed(3)).join(',');
+        worst = { kind: isPolar ? 'polar' : 'chord', distM: dist, errM, errPx, where };
+      }
     }
     const row: FanProbeRow = {
       ...c, label: fanProbeLabel(c), leaves: leaves.length, corner: specs.corner, interior: specs.interior, vertices: specs.vertexCount,
-      all: all.result(), polar: polar.result(), chord: chord.result(), own: own.result(), nonFinite, worst: worst.errPx < 0 ? { ...worst, errPx: 0 } : worst,
+      all: all.result(), polar: polar.result(), chord: chord.result(), own: own.result(),
+      chordBands: FAN_POLE_BANDS.map((from, k) => ({ fromRad: from, toRad: FAN_POLE_BANDS[k + 1] ?? PI, stats: bands[k].result() })),
+      poleZone: zone.result(), judged: judged.result(), nonFinite, worst: worst.errPx < 0 ? { ...worst, errPx: 0 } : worst,
       nearestM: Number.isFinite(nearest) ? nearest : 0, buildMs, ms: performance.now() - began,
     };
     rows.push(row);

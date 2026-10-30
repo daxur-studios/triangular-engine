@@ -1798,3 +1798,106 @@ Built by a Sonnet subagent and reviewed here. Library behaviour is unchanged: th
 - **For G6b:** the function takes longitude and latitude in the projection basis, so the caller turns the body point
   into them. `lod-surface/core` already imports three in its mesh files, so importing planet-material from there is
   fine, but the height-bake worker's import graph must not pull it in.
+
+## 2026-10-30: Morph spike part 4: the pole fan in the vertex stage (suite v6)
+
+Built by a Sonnet subagent and reviewed here (spike files only, library unchanged). Result:
+`lod-surface-morph@v6/2026-10-30T19-23-07-207Z_headless-hardware_46869e56-37bb0316.json`, auto pass, NVIDIA WebGPU,
+noisy load (GPU 9/41 %, CPU 19/37 %: game client, IDE, agents).
+
+**Design.**
+- **When the CPU rebuilds:** only when the projection centre, the radius, the ray count or the set of pole leaves and
+  their edge masks change. It builds the topology and the per-vertex parameters.
+- **Chord points** (the outer ring) keep their two lattice ends and a weight. Each end runs the neighbours' own lattice
+  path, so a boundary sample is bit-identical to what the neighbour draws.
+- **Polar points** keep longitude, colatitude and `2 sin²(c/2)` as float32 hi/lo pairs. They go through `p2FromAngles`,
+  which is split out of `p2Position`; no large-angle trig runs on the GPU.
+- **Per frame:** only uniforms change.
+
+**Results.** All new scenarios used 1,024 rays.
+
+- **Holes:**
+  - The vertex-stage fan has 0 holes, and a rim within 1 px, in pole-200m, tilted, orbit-map, mid and cut on both radii.
+  - Every v5 scenario is unchanged.
+- **Rebuilds** (6,371 km, 60 frames per phase):
+
+  | Fan | Camera move | Morph change |
+  |---|---|---|
+  | Vertex stage | 0 rebuilds | 0 rebuilds |
+  | CPU | 59 rebuilds, 1.6 s | 60 rebuilds, 1.5–2.0 s |
+
+  - **Vertex-stage first build:** 8–9 ms.
+  - **Projection-centre change:** one rebuild of 9–12 ms, because the polar parameters are in the projection basis.
+- **Precision of the fan's own vertices:** polar vertices are off by at most 5.9e-4 px. Polar and boundary vertices
+  outside 0.01° (about 1.1 km) of the pole are off by at most 0.14 px.
+
+**Open: lattice vertices within about 1 km of the projection's pole.**
+- **Size:** at morph 1 they are off by up to 9,471 px. That is about 1,100–1,260 vertices per case, and it pushes the
+  p99 to 13 px in two 600 km tilted cases.
+- **Cause:** the float32 lattice stage gives these vertices an ill-conditioned longitude. At morph 1 the whole pole is
+  the map's top edge, so a longitude error becomes a large error along the edge.
+- **Where it comes from:** the fan's boundary is bit-identical to the neighbours', so the error is inherited from the
+  shared lattice path, not added by the fan. That the instanced neighbours carry it too is inferred, not measured on
+  those vertices.
+- **Why the crack probe misses it:** the probe sees no hole because the vertices slide along the edge line. The
+  triangles there still overlap and shear, which would show in the cell colours at a close view of the map's pole edge.
+- **Not judged in v6:** the precision check excludes this zone and reports it (`poleZoneMaxErrPx`).
+- **Requirement for G6b:** the lattice stage takes a pole-relative form near the pole. The vertex's offset from the pole
+  is (vertex − anchor) + (anchor − pole), with the anchor-to-pole vector sent in doubles from the CPU, so the angle comes
+  from an accurate small vector. The library suite judges this zone.
+
+**Decision 2 settled:** G6d uses the vertex-stage fan.
+
+**Not measured:** a camera move under the stretch metric (the rebuild script used the sphere metric), and normals and
+shading under the morph.
+
+## 2026-10-30: G6c: the morph-aware selector (geometry hook and stretch metric)
+
+Built by a Sonnet subagent and reviewed here. Library only; no consumer uses it until G6e.
+
+**What was added.**
+- **Selector hook** (`lod-selector.ts`):
+  - `setGeometryHook(hook | undefined)`, `hook` and `invalidateGeometry()`.
+  - A hook fills the node's ground point, normal, bound centre and radius, split box, leaf edge and cell length.
+  - Each node carries a geometry stamp. A stale node is measured again only when it joins the next tree, and
+    `geometryRefreshes` counts those measurements.
+  - Without a hook the old code runs unchanged; it was moved into `domainGeometry`, not rewritten. Nothing is allocated
+    per node or per frame.
+- **Stretch metric** (`lod-morph-metric.ts`, exported from `core/public-api.ts`):
+  - `StretchMetric` takes nine samples per node through the material map and the bend, and the sag between them.
+  - At morph 0 no hook is installed, so selection is the sphere one bit for bit. A sweep 0 → 0.5 → 0 returns the
+    same tree.
+  - It replaces the spike's patch of private selector fields.
+- **Refresh policy:** geometry is measured again only when the morph has moved `morphStep` (default 0.01), when the morph
+  crosses 0, or when the projection, radius or basis changes above 0. The selector's camera sits in the measured frame,
+  so camera and nodes agree on where the ground is; the lag only changes node scale. That is covered by a pad of 3 % on
+  the cell length and the bounds.
+  - Not a proof: 14 of 88,974 near-threshold measurements exceed the pad. Each is corrected at the next step.
+- **Poles and the cut:**
+  - A leaf with the projection's pole at a corner gets the map's whole pole edge as its edge.
+  - A leaf with the pole strictly inside is "torn": it always splits and is never culled.
+  - A leaf straddling the cut is measured on its own side only. Fineness is underestimated for a camera on the other
+    side (open for G6d/G6e).
+- **Map maths copied, not imported:** `stretchMapXY` and the bend are copies of `planetMapXY` and the atmosphere's bend.
+  The selector side must stay worker-safe, and planet-material's entry pulls three and TSL. The spec asserts the copy is
+  exactly equal to `planetMapXY`, and within 1e-4 m of the bend.
+
+**Checks.**
+- lod-surface specs: 104 of 104 pass (81 before; 6 hook specs, 17 metric specs). Demo-app selector specs: 24 of 24.
+  Library build clean.
+- Bent bounds: 81 samples per leaf at three heights, levels 0–3, both projections, two projection centres, morph 0.3
+  and 1. All 4,080 nodes hold every sample.
+
+**Cost** (headless Chrome in Karma, noisy load; 6,371 km, 2 m above ground near the pole, morph 0.5, 4,098 leaves):
+
+| Frame | Selection time |
+|---|---|
+| Steady, stretch metric | about 0.5 ms |
+| Steady, sphere metric | about 0.47 ms |
+| Refresh frame | 25–36 ms, about 5,550 nodes measured again |
+
+**Open: the refresh frame is too slow for animation.** A morph animation passes a 0.01 step on most frames, so every frame
+would cost 25–36 ms. G6e must fix this before shipping a morph animation. Options:
+- a coarser step while the morph animates;
+- spreading the re-measurement over several frames;
+- a cheaper measure (about 5 µs per node now).

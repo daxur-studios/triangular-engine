@@ -3,13 +3,18 @@ import { BufferAttribute, FrontSide, InstancedBufferAttribute, InstancedBufferGe
 import { MeshBasicNodeMaterial, type NodeMaterial } from 'three/webgpu';
 import {
   attribute, cos, dot, float, floor, fract, fwidth, length, max, min, mix, mod, normalize, positionGeometry,
-  smoothstep, step, uniform, uniformArray, varying, vec2, vec3, vec4,
+  select, smoothstep, step, uniform, uniformArray, varying, vec2, vec3, vec4,
 } from 'three/tsl';
 import { detailNoiseNode, detailTexelMetres } from './lod-detail-noise';
 import { FACE_FRAMES, PLANE_FRAME, type LodDomain, type Vec3 } from './lod-domain';
 import type { HeightSource } from './lod-height';
 import { SIN_DENOMINATORS, anchorFor, latticeSteps, newAnchor } from './lod-lattice';
 import { LEAF_STRIDE, packLeaves } from './lod-leaf-pack';
+import {
+  computeMorphFrame, createMorphMap, morphSettingsFromUniforms, unbendPosition, type LodMorphSettings, type MorphFrame, type MorphMap, type MorphUniformsLike,
+} from './lod-morph-frame';
+import { instanceCapacity, packMorphLeaves, type MorphPack } from './lod-morph-leaves';
+import { createMorphStage } from './lod-morph-stage';
 import { maxLevelFor, type LodSelector, type PatchCells } from './lod-selector';
 
 /**
@@ -57,6 +62,11 @@ export interface LodSurfaceNodes {
   readonly position: any;
   /** Selector level of the leaf (varying). */
   readonly level: any;
+  /**
+   * Preview (needs the `morph` option, G6b): the bend's unit up at the vertex in the body frame (varying). Equals {@link up} at morph 0;
+   * above 0 it is the normal of the bent ground (a flat map's up is the projection's forward axis). Absent without the option.
+   */
+  readonly bentUp?: any;
 }
 
 /**
@@ -105,6 +115,14 @@ export interface LodSurfaceMeshOptions {
    * texels per face side. Absent: no noise nodes are built. Its amplitude is set with `setDetailNoise`.
    */
   readonly detail?: { readonly cells: number };
+  /**
+   * Preview (Plan 059 G6b, needs a sphere domain): builds the globe-to-map morph into the vertex stage. The instance capacity doubles (a
+   * leaf that reaches the map's cut is drawn twice), the vertex stage gains the pole stage and the bent position, and fragments outside the
+   * map's outline are discarded. Everything is driven by uniforms ({@link LodSurfaceMesh.setMorph}), so no recompile happens when the morph
+   * changes; at morph 0 the drawn position is today's, bit for bit (a `select` on a uniform). Absent: the shader is exactly the one without
+   * the morph. `<planetTerrain>` does not use it yet (G6e).
+   */
+  readonly morph?: boolean;
 }
 
 /** The drawn surface and its controls: one instanced mesh, one draw call. */
@@ -140,6 +158,27 @@ export interface LodSurfaceMesh {
   setDetailFade(spacingAngle: number): void;
   /** Sun lighting on the built-in material (off: flat colour). */
   setLighting(on: boolean): void;
+  /**
+   * Preview (needs the `morph` option, else it throws): the globe-to-map morph state, which {@link upload} reads each frame. Pass
+   * {@link LodMorphSettings} (a morph, a projection and a centre or a basis), or `<planet>`'s `morphUniforms`
+   * (`IPlanetMorphUniforms`), which are then read again on every upload, so animating `uMorph` there is all it takes. `undefined` is morph 0.
+   * The domain's `sizeM` is the planet radius the map is built with.
+   */
+  setMorph(source: LodMorphSettings | MorphUniformsLike | undefined): void;
+  /** The morph state in force (`morph` 0 when none is set or the mesh has no `morph` option). */
+  readonly morphState: { readonly morph: number; readonly map: MorphMap | undefined };
+  /**
+   * Preview: where a camera at scene position `camera` stands on the unbent globe, for the selector: the point under it at its height
+   * (the camera itself at morph 0). The selector selects in the unbent frame (until the bent bounds of G6c are wired), the mesh
+   * {@link upload}s with the bent camera.
+   */
+  unbend(camera: Vec3, out?: Vec3): Vec3;
+  /** Preview: leave the pole-fan leaves (a pole of the projection at a corner or inside) out of the instances above morph 0. G6d draws them instead. */
+  setSkipPoleLeaves(on: boolean): void;
+  /** Preview: the last frame's anchor values and outline (doubles), or `undefined` at morph 0; what G6d/G6e build on. */
+  readonly morphFrame: MorphFrame | undefined;
+  /** Preview: the counts of the last pack above morph 0 (duplicates for the cut, torn leaves, drops for capacity). */
+  readonly morphPack: MorphPack | undefined;
   /** Releases the geometry and the built-in materials (not a supplied one). */
   dispose(): void;
 }
@@ -185,10 +224,13 @@ const bit = (mask: any, e: number) => mod(floor(mask.div(2 ** e)), 2);
 export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurfaceMesh {
   const { domain, patchCells, source, capacity, detail } = options;
   const sphere = domain.kind === 'sphere';
+  if (options.morph && !sphere) throw new Error('The morph option needs a sphere domain');
+  const morphStage = options.morph ? createMorphStage(domain, patchCells) : undefined;
+  const instances = morphStage ? instanceCapacity(capacity) : capacity;
   const equalAngle = domain.warp === 'equal-angle';
   const maxLevel = maxLevelFor(patchCells);
   const steps = latticeSteps(patchCells, maxLevel);
-  const geometry = gridGeometry(patchCells, capacity);
+  const geometry = gridGeometry(patchCells, instances);
   const frames = uniformArray(FACE_FRAMES.flatMap(({ u, v }) => [new Vector3(...u), new Vector3(...v)]), 'vec3') as any;
   const uFolding = uniform(1) as any;
   const uGap = uniform(0) as any;
@@ -230,11 +272,12 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
       const delta = lattice.sub(uAnchorT.xy).add(toCentre.mul(gap));
       const offset = axisU.mul(delta.x).add(axisV.mul(delta.y)).mul(domain.sizeM / steps);
       const global = axisU.mul(lattice.x.div(steps).sub(0.5).mul(size)).add(axisV.mul(lattice.y.div(steps).sub(0.5).mul(size)));
-      return { global, offset: uAnchorRel.add(offset), up: axisN, lattice, c: undefined as any, lc: undefined as any, t: undefined as any };
+      return { global, offset: uAnchorRel.add(offset), up: axisN, lattice, c: undefined as any, lc: undefined as any, t: undefined as any, du: undefined as any, gapT: undefined as any };
     }
     // Cube-lattice vector: one component is +-L; the others are 2U - L, 2V - L. Integers, exact in float32.
     const t = axisN.mul(steps).add(axisU.mul(lattice.x.mul(2).sub(steps))).add(axisV.mul(lattice.y.mul(2).sub(steps)));
-    const dT = t.sub(uAnchorT).add(axisU.mul(toCentre.x.mul(2)).add(axisV.mul(toCentre.y.mul(2))).mul(gap));
+    const gapT = axisU.mul(toCentre.x.mul(2)).add(axisV.mul(toCentre.y.mul(2))).mul(gap);
+    const dT = t.sub(uAnchorT).add(gapT);
     const angle = Math.PI / 4 / steps;
     // tan(a) - tan(b) = sin(a - b) / (cos a cos b), with a - b from the exact integer difference.
     const dcRaw = equalAngle ? smallSin(dT.mul(angle)).div(cos(t.mul(angle)).mul(uAnchorCos)) : dT.div(steps);
@@ -243,9 +286,10 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     const c = cA.add(dc);
     const lc = c.length();
     const lC = cA.length();
-    const offset = dc.div(lc).sub(cA.mul(dot(dc, cA.mul(2).add(dc)).div(lc.mul(lC).mul(lc.add(lC))))).mul(size);
+    const du = dc.div(lc).sub(cA.mul(dot(dc, cA.mul(2).add(dc)).div(lc.mul(lC).mul(lc.add(lC)))));
+    const offset = du.mul(size);
     const up = c.div(lc);
-    return { global: up.mul(size), offset: uAnchorRel.add(offset), up, lattice, c, lc, t };
+    return { global: up.mul(size), offset: uAnchorRel.add(offset), up, lattice, c, lc, t, du, gapT };
   };
 
   /**
@@ -271,7 +315,15 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     const base = source.lattice ? source.lattice.heightNode(face, lattice) : source.heightNode(global);
     const noise = detail ? detailAt(own) : undefined;
     const height = noise ? base.add(noise.height) : base;
-    return { position: offset.add(up.mul(height)), detailSlope: noise?.slope };
+    const today = offset.add(up.mul(height));
+    if (!morphStage) return { position: today, detailSlope: noise?.slope, morph: undefined };
+    // The morph (G6b): at morph 0 the drawn position is `today`, the same node as without the option; above 0 it is P2's bent position.
+    const stage = morphStage.vertex({ t: own.t, gapT: own.gapT, du: own.du, info, height });
+    return {
+      position: select(morphStage.atGlobe.greaterThan(0.5), today, stage.rel),
+      detailSlope: noise?.slope,
+      morph: { ...stage, du: own.du },
+    };
   };
 
   /**
@@ -313,7 +365,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const alongX = min(1, south.mul(bit(mask, 0)).add(north.mul(bit(mask, 2)))).mul(oddX).mul(uFolding);
   const alongY = min(1, east.mul(bit(mask, 1)).add(west.mul(bit(mask, 3)))).mul(oddY).mul(uFolding);
   const foldStep = vec2(alongX as any, alongY as any);
-  const { position: positionNode, detailSlope } = surfacePoint(grid.sub(foldStep));
+  const { position: positionNode, detailSlope, morph: morphNodes } = surfacePoint(grid.sub(foldStep));
 
   // Lighting normal from the height gradient at the vertex's own grid point. The detail noise is built once per vertex, at
   // the folded, gapped point: folded edge vertices take the coarse vertex's detail slope (they sit on it), and the debug
@@ -323,7 +375,9 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     ? latticeGradient(own, detailSlope ? (source.lattice.slopeNode(face, own.lattice) as any).add(detailSlope) : source.lattice.slopeNode(face, own.lattice))
     : detailSlope ? (source.gradientNode(own.global) as any).add(latticeGradient(own, detailSlope)) : source.gradientNode(own.global)) as any;
   const tangential = gradient.sub(own.up.mul(dot(gradient, own.up)));
-  const shadingNormal = varying(normalize(own.up.sub(tangential)), 'vLodNormal') as any;
+  const globeNormal = normalize(own.up.sub(tangential));
+  // Above morph 0 the lit normal is the bend's up (relief shading on the bent ground is G6e's).
+  const shadingNormal = varying(morphStage && morphNodes ? select(morphStage.atGlobe.greaterThan(0.5), globeNormal, normalize(morphNodes.bentUp)) : globeNormal, 'vLodNormal') as any;
   const patchUv = varying(grid.mul(1 / patchCells), 'vLodPatchUv') as any;
   const level = varying(info.x, 'vLodLevel') as any;
   const nodes: LodSurfaceNodes = {
@@ -331,6 +385,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     normal: shadingNormal,
     position: varying(positionNode, 'vLodPosition') as any,
     level,
+    ...(morphNodes ? { bentUp: varying(select(morphStage!.atGlobe.greaterThan(0.5), own.up, morphNodes.bentUp), 'vLodBentUp') as any } : {}),
   };
 
   const hue = fract(level.mul(0.137).add(0.05));
@@ -350,6 +405,17 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   probeMaterial.positionNode = positionNode;
   probeMaterial.colorNode = vec4(1, 1, 1, 1);
   probeMaterial.toneMapped = false;
+  if (morphStage && morphNodes) {
+    // Fragments outside the map's outline (the overhang of a duplicated leaf at the cut) and the triangles of a torn leaf that cross its
+    // antipodal meridian are discarded. The distances are varyings, linear across a triangle.
+    const keep = morphStage.keepNode(
+      varying(morphNodes.edges, 'vLodMorphEdge') as any, varying(morphNodes.p2.dlam, 'vLodMorphDlam') as any,
+      varying(morphNodes.du, 'vLodMorphDu') as any, varying(morphNodes.torn, 'vLodMorphTorn') as any, varying(info.w, 'vLodMorphLeafLon') as any,
+    );
+    const existing = (material as NodeMaterial & { maskNode: any }).maskNode;
+    (material as NodeMaterial & { maskNode: any }).maskNode = existing ? existing.and(keep) : keep;
+    probeMaterial.maskNode = keep;
+  }
 
   const mesh = new Mesh(geometry, material);
   mesh.frustumCulled = false;
@@ -360,18 +426,73 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const anchor = newAnchor();
   let packedFrom: LodSelector | undefined;
   let packedVersion = -1;
+  let packedKey = '';
   let packedCount = 0;
+  // The morph (G6b): its source, the map resolved for this frame, and the last frame and pack.
+  let morphSource: LodMorphSettings | MorphUniformsLike | undefined;
+  let skipPoleLeaves = false;
+  let morphMap: MorphMap | undefined;
+  let morphFrame: MorphFrame | undefined;
+  let morphPack: MorphPack | undefined;
+  const resolveMap = (): MorphMap | undefined => {
+    if (!morphStage || !morphSource) return (morphMap = undefined);
+    const settings = 'uMorph' in morphSource ? morphSettingsFromUniforms(morphSource) : morphSource;
+    const next = createMorphMap(settings, domain.sizeM);
+    return (morphMap = next.morph > 0 ? next : undefined);
+  };
+  const unbent = { lon: 0, lat: 0, height: 0, position: [0, 0, 0] as Vec3 };
 
   return {
     mesh,
     material,
     nodes,
     probeMaterial,
+    get morphState() {
+      return { morph: morphMap?.morph ?? 0, map: morphMap };
+    },
+    get morphFrame() {
+      return morphFrame;
+    },
+    get morphPack() {
+      return morphPack;
+    },
+    setMorph(source) {
+      if (!morphStage) throw new Error('setMorph needs a mesh created with the morph option');
+      morphSource = source;
+      resolveMap();
+    },
+    setSkipPoleLeaves(on) {
+      skipPoleLeaves = on;
+    },
+    unbend(camera, out = [0, 0, 0]) {
+      const map = resolveMap();
+      if (!map) {
+        out[0] = camera[0];
+        out[1] = camera[1];
+        out[2] = camera[2];
+        return out;
+      }
+      unbendPosition(map, camera, unbent);
+      out[0] = unbent.position[0];
+      out[1] = unbent.position[1];
+      out[2] = unbent.position[2];
+      return out;
+    },
     upload(selector, camera) {
-      if (selector !== packedFrom || selector.version !== packedVersion) {
+      const map = resolveMap();
+      // Above morph 0 the instances are packed by `packMorphLeaves` (sides, cut duplicates); the key says when that pack is stale.
+      const key = map ? `${map.basis.forward}|${map.basis.up}|${map.projection}|${skipPoleLeaves}` : 'globe';
+      if (selector !== packedFrom || selector.version !== packedVersion || key !== packedKey) {
         packedFrom = selector;
         packedVersion = selector.version;
-        packedCount = packLeaves(selector, patchCells, maxLevel, capacity, leafData, infoData);
+        packedKey = key;
+        if (map) {
+          morphPack = packMorphLeaves(selector, { domain, patchCells, capacity: instances, basis: map.basis, morph: map.morph, skipPoleLeaves }, leafData, infoData);
+          packedCount = morphPack.instances;
+        } else {
+          morphPack = undefined;
+          packedCount = packLeaves(selector, patchCells, maxLevel, capacity, leafData, infoData);
+        }
         // Reuse the one update range of each attribute instead of allocating a new one per upload.
         for (const attr of attributes) {
           const ranges = attr.updateRanges;
@@ -386,7 +507,15 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
         }
         geometry.instanceCount = packedCount;
       }
-      anchorFor(domain, camera, steps, anchor);
+      if (map && morphStage) {
+        // `camera` is the bent camera; the lattice anchor is that of the camera's unbent position, which the frame computes.
+        morphFrame = computeMorphFrame(map, domain, steps, camera, anchor);
+        morphStage.setFrame(morphFrame);
+      } else {
+        morphFrame = undefined;
+        morphStage?.setGlobe();
+        anchorFor(domain, camera, steps, anchor);
+      }
       setVector(uAnchorT.value as Vector3, anchor.t);
       setVector(uAnchorCube.value as Vector3, anchor.cube);
       setVector(uAnchorError.value as Vector3, anchor.error);

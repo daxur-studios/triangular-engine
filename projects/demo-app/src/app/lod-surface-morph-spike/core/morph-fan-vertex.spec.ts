@@ -226,9 +226,13 @@ describe('morph-fan-vertex: the packed attributes', () => {
       if (Number.isNaN(lon)) {
         none++;
         expect(data.ref[v * 4 + 3]).toBe(0);
+        // No pole corner either: the lattice stage then gives the pole vertex the longitude it is placed near.
+        expect(data.misc[v * 4 + 1]).toBe(-1);
+        expect(data.misc[v * 4 + 2]).toBe(-1);
       } else {
         given++;
         expect(data.ref[v * 4 + 3]).toBe(Math.fround(lon));
+        expect(data.misc[v * 4 + 1]).toBe(s.specs.leaves[s.specs.data[v * FAN_SPEC_STRIDE + SPEC.LEAF]].cap?.[2] ?? -1);
       }
     }
     expect(none + given).toBeGreaterThan(0);

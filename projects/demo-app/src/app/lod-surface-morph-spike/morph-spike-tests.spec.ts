@@ -394,7 +394,7 @@ describe('fan precision observation', () => {
   const settings = scenario('fan-vertex-precision').settings;
   const stats = (maxErrPx: number) => ({ vertices: 10, maxErrPx, p99ErrPx: maxErrPx / 2, maxErrM: maxErrPx });
   const fanRow = (change: Partial<FanProbeRow> = {}): FanProbeRow => ({
-    label: 'case', leaves: 4, corner: 4, interior: 0, vertices: 1000, all: stats(0.1), polar: stats(0.1), chord: stats(0.05), own: stats(0.05), nonFinite: 0,
+    label: 'case', leaves: 4, corner: 4, interior: 0, vertices: 1000, all: stats(0.1), polar: stats(0.1), chord: stats(0.05), own: stats(0.05), judged: stats(0.1), poleZone: stats(0.04), chordBands: [], nonFinite: 0,
     worst: { kind: 'polar', distM: 100, errM: 0.01, errPx: 0.1 }, nearestM: 50, buildMs: 2, ms: 3, ...change,
   }) as FanProbeRow;
   const fullRows = (): FanProbeRow[] => {
@@ -412,8 +412,13 @@ describe('fan precision observation', () => {
 
   it('fails a vertex over the limit, a missing case, a non-finite result and a probe that never saw an interior pole', () => {
     const over = fullRows();
-    over[3] = fanRow({ all: stats(1.5) });
-    expect(check(fanPrecisionObservation(over, settings), 'Every fan vertex is within').passed).toBeFalse();
+    over[3] = fanRow({ judged: stats(1.5) });
+    expect(check(fanPrecisionObservation(over, settings), 'Every polar vertex').passed).toBeFalse();
+    const zoneOnly = fullRows();
+    zoneOnly[3] = fanRow({ all: stats(900), poleZone: stats(900) });
+    const zoneObs = fanPrecisionObservation(zoneOnly, settings);
+    expect(check(zoneObs, 'Every polar vertex').passed).toBeTrue();
+    expect(zoneObs.metrics.find((m) => m.name === 'poleZoneMaxErrPx')!.samples[3]).toBe(900);
     expect(check(fanPrecisionObservation(fullRows().slice(1), settings), 'The probe ran every case').passed).toBeFalse();
     const bad = fullRows();
     bad[0] = fanRow({ nonFinite: 3 });

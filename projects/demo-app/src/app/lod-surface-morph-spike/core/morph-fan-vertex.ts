@@ -120,7 +120,7 @@ export interface VertexFanData {
   readonly polar1: Float32Array;
   /** (eHi, eLo, sgn, kind): kind 1 for a polar vertex, 0 for a chord vertex. */
   readonly polar2: Float32Array;
-  /** (edge mask, corner x, corner y, 0): the corner is -1 for a leaf whose pole is strictly inside it. */
+  /** (edge mask, corner x, corner y, 0): the corner is -1 for a leaf whose pole is strictly inside it, and for a chord with no pole longitude. */
   readonly misc: Float32Array;
   readonly index: Uint32Array;
 }
@@ -159,8 +159,14 @@ export function packVertexFan(specs: FanSpecs): VertexFanData {
       ref[q] = d[o + (toB ? SPEC.REFB : SPEC.REFA)];
       ref[q + 1] = d[o + SPEC.REFB];
       ref[q + 2] = w;
+      // No pole longitude (NaN): the exact pole vertex takes the longitude it is placed near, as an instanced leaf's does when no edge gives it
+      // one. The lattice stage does that where the corner is -1, so the vertex says it has no pole corner.
       const poleLon = d[o + SPEC.POLE_LON];
-      ref[q + 3] = Number.isNaN(poleLon) ? 0 : poleLon;
+      if (Number.isNaN(poleLon)) {
+        ref[q + 3] = 0;
+        misc[q + 1] = -1;
+        misc[q + 2] = -1;
+      } else ref[q + 3] = poleLon;
     } else {
       const p = polarParamsOf(d[o + SPEC.LON], d[o + SPEC.C], d[o + SPEC.SGN]);
       polar1[q] = p.lonHi;
