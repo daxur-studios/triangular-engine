@@ -42,6 +42,9 @@ router, shared UI or automation-client dependency.
 
 These host members are integration points to implement in the game. Autostart
 requires explicit application opt-in; a query parameter alone does not enable it.
+Bind `available` to real scene readiness. If the runner is rendered before the canvas,
+keep it false until the canvas is connected, has a nonzero measured viewport and has
+completed a render at that size; do not leave an autostarting page ready from construction.
 The host owns control locking, including canvas/pointer/keyboard input and other
 test actions. A disabled form fieldset only covers its native form controls.
 
@@ -157,7 +160,9 @@ diagnostic measurements; a runnable link is not an accepted baseline.
 - **Read results cheaply:** run `npx triangular-test-summary [--suite id] [--last N]`
   first in a consumer app (installed bin). Inside the triangular-engine repository
   `npx` fails with a 404; use `npm run test:summary -- [--suite id] [--last N]`. It shows date, profile, fingerprint, `STALE` vs the current tree, the three
-  verdicts, median/p95/max per scenario and failed checks only. Open a full JSON
+  run verdicts, claim-scoped visual reviews, median/p95/max per scenario and failed checks only.
+  It reads `index.jsonl` and adjacent `.reviews.json` metadata without opening media pixels;
+  claim reviews remain separate from the run-level visual verdict. Open a full JSON
   (path printed per run) only for a failing case. Stale runs stay as history; do not
   compare timings across fingerprints without saying so.
 - **Do not trust headless/SwiftShader GPU timings** as hardware numbers. Ask for a

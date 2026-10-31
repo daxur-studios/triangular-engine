@@ -75,16 +75,18 @@ triangular docs records new --title "Water scattering" --slug water-scattering
 triangular docs records check
 triangular docs plan new --title "Water scattering" --slug water-scattering
 triangular docs archive docs/plans/043_optional_scene_tree.md
+triangular docs unarchive docs/plans/043_optional_scene_tree.md
 triangular docs map
 ```
 
 `docs records new` and its `docs plan new` alias create the reciprocal pair and update its indexes.
 `docs archive` archives a completed or superseded plan and its paired Engineering Record by saving
 the final commit hash, updating index statuses to `archived`, and replacing their full text with clean stubs.
+`docs unarchive` restores an archived plan and its paired Engineering Record from git history.
 `docs map` generates `public/development-map/manifest.json`.
 If a project has no plan or Engineering Record index yet, creation scaffolds both from the packaged
 templates; existing indexes are preserved and extended. Other record operations (`next`, `review`,
-`baseline`, `archive`, `manifest`, `map`) are forwarded to the existing helper. Its retention and explicit-baseline rules
+`baseline`, `archive`, `unarchive`, `manifest`, `map`) are forwarded to the existing helper. Its retention and explicit-baseline rules
 still apply.
 
 The testing commands delegate to the package's existing tools:
@@ -139,7 +141,9 @@ AI provider is called. Supported verdicts are `pass`, `fail`, `needs-work` and `
 Review artifacts must be files inside the matching run's artifact folder. The command reads only
 the test result path and artifact file metadata, never the media contents. The review record stays
 beside the run JSON if its media folder is later pruned. Use `testing review list --run <path>` to
-read the records without opening media.
+read the records without opening media. `testing summary` also reads these small review sidecars
+and prints each claim, reviewer and verdict beside the unchanged run-level `visualReview` status;
+it does not write review verdicts into the automated result JSON or the run index.
 
 `testing review overlay` adds a vector box or arrow to one contact-sheet frame. Coordinates are
 normalized from 0 to 1 within that frame; boxes use `x,y,width,height` and arrows use

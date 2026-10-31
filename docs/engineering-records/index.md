@@ -39,5 +39,6 @@ tags: [runbook, index]
 | [Triangular CLI and Consensus Reviews](/docs/engineering-records/071_triangular-cli-consensus-reviews.md) | [PLAN-071](/docs/plans/071_triangular-cli-consensus-reviews.md) |
 | [Optional test video recordings](/docs/engineering-records/072_testing-video-recordings.md) | [PLAN-072](/docs/plans/072_testing-video-recordings.md) |
 | [Visual verification evidence and retention](/docs/engineering-records/073_visual-verification-evidence-retention.md) | [PLAN-073](/docs/plans/073_visual-verification-evidence-retention.md) |
+| [Procedural character studio](/docs/engineering-records/074_procedural-character-studio.md) | [PLAN-074](/docs/plans/074_procedural-character-studio.md) |
 
 Existing records retain their `docs/runbook/` paths. Legacy runbooks `001`–`042` retain their historical formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

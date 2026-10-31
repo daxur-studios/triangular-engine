@@ -523,6 +523,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'character-studio',
+    loadComponent: () =>
+      import('./pages/character-studio/character-studio-page.component').then(
+        ({ CharacterStudioPageComponent }) => CharacterStudioPageComponent,
+      ),
+  },
+  {
     path: 'characters-lab',
     loadComponent: () =>
       import('./pages/characters-lab/characters-lab-page.component').then(

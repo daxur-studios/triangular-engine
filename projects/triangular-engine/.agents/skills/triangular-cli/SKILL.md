@@ -16,6 +16,7 @@ Angular or Three.js.
 - `triangular docs records ...` creates or validates paired Plans and Engineering Records.
 - `triangular docs plan new` is an alias for creating a paired Plan and Engineering Record.
 - `triangular docs archive <path>` archives a paired Plan and Engineering Record, preserving git history in a compact stub.
+- `triangular docs unarchive <path>` restores an archived Plan and Engineering Record from git history.
 - `triangular docs map` exports the development map manifest.
 - `triangular testing ...` delegates to the existing test runner, summary, receiver and baseline tools.
 

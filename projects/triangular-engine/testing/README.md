@@ -175,6 +175,10 @@ Autostart requires both `[allowAutoStart]="true"` and `[available]="true"`. It s
 once per component initialization, and waits while `externalBusy` is true. Applications
 must decide whether their dev/test mode permits autostart; a query parameter alone
 does not enable hidden production tooling. Button execution uses the same input checks.
+Bind `available` to actual scene readiness: when the runner appears before the canvas,
+keep it false until the canvas is connected, has a nonzero measured viewport, and has
+completed a render using that viewport. This keeps auto-started adapters from framing a
+scenario against fallback camera dimensions.
 
 ## Saved results (dev only)
 
@@ -222,11 +226,13 @@ diff and untracked files under `fingerprintPaths`. It is deliberately coarse: an
 there changes it. Older runs are flagged `STALE` in summaries, not removed.
 
 **Reading cheaply.** Run the summary first (`npx triangular-test-summary [--suite id] [--last N]` in a consumer app, where the bin is installed; inside this repository use `npm run test:summary -- [--suite id] [--last N]`, since `npx` cannot resolve the bin here): date,
-profile, fingerprint and stale flag, the three verdicts, median/p95/max per scenario
-metric (a constant metric such as a draw count prints once as `= value`) and failed
-checks only. `--metric text` keeps only metrics whose name contains `text`. The summary
-reads only `index.jsonl`; it opens a result file just for lines written before case
-summaries existed. Open a full JSON only for a failing case.
+profile, fingerprint and stale flag, the three run verdicts, any claim-scoped visual reviews,
+median/p95/max per scenario metric (a constant metric such as a draw count prints once
+as `= value`) and failed checks only. `--metric text` keeps only metrics whose name
+contains `text`. The summary reads `index.jsonl` plus adjacent `.reviews.json` metadata;
+it never opens reviewed image/video pixels and does not change either file. It opens a
+result file only for index rows written before case summaries existed. Open a full JSON
+only for a failing case.
 
 **Caveat.** Headless or software-rendered (SwiftShader) runs give GPU timings that are
 not real hardware numbers; use visible-tab runs on the target machine for performance (pure CPU suites are the

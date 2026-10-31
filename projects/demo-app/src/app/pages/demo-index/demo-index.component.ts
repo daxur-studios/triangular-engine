@@ -78,6 +78,16 @@ export const CATEGORIES: readonly DemoCategory[] = [
 
 export const DEMOS: readonly DemoItem[] = [
   {
+    id: 'character-studio', number: '20f', title: 'Capsule Character Studio', route: '/character-studio',
+    categoryId: 'core', tier: 'lab', createdAt: '2026-10-31', entryPoints: ['characters', 'procedural'], package: 'triangular-engine/characters + procedural',
+    description: 'A focused procedural capsule human and cat studio with editable character presets, appearance controls, expressions, and motion preview.',
+  },
+  {
+    id: 'characters-lab', number: '20e', title: 'Capsule Characters Lab', route: '/characters-lab',
+    categoryId: 'core', tier: 'lab', createdAt: '2026-10-31', entryPoints: ['characters', 'procedural', 'testing'], package: 'triangular-engine/characters + procedural + testing',
+    description: 'Procedural capsule humans and cats with customizable parts, animation, facial expressions, close-up visual verification, and reusable test evidence.',
+  },
+  {
     id: 'illustrative-cell-planet', number: '054', title: 'Illustrative Cell Planet', route: '/illustrative-cell-planet',
     categoryId: 'terrain', tier: 'lab', createdAt: '2026-10-18', entryPoints: ['worldgen', 'worldgen/render', 'testing'], package: 'triangular-engine',
     description: 'Controlled same-world comparison of low-relief plains, angular peaks and volcanoes, with repeatable camera tests.',
@@ -1093,6 +1103,7 @@ export class DemoIndexComponent {
   /** Demos matching active search, tier, category, and tag filters, ordered by selectedSort. */
   readonly sortedFilteredDemos = computed<readonly DemoItem[]>(() => {
     const demos = [...this.filteredDemos()];
+    const sourceOrder = new Map(demos.map((demo, index) => [demo.id, index] as const));
     const sort = this.selectedSort();
 
     switch (sort) {
@@ -1100,13 +1111,13 @@ export class DemoIndexComponent {
         return demos.sort(
           (a, b) =>
             b.createdAt.localeCompare(a.createdAt) ||
-            a.number.localeCompare(b.number),
+            sourceOrder.get(a.id)! - sourceOrder.get(b.id)!,
         );
       case 'oldest':
         return demos.sort(
           (a, b) =>
             a.createdAt.localeCompare(b.createdAt) ||
-            a.number.localeCompare(b.number),
+            sourceOrder.get(a.id)! - sourceOrder.get(b.id)!,
         );
       case 'title':
         return demos.sort((a, b) => a.title.localeCompare(b.title));

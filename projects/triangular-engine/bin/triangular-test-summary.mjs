@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Compact table over artifacts/test-runs/index.jsonl. Read this first; open a full JSON only for a failure.
+// Compact table over artifacts/test-runs/index.jsonl plus run-adjacent visual-review metadata.
 // Usage: triangular-test-summary [--suite id] [--last N] [--metric text] [--dir artifacts/test-runs]
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ablationSummaries, caseSummaries, computeFingerprint, loadConfig } from './triangular-test-receiver.mjs';
 
@@ -36,6 +36,20 @@ export function loadText(row, load) {
 
 /** Name of the load record beside a result file. */
 export const loadFile = (file) => file.replace(/\.json$/, '.load.json');
+
+/** A concise, claim-scoped review line; visual reviews do not replace the runner's run-level status. */
+export function visualReviewLines(reviews) {
+  if (!Array.isArray(reviews)) return [];
+  return reviews.map((review) => {
+    const reviewer = review?.reviewer ?? {};
+    const identity = [reviewer.kind, reviewer.id].filter(Boolean).join(' ') || 'unknown reviewer';
+    const verdict = String(review?.verdict ?? 'unknown').toUpperCase();
+    const claim = String(review?.claim ?? '').replace(/\s+/g, ' ').trim();
+    const shortenedClaim = claim.length > 180 ? `${claim.slice(0, 177)}...` : claim;
+    const artifact = review?.artifact?.file ? ` [${review.artifact.file}]` : '';
+    return `  claim review ${verdict} (${identity}): ${shortenedClaim || '(no claim)'}${artifact}`;
+  });
+}
 
 const fmt = (n) => (Number.isFinite(n) ? n.toFixed(2) : 'n/a');
 
@@ -86,7 +100,7 @@ export function breakdownLines(metrics, filter) {
  * Index lines written since summaries were added carry `cases`, so no result file is opened. Older lines fall back
  * to reading their file. `metric` keeps only metrics whose name contains that text.
  */
-export function summarize(rows, readRun, currentHash, { suite, last = 5, metric, readLoad = () => null } = {}) {
+export function summarize(rows, readRun, currentHash, { suite, last = 5, metric, readLoad = () => null, readReviews = () => [] } = {}) {
   const lines = [];
   const bySuite = Map.groupBy(rows.filter((r) => !suite || r.suite === suite), (r) => `${r.suite}@v${r.version}`);
   for (const [key, list] of bySuite) {
@@ -94,6 +108,9 @@ export function summarize(rows, readRun, currentHash, { suite, last = 5, metric,
     for (const row of list.slice(-last)) {
       const stale = currentHash && row.fingerprint !== currentHash ? 'STALE' : 'current';
       lines.push(`${row.startedAt?.slice(0, 16) ?? row.savedAt.slice(0, 16)}  ${row.profile} ${row.mode ?? 'standard'}  ${row.fingerprint} ${stale}  auto=${row.automatedVerdict} perf=${row.performanceVerdict} visual=${row.visualReview}`);
+      const claimReviews = readReviews(row.file) ?? [];
+      if (claimReviews.length) lines.push(...visualReviewLines(claimReviews));
+      else if (row.visualReview === 'pending') lines.push('  claim reviews: none recorded');
       const load = loadText(row, readLoad(row.file));
       if (load) lines.push(load);
       const machine = machineText(row);
@@ -135,8 +152,18 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
   if (!existsSync(indexFile)) { console.log(`No results yet (${indexFile}). Run a suite in a visible tab with the sink enabled.`); process.exit(0); }
   const rows = readFileSync(indexFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const readRun = (file) => { try { return JSON.parse(readFileSync(join(dir, file), 'utf8')); } catch { return null; } };
+  const readReviews = (file) => {
+    if (typeof file !== 'string' || !file.endsWith('.json')) return [];
+    const sidecar = resolve(dir, file.replace(/\.json$/, '.reviews.json'));
+    const relativeSidecar = relative(resolve(dir), sidecar);
+    if (!relativeSidecar || relativeSidecar === '..' || relativeSidecar.startsWith(`..${sep}`) || isAbsolute(relativeSidecar) || !existsSync(sidecar)) return [];
+    try {
+      const parsed = JSON.parse(readFileSync(sidecar, 'utf8'));
+      return parsed?.schemaVersion === 1 && parsed.run === file && Array.isArray(parsed.reviews) ? parsed.reviews : [];
+    } catch { return []; }
+  };
   const current = computeFingerprint(root, config.fingerprintPaths).hash;
   console.log(`current fingerprint ${current}\n`);
   const readLoad = (file) => readRun(loadFile(file));
-  console.log(summarize(rows, readRun, current, { suite: opt('--suite'), last: Number(opt('--last', 5)), metric: opt('--metric'), readLoad }));
+  console.log(summarize(rows, readRun, current, { suite: opt('--suite'), last: Number(opt('--last', 5)), metric: opt('--metric'), readLoad, readReviews }));
 }

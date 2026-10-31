@@ -9,6 +9,7 @@ import {
   main as packageMain,
   nextNumber as packageNextNumber,
   refreshReview as packageRefreshReview,
+  unarchiveDocument as packageUnarchiveDocument,
 } from "../projects/triangular-engine/bin/engineering-records.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -28,6 +29,8 @@ export const confirmScopeBaseline = (options = {}) =>
   packageConfirmScopeBaseline({ ...options, root: options.root ?? WORKSPACE_ROOT });
 export const archiveDocument = (options = {}) =>
   packageArchiveDocument({ ...options, root: options.root ?? WORKSPACE_ROOT });
+export const unarchiveDocument = (options = {}) =>
+  packageUnarchiveDocument({ ...options, root: options.root ?? WORKSPACE_ROOT });
 export const inspectDocuments = (root = WORKSPACE_ROOT) =>
   packageInspectDocuments(root);
 export const main = (args = process.argv.slice(2), root = WORKSPACE_ROOT) =>

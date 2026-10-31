@@ -1786,6 +1786,203 @@ ${finalOutcome}
   };
 }
 
+export async function unarchiveDocument({
+  root = DEFAULT_ROOT,
+  docPath,
+  commit,
+  status,
+  force = false,
+}) {
+  if (!docPath) throw new Error("A document path is required.");
+  const targetFile = projectPath(root, docPath.replace(/\\/g, "/"));
+  if (!(await exists(targetFile))) {
+    throw new Error(`Document not found: ${docPath}`);
+  }
+  const targetText = await readFile(targetFile, "utf8");
+  const targetFields = frontmatter(targetText, targetFile, []);
+
+  let planPath = "";
+  let recordPath = "";
+  let planText = "";
+  let recordText = "";
+
+  if (
+    targetFields.type === "Plan" ||
+    targetFile.replace(/\\/g, "/").includes("/docs/plans/")
+  ) {
+    planPath = targetFile;
+    planText = targetText;
+    const recordRef = targetFields.record || targetFields.runbook;
+    if (!recordRef) {
+      throw new Error(`${docPath}: Plan must specify a paired record.`);
+    }
+    recordPath = projectPath(root, recordRef);
+    if (!(await exists(recordPath))) {
+      throw new Error(`Paired Engineering Record not found: ${recordRef}`);
+    }
+    recordText = await readFile(recordPath, "utf8");
+  } else {
+    recordPath = targetFile;
+    recordText = targetText;
+    const plans = frontmatterList(recordText, "plans");
+    const planRef = plans[0];
+    if (!planRef) {
+      throw new Error(
+        `${docPath}: Engineering Record must list at least one paired plan under plans:.`,
+      );
+    }
+    planPath = projectPath(root, planRef);
+    if (!(await exists(planPath))) {
+      throw new Error(`Paired Plan not found: ${planRef}`);
+    }
+    planText = await readFile(planPath, "utf8");
+  }
+
+  const planFields = frontmatter(planText, planPath, []);
+  const recordFields = frontmatter(recordText, recordPath, []);
+
+  if (
+    planFields.status !== "archived" &&
+    recordFields.status !== "archived" &&
+    !force
+  ) {
+    throw new Error(
+      `${path.relative(root, planPath)} is not archived. Pass --force to unarchive anyway.`,
+    );
+  }
+
+  const resolvedCommit =
+    commit?.trim() ||
+    planFields.archived_commit ||
+    recordFields.archived_commit;
+
+  if (!resolvedCommit) {
+    throw new Error(
+      `No archived_commit found in stub frontmatter for ${docPath}. Specify --commit <hash>.`,
+    );
+  }
+
+  const planRelative = path.relative(root, planPath).split(path.sep).join("/");
+  const recordRelative = path
+    .relative(root, recordPath)
+    .split(path.sep)
+    .join("/");
+
+  let originalPlanContent = "";
+  try {
+    originalPlanContent = execFileSync(
+      "git",
+      ["show", `${resolvedCommit}:${planRelative}`],
+      { cwd: root, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
+    );
+  } catch (error) {
+    throw new Error(
+      `Failed to retrieve original plan from git (${resolvedCommit}:${planRelative}): ${error.message}`,
+    );
+  }
+
+  let originalRecordContent = "";
+  try {
+    originalRecordContent = execFileSync(
+      "git",
+      ["show", `${resolvedCommit}:${recordRelative}`],
+      { cwd: root, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
+    );
+  } catch (error) {
+    throw new Error(
+      `Failed to retrieve original record from git (${resolvedCommit}:${recordRelative}): ${error.message}`,
+    );
+  }
+
+  const originalPlanFields = frontmatter(originalPlanContent, planPath, []);
+  const originalRecordFields = frontmatter(originalRecordContent, recordPath, []);
+
+  let resolvedStatus = status?.trim() || "";
+  if (!resolvedStatus) {
+    try {
+      const historicalIndex = execFileSync(
+        "git",
+        ["show", `${resolvedCommit}:docs/plans/index.md`],
+        { cwd: root, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] },
+      );
+      const targetPattern = planRelative.startsWith("/")
+        ? planRelative
+        : `/${planRelative}`;
+      const lines = historicalIndex.split(/\r?\n/);
+      for (const line of lines) {
+        if (line.trim().startsWith("|") && line.includes(targetPattern)) {
+          const cells = splitCells(line);
+          if (cells.length >= 3 && cells[1] && cells[1].trim() !== "archived") {
+            resolvedStatus = cells[1].trim();
+            break;
+          }
+        }
+      }
+    } catch {
+      // Historical index may not exist or git show failed.
+    }
+  }
+
+  if (
+    !resolvedStatus &&
+    originalPlanFields.status &&
+    originalPlanFields.status !== "archived"
+  ) {
+    resolvedStatus = originalPlanFields.status;
+  }
+  if (!resolvedStatus) {
+    resolvedStatus = "in_progress";
+  }
+
+  if (
+    status?.trim() &&
+    originalPlanFields.status &&
+    originalPlanFields.status !== status.trim()
+  ) {
+    originalPlanContent = originalPlanContent.replace(
+      /^status:\s*.*$/m,
+      `status: ${status.trim()}`,
+    );
+  }
+
+  const planIndexPath = path.join(root, "docs", "plans", "index.md");
+  let updatedPlanIndex = null;
+  if (await exists(planIndexPath)) {
+    const currentIndex = await readFile(planIndexPath, "utf8");
+    updatedPlanIndex = updatePlanIndexStatus(
+      currentIndex,
+      `/${planRelative}`,
+      resolvedStatus,
+    );
+  }
+
+  await withIndexLock(root, async () => {
+    await atomicWrite(planPath, originalPlanContent);
+    await atomicWrite(recordPath, originalRecordContent);
+    if (
+      updatedPlanIndex &&
+      updatedPlanIndex !== (await readFile(planIndexPath, "utf8"))
+    ) {
+      await atomicWrite(planIndexPath, updatedPlanIndex);
+    }
+  });
+
+  return {
+    documentId:
+      originalPlanFields.document_id ||
+      planFields.document_id ||
+      `plan-${numericPrefix(path.basename(planPath))}`,
+    recordId:
+      originalRecordFields.record_id ||
+      recordFields.record_id ||
+      `er-${numericPrefix(path.basename(recordPath))}`,
+    plan: `/${planRelative}`,
+    record: `/${recordRelative}`,
+    commit: resolvedCommit,
+    status: resolvedStatus,
+  };
+}
+
 export async function inspectDocuments(root = DEFAULT_ROOT) {
   const { documents, errors } = await readPlansAndValidate(root);
   return {
@@ -1817,7 +2014,7 @@ function parseFlags(args) {
 }
 
 function help() {
-  return `Engineering document helper\n\n  npm run docs:records:next\n  npm run docs:records:new -- --title "Water scattering" --slug water-scattering\n  npm run docs:records:review -- docs/plans/NNN_topic.md agent\n  npm run docs:records:baseline -- docs/plans/NNN_topic.md --developer-confirmed\n  npm run docs:records:archive -- docs/plans/NNN_topic.md [--commit <hash>] [--outcome "text"]\n  npm run docs:records:check\n  npm run docs:records:manifest [--output path] [--export-docs dir]\n  npm run docs:records:map [--output path] [--export-docs dir]\n\nReview refreshes an agent assessment; it does not signify developer approval. Baseline confirmation requires explicit developer approval of the exact scope snapshot. Archive preserves the commit hash and replaces full documents with clean stubs.`;
+  return `Engineering document helper\n\n  npm run docs:records:next\n  npm run docs:records:new -- --title "Water scattering" --slug water-scattering\n  npm run docs:records:review -- docs/plans/NNN_topic.md agent\n  npm run docs:records:baseline -- docs/plans/NNN_topic.md --developer-confirmed\n  npm run docs:records:archive -- docs/plans/NNN_topic.md [--commit <hash>] [--outcome "text"]\n  npm run docs:records:unarchive -- docs/plans/NNN_topic.md [--commit <hash>] [--status <status>]\n  npm run docs:records:check\n  npm run docs:records:manifest [--output path] [--export-docs dir]\n  npm run docs:records:map [--output path] [--export-docs dir]\n\nReview refreshes an agent assessment; it does not signify developer approval. Baseline confirmation requires explicit developer approval of the exact scope snapshot. Archive preserves the commit hash and replaces full documents with clean stubs. Unarchive restores the original documents from git history.`;
 }
 
 export async function main(
@@ -1886,6 +2083,20 @@ export async function main(
     });
     console.log(
       `Archived ${result.documentId} (${result.plan}) and ${result.recordId} (${result.record}) at commit ${result.commit}.`,
+    );
+    return 0;
+  }
+  if (command === "unarchive") {
+    const docPath = flags._positionals[0];
+    const result = await unarchiveDocument({
+      root: projectRoot,
+      docPath,
+      commit: flags.commit,
+      status: flags.status,
+      force: flags.force === true,
+    });
+    console.log(
+      `Unarchived ${result.documentId} (${result.plan}) and ${result.recordId} (${result.record}) from commit ${result.commit} (status: ${result.status}).`,
     );
     return 0;
   }

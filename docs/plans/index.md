@@ -40,5 +40,6 @@ tags: [plans, index]
 | [Triangular CLI and Consensus Reviews](/docs/plans/071_triangular-cli-consensus-reviews.md) | planned | [ER 071](/docs/engineering-records/071_triangular-cli-consensus-reviews.md) |
 | [Optional test video recordings](/docs/plans/072_testing-video-recordings.md) | complete | [ER 072](/docs/engineering-records/072_testing-video-recordings.md) |
 | [Visual verification evidence and retention](/docs/plans/073_visual-verification-evidence-retention.md) | planned | [ER 073](/docs/engineering-records/073_visual-verification-evidence-retention.md) |
+| [Procedural character studio](/docs/plans/074_procedural-character-studio.md) | planned | [ER 074](/docs/engineering-records/074_procedural-character-studio.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

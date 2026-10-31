@@ -68,8 +68,9 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
   This is a repository-local skill; it may not appear in the agent's installed skill
   catalog. Open the file at that path directly. For consumer apps outside this repo,
   the package includes it at `node_modules/triangular-engine/skills/triangular-engine-testing/`.
-- Read results with `npm run test:summary` first; it reads only `artifacts/test-runs/index.jsonl`.
-  Open a full result JSON only for a failing case. In PowerShell quote the separator
+- Read results with `npm run test:summary` first; it reads `artifacts/test-runs/index.jsonl`
+  and run-adjacent `.reviews.json` metadata without opening media. Open a full result JSON
+  only for a failing case. In PowerShell quote the separator
   (`npm run test:summary '--' --suite <id>`), or npm swallows the flags and prints every suite.
 - **The demo app is already served.** The owner keeps it running at `http://triangular-demo.localhost:4200`, with the
   result receiver. Never start `ng serve` or another dev server; point browser runs and `npm run test:run --url` at

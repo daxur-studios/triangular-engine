@@ -107,6 +107,36 @@ A later extension could let a vision agent propose an SVG outline and named land
 
 **Status.** The current external consumer-app experiment remains the next feedback gate. This documentation makes the established media workflow discoverable in a fresh session; it does not accept the proposed concept-reference manifest or SVG tracing work into implementation scope.
 
+## 2026-10-31 — Consumer feedback: rendered readiness and review summaries
+
+**Feedback.** A consumer-app agent reported that reference-informed capsule-human variants and close-up human/cat expression cases now have recorded visual reviews. The experiment exposed an autostart race: the runner was marked available before the canvas had completed its first render and ResizeObserver sizing, so scenario framing could use fallback dimensions. It also found that claim-scoped `.reviews.json` records were invisible in the compact test summary, which continued to show the immutable run-level `visualReview` field.
+
+**Change.** Characters Lab now holds `available` false until a completed render sees a connected canvas whose measured viewport matches the engine dimensions and active perspective-camera aspect. The summary reads adjacent review metadata and prints each claim, verdict, reviewer and artifact next to the unchanged run-level verdict. The automated run JSON and append-only run index remain untouched by review commands. The testing README, packaged testing skill, repository agent instructions and CLI guide now describe these behaviors.
+
+**Verification.** No tests or build were run in this implementation pass. The consumer-agent results described above are prior evidence and do not verify these follow-up code changes.
+
+**Status and next work.** The capsule experiment has supplied its feedback. Keep the generic focus-camera helper and structured focus-observation API deferred until a second app demonstrates the repeated need. Full-cycle sprite atlases, consumer-style adapter documentation and retention policy/tooling remain open; automatic deletion remains disabled.
+
+## 2026-10-31 — Future exploration: focused procedural character studio
+
+**Discussion.** The current `/characters-lab` combines capsule human and cat customization, ARKit/procedural face experiments, a general humanoid rig, and capsule test suites in one page component. A dedicated full-screen procedural character studio could make the capsule human the primary subject while retaining capsule cats as a second selectable character family. The existing lab could then focus on face-rig and general humanoid engineering demonstrations, while capsule-specific visual suites and capture controls move with the characters they verify.
+
+**Proposed architecture.** First separate the demo-app UI into a studio shell, a shared viewport/verification surface, and app-owned character-family contributions for capsule humans and cats. Keep character DNA, actors, animation and rendering in their existing engine entry points; keep presets, artwork references, project persistence and tests owned by the host app. Treat contributions as a narrow typed extension contract (identity, presets, actor lifecycle, supported control panels, focus targets and visual suites), not a general-purpose plugin runtime. If a second consumer proves the contract useful, consider promoting only the stable contracts and optional shell into a dedicated Angular entry point; games should remain free to build their own UI around the engine character APIs.
+
+**Disposition.** Exploration only. No route, UI migration, generic plugin API, persistence model or new package entry point is accepted by this discussion. If implementation is requested, begin with an app-local studio route and human/cat contributions, preserving the current capsule test and evidence workflows; evaluate library extraction after that boundary has been exercised by another app.
+
+## 2026-10-31 — Character studio scaffold tracked separately
+
+The owner agreed to begin a focused capsule character studio. The UI and local contribution model are tracked in [Plan 074](/docs/plans/074_procedural-character-studio.md), which builds on this plan's test evidence workflow. The studio plan preserves capsule tests and media review during migration; the public engine extension API and themed costume/anatomy packs remain future work.
+
+## 2026-10-31 — Character-studio reference examples
+
+**Examples discussed.** The supplied capsule-style references cover: young and older villagers with varied hair, facial hair and tunics; a wise older human contrasted with a demon-like character whose horns, ears, wings, tail and clawed feet change its anatomy; and Greek swordsman/archer roles combining shared armor and clothing with different weapons, carried equipment and stances.
+
+**Architecture implications.** Model these as composable layers: a body-plan provider and proportions; attachable or deforming anatomy parts; clothing and armor layers; material palettes; accessories and props; role kits that assemble equipment; and pose/action profiles that account for held objects. A deterministic character recipe should reference these modules and their parameters so the same result can be regenerated, compared with concept art, and tested. Features such as wings, tails, age proportions and clawed feet may affect the base silhouette, rig, focus bounds or locomotion. Role equipment such as a bow also needs a compatible grip and pose, with the hand actually holding it.
+
+**Disposition.** These are exploratory design examples, not approved implementation scope or a fixed taxonomy. The first studio prototype should test a small combination spanning wardrobe, role equipment and one anatomy extension before a shared engine extension API is considered.
+
 ## Scope history
 
 <!-- tri:scope-history -->
