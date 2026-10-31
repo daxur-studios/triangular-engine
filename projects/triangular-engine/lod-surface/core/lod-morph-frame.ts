@@ -83,21 +83,50 @@ export function morphSettingsFromUniforms(uniforms: MorphUniformsLike): LodMorph
 }
 
 const dot = (a: readonly number[], b: readonly number[]): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const normalised = (v: readonly number[]): Vec3 => {
   const l = Math.hypot(v[0], v[1], v[2]);
   return [v[0] / l, v[1] / l, v[2] / l];
 };
 
-/** `setPlanetProjectionCentre`'s basis, in doubles. */
-export function projectionBasis(lonDeg: number, latDeg: number): MorphBasis {
+/** A projection basis with its own arrays (all zero but the default centre's), for {@link projectionBasisInto} to fill. */
+export function newProjectionBasis(): MorphBasis {
+  return { forward: [0, 0, 1], up: [0, 1, 0], right: [1, 0, 0] };
+}
+
+/**
+ * {@link projectionBasis} written into `out` (its three vectors are overwritten; the same arithmetic, so the same numbers, and no
+ * allocation). Returns `out`.
+ */
+export function projectionBasisInto(lonDeg: number, latDeg: number, out: MorphBasis): MorphBasis {
   const lon = lonDeg * DEG;
   const lat = latDeg * DEG;
-  const forward: Vec3 = [Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon)];
-  let up: Vec3 = [-forward[1] * forward[0], 1 - forward[1] * forward[1], -forward[1] * forward[2]];
-  if (up[0] * up[0] + up[1] * up[1] + up[2] * up[2] < 1e-8) up = [0, 0, forward[1] > 0 ? -1 : 1];
-  up = normalised(up);
-  return { forward, up, right: cross(up, forward) };
+  const f = out.forward;
+  f[0] = Math.cos(lat) * Math.sin(lon);
+  f[1] = Math.sin(lat);
+  f[2] = Math.cos(lat) * Math.cos(lon);
+  const u = out.up;
+  u[0] = -f[1] * f[0];
+  u[1] = 1 - f[1] * f[1];
+  u[2] = -f[1] * f[2];
+  if (u[0] * u[0] + u[1] * u[1] + u[2] * u[2] < 1e-8) {
+    u[0] = 0;
+    u[1] = 0;
+    u[2] = f[1] > 0 ? -1 : 1;
+  }
+  const l = Math.hypot(u[0], u[1], u[2]);
+  u[0] /= l;
+  u[1] /= l;
+  u[2] /= l;
+  const r = out.right;
+  r[0] = u[1] * f[2] - u[2] * f[1];
+  r[1] = u[2] * f[0] - u[0] * f[2];
+  r[2] = u[0] * f[1] - u[1] * f[0];
+  return out;
+}
+
+/** `setPlanetProjectionCentre`'s basis, in doubles. */
+export function projectionBasis(lonDeg: number, latDeg: number): MorphBasis {
+  return projectionBasisInto(lonDeg, latDeg, newProjectionBasis());
 }
 
 /** A resolved morph: the settings with the planet radius, the basis and the map's weights, so that the functions below take one argument. */
@@ -121,33 +150,144 @@ export interface MorphMap {
  */
 export const MORPH_EQUAL_EARTH_SCALE = MORPH_EE.M * MORPH_EE.A1;
 
+/** A {@link MorphMap} whose arrays are its own, for {@link setMorphWeights} and {@link MorphMapResolver} to write into. */
+export function newMorphMap(): MorphMap {
+  return { radius: 1, morph: 0, projection: 'equal-earth', basis: newProjectionBasis(), wLin: 1, wEE: 0, k: 0, shift: 0 };
+}
+
+/** A map with its numbers written: the scalars are the map's own fields, the basis is not touched. */
+type WritableMorphMap = { -readonly [K in keyof MorphMap]: MorphMap[K] };
+
+/**
+ * Writes a map's morph, projection and radius, and the weights, curvature and shift that follow from them (the formulas of
+ * {@link createMorphMap}). `morph` must already be clamped to 0..1. The basis is left as it is.
+ */
+export function setMorphWeights(out: MorphMap, morph: number, projection: MorphProjection, radius: number): void {
+  const w = out as WritableMorphMap;
+  const equalEarth = projection === 'equal-earth';
+  w.radius = radius;
+  w.morph = morph;
+  w.projection = projection;
+  w.wLin = equalEarth ? 1 - morph : 1;
+  w.wEE = equalEarth ? morph * MORPH_EQUAL_EARTH_SCALE : 0;
+  w.k = (1 - morph) / radius;
+  w.shift = (1 - morph) * radius;
+}
+
 /** Resolves the settings for a planet of `radius` metres. `morph` is clamped to 0..1. */
 export function createMorphMap(settings: LodMorphSettings, radius: number): MorphMap {
   const morph = Math.min(1, Math.max(0, settings.morph));
   const basis = settings.basis ?? projectionBasis(settings.projectionCentre?.lonDeg ?? 0, settings.projectionCentre?.latDeg ?? 0);
-  const equalEarth = settings.projection === 'equal-earth';
-  return {
-    radius,
-    morph,
-    projection: settings.projection,
-    basis,
-    wLin: equalEarth ? 1 - morph : 1,
-    wEE: equalEarth ? morph * MORPH_EQUAL_EARTH_SCALE : 0,
-    k: (1 - morph) / radius,
-    shift: (1 - morph) * radius,
-  };
+  const map: MorphMap = { radius, morph, projection: settings.projection, basis, wLin: 0, wEE: 0, k: 0, shift: 0 };
+  setMorphWeights(map, morph, settings.projection, radius);
+  return map;
 }
 
-/** Equal Earth on the unit sphere: `x = lon c(lat)` and `y`, the same as `planetEqualEarthRow`. */
+/** Numbers that say which map a morph state is: the morph, equal-earth (1) or not, basis mode (1: the basis; 0: the centre), the centre, the basis. */
+const MORPH_KEY_LENGTH = 14;
+
+/** Writes the morph state of `source` as numbers into `out` (see {@link MORPH_KEY_LENGTH}); reads no object, allocates nothing. */
+function readMorphKey(source: LodMorphSettings | MorphUniformsLike, out: Float64Array): void {
+  if ('uMorph' in source) {
+    // As `morphSettingsFromUniforms`: the basis when `uProjMode` is set, else the default centre (0, 0).
+    out[0] = source.uMorph.value;
+    out[1] = source.uProjectionType.value >= 0.5 ? 1 : 0;
+    const basisMode = source.uProjMode.value >= 0.5;
+    out[2] = basisMode ? 1 : 0;
+    out[3] = 0;
+    out[4] = 0;
+    if (basisMode) {
+      writeVec(out, 5, source.uProjForward.value);
+      writeVec(out, 8, source.uProjUp.value);
+      writeVec(out, 11, source.uProjRight.value);
+    } else out.fill(0, 5, MORPH_KEY_LENGTH);
+    return;
+  }
+  out[0] = source.morph;
+  out[1] = source.projection === 'equal-earth' ? 1 : 0;
+  if (source.basis) {
+    out[2] = 1;
+    out[3] = 0;
+    out[4] = 0;
+    writeVecArray(out, 5, source.basis.forward);
+    writeVecArray(out, 8, source.basis.up);
+    writeVecArray(out, 11, source.basis.right);
+  } else {
+    out[2] = 0;
+    out[3] = source.projectionCentre?.lonDeg ?? 0;
+    out[4] = source.projectionCentre?.latDeg ?? 0;
+    out.fill(0, 5, MORPH_KEY_LENGTH);
+  }
+}
+
+function writeVec(out: Float64Array, at: number, v: { readonly x: number; readonly y: number; readonly z: number }): void {
+  out[at] = v.x;
+  out[at + 1] = v.y;
+  out[at + 2] = v.z;
+}
+
+function writeVecArray(out: Float64Array, at: number, v: readonly number[]): void {
+  out[at] = v[0];
+  out[at + 1] = v[1];
+  out[at + 2] = v[2];
+}
+
+/** Writes the map that a key (from {@link readMorphKey}) and a radius describe into `out`, as {@link createMorphMap} would. */
+function fillMorphMapFromKey(out: MorphMap, key: Float64Array, radius: number): void {
+  const morph = Math.min(1, Math.max(0, key[0]));
+  const projection: MorphProjection = key[1] >= 0.5 ? 'equal-earth' : 'equirectangular';
+  const basis = out.basis;
+  if (key[2] === 1) {
+    for (let c = 0; c < 3; c++) {
+      basis.forward[c] = key[5 + c];
+      basis.up[c] = key[8 + c];
+      basis.right[c] = key[11 + c];
+    }
+  } else projectionBasisInto(key[3], key[4], basis);
+  setMorphWeights(out, morph, projection, radius);
+}
+
+/**
+ * Resolves a morph state (the settings, or `<planet>`'s uniforms, read on each call) to a {@link MorphMap} without allocating per
+ * call: the same map object is returned every time, and it is re-filled in place only when a number of the state (the morph, the
+ * projection, the centre or basis, or the radius) differs from the last call's. A morph animation re-fills it every frame, at no
+ * allocation cost. The map's contents are the ones {@link createMorphMap} gives for the same state; the object is the resolver's.
+ */
+export class MorphMapResolver {
+  private readonly map = newMorphMap();
+  private readonly last = new Float64Array(MORPH_KEY_LENGTH);
+  private readonly next = new Float64Array(MORPH_KEY_LENGTH);
+  private lastRadius = NaN;
+  private filled = false;
+
+  /** The map of `source` for a planet of `radius` metres: this resolver's own object, valid until the next call. */
+  resolve(source: LodMorphSettings | MorphUniformsLike, radius: number): MorphMap {
+    const next = this.next;
+    const last = this.last;
+    readMorphKey(source, next);
+    let same = this.filled && radius === this.lastRadius;
+    for (let k = 0; same && k < MORPH_KEY_LENGTH; k++) if (next[k] !== last[k]) same = false;
+    if (same) return this.map;
+    last.set(next);
+    this.lastRadius = radius;
+    this.filled = true;
+    fillMorphMapFromKey(this.map, last, radius);
+    return this.map;
+  }
+}
+
+/** Scratch of {@link equalEarthRow}: every caller reads it at once, so it is not allocated per call. */
+const EE_ROW = { c: 0, y: 0 };
+
+/** Equal Earth on the unit sphere: `x = lon c(lat)` and `y`, the same as `planetEqualEarthRow`. The result is a shared object: read it before the next call. */
 function equalEarthRow(lat: number): { c: number; y: number } {
   const E = MORPH_EE;
   const theta = Math.asin(Math.max(-1, Math.min(1, E.M * Math.sin(lat))));
   const t2 = theta * theta;
   const t6 = t2 * t2 * t2;
-  return {
-    c: Math.cos(theta) / (E.M * (E.A1 + 3 * E.A2 * t2 + t6 * (7 * E.A3 + 9 * E.A4 * t2))),
-    y: theta * (E.A1 + E.A2 * t2 + t6 * (E.A3 + E.A4 * t2)),
-  };
+  EE_ROW.c = Math.cos(theta) / (E.M * (E.A1 + 3 * E.A2 * t2 + t6 * (7 * E.A3 + 9 * E.A4 * t2)));
+  EE_ROW.y = theta * (E.A1 + E.A2 * t2 + t6 * (E.A3 + E.A4 * t2));
+  return EE_ROW;
 }
 
 /** The row factor `g = wLin + wEE c(lat)`: the map's x is `R lon g` and the row's half-width `pi R g`. */
@@ -155,11 +295,21 @@ export function morphRowFactor(lat: number, map: MorphMap): number {
   return map.wEE === 0 ? map.wLin : map.wLin + map.wEE * equalEarthRow(lat).c;
 }
 
-/** Where the map puts the point at projected `lon`/`lat` (radians), metres from the map centre: `planetMapXY`. */
+/**
+ * Where the map puts the point at projected `lon`/`lat` (radians), metres from the map centre: `planetMapXY`. The operations and
+ * their order are the same as `planetMapXY`'s, so the two agree bit for bit (`lod-morph-metric.spec.ts` checks it).
+ */
 export function morphMapXY(lon: number, lat: number, map: MorphMap, out: [number, number] = [0, 0]): [number, number] {
-  const row = map.wEE === 0 ? { c: 0, y: 0 } : equalEarthRow(lat);
-  out[0] = map.radius * lon * (map.wLin + map.wEE * row.c);
-  out[1] = map.radius * (map.wLin * lat + map.wEE * row.y);
+  if (map.wEE === 0) {
+    // Equirectangular, or Equal Earth at morph 0: no row factor.
+    out[0] = map.radius * lon * map.wLin;
+    out[1] = map.radius * (map.wLin * lat);
+    return out;
+  }
+  const row = equalEarthRow(lat);
+  const scale = MORPH_EQUAL_EARTH_SCALE * map.radius;
+  out[0] = map.radius * lon * map.wLin + lon * row.c * scale * map.morph;
+  out[1] = map.radius * lat * map.wLin + row.y * scale * map.morph;
   return out;
 }
 
@@ -189,10 +339,12 @@ export function morphRowHalfWidth(lat: number, map: MorphMap): number {
 
 /** The map's outline extents: the equator's half-width and the poles' `y`, `planetMapExtents`. */
 export function morphExtents(map: MorphMap): { halfWidth: number; halfHeight: number } {
-  return {
-    halfWidth: Math.PI * map.radius,
-    halfHeight: map.radius * (map.wLin * HALF_PI + (map.wEE === 0 ? 0 : map.wEE * equalEarthRow(HALF_PI).y)),
-  };
+  return { halfWidth: Math.PI * map.radius, halfHeight: halfHeightOf(map) };
+}
+
+/** The pole's `y` on the map (`morphExtents().halfHeight`), without the object. */
+function halfHeightOf(map: MorphMap): number {
+  return map.radius * (map.wLin * HALF_PI + (map.wEE === 0 ? 0 : map.wEE * equalEarthRow(HALF_PI).y));
 }
 
 // -- the bend ------------------------------------------------------------------------------------------------------
@@ -210,27 +362,54 @@ export interface MorphBentPoint {
  * `triangular-engine/atmosphere`. `k = 0` gives `(x, y, height)`.
  */
 export function bendPoint(x: number, y: number, k: number, height = 0): MorphBentPoint {
+  return bendPointInto(x, y, k, height, { position: [0, 0, 0], normal: [0, 0, 0] });
+}
+
+/** {@link bendPoint} written into `out` (its `position` and `normal`), without allocating: for loops over many points. */
+export function bendPointInto(x: number, y: number, k: number, height: number, out: { position: Vec3; normal: Vec3 }): MorphBentPoint {
   const kx = k * x;
   const ky = k * y;
   const cx = Math.cos(kx);
   const cy = Math.cos(ky);
-  const normal: Vec3 = [cy * Math.sin(kx), Math.sin(ky), cx * cy];
+  const normal = out.normal;
+  normal[0] = cy * Math.sin(kx);
+  normal[1] = Math.sin(ky);
+  normal[2] = cx * cy;
   const sx = sinc(kx / 2);
   const sy = sinc(ky / 2);
   const z = -(0.5 * k * x * x * sx * sx + cx * 0.5 * k * y * y * sy * sy);
-  return {
-    position: [cy * x * sinc(kx) + height * normal[0], y * sinc(ky) + height * normal[1], z + height * normal[2]],
-    normal,
-  };
+  const position = out.position;
+  position[0] = cy * x * sinc(kx) + height * normal[0];
+  position[1] = y * sinc(ky) + height * normal[1];
+  position[2] = z + height * normal[2];
+  return out;
 }
 
 /** The inverse of {@link bendPoint}: the map point and the height of a point of the map frame. */
 export function unbendPoint(p: Vec3, k: number): { x: number; y: number; height: number } {
-  if (k === 0) return { x: p[0], y: p[1], height: p[2] };
+  return unbendPointInto(p, k, { x: 0, y: 0, height: 0 }, [0, 0, 0]);
+}
+
+/**
+ * {@link unbendPoint} written into `out`, with the bent normal written into `normalOut` as scratch: no allocation. Returns `out`.
+ */
+export function unbendPointInto(p: Vec3, k: number, out: { x: number; y: number; height: number }, normalOut: Vec3): { x: number; y: number; height: number } {
+  if (k === 0) {
+    out.x = p[0];
+    out.y = p[1];
+    out.height = p[2];
+    return out;
+  }
   const q = k * dot(p, p) + 2 * p[2];
   const root = Math.sqrt(1 + k * q);
-  const normal: Vec3 = [(k * p[0]) / root, (k * p[1]) / root, (k * p[2] + 1) / root];
-  return { x: Math.atan2(normal[0], normal[2]) / k, y: Math.asin(Math.max(-1, Math.min(1, normal[1]))) / k, height: q / (1 + root) };
+  const normal = normalOut;
+  normal[0] = (k * p[0]) / root;
+  normal[1] = (k * p[1]) / root;
+  normal[2] = (k * p[2] + 1) / root;
+  out.x = Math.atan2(normal[0], normal[2]) / k;
+  out.y = Math.asin(Math.max(-1, Math.min(1, normal[1]))) / k;
+  out.height = q / (1 + root);
+  return out;
 }
 
 // -- frames ---------------------------------------------------------------------------------------------------------
@@ -250,8 +429,17 @@ export function bodyToMap(map: MorphMap, p: readonly number[], out: Vec3 = [0, 0
 
 /** Unit direction (body frame) of a longitude and latitude in the projection basis. */
 export function directionOf(basis: MorphBasis, lon: number, lat: number): Vec3 {
+  return directionInto(basis, lon, lat, [0, 0, 0]);
+}
+
+/** {@link directionOf} written into `out`, without allocating. Returns `out`. */
+export function directionInto(basis: MorphBasis, lon: number, lat: number, out: Vec3): Vec3 {
   const cl = Math.cos(lat);
-  return [0, 1, 2].map((i) => basis.right[i] * cl * Math.sin(lon) + basis.up[i] * Math.sin(lat) + basis.forward[i] * cl * Math.cos(lon)) as Vec3;
+  const sinLon = Math.sin(lon);
+  const cosLon = Math.cos(lon);
+  const sinLat = Math.sin(lat);
+  for (let i = 0; i < 3; i++) out[i] = basis.right[i] * cl * sinLon + basis.up[i] * sinLat + basis.forward[i] * cl * cosLon;
+  return out;
 }
 
 /** The unit direction of a face lattice point, in doubles, from the exact integer cube-lattice vector. */
@@ -272,10 +460,18 @@ export function leafSide(basis: MorphBasis, unitCentre: Vec3): 1 | -1 {
   return Math.atan2(dot(unitCentre, basis.right), dot(unitCentre, basis.forward)) >= 0 ? 1 : -1;
 }
 
+/** Scratch of {@link unbendPosition} (it is synchronous, so one set per module is enough). */
+const UNBEND_MAP_POINT: Vec3 = [0, 0, 0];
+const UNBEND_NORMAL: Vec3 = [0, 0, 0];
+const UNBEND_BENT = { x: 0, y: 0, height: 0 };
+const UNBEND_AT = { lon: 0, lat: 0 };
+const UNBEND_UNIT: Vec3 = [0, 0, 0];
+
 /**
  * Where a camera at body (= scene) position `scene` stands on the unbent globe: its longitude and latitude in the projection
  * basis, its height above the base sphere, and the unbent position `unit * (R + height)` that the selector and the lattice
  * anchor see. A camera past a pole or beyond the map's edge gets the nearest pole's latitude or a longitude past pi.
+ * Pass `out` to allocate nothing (the per-frame callers do).
  */
 export function unbendPosition(map: MorphMap, scene: readonly number[], out?: { lon: number; lat: number; height: number; position: Vec3 }): {
   lon: number;
@@ -284,13 +480,14 @@ export function unbendPosition(map: MorphMap, scene: readonly number[], out?: { 
   position: Vec3;
 } {
   const result = out ?? { lon: 0, lat: 0, height: 0, position: [0, 0, 0] as Vec3 };
-  const p = bodyToMap(map, scene);
-  const bent = unbendPoint(p, map.k);
-  const at = morphMapInverse(bent.x, bent.y, map);
+  // Scratch of this function (synchronous, so one set per module is enough): with `out` given, no allocation.
+  const p = bodyToMap(map, scene, UNBEND_MAP_POINT);
+  const bent = unbendPointInto(p, map.k, UNBEND_BENT, UNBEND_NORMAL);
+  const at = morphMapInverse(bent.x, bent.y, map, UNBEND_AT);
   result.lon = at.lon;
   result.lat = at.lat;
   result.height = bent.height;
-  const unit = directionOf(map.basis, at.lon, at.lat);
+  const unit = directionInto(map.basis, at.lon, at.lat, UNBEND_UNIT);
   const r = map.radius + bent.height;
   result.position[0] = unit[0] * r;
   result.position[1] = unit[1] * r;
@@ -339,32 +536,84 @@ export interface PoleOrigin {
   readonly isVertex: boolean;
 }
 
-/** The lattice origin of the basis' pole `sign * up`. */
-export function poleOrigin(basis: MorphBasis, sign: 1 | -1, domain: LodDomain, steps: number): PoleOrigin {
-  const dir: Vec3 = [basis.up[0] * sign, basis.up[1] * sign, basis.up[2] * sign];
-  const m = Math.max(Math.abs(dir[0]), Math.abs(dir[1]), Math.abs(dir[2]));
-  const c: Vec3 = [dir[0] / m, dir[1] / m, dir[2] / m];
-  const warped = domain.warp !== 'none';
-  const t = c.map((x) => (Math.abs(x) >= 1 ? Math.sign(x) * steps : warped ? (Math.atan(x) / (Math.PI / 4)) * steps : x * steps)) as Vec3;
-  const cube = c.map(Math.fround) as Vec3;
-  const error = c.map((x, k) => x - cube[k]) as Vec3;
-  const cos = t.map((x) => (warped ? Math.cos(((Math.PI / 4) * x) / steps) : 1)) as Vec3;
-  const isVertex = t.every((x) => Math.abs(x - Math.round(x)) < 1e-6);
-  const unitCube = normalised(cube);
-  const bias: Vec3 = [unitCube[0] - dir[0], unitCube[1] - dir[1], unitCube[2] - dir[2]];
-  return { t, cube, error, cos, bias, isVertex };
+/** A pole origin with its own arrays, for {@link poleOriginInto} to fill. */
+export function newPoleOrigin(): PoleOrigin {
+  return { t: [0, 0, 0], cube: [0, 0, 0], error: [0, 0, 0], cos: [0, 0, 0], bias: [0, 0, 0], isVertex: false };
 }
 
-/** The anchor's distances to the map's edges in doubles: `right[n]` = pi - lamA - 2 pi n and `left[n]` = pi + lamA + 2 pi n for the unwrap integers n = -OUTLINE_WRAP ... OUTLINE_WRAP, and halfHeight -+ yA. The whole turns are subtracted here, where a double keeps the small remainder. */
-export function outlineOf(lamA: number, yA: number, map: MorphMap): MorphOutline<number> {
-  const halfHeight = morphExtents(map).halfHeight;
-  const right: number[] = [];
-  const left: number[] = [];
+/** The lattice coordinate of a cube component `x` (the pole's direction in its face's frame): `pi/4`-warped for an equal-angle cube. */
+function poleLatticeCoord(x: number, warped: boolean, steps: number): number {
+  return Math.abs(x) >= 1 ? Math.sign(x) * steps : warped ? (Math.atan(x) / (Math.PI / 4)) * steps : x * steps;
+}
+
+/**
+ * {@link poleOrigin} written into `out` (all its arrays overwritten; the same arithmetic). Returns `out`.
+ */
+export function poleOriginInto(basis: MorphBasis, sign: 1 | -1, domain: LodDomain, steps: number, out: PoleOrigin): PoleOrigin {
+  const d0 = basis.up[0] * sign;
+  const d1 = basis.up[1] * sign;
+  const d2 = basis.up[2] * sign;
+  const m = Math.max(Math.abs(d0), Math.abs(d1), Math.abs(d2));
+  const c0 = d0 / m;
+  const c1 = d1 / m;
+  const c2 = d2 / m;
+  const warped = domain.warp !== 'none';
+  const t0 = poleLatticeCoord(c0, warped, steps);
+  const t1 = poleLatticeCoord(c1, warped, steps);
+  const t2 = poleLatticeCoord(c2, warped, steps);
+  const cube0 = Math.fround(c0);
+  const cube1 = Math.fround(c1);
+  const cube2 = Math.fround(c2);
+  const t = out.t;
+  t[0] = t0;
+  t[1] = t1;
+  t[2] = t2;
+  const cube = out.cube;
+  cube[0] = cube0;
+  cube[1] = cube1;
+  cube[2] = cube2;
+  const error = out.error;
+  error[0] = c0 - cube0;
+  error[1] = c1 - cube1;
+  error[2] = c2 - cube2;
+  const cos = out.cos;
+  cos[0] = warped ? Math.cos(((Math.PI / 4) * t0) / steps) : 1;
+  cos[1] = warped ? Math.cos(((Math.PI / 4) * t1) / steps) : 1;
+  cos[2] = warped ? Math.cos(((Math.PI / 4) * t2) / steps) : 1;
+  (out as { isVertex: boolean }).isVertex = Math.abs(t0 - Math.round(t0)) < 1e-6 && Math.abs(t1 - Math.round(t1)) < 1e-6 && Math.abs(t2 - Math.round(t2)) < 1e-6;
+  const l = Math.hypot(cube0, cube1, cube2);
+  const bias = out.bias;
+  bias[0] = cube0 / l - d0;
+  bias[1] = cube1 / l - d1;
+  bias[2] = cube2 / l - d2;
+  return out;
+}
+
+/** The lattice origin of the basis' pole `sign * up`. */
+export function poleOrigin(basis: MorphBasis, sign: 1 | -1, domain: LodDomain, steps: number): PoleOrigin {
+  return poleOriginInto(basis, sign, domain, steps, newPoleOrigin());
+}
+
+/**
+ * The anchor's distances to the map's edges in doubles, written into `out`: `right[n]` = pi - lamA - 2 pi n and `left[n]` = pi + lamA + 2 pi n
+ * for the unwrap integers n = -OUTLINE_WRAP ... OUTLINE_WRAP (at index `n + OUTLINE_WRAP`), and halfHeight -+ yA. The whole turns are
+ * subtracted here, where a double keeps the small remainder. Returns `out`.
+ */
+export function outlineOfInto(lamA: number, yA: number, map: MorphMap, out: MorphOutline<number>): MorphOutline<number> {
+  const halfHeight = halfHeightOf(map);
   for (let n = -OUTLINE_WRAP; n <= OUTLINE_WRAP; n++) {
-    right.push(Math.PI - lamA - TWO_PI * n);
-    left.push(Math.PI + lamA + TWO_PI * n);
+    out.right[n + OUTLINE_WRAP] = Math.PI - lamA - TWO_PI * n;
+    out.left[n + OUTLINE_WRAP] = Math.PI + lamA + TWO_PI * n;
   }
-  return { right, left, top: halfHeight - yA, bottom: halfHeight + yA };
+  out.top = halfHeight - yA;
+  out.bottom = halfHeight + yA;
+  return out;
+}
+
+/** The anchor's distances to the map's edges in doubles (see {@link outlineOfInto}). */
+export function outlineOf(lamA: number, yA: number, map: MorphMap): MorphOutline<number> {
+  const n = 2 * OUTLINE_WRAP + 1;
+  return outlineOfInto(lamA, yA, map, { right: new Array<number>(n).fill(0), left: new Array<number>(n).fill(0), top: 0, bottom: 0 });
 }
 
 /** Signed distances (metres, inside positive) of a map point to the edges right, left, top, bottom, in doubles: the reference of the vertex stage's `outlineDistances`. */
@@ -375,21 +624,88 @@ export function outlineDistancesAt(lon: number, lat: number, map: MorphMap): [nu
   return [halfWidth - x, halfWidth + x, halfHeight - y, halfHeight + y];
 }
 
+/** The arrays and objects of a frame, for the typed writes of {@link computeMorphFrame} (the interfaces are read-only). */
+type MutableFrame = { -readonly [K in keyof MorphFrame]: MorphFrame[K] };
+type MutableAnchor = { -readonly [K in keyof MorphAnchor<number>]: MorphAnchor<number>[K] };
+
+/** Scratch of {@link computeMorphFrame}: it runs synchronously, so one set per module is enough. */
+const FRAME_UNBENT = { lon: 0, lat: 0, height: 0, position: [0, 0, 0] as Vec3 };
+const FRAME_XY: [number, number] = [0, 0];
+const FRAME_GROUND = { position: [0, 0, 0] as Vec3, normal: [0, 0, 0] as Vec3 };
+const FRAME_POLE_UP = newPoleOrigin();
+const FRAME_POLE_DOWN = newPoleOrigin();
+
+/**
+ * A frame with arrays of its own, all zero (or the default basis), for {@link computeMorphFrame} to fill. Reuse one per mesh: a frame
+ * written in place keeps its arrays, so a frame a morph animation fills each frame allocates nothing.
+ */
+export function newMorphFrame(): MorphFrame {
+  const basis = newProjectionBasis();
+  const values: MutableAnchor = {
+    bRight: basis.right, bUp: basis.up, bForward: basis.forward,
+    wLin: 1, wEE: 0, radius: 1, k: 0,
+    sA: 0, cA: 0, omsA: 0, opsA: 0, vA1: 0, vA2: 0, nA2: 0, lamA: 0,
+    thA: 0, tA: 0, uA: 0, cosThA: 0, QA: 0, BA: 0, gA: 0,
+    sinAA: 0, cosAA: 0, sinBA: 0, cosBA: 0,
+    upA: [0, 0, 0], garel: [0, 0, 0],
+    poleOn: 0, poleDs: 0,
+    poleHi: [0, 0, 0], poleLo: [0, 0, 0], poleCube: [0, 0, 0], poleError: [0, 0, 0], poleCos: [1, 1, 1], poleBias: [0, 0, 0],
+  };
+  return {
+    map: newMorphMap(),
+    camBody: [0, 0, 0],
+    camMap: [0, 0, 0],
+    lambdaC: 0,
+    phiC: 0,
+    heightC: 0,
+    selectorCamera: [0, 0, 0],
+    anchor: newAnchor(),
+    anchorDir: [0, 0, 0],
+    values,
+    outline: { right: new Array<number>(2 * OUTLINE_WRAP + 1).fill(0), left: new Array<number>(2 * OUTLINE_WRAP + 1).fill(0), top: 0, bottom: 0 },
+    poles: [undefined, undefined],
+  };
+}
+
+/** Writes pole `origin`'s lattice vector, rounded, into `poles[index]` (or leaves it undefined when the pole is not a lattice vertex). */
+function setPoleVertex(poles: [Vec3 | undefined, Vec3 | undefined], index: number, origin: PoleOrigin): void {
+  if (!origin.isVertex) {
+    poles[index] = undefined;
+    return;
+  }
+  const v = poles[index] ?? (poles[index] = [0, 0, 0]);
+  for (let c = 0; c < 3; c++) v[c] = Math.round(origin.t[c]);
+}
+
 /**
  * One frame: the lattice anchor of the camera's unbent position, and every anchor value of P2 in doubles. `scene` is the camera's
  * body (= scene) position, the bent camera; `steps` is the lattice size of the selector's patch cells; `anchorOut` is reused when given.
+ * `out` is filled in place and returned (default: a new frame from {@link newMorphFrame}); pass the frame of the last call to allocate nothing.
  */
-export function computeMorphFrame(map: MorphMap, domain: LodDomain, steps: number, scene: readonly number[], anchorOut: LatticeAnchor = newAnchor()): MorphFrame {
+export function computeMorphFrame(
+  map: MorphMap, domain: LodDomain, steps: number, scene: readonly number[], anchorOut: LatticeAnchor = newAnchor(), out: MorphFrame = newMorphFrame(),
+): MorphFrame {
   const { radius: R, basis, k } = map;
-  const camBody: Vec3 = [scene[0], scene[1], scene[2]];
-  const camMap = bodyToMap(map, camBody);
-  const unbent = unbendPosition(map, camBody);
+  const f = out as MutableFrame;
+  const camBody = f.camBody as Vec3;
+  camBody[0] = scene[0];
+  camBody[1] = scene[1];
+  camBody[2] = scene[2];
+  const camMap = bodyToMap(map, camBody, f.camMap as Vec3);
+  const unbent = unbendPosition(map, camBody, FRAME_UNBENT);
   const lambdaC = unbent.lon;
-  const selectorCamera: Vec3 = unbent.position;
+  const selectorCamera = f.selectorCamera as Vec3;
+  selectorCamera[0] = unbent.position[0];
+  selectorCamera[1] = unbent.position[1];
+  selectorCamera[2] = unbent.position[2];
   const anchor = anchorFor(domain, selectorCamera, steps, anchorOut);
 
   // The anchor direction: the lattice anchor's float cube point, normalised (the shader's own anchor).
-  const anchorDir = normalised(anchor.cube);
+  const anchorDir = f.anchorDir as Vec3;
+  const cubeLength = Math.hypot(anchor.cube[0], anchor.cube[1], anchor.cube[2]);
+  anchorDir[0] = anchor.cube[0] / cubeLength;
+  anchorDir[1] = anchor.cube[1] / cubeLength;
+  anchorDir[2] = anchor.cube[2] / cubeLength;
   const sA = dot(anchorDir, basis.up);
   const v1 = dot(anchorDir, basis.forward);
   const v2 = dot(anchorDir, basis.right);
@@ -413,33 +729,78 @@ export function computeMorphFrame(map: MorphMap, domain: LodDomain, steps: numbe
   const gA = map.wLin + (map.wEE * cosThA) / BA;
 
   // The anchor's map point and the bend there.
-  const [xA, yA] = morphMapXY(lamA, phiA, map);
+  const XY = FRAME_XY;
+  morphMapXY(lamA, phiA, map, XY);
+  const xA = XY[0];
+  const yA = XY[1];
   const aA = k * xA;
   const bA = k * yA;
-  const groundA = bendPoint(xA, yA, k, 0);
-  const garel: Vec3 = [groundA.position[0] - camMap[0], groundA.position[1] - camMap[1], groundA.position[2] - camMap[2]];
+  const groundA = bendPointInto(xA, yA, k, 0, FRAME_GROUND);
+  const values = f.values as MutableAnchor;
+  const garel = values.garel as Vec3;
+  for (let c = 0; c < 3; c++) garel[c] = groundA.position[c] - camMap[c];
 
   // The pole nearer the anchor, as a second lattice origin: its lattice vector as hi + lo (the vertex stage forms (T - hi) - lo, which is exact near the pole).
   const sign: 1 | -1 = sA >= 0 ? 1 : -1;
-  const pole = poleOrigin(basis, sign, domain, steps);
-  const poleHi = pole.t.map(Math.fround) as Vec3;
-  const poleLo = pole.t.map((x, i) => Math.fround(x - poleHi[i])) as Vec3;
+  const poleUp = poleOriginInto(basis, 1, domain, steps, FRAME_POLE_UP);
+  const poleDown = poleOriginInto(basis, -1, domain, steps, FRAME_POLE_DOWN);
+  const pole = sign === 1 ? poleUp : poleDown;
+  const poleHi = values.poleHi as Vec3;
+  const poleLo = values.poleLo as Vec3;
+  for (let c = 0; c < 3; c++) poleHi[c] = Math.fround(pole.t[c]);
+  for (let c = 0; c < 3; c++) poleLo[c] = Math.fround(pole.t[c] - poleHi[c]);
+  const poleCube = values.poleCube as Vec3;
+  const poleError = values.poleError as Vec3;
+  const poleCos = values.poleCos as Vec3;
+  const poleBias = values.poleBias as Vec3;
+  const upA = values.upA as Vec3;
+  for (let c = 0; c < 3; c++) {
+    poleCube[c] = pole.cube[c];
+    poleError[c] = pole.error[c];
+    poleCos[c] = pole.cos[c];
+    poleBias[c] = pole.bias[c];
+    upA[c] = groundA.normal[c];
+  }
 
-  const values: MorphAnchor<number> = {
-    bRight: basis.right, bUp: basis.up, bForward: basis.forward,
-    wLin: map.wLin, wEE: map.wEE, radius: R, k,
-    sA, cA, omsA, opsA, vA1: v1, vA2: v2, nA2: v1 * v1 + v2 * v2, lamA,
-    thA, tA, uA, cosThA, QA, BA, gA,
-    sinAA: Math.sin(aA), cosAA: Math.cos(aA), sinBA: Math.sin(bA), cosBA: Math.cos(bA),
-    upA: [groundA.normal[0], groundA.normal[1], groundA.normal[2]],
-    garel,
-    poleOn: map.morph > 0 ? 1 : 0,
-    poleDs: sign === 1 ? omsA : -opsA,
-    poleHi, poleLo, poleCube: pole.cube, poleError: pole.error, poleCos: pole.cos, poleBias: pole.bias,
-  };
-  const outline = outlineOf(lamA, yA, map);
-  const poles = [poleOrigin(basis, 1, domain, steps), poleOrigin(basis, -1, domain, steps)].map((p) => (p.isVertex ? (p.t.map(Math.round) as Vec3) : undefined)) as [Vec3 | undefined, Vec3 | undefined];
-  return { map, camBody, camMap, lambdaC, phiC: unbent.lat, heightC: unbent.height, selectorCamera, anchor, anchorDir, values, outline, poles };
+  values.bRight = basis.right;
+  values.bUp = basis.up;
+  values.bForward = basis.forward;
+  values.wLin = map.wLin;
+  values.wEE = map.wEE;
+  values.radius = R;
+  values.k = k;
+  values.sA = sA;
+  values.cA = cA;
+  values.omsA = omsA;
+  values.opsA = opsA;
+  values.vA1 = v1;
+  values.vA2 = v2;
+  values.nA2 = v1 * v1 + v2 * v2;
+  values.lamA = lamA;
+  values.thA = thA;
+  values.tA = tA;
+  values.uA = uA;
+  values.cosThA = cosThA;
+  values.QA = QA;
+  values.BA = BA;
+  values.gA = gA;
+  values.sinAA = Math.sin(aA);
+  values.cosAA = Math.cos(aA);
+  values.sinBA = Math.sin(bA);
+  values.cosBA = Math.cos(bA);
+  values.poleOn = map.morph > 0 ? 1 : 0;
+  values.poleDs = sign === 1 ? omsA : -opsA;
+
+  outlineOfInto(lamA, yA, map, f.outline);
+  const poles = f.poles as [Vec3 | undefined, Vec3 | undefined];
+  setPoleVertex(poles, 0, poleUp);
+  setPoleVertex(poles, 1, poleDown);
+  f.map = map;
+  f.lambdaC = lambdaC;
+  f.phiC = unbent.lat;
+  f.heightC = unbent.height;
+  f.anchor = anchor;
+  return out;
 }
 
 // -- the reference vertex ---------------------------------------------------------------------------------------------

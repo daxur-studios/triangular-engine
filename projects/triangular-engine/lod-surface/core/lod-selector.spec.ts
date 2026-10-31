@@ -153,3 +153,114 @@ describe('Plan 059 G6c selector geometry hook', () => {
     names.forEach((name, k) => expect(selector[name]).toBe(before[k]));
   });
 });
+
+/** Plan 059, step G6e-a: the refresh budget of a geometry hook (the stale nodes measured per pass). */
+describe('Plan 059 G6e-a selector refresh budget', () => {
+  // No hysteresis: the tree is then a function of the geometry and the view alone, so a spread refresh must settle on the full one.
+  const exact = (): SelectorSettings => settings({ hysteresis: 0 });
+
+  /** {@link mirrorHook} with a refresh budget. */
+  const budgeted = (budget: number, cellScale: () => number): NodeGeometryHook => ({ ...mirrorHook(16, cellScale), refreshBudget: budget });
+
+  /** Selects `v` until a pass leaves no stale node in the tree; returns the passes and each pass's re-measures. */
+  function settle(selector: LodSelector, v: SelectorView, cap = 1000): { passes: number; measured: number[] } {
+    const measured: number[] = [];
+    do {
+      selector.select(v);
+      measured.push(selector.stats.geometryMeasured);
+    } while (selector.stats.geometryStale > 0 && measured.length < cap);
+    return { passes: measured.length, measured };
+  }
+
+  it('a budget caps the re-measures of each pass; the spread settles on the full refresh tree; a settled view measures nothing', () => {
+    const v = view(5_000);
+    let scale = 1;
+    const cellScale = (): number => scale;
+    const spread = new LodSelector(exact());
+    spread.setGeometryHook(budgeted(50, cellScale));
+    spread.select(v);
+    const full = new LodSelector(exact());
+    full.setGeometryHook(mirrorHook(16, cellScale));
+    full.select(v);
+    scale = 0.5;
+    spread.invalidateGeometry();
+    full.invalidateGeometry();
+    const fullBefore = full.geometryRefreshes;
+    full.select(v);
+    const fullCount = full.geometryRefreshes - fullBefore;
+    const spreadBefore = spread.geometryRefreshes;
+    const { passes, measured } = settle(spread, v);
+    expect(fullCount).toBeGreaterThan(50);
+    expect(Math.max(...measured)).toBeLessThanOrEqual(50);
+    expect(measured.reduce((sum, m) => sum + m, 0)).toBe(spread.geometryRefreshes - spreadBefore);
+    expect(passes).toBeGreaterThan(1);
+    expect(passes).toBeLessThanOrEqual(Math.ceil(fullCount / 50));
+    expect(treeOf(spread)).toBe(treeOf(full));
+    const version = spread.version;
+    spread.select(v);
+    expect(spread.version).toBe(version);
+    expect(spread.stats.geometryMeasured).toBe(0);
+    expect(spread.stats.geometryStale).toBe(0);
+  });
+
+  it('with no budget, or an infinite one, a refresh is a single pass: the tree is the one before the budget existed', () => {
+    const v = view(5_000);
+    let scale = 1;
+    const cellScale = (): number => scale;
+    for (const hook of [mirrorHook(16, cellScale), budgeted(Infinity, cellScale)]) {
+      const selector = new LodSelector(exact());
+      selector.setGeometryHook(hook);
+      selector.select(v);
+      scale = 0.5;
+      selector.invalidateGeometry();
+      const before = selector.geometryRefreshes;
+      selector.select(v);
+      expect(selector.stats.geometryStale).toBe(0);
+      expect(selector.stats.geometryMeasured).toBe(selector.geometryRefreshes - before);
+      expect(selector.stats.geometryMeasured).toBeGreaterThan(50);
+      scale = 1;
+    }
+  });
+
+  it('a new trigger mid-spread restarts the sweep, and the budget still caps every pass, the settled tree being the full one', () => {
+    const v = view(5_000);
+    let scale = 1;
+    const cellScale = (): number => scale;
+    const spread = new LodSelector(exact());
+    spread.setGeometryHook(budgeted(40, cellScale));
+    spread.select(v);
+    scale = 0.5;
+    spread.invalidateGeometry();
+    spread.select(v);
+    expect(spread.stats.geometryMeasured).toBe(40);
+    expect(spread.stats.geometryStale).toBeGreaterThan(0);
+    scale = 0.25;
+    spread.invalidateGeometry();
+    spread.select(v);
+    expect(spread.stats.geometryMeasured).toBeLessThanOrEqual(40);
+    expect(spread.stats.geometryStale).toBeGreaterThan(0);
+    const { measured } = settle(spread, v);
+    expect(Math.max(...measured)).toBeLessThanOrEqual(40);
+    const full = new LodSelector(exact());
+    full.setGeometryHook(mirrorHook(16, cellScale));
+    full.select(v);
+    expect(treeOf(spread)).toBe(treeOf(full));
+  });
+
+  it('removing the hook mid-spread measures the whole tree in one pass, with the default geometry', () => {
+    const v = view(5_000);
+    const plain = new LodSelector(exact());
+    plain.select(v);
+    const selector = new LodSelector(exact());
+    selector.setGeometryHook(budgeted(40, () => 0.5));
+    selector.select(v);
+    selector.invalidateGeometry();
+    selector.select(v);
+    expect(selector.stats.geometryStale).toBeGreaterThan(0);
+    selector.setGeometryHook(undefined);
+    selector.select(v);
+    expect(selector.stats.geometryStale).toBe(0);
+    expect(selector.stats.geometryMeasured).toBeGreaterThan(40);
+    expect(treeOf(selector)).toBe(treeOf(plain));
+  });
+});

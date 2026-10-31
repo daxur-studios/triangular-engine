@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import { asin, atan, clamp, float, normalize, vec2 } from 'three/tsl';
+import { asin, atan, clamp, float, mix, normalize, select, vec2 } from 'three/tsl';
 import {
   buildCellPlanetLookup,
   resolveCellPlanetWorld,
@@ -16,10 +16,12 @@ import {
   cellAtlasUv,
   cellVoronoiLayer,
   createPlanetDayNightUniforms,
+  seamProjectedLon,
   solidColorLayer,
   type ICellVoronoiLayer,
   type IPlanetContext,
   type IPlanetDayNightUniforms,
+  type IPlanetMorphUniforms,
   type IPlanetSurfaceMaterialOptions,
 } from 'triangular-engine/planet-material';
 
@@ -36,6 +38,17 @@ export interface TerrainPlanetMaterialOptions extends IPlanetSurfaceMaterialOpti
   readonly cellPlanet?: CellPlanetSource;
   /** Atlas size and colour overrides of the cell lookup; used only with {@link cellPlanet}. */
   readonly cellLookup?: CellPlanetLookupOptions;
+  /**
+   * The planet's shared morph uniforms (`<planet>`'s `morphUniforms`), for a terrain that follows the globe-to-map morph
+   * (Plan 059 G6e). With them the material reads `morph` and the projected longitude from these uniforms, bends its shading
+   * normal with the ground and turns direct shadows off while morph is above 0. Give the same set to the terrain body's
+   * `setMorph` so the drawn surface and the shading agree. Omitted: the terrain is the globe (morph 0), as before.
+   *
+   * With the mesh's globe fields (`globePosition`, `globeNormal`, built with its morph option) the cells stay on the sphere:
+   * `bodyFixedLocal` is the unbent position, so cells do not move with the map. The shading normal blends from the globe's
+   * relief normal at morph 0 to the bent ground's up at morph 1, so relief fades out as the map flattens (a known simplification).
+   */
+  readonly morphUniforms?: IPlanetMorphUniforms;
 }
 
 /**
@@ -50,9 +63,11 @@ export interface TerrainPlanetMaterialOptions extends IPlanetSurfaceMaterialOpti
  * |---|---|
  * | `radialDirection`, `latLon` | `nodes.up`, the unit direction of the vertex's base point (exact, no height in it) |
  * | `sphereNormal` | `nodes.normal`, the height-gradient shading normal (tilts with relief, as the field's doc says) |
- * | `bodyFixedLocal`, `morphedBatchedLocal`, `morphedPosition` | `nodes.position`, relative to the camera: lift it through `modelWorldMatrix` as the macro layer does (the mesh must sit at the camera, as `LodTerrainBody` keeps it) |
+ * | `bodyFixedLocal` | `nodes.globePosition` (unbent) with `morphUniforms` and the mesh's globe fields, else `nodes.position`; relative to the camera: lift it through `modelWorldMatrix` as the macro layer does (the mesh must sit at the camera, as `LodTerrainBody` keeps it) |
+ * | `morphedBatchedLocal`, `morphedPosition` | `nodes.position`, the drawn (bent above morph 0) position, lifted the same way |
  * | `uv` | the cell atlas's longitude/latitude uv of `radialDirection` |
- * | `morph`, `projectedLon`, `seamCull` | constants: the terrain is always the globe (morph 0) |
+ * | `morph`, `projectedLon` | constants (morph 0, longitude 0) without `morphUniforms`; with it, the shared `uMorph` and the longitude of `radialDirection` in the projection frame |
+ * | `seamCull` | constant 0: the mesh's own fragment mask cuts the map's seam, so the terrain has no per-triangle test |
  *
  * The default base layer is a solid colour, not the vertex colour (the terrain has no `color` attribute). It is lit by the
  * scene's lights (standard PBR), so the scene needs a directional light; see {@link setSunDirection} for the sun a parent
@@ -82,12 +97,22 @@ export class TerrainPlanetMaterial extends PlanetSurfaceMaterial implements LodS
    */
   readonly dayNight: IPlanetDayNightUniforms = createPlanetDayNightUniforms();
 
+  /** The shared morph uniforms when given ({@link TerrainPlanetMaterialOptions.morphUniforms}); undefined: the terrain is the globe. */
+  private readonly sharedMorph: IPlanetMorphUniforms | undefined;
+
   constructor(options: TerrainPlanetMaterialOptions = {}) {
-    const { cellPlanet, cellLookup, ...materialOptions } = options;
-    super({ base: solidColorLayer({ color: '#6f8a4e' }).layer, ...materialOptions });
+    const { cellPlanet, cellLookup, morphUniforms, ...materialOptions } = options;
+    super({ base: solidColorLayer({ color: '#6f8a4e' }).layer, ...materialOptions, ...(morphUniforms ? { morph: morphUniforms } : {}) });
+    this.sharedMorph = morphUniforms;
     // The globe's fragment mask reads attributes the terrain lacks; the terrain never crosses a map seam.
     this.maskNode = null;
     this.maskShadowNode = null;
+    if (morphUniforms) {
+      // Direct shadows contribute nothing above the globe: the shadow factor is 1 while morph > 0 and the shadow map's own
+      // factor at morph 0. `receivedShadowNode` is three's hook for it; its argument is the factor the lights computed.
+      const morph = morphUniforms.uMorph as any;
+      this.receivedShadowNode = ((shadow: any) => select(morph.greaterThan(0), float(1), shadow)) as any;
+    }
     if (cellPlanet) {
       const world = resolveCellPlanetWorld(cellPlanet);
       const began = performance.now();
@@ -106,20 +131,42 @@ export class TerrainPlanetMaterial extends PlanetSurfaceMaterial implements LodS
   /** Called by the terrain mesh when it is built (and again if the same material is given to a rebuilt mesh). */
   bindLodSurfaceNodes(nodes: LodSurfaceNodes): void {
     const radial = normalize(nodes.up);
+    const shared = this.sharedMorph;
+    const morph = shared?.uMorph as any;
+    // With the mesh's globe fields (G6e-c) the cells stay on the sphere: `bodyFixedLocal` is the unbent position, and the shading
+    // normal blends the globe's relief normal (exact at morph 0) into the bent up at morph 1, so relief fades as the map flattens.
+    // Without them (an older mesh, or no morphUniforms) the previous nodes are used. Without a bend in the nodes (the mesh built
+    // without its morph option) the shading normal stays the normal.
+    const onGlobe = shared !== undefined && nodes.globePosition !== undefined;
+    const bodyFixed = onGlobe ? nodes.globePosition : nodes.position;
+    const globeNormal = onGlobe ? nodes.globeNormal : nodes.normal;
+    const shadingNormal =
+      shared && nodes.bentUp
+        ? select(morph.lessThan(1e-4), globeNormal, normalize((mix as any)(globeNormal, nodes.bentUp, clamp(morph, 0, 1))))
+        : nodes.normal;
     this.setStageOverride({
-      id: 'lodTerrain',
+      id: shared ? 'lodTerrainMorph' : 'lodTerrain',
       context: {
         sphereNormal: nodes.normal,
         radialDirection: radial,
         morphedPosition: nodes.position,
         latLon: vec2(asin(clamp((radial as any).y, -1, 1)), atan((radial as any).x, (radial as any).z)),
-        bodyFixedLocal: nodes.position,
+        bodyFixedLocal: bodyFixed,
         morphedBatchedLocal: nodes.position,
         uv: cellAtlasUv(radial),
-        projectedLon: float(0),
+        ...(shared
+          ? {
+              morph,
+              projectedLon: select(
+                (shared.uProjMode as any).greaterThan(0.5),
+                seamProjectedLon(radial, shared.uProjForward as any, shared.uProjRight as any),
+                float(0),
+              ),
+            }
+          : { projectedLon: float(0) }),
         seamCull: float(0),
       } satisfies Partial<IPlanetContext>,
-      shadingNormal: nodes.normal,
+      shadingNormal,
       maskNode: null,
       maskShadowNode: null,
     });

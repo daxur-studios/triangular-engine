@@ -11,11 +11,15 @@ export interface PlanetSceneTestSettings {
    * so the cost of the air is the difference between a case and its `-atmosphere-off` partner.
    */
   readonly atmosphere: boolean;
-  /** `<planet [morph]>`; every v1 case is the globe (0). The terrain does not bend until step G6. */
+  /**
+   * `<planet [morph]>`: 0 the globe, 1 the flat map. The terrain bends into the map; the pole fan draws a flat colour only;
+   * the atmosphere and the clouds do not morph yet, so above 0 the sky is the globe's sky.
+   */
   readonly morph: number;
   /**
    * A scripted camera runs during the window instead of a still pose: `descent` flies orbit to the 2 m eye over one ground
-   * point; `yaw360` holds the ground pose and turns the heading once round.
+   * point; `yaw360` holds the ground pose and turns the heading once round; `morphSweep` holds the orbit pose and sweeps the
+   * morph 0 to 1 and back to 0.
    */
   readonly motion?: PlanetMotion;
 }
@@ -41,7 +45,7 @@ function scripted(id: string, label: string, motion: PlanetMotion, change: Parti
  *
  * Still poses (orbit, 20 km, the 2 m eye), a scripted descent from orbit to the eye and a scripted 360 degree turn at the eye.
  * The GPU timer splits by render pass, not by layer, so the per-layer cost is read from two atmosphere-off partners (orbit and
- * eye): same view, same terrain, the sky and the lighting and haze stages off. No morph cases; they come with step G6.
+ * eye): same view, same terrain, the sky and the lighting and haze stages off. v1 has no morph cases; v2 adds them.
  */
 const PLANET_SCENE_V1: TestSuite<PlanetSceneTestSettings> = {
   id: 'planet-scene',
@@ -60,5 +64,27 @@ const PLANET_SCENE_V1: TestSuite<PlanetSceneTestSettings> = {
   ],
 };
 
+/**
+ * Suite `planet-scene` v2 (Plan 059, step G6f): v1 unchanged, plus the morph. `<planet [morph]>` at 0.5 (half way: the terrain
+ * is part way into the map) and 1 (the flat map) at orbit and at the 2 m eye, and a scripted sweep at orbit that goes 0 to 1
+ * and back to 0 over the window with the camera still. The sky does not morph yet, so at morph above 0 the timed sky is the
+ * globe's sky. The morph cases keep the atmosphere on and the terrain in the scene, as orbit and ground do.
+ */
+const PLANET_SCENE_V2: TestSuite<PlanetSceneTestSettings> = {
+  id: 'planet-scene',
+  version: 2,
+  title: 'Planet scene: <planet> with terrain and atmosphere at orbit, 20 km and the 2 m eye, a descent, a turn and the morph 0 to 1 (Plan 059 G6f)',
+  purpose: 'performance',
+  requiresVisualReview: true,
+  scenarios: [
+    ...PLANET_SCENE_V1.scenarios,
+    still('orbit-morph-0.5', 'orbit · morph 0.5', { pose: 'orbit', morph: 0.5 }),
+    still('orbit-morph-1', 'orbit · morph 1', { pose: 'orbit', morph: 1 }),
+    still('ground-morph-0.5', '2 m eye · morph 0.5', { pose: 'ground', morph: 0.5 }),
+    still('ground-morph-1', '2 m eye · morph 1', { pose: 'ground', morph: 1 }),
+    scripted('morph-sweep', 'morph sweep · orbit, 0 to 1 and back to 0', 'morphSweep', { pose: 'orbit' }),
+  ],
+};
+
 /** Oldest first; the final entry is "Run latest test". */
-export const PLANET_SCENE_TEST_HISTORY: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_V1];
+export const PLANET_SCENE_TEST_HISTORY: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_V1, PLANET_SCENE_V2];

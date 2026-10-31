@@ -1,6 +1,7 @@
 import { PerspectiveCamera } from 'three';
 import { createHeightSource } from './lod-height';
 import { createMorphMap } from './lod-morph-frame';
+import { StretchMetric } from './lod-morph-metric';
 import { sceneCameraAt } from './lod-morph.testing';
 import { LodSelector } from './lod-selector';
 import { LodTerrainBody, type LodTerrainSettings } from './lod-terrain-body';
@@ -96,5 +97,54 @@ describe('LodTerrainBody morph preview', () => {
     const plane = new LodTerrainBody({ ...settings({ morph: true }), domain: { kind: 'plane', sizeM: 10_000, warp: 'none' }, heights: createHeightSource('flat', 'plane') });
     expect(() => plane.setMorph(morphSettings)).not.toThrow();
     plane.dispose();
+  });
+
+  it('setMorphMetric: a stretch hook is installed above morph 0 only, and is remade with each selector', () => {
+    const body = new LodTerrainBody(settings({ morph: true }));
+    body.setMorph(morphSettings);
+    body.setMorphMetric(true);
+    const camera = skyCamera(sceneCameraAt(createMorphMap(morphSettings, 10_000), 0.3, 0.4, 20));
+    body.update(camera, 1000);
+    expect(body.selector.hook).toBeInstanceOf(StretchMetric);
+    expect(body.stats.drawn).toBeLessThan(body.stats.leaves);
+
+    body.configure(settings({ morph: true, patchCells: 32 }));
+    body.update(camera, 1000);
+    expect(body.selector.hook).toBeInstanceOf(StretchMetric);
+
+    body.setMorph({ ...morphSettings, morph: 0 });
+    body.update(camera, 1000);
+    expect(body.selector.hook).toBeUndefined();
+    body.dispose();
+  });
+
+  it('setMorphMetric: dispose removes the hook from the selector', () => {
+    const body = new LodTerrainBody(settings({ morph: true }));
+    body.setMorph(morphSettings);
+    body.setMorphMetric(true);
+    body.update(skyCamera([0, 0, 10_020]), 1000);
+    const selector = body.selector;
+    expect(selector.hook).toBeInstanceOf(StretchMetric);
+    body.dispose();
+    expect(selector.hook).toBeUndefined();
+  });
+
+  it('the pole fan is in the scene only above morph 0', () => {
+    const body = new LodTerrainBody(settings({ morph: true, poleFan: true }));
+    body.setMorph({ ...morphSettings, morph: 0 });
+    const camera = skyCamera([0, 0, 10_020]);
+    body.update(camera, 1000);
+    const fan = body.surface.poleFanMesh!;
+    expect(fan).toBeDefined();
+    expect(body.object.children).not.toContain(fan);
+
+    body.setMorph(morphSettings);
+    body.update(camera, 1000);
+    expect(body.object.children).toContain(fan);
+
+    body.setMorph({ ...morphSettings, morph: 0 });
+    body.update(camera, 1000);
+    expect(body.object.children).not.toContain(fan);
+    body.dispose();
   });
 });

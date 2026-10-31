@@ -11,8 +11,11 @@ import { FIXTURE_GROUND, FIXTURE_HEADING_RAD, groundFrame, type Vec3 } from 'tri
 
 export type PlanetPoseId = 'orbit' | 'mid-20km' | 'ground';
 
-/** Scripted camera moves; both are pure functions of their progress in 0..1. */
-export type PlanetMotion = 'descent' | 'yaw360';
+/**
+ * Scripted moves; each is a pure function of its progress in 0..1. `descent` and `yaw360` move the camera. `morphSweep` keeps the
+ * orbit pose and runs `<planet [morph]>` from 0 to 1 and back to 0 ({@link morphSweepValue}).
+ */
+export type PlanetMotion = 'descent' | 'yaw360' | 'morphSweep';
 
 export interface PlanetView {
   /** A ground direction from the planet's centre (normalised when resolved). */
@@ -79,8 +82,30 @@ export function yawView(t: number): PlanetView {
   return { ...from, headingRad: from.headingRad + 2 * Math.PI * Math.min(1, Math.max(0, t)) };
 }
 
+/** The morph sweep: the camera stays on the orbit pose for the whole move. */
+export function morphSweepView(): PlanetView {
+  return planetPoseView('orbit');
+}
+
+/**
+ * The morph sweep's value of `<planet [morph]>` at progress `t`: 0 at the start, 1 at the middle, 0 at the end. A smoothstep on
+ * each half, so the speed is zero at both ends and at the peak, and both ends are exactly 0 (the page's morph check compares
+ * the value after the move with the case's 0).
+ */
+export function morphSweepValue(t: number): number {
+  const s = Math.min(1, Math.max(0, t));
+  const x = s < 0.5 ? 2 * s : 2 - 2 * s;
+  return x * x * (3 - 2 * x);
+}
+
 export function motionView(motion: PlanetMotion, t: number): PlanetView {
+  if (motion === 'morphSweep') return morphSweepView();
   return motion === 'descent' ? descentView(t) : yawView(t);
+}
+
+/** The morph a scripted move sets at progress `t`, or undefined when the move leaves the morph alone. */
+export function motionMorph(motion: PlanetMotion, t: number): number | undefined {
+  return motion === 'morphSweep' ? morphSweepValue(t) : undefined;
 }
 
 /** The sun of the page: a fixed direction that is a late-afternoon sun over the pose ground point (the lab's choice). */

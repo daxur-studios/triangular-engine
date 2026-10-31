@@ -257,3 +257,166 @@ export function inWindow(lon: number, sigma: number): boolean {
   const lo = (sigma * Math.PI) / 2 - Math.PI;
   return lon > lo && lon <= lo + TWO_PI;
 }
+
+/**
+ * What the pack reads of one leaf from the basis, the domain and the leaf's corners (G6i). The facts do not depend on the morph's
+ * amount, only on the basis, so a leaf keeps them while the projection stays.
+ */
+interface LeafFacts {
+  readonly containsPole: boolean;
+  readonly reachesCut: boolean;
+  readonly centreLon: number;
+  /** The side by the sign of the centre longitude (as {@link analyseLeaf}). */
+  readonly side: 1 | -1;
+  readonly centre: Vec3;
+  readonly torn: boolean;
+  /** {@link isPoleFanLeaf}. */
+  readonly poleFan: boolean;
+  /** {@link poleVertexLongitude} on side +1 and on side -1. */
+  readonly poleLonPos: number;
+  readonly poleLonNeg: number;
+}
+
+/** One node's memo: the cell it was made for (root, level, cell i, cell j) and the generation of the basis it was made under. */
+interface MemoSlot {
+  generation: number;
+  root: number;
+  level: number;
+  i: number;
+  j: number;
+  facts: LeafFacts | undefined;
+}
+
+/** The facts of a leaf, computed from scratch (what {@link packMorphLeaves} computes per leaf). */
+function leafFactsOf(basis: MorphBasis, domain: LodDomain, steps: number, face: number, u0: number, v0: number, span: number): LeafFacts {
+  const a = analyseLeaf(basis, domain, steps, face, u0, v0, span);
+  const torn = leafTorn(basis, steps, face, u0, v0, span, domain.warp);
+  const poleFan = leafPoleCorner(basis, steps, face, u0, v0, span, domain.warp) !== undefined || torn;
+  return {
+    containsPole: a.containsPole,
+    reachesCut: a.reachesCut,
+    centreLon: a.centreLon,
+    side: a.side,
+    centre: a.centre,
+    torn,
+    poleFan,
+    poleLonPos: poleVertexLongitude(basis, a.centre, 1),
+    poleLonNeg: poleVertexLongitude(basis, a.centre, -1),
+  };
+}
+
+/**
+ * Memo of the per-leaf facts of {@link packMorphLeavesMemo} (Plan 059, G6i). A drawn leaf that keeps its cell (root, level, i, j) and
+ * the same basis, domain and patch size is not analysed again; the memo is keyed by the selector's node id and checked against the cell
+ * on each use. The memo is valid for one basis, domain and patch size at a time: a change of any of them makes every slot stale.
+ */
+export class MorphLeafMemo {
+  private readonly basisKey = new Float64Array(9);
+  private domainKey: LodDomain | undefined;
+  private patchKey = -1;
+  private generation = 0;
+  private readonly slots: MemoSlot[] = [];
+
+  /** Makes the memo valid for `basis`, `domain` and `patchCells`; a change of any of them starts a new generation. */
+  prepare(basis: MorphBasis, domain: LodDomain, patchCells: number): void {
+    const key = this.basisKey;
+    let same = this.domainKey === domain && this.patchKey === patchCells;
+    for (let c = 0; c < 3; c++) {
+      if (key[c] !== basis.forward[c] || key[3 + c] !== basis.up[c] || key[6 + c] !== basis.right[c]) same = false;
+    }
+    if (same) return;
+    for (let c = 0; c < 3; c++) {
+      key[c] = basis.forward[c];
+      key[3 + c] = basis.up[c];
+      key[6 + c] = basis.right[c];
+    }
+    this.domainKey = domain;
+    this.patchKey = patchCells;
+    this.generation++;
+  }
+
+  /** The facts of `node`'s leaf: from its slot when the slot holds this cell under the current generation, else computed and stored. */
+  factsOf(basis: MorphBasis, domain: LodDomain, steps: number, node: number, face: number, level: number, cellI: number, cellJ: number, u0: number, v0: number, span: number): LeafFacts {
+    let slot = this.slots[node];
+    if (!slot) {
+      slot = { generation: -1, root: -1, level: -1, i: -1, j: -1, facts: undefined };
+      this.slots[node] = slot;
+    }
+    if (slot.facts && slot.generation === this.generation && slot.root === face && slot.level === level && slot.i === cellI && slot.j === cellJ) {
+      return slot.facts;
+    }
+    const facts = leafFactsOf(basis, domain, steps, face, u0, v0, span);
+    slot.generation = this.generation;
+    slot.root = face;
+    slot.level = level;
+    slot.i = cellI;
+    slot.j = cellJ;
+    slot.facts = facts;
+    return facts;
+  }
+}
+
+/**
+ * {@link packMorphLeaves} with the per-leaf facts taken from `memo` (Plan 059, G6i). It writes the same instances, in the same order and
+ * with the same values, as the full pack: the memo only skips the analysis of a leaf whose cell and basis did not change. `memo` must be
+ * used for one mesh's leaf arrays (it keys by node id); the arrays it writes are `leafData` and `infoData`, as in {@link packMorphLeaves}.
+ */
+export function packMorphLeavesMemo(memo: MorphLeafMemo, selector: LodSelector, options: MorphPackOptions, leafData: Float32Array, infoData: Float32Array): MorphPack {
+  const { domain, patchCells, capacity, basis, morph } = options;
+  const duplicate = options.duplicate ?? true;
+  const skipPoleLeaves = options.skipPoleLeaves ?? false;
+  const maxLevel = maxLevelFor(patchCells);
+  const steps = latticeSteps(patchCells, maxLevel);
+  const leafCount = Math.min(selector.stats.drawn, capacity);
+  const { leaves, masks, level, i, j, root } = selector;
+  memo.prepare(basis, domain, patchCells);
+  let instances = 0;
+  let duplicates = 0;
+  let poleLeaves = 0;
+  let torn = 0;
+  let dropped = 0;
+  let skipped = 0;
+  const emit = (k: number, node: number, u0: number, v0: number, step: number, sigma: number, leafLon: number): void => {
+    if (instances >= capacity) {
+      dropped++;
+      return;
+    }
+    const o = instances * LEAF_STRIDE;
+    leafData[o] = u0;
+    leafData[o + 1] = v0;
+    leafData[o + 2] = step;
+    leafData[o + 3] = root[node];
+    infoData[o] = level[node];
+    infoData[o + 1] = masks[k];
+    infoData[o + 2] = sigma;
+    infoData[o + 3] = leafLon;
+    instances++;
+  };
+  for (let k = 0; k < leafCount; k++) {
+    const node = leaves[k];
+    const step = 1 << (maxLevel - level[node]);
+    const span = step * patchCells;
+    const u0 = i[node] * span;
+    const v0 = j[node] * span;
+    const face = root[node];
+    const facts = memo.factsOf(basis, domain, steps, node, face, level[node], i[node], j[node], u0, v0, span);
+    if (morph <= 0) {
+      emit(k, node, u0, v0, step, facts.side, 0);
+      continue;
+    }
+    if (skipPoleLeaves && facts.poleFan) {
+      skipped++;
+      continue;
+    }
+    if (facts.containsPole) poleLeaves++;
+    const twoSides = facts.reachesCut && duplicate;
+    if (twoSides) duplicates++;
+    const isTorn = facts.torn;
+    for (let s = 0; s < (twoSides ? 2 : 1); s++) {
+      const sigma = twoSides ? (s === 0 ? 1 : -1) : facts.side;
+      if (isTorn) torn++;
+      emit(k, node, u0, v0, step, isTorn ? 2 * sigma : sigma, sigma > 0 ? facts.poleLonPos : facts.poleLonNeg);
+    }
+  }
+  return { instances, leaves: leafCount, duplicates, poleLeaves, torn, dropped, ...(skipPoleLeaves ? { skipped } : {}) };
+}

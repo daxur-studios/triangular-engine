@@ -6,7 +6,8 @@ import { createGroundSample, groundAt, type GroundSample } from './lod-ground-qu
 import { DEFAULT_BAKE_K } from './lod-height-bake';
 import type { HeightSource } from './lod-height';
 import type { TextureHeightSource } from './lod-height-texture';
-import type { LodMorphSettings, MorphUniformsLike } from './lod-morph-frame';
+import { MorphMapResolver, projectionBasis, type LodMorphSettings, type MorphUniformsLike } from './lod-morph-frame';
+import { StretchMetric, type StretchBasis, type StretchProjection, type StretchState } from './lod-morph-metric';
 import { CAP_SLACK, LodSelector, PIXEL_FLOOR, type NodeGeometryHook, type PatchCells, type SelectorStats, type SelectorView } from './lod-selector';
 import { createLodSurfaceMesh, type LodSurfaceMesh, type LodView } from './lod-surface-mesh';
 import { frustumNormals, type CameraAxes } from './lod-view';
@@ -56,9 +57,14 @@ export interface LodTerrainSettings {
   readonly material?: NodeMaterial;
   /**
    * Preview (Plan 059 G6b, sphere only): builds the globe-to-map morph into the surface mesh (`LodSurfaceMeshOptions.morph`). Changing it
-   * rebuilds the mesh. Drive it with {@link LodTerrainBody.setMorph}. `<planetTerrain>` does not set it yet (G6e).
+   * rebuilds the mesh. Drive it with {@link LodTerrainBody.setMorph}. `<planetTerrain>` sets it for a sphere (G6e).
    */
   readonly morph?: boolean;
+  /**
+   * Preview (Plan 059 G6d, needs ` morph `): draws the pole leaves as a fan beside the surface (` LodSurfaceMeshOptions.poleFan `). The body
+   * adds {@link LodSurfaceMesh.poleFanMesh} to {@link object} only while the morph is above 0. Changing it rebuilds the mesh.
+   */
+  readonly poleFan?: boolean;
 }
 
 /**
@@ -115,6 +121,18 @@ export class LodTerrainBody {
   private morphCulling: LodMorphCulling = 'off';
   private geometryHook: NodeGeometryHook | undefined;
   private readonly unbent: Vec3 = [0, 0, 0];
+  private stretchOn = false;
+  /** The stretch metric of the current selector (see {@link setMorphMetric}); remade with each selector. */
+  private stretch: StretchMetric | undefined;
+  private stretchSelector: LodSelector | undefined;
+  private readonly bentCamera: Vec3 = [0, 0, 0];
+  /** The live map of the stretch camera (`placeStretchCamera`): one object, re-filled in place as the morph moves. */
+  private readonly morphResolver = new MorphMapResolver();
+  /** The state the stretch metric is updated with each frame: one object, written in place. */
+  private readonly stretchState: { morph: number; projection: StretchProjection; radiusM: number; basis: StretchBasis } = {
+    morph: 0, projection: 'equal-earth', radiusM: 1, basis: projectionBasis(0, 0),
+  };
+  private readonly globeState: StretchState = { morph: 0 };
 
   constructor(settings: LodTerrainSettings) {
     this.object.name = 'LOD terrain';
@@ -157,20 +175,24 @@ export class LodTerrainBody {
       ...(this.source.nodeRange ? { heightRanges: { nodeRange: this.source.nodeRange.bind(this.source) } } : {}),
     });
     if (this.geometryHook) this.selector.setGeometryHook(this.geometryHook);
+    this.syncStretch();
     const capacity = settings.leafCap + CAP_SLACK + 6;
     const morph = settings.morph === true && domain.kind === 'sphere';
-    const key = [domain.kind, domain.sizeM, domain.warp, settings.patchCells, capacity, settings.detailNoise > 0, detailCells, morph].join('|');
+    const poleFan = morph && settings.poleFan === true;
+    const key = [domain.kind, domain.sizeM, domain.warp, settings.patchCells, capacity, settings.detailNoise > 0, detailCells, morph, poleFan].join('|');
     if (this.surface && key === this.builtKey && heights === this.builtHeights && settings.material === this.builtMaterial) {
       this.surface.setDetailNoise(settings.detailNoise);
       return;
     }
     this.surface?.mesh.removeFromParent();
+    this.surface?.poleFanMesh?.removeFromParent();
     this.surface?.dispose();
     this.surface = createLodSurfaceMesh({
       domain, patchCells: settings.patchCells, source: this.source, capacity,
       ...(settings.detailNoise > 0 ? { detail: { cells: detailCells } } : {}),
       ...(settings.material ? { material: settings.material } : {}),
       ...(morph ? { morph } : {}),
+      ...(poleFan ? { poleFan } : {}),
     });
     if (morph) this.surface.setMorph(this.morphSource);
     this.surface.setView(this.view);
@@ -180,6 +202,7 @@ export class LodTerrainBody {
     this.surface.setSun(this.sun);
     this.surface.setDetailNoise(settings.detailNoise);
     this.object.add(this.surface.mesh);
+    this.syncPoleFan();
     this.builtKey = key;
     this.builtHeights = heights;
     this.builtMaterial = settings.material;
@@ -274,7 +297,8 @@ export class LodTerrainBody {
     // Above morph 0 the surface is bent while the selector's bounds describe the globe: by default nothing is culled (a zero frustum
     // never rejects a node) and the selector sees the camera over the unbent globe. With bent bounds it sees the bent camera.
     const morphing = this.settings.morph === true && this.surface.morphState.morph > 0;
-    if (morphing && this.morphCulling === 'off') {
+    if (this.stretch) this.placeStretchCamera(position, view);
+    else if (morphing && this.morphCulling === 'off') {
       this.frustum.fill(0);
       this.surface.unbend(position, this.unbent);
       view.camera = this.unbent;
@@ -283,13 +307,77 @@ export class LodTerrainBody {
     view.camera = position;
     this.surface.setDetailFade(Math.max(this.settings.cellPixels, PIXEL_FLOOR) * view.pixelAngle);
     this.surface.upload(this.selector, position);
+    this.syncPoleFan();
     this.object.position.set(position[0], position[1], position[2]);
     this.selectionMs = performance.now() - began;
   }
 
+  /**
+   * Preview (G6e, sphere only, needs the morph setting): selects above morph 0 in the bent frame, with a {@link StretchMetric} on each
+   * selector this body makes. Above morph 0 the selector's camera is the metric's bent camera (`selectionPoint`) for the camera's unbent
+   * direction and altitude, and the frustum is the camera's own. The morph is read from the source given to {@link setMorph} each frame.
+   * It sets the culling to `'bent-bounds'`, and while it is on {@link setMorphCulling} has no effect. Kept across {@link configure}. Off by default.
+   */
+  setMorphMetric(on: boolean): void {
+    this.stretchOn = on;
+    this.morphCulling = on ? 'bent-bounds' : 'off';
+    this.syncStretch();
+  }
+
+  /** Makes, keeps or drops the stretch metric so that it belongs to the current selector (a configure remakes the selector). */
+  private syncStretch(): void {
+    const want = this.stretchOn && this.settings.morph === true && this.settings.domain.kind === 'sphere';
+    if (want && this.stretch && this.stretchSelector === this.selector) return;
+    this.stretch?.dispose();
+    this.stretch = undefined;
+    this.stretchSelector = undefined;
+    if (!want) return;
+    this.stretch = new StretchMetric(this.selector, { radiusM: this.settings.domain.sizeM });
+    this.stretchSelector = this.selector;
+  }
+
+  /**
+   * The metric takes the live morph each frame, and above morph 0 the selector's camera is the bent camera of the metric's frame: the
+   * camera's unbent point under the map the node geometry was measured at ({@link StretchMetric.placeCamera}), not the live one. The
+   * selector's view then changes only when the camera moves or the geometry is refreshed, so a morph animation between refreshes
+   * reuses the tree, while the mesh still draws with the live morph. At morph 0 the camera is left as it is.
+   */
+  private placeStretchCamera(position: Vec3, view: { camera: Vec3 }): void {
+    const stretch = this.stretch;
+    if (!stretch) return;
+    const source = this.morphSource;
+    const map = source && this.settings.morph === true ? this.morphResolver.resolve(source, this.settings.domain.sizeM) : undefined;
+    if (!map) {
+      stretch.update(this.globeState);
+      return;
+    }
+    const state = this.stretchState;
+    state.morph = map.morph;
+    state.projection = map.projection;
+    state.radiusM = map.radius;
+    state.basis = map.basis;
+    stretch.update(state);
+    if (map.morph <= 0) return;
+    stretch.placeCamera(position, this.bentCamera);
+    view.camera = this.bentCamera;
+  }
+
+  /** The pole fan is in the scene only above morph 0 (it draws nothing at the globe): added and removed as the morph crosses 0. */
+  private syncPoleFan(): void {
+    const fan = this.surface.poleFanMesh;
+    if (!fan) return;
+    const shown = this.surface.morphState.morph > 0;
+    if (shown && fan.parent !== this.object) this.object.add(fan);
+    else if (!shown && fan.parent === this.object) fan.removeFromParent();
+  }
+
   /** Removes the object from its parent and releases the mesh (not a supplied material). The body is unusable afterwards. */
   dispose(): void {
+    this.stretch?.dispose();
+    this.stretch = undefined;
+    this.stretchSelector = undefined;
     this.surface.mesh.removeFromParent();
+    this.surface.poleFanMesh?.removeFromParent();
     this.surface.dispose();
     this.object.removeFromParent();
   }

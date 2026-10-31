@@ -12,10 +12,8 @@ import {
   DEFAULT_CAPSULE_HAIR_COLORS,
   type CapsuleAccessoryId,
   type CapsuleCatBodyPatternId,
-  type CapsuleCatCharacterDNA,
   type CapsuleCatGaitMode,
   type CapsuleCatPackId,
-  type CapsuleCharacterDNA,
   type CapsuleChestPatchId,
   type CapsuleFacialHairId,
   type CapsuleHairStyleId,
@@ -149,17 +147,15 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
     setMotion: (motionId) => humanActor.setLocomotion(motionId as CapsuleLocomotionMode),
     setExpression: (expression) => humanActor.facialController.setExpression(expression, 1, 0.2),
     setControl: (controlId, value) => {
-      const dna: Partial<CapsuleCharacterDNA> = {};
       switch (controlId) {
-        case 'hairStyleId': dna.hairStyleId = value as CapsuleHairStyleId; break;
-        case 'facialHairId': dna.facialHairId = value as CapsuleFacialHairId; break;
-        case 'hairColor': dna.hairColor = value; break;
-        case 'accessory': dna.accessory = value as CapsuleAccessoryId; break;
-        case 'chestPatch': dna.chestPatch = value as CapsuleChestPatchId; break;
-        case 'helmet': dna.helmet = value === 'true'; break;
-        case 'jetpack': dna.jetpack = value === 'true'; break;
+        case 'hairStyleId': humanActor.setDna({ hairStyleId: value as CapsuleHairStyleId }); break;
+        case 'facialHairId': humanActor.setDna({ facialHairId: value as CapsuleFacialHairId }); break;
+        case 'hairColor': humanActor.setDna({ hairColor: value }); break;
+        case 'accessory': humanActor.setDna({ accessory: value as CapsuleAccessoryId }); break;
+        case 'chestPatch': humanActor.setDna({ chestPatch: value as CapsuleChestPatchId }); break;
+        case 'helmet': humanActor.setDna({ helmet: value === 'true' }); break;
+        case 'jetpack': humanActor.setDna({ jetpack: value === 'true' }); break;
       }
-      humanActor.setDna(dna);
     },
     randomize: (seed) => humanActor.setSeed(`character-studio-human-${seed}`),
     update: (deltaSeconds) => humanActor.update(deltaSeconds),
@@ -187,7 +183,7 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
         id: 'appearance',
         label: 'Appearance',
         controls: [
-          control('bodyPatternId', 'Body pattern', catActor.dna.bodyPatternId, choices(CAPSULE_CAT_BODY_PATTERN_IDS)),
+          control('bodyPatternId', 'Body pattern', catActor.dna.bodyPattern, choices(CAPSULE_CAT_BODY_PATTERN_IDS)),
           control('furColor', 'Fur color', catActor.dna.furColor, choices(DEFAULT_CAPSULE_CAT_FUR_COLORS)),
           control('furAccentColor', 'Accent color', catActor.dna.furAccentColor, choices(DEFAULT_CAPSULE_CAT_FUR_COLORS)),
         ],
@@ -196,10 +192,10 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
         id: 'gear',
         label: 'Gear',
         controls: [
-          control('packId', 'Pack', catActor.dna.packId, choices(CAPSULE_CAT_PACK_IDS)),
+          control('packId', 'Pack', catActor.dna.pack, choices(CAPSULE_CAT_PACK_IDS)),
           control('helmet', 'Bubble helmet', catActor.dna.helmet, booleanChoices),
           control('harness', 'Harness', catActor.dna.harness, booleanChoices),
-          control('booties', 'Booties', catActor.dna.booties, booleanChoices),
+          control('booties', 'Booties', catActor.dna.suitBooties, booleanChoices),
         ],
       },
     ],
@@ -210,17 +206,15 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
     setMotion: (motionId) => catActor.setLocomotion(motionId as CapsuleCatGaitMode),
     setExpression: (expression) => catActor.facialController.setExpression(expression, 1, 0.2),
     setControl: (controlId, value) => {
-      const dna: Partial<CapsuleCatCharacterDNA> = {};
       switch (controlId) {
-        case 'bodyPatternId': dna.bodyPatternId = value as CapsuleCatBodyPatternId; break;
-        case 'furColor': dna.furColor = value; break;
-        case 'furAccentColor': dna.furAccentColor = value; break;
-        case 'packId': dna.packId = value as CapsuleCatPackId; break;
-        case 'helmet': dna.helmet = value === 'true'; break;
-        case 'harness': dna.harness = value === 'true'; break;
-        case 'booties': dna.booties = value === 'true'; break;
+        case 'bodyPatternId': catActor.setDna({ bodyPattern: value as CapsuleCatBodyPatternId }); break;
+        case 'furColor': catActor.setDna({ furColor: value }); break;
+        case 'furAccentColor': catActor.setDna({ furAccentColor: value }); break;
+        case 'packId': catActor.setDna({ pack: value as CapsuleCatPackId }); break;
+        case 'helmet': catActor.setDna({ helmet: value === 'true' }); break;
+        case 'harness': catActor.setDna({ harness: value === 'true' }); break;
+        case 'booties': catActor.setDna({ suitBooties: value === 'true' }); break;
       }
-      catActor.setDna(dna);
     },
     randomize: (seed) => catActor.setSeed(`character-studio-cat-${seed}`),
     update: (deltaSeconds) => catActor.update(deltaSeconds),

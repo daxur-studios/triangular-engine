@@ -13,6 +13,7 @@ export * from './lod-morph-math';
 export * from './lod-morph-frame';
 export * from './lod-morph-leaves';
 export * from './lod-morph-stage';
+export { POLE_FAN_DEFAULT_RAYS, type PoleFanStats } from './lod-morph-fan';
 export * from './lod-leaf-pack';
 export * from './lod-height';
 export * from './lod-canyon';

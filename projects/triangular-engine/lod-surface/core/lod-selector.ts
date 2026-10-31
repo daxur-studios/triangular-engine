@@ -143,6 +143,11 @@ export interface NodeGeometryHook {
    * (metres along the surface normal): widen `centre`, `boundRadius`, `across` and `alongHalf` to hold that range.
    */
   measure(root: number, level: number, i: number, j: number, heightLo: number, heightHi: number, out: NodeGeometry): void;
+  /**
+   * Most stale nodes measured per selection pass while this hook is installed; the rest keep their old geometry and the next
+   * {@link LodSelector.select} measures more (it rebuilds even for the same view until none is left stale). Default: no limit.
+   */
+  readonly refreshBudget?: number;
 }
 
 /** Counters of the last selection: tree size, level churn and whether the cap bound. Overwritten by every `select`, so copy what you keep. */
@@ -175,6 +180,16 @@ export interface SelectorStats {
   unmet: number;
   capHit: boolean;
   deepestLevel: number;
+  /**
+   * Stale nodes measured again in this pass (at most the hook's `refreshBudget`); first measurements of new nodes are not
+   * counted. 0 when `select` returned early.
+   */
+  geometryMeasured: number;
+  /**
+   * Stale nodes this pass met and left at their old geometry, because the budget was spent: the next pass measures them.
+   * 0 once the tree is settled, and then the selection is the one a full refresh gives.
+   */
+  geometryStale: number;
 }
 
 /** Extra leaves a balancing chain may add beyond the cap (each forced split adds three); sized for the deepest chain. */
@@ -254,7 +269,7 @@ export class LodSelector {
   /** Leaves after {@link select}, as node indices, with their edge masks; drawn leaves first (`stats.drawn`). */
   readonly leaves: Int32Array;
   readonly masks: Uint8Array;
-  readonly stats: SelectorStats = { leaves: 0, drawn: 0, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0 };
+  readonly stats: SelectorStats = { leaves: 0, drawn: 0, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0, geometryMeasured: 0, geometryStale: 0 };
   /** Most nodes one tree can hold. */
   private readonly treeCapacity: number;
   private readonly heap: Int32Array;
@@ -294,6 +309,8 @@ export class LodSelector {
   private readonly geometry: NodeGeometry = { ground: [0, 0, 0], normal: [0, 0, 0], centre: [0, 0, 0], boundRadius: 0, across: 0, alongHalf: 0, leafEdge: 0, cellEdge: 0 };
   /** Nodes measured again because their geometry was stale (first measurements not counted): the cost of {@link invalidateGeometry}. */
   geometryRefreshes = 0;
+  /** Stale re-measures this rebuild may still make: the hook's budget, less those made so far (`Infinity` without a budget). */
+  private budgetLeft = Infinity;
 
   /**
    * @param poolTrees Node pool size in trees, at least 2: after a reclaim the pool holds the last tree and must still
@@ -361,7 +378,8 @@ export class LodSelector {
   /**
    * Marks all node geometry stale (the hook's state changed). Nodes are measured again lazily as they join the next tree, so
    * the cost is one `measure` per node of that tree, and a pooled node outside it waits until it is needed. The next
-   * {@link select} rebuilds even for an unchanged view.
+   * {@link select} rebuilds even for an unchanged view. With a `refreshBudget` on the hook, the measures are spread over
+   * passes: see {@link SelectorStats.geometryStale}.
    */
   invalidateGeometry(): void {
     this.geometryVersion++;
@@ -376,6 +394,7 @@ export class LodSelector {
       this.stats.merges = 0;
       this.stats.visibleNewSplits = 0;
       this.stats.visibleMerges = 0;
+      this.stats.geometryMeasured = 0;
       return;
     }
     this.version++;
@@ -386,6 +405,10 @@ export class LodSelector {
     stats.splits = 0;
     stats.forcedSplits = 0;
     stats.capHit = false;
+    stats.geometryMeasured = 0;
+    stats.geometryStale = 0;
+    // At least one per pass, so a hook with a budget below 1 cannot leave the spread unsettled for ever.
+    this.budgetLeft = Math.max(1, this.geometryHook?.refreshBudget ?? Infinity);
     this.openLast = 0;
     const roots = rootCount(this.settings.domain);
     if (this.nodeCount === 0) {
@@ -441,7 +464,8 @@ export class LodSelector {
     let same = this.hasViewKey && key[15] === view.pixelAngle;
     for (let k = 0; k < 3; k++) if (key[k] !== camera[k]) same = false;
     for (let k = 0; k < 12; k++) if (key[3 + k] !== frustum[k]) same = false;
-    if (same) return true;
+    // A refresh still spread over several passes is not settled: the same view measures its next nodes.
+    if (same) return this.stats.geometryStale === 0;
     for (let k = 0; k < 3; k++) key[k] = camera[k];
     for (let k = 0; k < 12; k++) key[3 + k] = frustum[k];
     key[15] = view.pixelAngle;
@@ -650,11 +674,18 @@ export class LodSelector {
     let n = this.activeCount;
     const geoStamp = this.geoStamp;
     const geometryVersion = this.geometryVersion;
+    const stats = this.stats;
     for (let node = first; node < first + count; node++) {
       active[n++] = node;
       if (geoStamp[node] !== geometryVersion) {
-        this.geometryRefreshes++;
-        this.measureNode(node);
+        // A stale node is measured while the budget lasts. Past it the node keeps its old geometry (a pool node always has one)
+        // and the next pass measures it.
+        if (this.budgetLeft > 0) {
+          this.budgetLeft--;
+          this.geometryRefreshes++;
+          stats.geometryMeasured++;
+          this.measureNode(node);
+        } else stats.geometryStale++;
       }
       // Split in the last tree: open there, and in that tree (stamped one rebuild ago; older flags are stale).
       const kept = wasOpen[node] === 1 && stamp[node] === frame - 1;

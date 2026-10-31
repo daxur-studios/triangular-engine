@@ -34,7 +34,7 @@ export interface PlanetSceneTestHost {
   /** Leaves per frame since the last reset (same frames as {@link selectionSamples}). */
   leafSamples(): readonly number[];
   resetSamples(): void;
-  /** Places the camera on the scripted move of the case, `t` (0..1) into it; `undefined` returns to the named pose. */
+  /** Places the camera (and the morph, for a morph sweep) on the scripted move of the case, `t` (0..1) into it; `undefined` returns to the named pose. */
   setMotionProgress(t: number | undefined): void;
   isSampling(): boolean;
   startSampling(): void;
@@ -284,7 +284,7 @@ export function createPlanetSceneTestAdapter(host: PlanetSceneTestHost): TestRun
           'The GPU timer splits by render pass, not by layer. The terrain and the sky backdrop share the main scene pass; read the sky\'s cost from the `-atmosphere-off` partner of a case (same view, sky, lighting and haze off).',
           'Compute passes are not split by the timer. The atmosphere\'s table updates that run as compute are inside the whole-frame figure only.',
           'The terrain is selected every frame from the active camera; draw calls and renderer triangles are the last frame\'s counters.',
-          'The morph is 0 (the globe) in every case: the terrain does not bend until step G6.',
+          'The morph bends the terrain into the map (`<planet [morph]>`). The pole fan draws a flat colour only. The atmosphere and the clouds do not morph yet, so above morph 0 the sky is the globe\'s sky. No case stands near a pole, so the pole-zone float32 floor is not measured here.',
         ],
       };
     },

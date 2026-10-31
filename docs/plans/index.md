@@ -41,5 +41,6 @@ tags: [plans, index]
 | [Optional test video recordings](/docs/plans/072_testing-video-recordings.md) | complete | [ER 072](/docs/engineering-records/072_testing-video-recordings.md) |
 | [Visual verification evidence and retention](/docs/plans/073_visual-verification-evidence-retention.md) | planned | [ER 073](/docs/engineering-records/073_visual-verification-evidence-retention.md) |
 | [Procedural character studio](/docs/plans/074_procedural-character-studio.md) | planned | [ER 074](/docs/engineering-records/074_procedural-character-studio.md) |
+| [Claude-specific coding approach: Haiku builds, Opus decides](/docs/plans/075_claude-coding-approach.md) | planned | [ER 075](/docs/engineering-records/075_claude-coding-approach.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

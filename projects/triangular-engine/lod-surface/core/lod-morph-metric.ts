@@ -1,5 +1,8 @@
 import { domainPoint, faceOfDirection, type LodDomain, type Vec3 } from './lod-domain';
 import { cubeComponent, cubeLattice, latticeSteps } from './lod-lattice';
+import {
+  bendPointInto, createMorphMap, morphMapXY, newMorphMap, projectionBasis, setMorphWeights, unbendPosition, type MorphBasis, type MorphMap, type MorphProjection,
+} from './lod-morph-frame';
 import { PIXEL_FLOOR, maxLevelFor, type LodSelector, type NodeGeometry, type NodeGeometryHook } from './lod-selector';
 
 /**
@@ -22,20 +25,17 @@ import { PIXEL_FLOOR, maxLevelFor, type LodSelector, type NodeGeometry, type Nod
  * selection by a fraction of a step, not by the whole drift of the surface (kilometres at planet scale). And what is left, the
  * leaf growing or shifting by a step's worth, is padded: the cell length by `1 + stalePad` and the bounds by `stalePad` of the
  * leaf's own size, which makes a stale node ask for at least as much refinement as a fresh one (the spec measures it).
+ *
+ * Spreading (G6e-a). A refresh does not measure the whole tree in one pass: the selector measures at most
+ * {@link StretchMetricOptions.refreshBudget} stale nodes per pass, the others keep their previous geometry, and passes with the
+ * same view continue until none is stale. The settled selection is the full refresh's ({@link StretchMetric.stats} reports the last pass).
  */
 
 /** The map the globe flattens to. Same values as `PlanetMapProjection` in `triangular-engine/planet-material`. */
-export type StretchProjection = 'equirectangular' | 'equal-earth';
+export type StretchProjection = MorphProjection;
 
-/** The projection basis in the body frame: three orthonormal vectors (`setPlanetProjectionCentre`'s forward, up and right). */
-export interface StretchBasis {
-  /** Towards the projection centre (longitude 0, latitude 0). */
-  readonly forward: readonly [number, number, number];
-  /** Towards the map's north pole. */
-  readonly up: readonly [number, number, number];
-  /** Towards the map's +x. */
-  readonly right: readonly [number, number, number];
-}
+/** The projection basis in the body frame: three orthonormal vectors (`setPlanetProjectionCentre`'s forward, up and right). The frame module's {@link MorphBasis}. */
+export type StretchBasis = MorphBasis;
 
 /** The chord sag of a cell that counts as one pixel of error: the sag becomes an equivalent cell length (`sag * cellPixels / STRETCH_SAG_PX`). */
 export const STRETCH_SAG_PX = 1;
@@ -53,68 +53,39 @@ export const DEFAULT_STRETCH_MORPH_STEP = 0.01;
  */
 export const DEFAULT_STRETCH_STALE_PAD_PER_MORPH = 3;
 
+/**
+ * Default for {@link StretchMetricOptions.refreshBudget}: most stale nodes measured per selector pass once the policy has
+ * fired. About 4 ms a pass at the headless cost of about 14 microseconds per node, so a refresh of a 4,098-leaf tree takes about
+ * 18 passes instead of one 25 to 36 ms frame.
+ */
+export const DEFAULT_STRETCH_REFRESH_BUDGET = 300;
+
 const TWO_PI = 2 * Math.PI;
 /** A leaf with a pole strictly inside it is bounded by this many planet radii: more than any two points of the map are apart. */
 const TORN_REACH_RADII = 8;
 /** How many chord sags of a leaf pad its bounds beyond the nine measured samples. */
 const BOUND_SAG_MARGIN = 2;
-const DEG = Math.PI / 180;
 
-// Equal Earth (Savric et al.), the constants of `planet-map.ts`.
-const EE_A1 = 1.340264;
-const EE_A2 = -0.081106;
-const EE_A3 = 0.000893;
-const EE_A4 = 0.003796;
-const EE_M = Math.sqrt(3) / 2;
-const EE_RAW_X_MAX = Math.PI / (EE_M * EE_A1);
-/** How much wider the material's Equal Earth map is than the unit-sphere form: `pi / rawXMax`, about 1.1607. */
-const EE_SCALE = Math.PI / EE_RAW_X_MAX;
+/** The default projection basis (centre 0, 0), resolved once: the map functions below take it when they are given no other. */
+const DEFAULT_BASIS = projectionBasis(0, 0);
 
 /**
  * Where the planet material puts the point at projected `lon`/`lat` (radians, in the projection's own frame) on its map,
- * metres from the map centre: a copy of `planetMapXY` (`triangular-engine/planet-material`) so this worker-safe entry does not
- * import the material's entry (which pulls three and TSL). The spec proves the two equal.
+ * metres from the map centre: `planetMapXY` (`triangular-engine/planet-material`), computed by the frame module's
+ * `morphMapXY` (this worker-safe entry must not import the material's entry, which pulls three and TSL). The spec proves the two equal.
  *
  * @param out Receives x and y; pass one to avoid an allocation.
  */
 export function stretchMapXY(lon: number, lat: number, morph: number, projection: StretchProjection, radius: number, out: [number, number] = [0, 0]): [number, number] {
-  if (projection === 'equirectangular') {
-    out[0] = radius * lon;
-    out[1] = radius * lat;
-    return out;
-  }
-  const m = Math.min(1, Math.max(0, morph));
-  const theta = Math.asin(Math.max(-1, Math.min(1, EE_M * Math.sin(lat))));
-  const t2 = theta * theta;
-  const t6 = t2 * t2 * t2;
-  const c = Math.cos(theta) / (EE_M * (EE_A1 + 3 * EE_A2 * t2 + t6 * (7 * EE_A3 + 9 * EE_A4 * t2)));
-  const y = theta * (EE_A1 + EE_A2 * t2 + t6 * (EE_A3 + EE_A4 * t2));
-  const scale = EE_SCALE * radius;
-  out[0] = radius * lon * (1 - m) + lon * c * scale * m;
-  out[1] = radius * lat * (1 - m) + y * scale * m;
-  return out;
-}
-
-/** `sin(a) / a`, by its series for tiny `a` (as `atmosphere/bent-planet.ts`). */
-function sinc(a: number): number {
-  const a2 = a * a;
-  if (a2 < 1e-6) return 1 - a2 / 6 + (a2 * a2) / 120;
-  return Math.sin(a) / a;
+  return morphMapXY(lon, lat, createMorphMap({ morph, projection, basis: DEFAULT_BASIS }, radius), out);
 }
 
 /**
  * The projection basis for a centre at `lonDeg` east and `latDeg` north on the body (lon 0 = +Z, lat 0 = the equator), as
- * `setPlanetProjectionCentre` builds it.
+ * `setPlanetProjectionCentre` builds it: the frame module's `projectionBasis`.
  */
 export function stretchProjectionBasis(lonDeg: number, latDeg: number): StretchBasis {
-  const lon = lonDeg * DEG;
-  const lat = latDeg * DEG;
-  const f: Vec3 = [Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon)];
-  let u: Vec3 = [-f[1] * f[0], 1 - f[1] * f[1], -f[1] * f[2]];
-  if (u[0] * u[0] + u[1] * u[1] + u[2] * u[2] < 1e-8) u = [0, 0, f[1] > 0 ? -1 : 1];
-  const ul = Math.hypot(u[0], u[1], u[2]);
-  u = [u[0] / ul, u[1] / ul, u[2] / ul];
-  return { forward: f, up: u, right: [u[1] * f[2] - u[2] * f[1], u[2] * f[0] - u[0] * f[2], u[0] * f[1] - u[1] * f[0]] };
+  return projectionBasis(lonDeg, latDeg);
 }
 
 /** The knobs of a {@link StretchMetric}. */
@@ -129,6 +100,14 @@ export interface StretchMetricOptions {
   readonly morph?: number;
   /** Re-measure node geometry once the morph has moved this far from the morph it was measured at. Default {@link DEFAULT_STRETCH_MORPH_STEP}. */
   readonly morphStep?: number;
+  /**
+   * Most stale nodes measured per selector pass once the policy has fired. A refresh measures the nodes of the tree as they
+   * join it, up to this many per pass; the rest keep their geometry from before and the selector runs another pass (with the
+   * same view, if nothing else changed) until none is stale, so a refresh costs this much per frame, not the whole tree at once.
+   * The selection after the last pass equals the one a full refresh gives. Default {@link DEFAULT_STRETCH_REFRESH_BUDGET};
+   * `Infinity` measures the whole tree in one pass, as before the budget.
+   */
+  readonly refreshBudget?: number;
   /**
    * Growth of the measured cell length per unit of morph lag; the pad is `1 + stalePadPerMorph * morphStep`. Default
    * {@link DEFAULT_STRETCH_STALE_PAD_PER_MORPH}. 0 turns the pad off (then a lagging measurement can under-refine by up to the lag).
@@ -151,30 +130,41 @@ export interface StretchMetricStats {
   invalidations: number;
   /** Nodes measured: the work the invalidations caused. */
   measured: number;
+  /**
+   * Stale nodes measured again by the selector's last pass (at most {@link StretchMetricOptions.refreshBudget}). Read from the
+   * selector, so it describes the last `select` call; 0 when that call reused the tree.
+   */
+  measuredLastPass: number;
+  /**
+   * Stale nodes the last pass met and left at their old geometry, for the next pass to measure. 0 once a refresh has settled:
+   * then the selection is the full refresh's.
+   */
+  staleLeft: number;
 }
 
 /** A map state the placement functions read: either the live one (the camera's) or the one node geometry was measured at. */
 interface MapState {
-  morph: number;
-  projection: StretchProjection;
-  radius: number;
-  /** Curvature `(1 - morph) / radius`. */
-  k: number;
-  /** Shift of the map frame's z into the body frame, `(1 - morph) * radius`. */
-  shift: number;
-  /** forward (0..2), up (3..5), right (6..8). */
+  /** The frame module's map at this state: weights, curvature `k`, the shift and the basis. Written in place by {@link setMapState}. */
+  map: MorphMap;
+  /** forward (0..2), up (3..5), right (6..8): the basis as the placement and the pole search read it. */
   basis: Float64Array;
 }
 
-const newMapState = (): MapState => ({ morph: 0, projection: 'equal-earth', radius: 1, k: 0, shift: 0, basis: new Float64Array(9) });
+const newMapState = (): MapState => ({ map: newMorphMap(), basis: new Float64Array(9) });
 
+/** Sets a map state from its morph, projection, radius and packed basis, in place: the call is once a frame, and allocates nothing. */
 function setMapState(state: MapState, morph: number, projection: StretchProjection, radius: number, basis: Float64Array): void {
-  state.morph = morph;
-  state.projection = projection;
-  state.radius = radius;
-  state.k = (1 - morph) / radius;
-  state.shift = (1 - morph) * radius;
   state.basis.set(basis);
+  const b = state.basis;
+  const forward = state.map.basis.forward;
+  const up = state.map.basis.up;
+  const right = state.map.basis.right;
+  for (let c = 0; c < 3; c++) {
+    forward[c] = b[c];
+    up[c] = b[3 + c];
+    right[c] = b[6 + c];
+  }
+  setMorphWeights(state.map, morph, projection, radius);
 }
 
 /** Scratch slots for the samples of one node. */
@@ -208,7 +198,9 @@ const CORNER_COORD: readonly (readonly [number, number])[] = [[0, 0], [1, 0], [1
  * Preview: wired into the terrain in step G6e.
  */
 export class StretchMetric implements NodeGeometryHook {
-  readonly stats: StretchMetricStats = { invalidations: 0, measured: 0 };
+  /** The most stale nodes a selector pass measures (see {@link StretchMetricOptions.refreshBudget}). */
+  readonly refreshBudget: number;
+  private readonly counts = { invalidations: 0, measured: 0 };
   private readonly selector: LodSelector;
   private readonly domain: LodDomain;
   private readonly patchCells: number;
@@ -216,6 +208,8 @@ export class StretchMetric implements NodeGeometryHook {
   private readonly steps: number;
   private readonly morphStep: number;
   private readonly stalePad: number;
+  /** Scratch of the bend: the position and normal of one map point (see `bendPointInto`). */
+  private readonly bent = { position: [0, 0, 0] as Vec3, normal: [0, 0, 0] as Vec3 };
   /** The state of the camera and the mesh: the latest {@link update}. */
   private readonly live = newMapState();
   /** The state node geometry was last measured at. */
@@ -232,6 +226,9 @@ export class StretchMetric implements NodeGeometryHook {
   private poleCount = 0;
   private readonly edgeLon: [number, number] = [0, 0];
   private readonly scratchBasis = new Float64Array(9);
+  /** Scratch of {@link placeCamera}: the unbent camera and its unit direction. */
+  private readonly unbentScratch = { lon: 0, lat: 0, height: 0, position: [0, 0, 0] as Vec3 };
+  private readonly placeUnit: Vec3 = [0, 0, 0];
 
   /**
    * @param selector A selector over a sphere domain. Its patch size and cell pixels are read from its settings.
@@ -247,6 +244,7 @@ export class StretchMetric implements NodeGeometryHook {
     this.steps = latticeSteps(this.patchCells, maxLevelFor(selector.settings.patchCells));
     this.morphStep = Math.max(1e-6, options.morphStep ?? DEFAULT_STRETCH_MORPH_STEP);
     this.stalePad = (options.stalePadPerMorph ?? DEFAULT_STRETCH_STALE_PAD_PER_MORPH) * this.morphStep;
+    this.refreshBudget = Math.max(1, Math.floor(options.refreshBudget ?? DEFAULT_STRETCH_REFRESH_BUDGET));
     const basis = options.basis ?? stretchProjectionBasis(0, 0);
     this.packBasis(basis, this.scratchBasis);
     const morph = clamp01(options.morph ?? 0);
@@ -257,17 +255,31 @@ export class StretchMetric implements NodeGeometryHook {
 
   /** The live morph, as last given to {@link update}. */
   get morph(): number {
-    return this.live.morph;
+    return this.live.map.morph;
   }
 
   /** The morph node geometry was last measured at: within the morph step of {@link morph} (or exactly 0 when the metric is off). */
   get measuredMorph(): number {
-    return this.measuredAt.morph;
+    return this.measuredAt.map.morph;
   }
 
   /** The measured cell length is multiplied by `1 + pad`: see {@link DEFAULT_STRETCH_STALE_PAD_PER_MORPH}. */
   get pad(): number {
     return this.stalePad;
+  }
+
+  /**
+   * Counters. `measuredLastPass` and `staleLeft` are read from the selector, so they describe its last `select` call: read them
+   * after the call, not before. Each read returns a new object.
+   */
+  get stats(): StretchMetricStats {
+    const last = this.selector.stats;
+    return {
+      invalidations: this.counts.invalidations,
+      measured: this.counts.measured,
+      measuredLastPass: last.geometryMeasured,
+      staleLeft: last.geometryStale,
+    };
   }
 
   /**
@@ -283,25 +295,25 @@ export class StretchMetric implements NodeGeometryHook {
    */
   update(state: StretchState): boolean {
     const live = this.live;
-    const morph = state.morph === undefined ? live.morph : clamp01(state.morph);
-    const projection = state.projection ?? live.projection;
-    const radius = state.radiusM ?? live.radius;
+    const morph = state.morph === undefined ? live.map.morph : clamp01(state.morph);
+    const projection = state.projection ?? live.map.projection;
+    const radius = state.radiusM ?? live.map.radius;
     let basisChanged = false;
     if (state.basis) {
       this.packBasis(state.basis, this.scratchBasis);
       for (let k = 0; k < 9; k++) if (this.scratchBasis[k] !== live.basis[k]) basisChanged = true;
     }
-    const others = projection !== live.projection || radius !== live.radius || basisChanged;
+    const others = projection !== live.map.projection || radius !== live.map.radius || basisChanged;
     setMapState(live, morph, projection, radius, basisChanged ? this.scratchBasis : live.basis);
-    const wasOn = this.measuredAt.morph > 0;
+    const wasOn = this.measuredAt.map.morph > 0;
     const nowOn = morph > 0;
     let refresh: boolean;
     if (wasOn !== nowOn) refresh = true;
     else if (!nowOn) refresh = false;
-    else refresh = Math.abs(morph - this.measuredAt.morph) >= this.morphStep - 1e-12 || others;
+    else refresh = Math.abs(morph - this.measuredAt.map.morph) >= this.morphStep - 1e-12 || others;
     if (!refresh) return false;
     this.takeSnapshot();
-    this.stats.invalidations++;
+    this.counts.invalidations++;
     if (!nowOn) this.selector.setGeometryHook(undefined);
     else if (this.selector.hook === this) this.selector.invalidateGeometry();
     else this.selector.setGeometryHook(this);
@@ -343,6 +355,31 @@ export class StretchMetric implements NodeGeometryHook {
     return this.normalIn(this.measuredAt, unit, out, refLon);
   }
 
+  /**
+   * The selector's camera for the camera at scene position `scene` (the body frame, as the mesh draws it): the point it stands
+   * over on the unbent globe, bent in the frame node geometry is measured in ({@link selectionPoint}). The unbend uses the map node
+   * geometry was measured at, not the live one, so the camera changes only when the camera moves or the geometry is refreshed: a
+   * morph animation between refreshes leaves it, and the selector's view, unchanged. Above morph 0 only; at morph 0 (no map
+   * measured) it returns `scene` as it is. Call {@link update} first in the frame.
+   */
+  placeCamera(scene: readonly number[], out: Vec3 = [0, 0, 0]): Vec3 {
+    const state = this.measuredAt;
+    if (state.map.morph <= 0) {
+      out[0] = scene[0];
+      out[1] = scene[1];
+      out[2] = scene[2];
+      return out;
+    }
+    const u = unbendPosition(state.map, scene, this.unbentScratch);
+    const p = u.position;
+    const r = Math.hypot(p[0], p[1], p[2]) || 1;
+    const unit = this.placeUnit;
+    unit[0] = p[0] / r;
+    unit[1] = p[1] / r;
+    unit[2] = p[2] / r;
+    return this.selectionPoint(unit, r - state.map.radius, out);
+  }
+
   private pointIn(state: MapState, unit: readonly number[], heightM: number, out: Vec3, refLon?: number): Vec3 {
     const b = state.basis;
     const principal = Math.atan2(unit[0] * b[6] + unit[1] * b[7] + unit[2] * b[8], unit[0] * b[0] + unit[1] * b[1] + unit[2] * b[2]);
@@ -366,7 +403,7 @@ export class StretchMetric implements NodeGeometryHook {
    * hold the 90 degrees of edge the leaf spans.
    */
   measure(root: number, level: number, i: number, j: number, heightLo: number, heightHi: number, out: NodeGeometry): void {
-    this.stats.measured++;
+    this.counts.measured++;
     const state = this.measuredAt;
     const { unit, pos, nrm, unitPos, unitNormal } = this;
     const domain = this.domain;
@@ -400,7 +437,7 @@ export class StretchMetric implements NodeGeometryHook {
       // leaf is the map's whole width (the mesh draws it with its pole fan): bounds as big as the map, so it always splits
       // (down to the deepest level, a chain of a few leaves) and is never culled.
       this.place(state, unit[0], unit[1], unit[2], refLon, NaN, CENTRE);
-      const reach = TORN_REACH_RADII * state.radius;
+      const reach = TORN_REACH_RADII * state.map.radius;
       const halfRange = (heightHi - heightLo) / 2;
       const mid = (heightHi + heightLo) / 2;
       for (let c = 0; c < 3; c++) {
@@ -527,7 +564,7 @@ export class StretchMetric implements NodeGeometryHook {
   private takeSnapshot(): void {
     const live = this.live;
     const state = this.measuredAt;
-    setMapState(state, live.morph, live.projection, live.radius, live.basis);
+    setMapState(state, live.map.morph, live.map.projection, live.map.radius, live.basis);
     this.poleCount = 0;
     const b = state.basis;
     for (let sign = 1; sign >= -1; sign -= 2) {
@@ -611,26 +648,16 @@ export class StretchMetric implements NodeGeometryHook {
       const principal = Math.atan2(v2, v1);
       lon = principal + TWO_PI * Math.round((refLon - principal) / TWO_PI);
     }
-    const xy = stretchMapXY(lon, lat, state.morph, state.projection, state.radius, this.xy);
-    const x = xy[0];
-    const y = xy[1];
-    // The bend (`bend()` of atmosphere/bent-planet.ts) of the map point at height 0, in the map frame.
-    const k = state.k;
-    const kx = k * x;
-    const ky = k * y;
-    const cx = Math.cos(kx);
-    const sx = Math.sin(kx);
-    const cy = Math.cos(ky);
-    const sy = Math.sin(ky);
-    const hx = sinc(kx / 2);
-    const hy = sinc(ky / 2);
-    const mx = cy * x * sinc(kx);
-    const my = y * sinc(ky);
-    const mz = -(0.5 * k * x * x * hx * hx + cx * 0.5 * k * y * y * hy * hy) + state.shift;
+    const xy = morphMapXY(lon, lat, state.map, this.xy);
+    // The bend of the map point at height 0 (the frame module's `bendPointInto`); the shift puts the globe's centre back on the origin.
+    const bent = bendPointInto(xy[0], xy[1], state.map.k, 0, this.bent);
+    const mx = bent.position[0];
+    const my = bent.position[1];
+    const mz = bent.position[2] + state.map.shift;
+    const nxm = bent.normal[0];
+    const nym = bent.normal[1];
+    const nzm = bent.normal[2];
     const o = slot * 3;
-    const nxm = cy * sx;
-    const nym = sy;
-    const nzm = cx * cy;
     // Map frame to body frame: right x + up y + forward z.
     for (let c = 0; c < 3; c++) {
       this.pos[o + c] = b[6 + c] * mx + b[3 + c] * my + b[c] * mz;

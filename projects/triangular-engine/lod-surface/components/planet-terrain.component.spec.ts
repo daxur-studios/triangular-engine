@@ -5,7 +5,9 @@ import { Subject } from 'rxjs';
 import { PerspectiveCamera, Scene } from 'three';
 import type { NodeMaterial } from 'three/webgpu';
 import { EngineService } from 'triangular-engine';
-import { TERRAIN_DEFAULTS, createGroundSample, createHeightSource, runBake, type BakeClient } from 'triangular-engine/lod-surface/core';
+import {
+  LodTerrainBody, StretchMetric, TERRAIN_DEFAULTS, createGroundSample, createHeightSource, projectionBasis, runBake, type BakeClient,
+} from 'triangular-engine/lod-surface/core';
 import { buildCellPlanetWorld } from 'triangular-engine/worldgen';
 import { TerrainPlanetMaterial } from '../terrain-planet-material';
 import { PlanetTerrainComponent } from './planet-terrain.component';
@@ -314,6 +316,43 @@ describe('PlanetTerrainComponent', () => {
     expect(sample.normal.every(Number.isFinite)).toBeTrue();
     fixture.destroy();
   });
+
+  it('takes morph, projection and projection centre as its own without a planet, and selects in the bent frame above 0', () => {
+    const fixture = TestBed.createComponent(PlanetTerrainComponent);
+    fixture.componentRef.setInput('radius', 10_000);
+    fixture.componentRef.setInput('morph', 0.5);
+    fixture.componentRef.setInput('projection', 'equirectangular');
+    fixture.componentRef.setInput('projectionCentre', { lonDeg: 30, latDeg: 10 });
+    fixture.detectChanges();
+    const terrain = fixture.componentInstance.terrain()!;
+    beforeRender$.next();
+    expect(terrain.settings.morph).toBeTrue();
+    expect(terrain.settings.poleFan).toBeTrue();
+    expect(terrain.surface.morphState.morph).toBe(0.5);
+    const map = terrain.surface.morphState.map!;
+    expect(map.projection).toBe('equirectangular');
+    const basis = projectionBasis(30, 10);
+    for (let k = 0; k < 3; k++) expect(map.basis.forward[k]).toBeCloseTo(basis.forward[k], 9);
+    expect(terrain.selector.hook).toBeInstanceOf(StretchMetric);
+    expect(terrain.object.children).toContain(terrain.surface.poleFanMesh!);
+
+    // Clamped like `<planet>`'s morph, and the uniform set follows.
+    fixture.componentRef.setInput('morph', 2);
+    fixture.detectChanges();
+    beforeRender$.next();
+    expect(terrain.surface.morphState.morph).toBe(1);
+    fixture.destroy();
+  });
+
+  it('at its default morph 0 has no stretch hook and no pole fan in the scene', () => {
+    const fixture = create();
+    const terrain = fixture.componentInstance.terrain()!;
+    beforeRender$.next();
+    expect(terrain.surface.morphState.morph).toBe(0);
+    expect(terrain.selector.hook).toBeUndefined();
+    expect(terrain.object.children).toEqual([terrain.surface.mesh]);
+    fixture.destroy();
+  });
 });
 
 @Component({
@@ -341,16 +380,21 @@ describe('PlanetTerrainComponent inside <planet>', () => {
   const flush = () => new Promise<void>((resolve) => setTimeout(resolve));
   let error$: Subject<{ phase: string; error: unknown }>;
   let errors: { phase: string; error: unknown }[];
+  let camera: PerspectiveCamera;
+  let beforeRender$: Subject<void>;
 
   beforeEach(() => {
     error$ = new Subject();
     errors = [];
     error$.subscribe((event) => errors.push(event));
+    camera = new PerspectiveCamera(60, 16 / 9, 0.1, 1e9);
+    camera.position.set(0, 0, 10_050);
+    beforeRender$ = new Subject<void>();
     const engine = {
       scene: new Scene(),
-      camera: new PerspectiveCamera(60, 16 / 9, 0.1, 1e9),
+      camera,
       renderer: { isWebGPURenderer: true, domElement: { height: 720 } },
-      beforeRender$: new Subject<void>(),
+      beforeRender$,
       error$,
     };
     TestBed.configureTestingModule({
@@ -440,24 +484,58 @@ describe('PlanetTerrainComponent inside <planet>', () => {
     fixture.destroy();
   });
 
-  it('keeps drawing the sphere while the planet morphs, and says so once (phase morph)', () => {
+  it('bends into the map while the planet morphs: the body has the morph and pole fan, a stretch hook, bent culling, and nothing is reported', () => {
     const { fixture, host, component } = create();
-    expect(errors).toEqual([]);
     host.morph.set(0.5);
     fixture.detectChanges();
-    expect(errors.length).toBe(1);
-    expect(errors[0].phase).toBe('morph');
-    expect(String(errors[0].error)).toContain('sphere');
-    expect(component.terrain()).toBeDefined();
-    expect(component.terrain()!.settings.domain.kind).toBe('sphere');
+    const terrain = component.terrain()!;
+    beforeRender$.next();
+    expect(errors).toEqual([]);
+    expect(terrain.settings.domain.kind).toBe('sphere');
+    expect(terrain.settings.morph).toBeTrue();
+    expect(terrain.settings.poleFan).toBeTrue();
+    expect(terrain.surface.morphState.morph).toBe(0.5);
+    expect(terrain.selector.hook).toBeInstanceOf(StretchMetric);
+    expect((terrain as unknown as { morphCulling: string }).morphCulling).toBe('bent-bounds');
+    expect(terrain.object.children).toContain(terrain.surface.poleFanMesh!);
+    expect(terrain.stats.drawn).toBeGreaterThan(0);
 
-    host.morph.set(1);
+    const selector = terrain.selector;
+    fixture.destroy();
+    expect(selector.hook).toBeUndefined();
+    expect(errors).toEqual([]);
+  });
+
+  it('at morph 0 reports nothing, installs no hook and draws the same leaves as a body without the morph', () => {
+    const { fixture, component } = create();
+    const terrain = component.terrain()!;
+    beforeRender$.next();
+    expect(errors).toEqual([]);
+    expect(terrain.surface.morphState.morph).toBe(0);
+    expect(terrain.selector.hook).toBeUndefined();
+    expect(terrain.object.children).toEqual([terrain.surface.mesh]);
+
+    const reference = new LodTerrainBody({ ...terrain.settings, morph: false, poleFan: false });
+    reference.update(camera, 720);
+    expect(terrain.stats.leaves).toBe(reference.stats.leaves);
+    expect(terrain.stats.drawn).toBe(reference.stats.drawn);
+    reference.dispose();
+    fixture.destroy();
+  });
+
+  it('lets go of the stretch hook and the pole fan when the planet\'s morph returns to 0', () => {
+    const { fixture, host, component } = create();
+    host.morph.set(0.5);
     fixture.detectChanges();
+    const terrain = component.terrain()!;
+    beforeRender$.next();
+    expect(terrain.selector.hook).toBeInstanceOf(StretchMetric);
     host.morph.set(0);
     fixture.detectChanges();
-    host.morph.set(0.2);
-    fixture.detectChanges();
-    expect(errors.length).toBe(1);
+    beforeRender$.next();
+    expect(terrain.selector.hook).toBeUndefined();
+    expect(terrain.object.children).toEqual([terrain.surface.mesh]);
+    expect(errors).toEqual([]);
     fixture.destroy();
   });
 
@@ -530,6 +608,16 @@ describe('PlanetTerrainComponent inside <planet>', () => {
       fixture.destroy();
       expect(disposeOwn).not.toHaveBeenCalled();
       expect(disposeOwned).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives the material it makes the planet\'s morph uniforms', () => {
+      const { fixture, host, component } = create();
+      host.world.set(world);
+      fixture.detectChanges();
+      const planet = fixture.debugElement.query(By.directive(PlanetComponent)).componentInstance as PlanetComponent;
+      const material = component.surface() as TerrainPlanetMaterial;
+      expect((material as unknown as { sharedMorph: unknown }).sharedMorph).toBe(planet.morphUniforms);
+      fixture.destroy();
     });
 
     it('creates no material without a world', () => {

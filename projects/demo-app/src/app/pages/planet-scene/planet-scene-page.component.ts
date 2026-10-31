@@ -9,7 +9,7 @@ import { cellPlanetFor, createGroundSample, type Vec3 } from 'triangular-engine/
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import { bakeInWorker } from '../lod-surface-lab/lod-height-bake-client';
 import {
-  PLANET_POSES, PLANET_RADIUS_M, groundUp, motionView, nearPlaneFor, planetPoseView, resolvePlanetCamera, sceneSunDirection,
+  PLANET_POSES, PLANET_RADIUS_M, groundUp, motionMorph, motionView, nearPlaneFor, planetPoseView, resolvePlanetCamera, sceneSunDirection,
   type PlanetMotion, type PlanetPoseId, type PlanetView,
 } from './planet-camera';
 import { createPlanetSceneTestAdapter, type PlanetSceneTestHost } from './planet-scene-test-adapter';
@@ -18,8 +18,8 @@ import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_TEST_HISTORY, type PlanetSc
 /**
  * Plan 059 step G5: the planet scene. `<planet>` with `<planetTerrain>` and `<planetAtmosphere>` inside it, written the way
  * a game writes it: the radius, the sun and the baked cell-planet world are given to the planet once, and the layers read them.
- * WebGPU only. Clouds are a placeholder (`<planetClouds>` has its own plan); the morph slider is bound to `<planet [morph]>`,
- * but the terrain does not bend until step G6 and says so.
+ * WebGPU only. Clouds are a placeholder (`<planetClouds>` has its own plan). The morph slider is bound to `<planet [morph]>`:
+ * the terrain bends into the flat map; the sky and the clouds do not morph yet.
  *
  * The camera stands in the scene frame (the planet's centre is the origin) and is placed every tick from a pose or a scripted
  * move; the terrain's `groundAt` keeps the eye above the drawn ground. Reversed float depth, so a 2 cm near plane and an orbit
@@ -30,8 +30,10 @@ const FOV_DEG = 60;
 const THUMBNAIL_WIDTH = 240;
 /** Selection samples kept for the HUD's running mean. */
 const HUD_SAMPLES = 60;
+/** The scripted moves the page's own "play" buttons run (the morph sweep is only run by a test). */
+type DemoMotion = Exclude<PlanetMotion, 'morphSweep'>;
 /** How long the page's own "play" buttons take for a scripted move, seconds. */
-const PLAY_SECONDS: Readonly<Record<PlanetMotion, number>> = { descent: 14, yaw360: 12 };
+const PLAY_SECONDS: Readonly<Record<DemoMotion, number>> = { descent: 14, yaw360: 12 };
 
 const SOFTWARE = /swiftshader|llvmpipe|software|basic render|microsoft basic/i;
 
@@ -131,9 +133,6 @@ interface RendererLike {
         <p class="row">morph {{ morph().toFixed(2) }}
           <input type="range" min="0" max="1" step="0.05" aria-label="Globe to map morph" [value]="morph()" (input)="setMorph(+$any($event.target).value)" />
         </p>
-        @if (morphNotice()) {
-          <p class="note warn" data-testid="morph-notice">{{ morphNotice() }}</p>
-        }
       </fieldset>
       @if (errorLine()) {
         <p class="note warn" role="alert">{{ errorLine() }}</p>
@@ -182,7 +181,7 @@ export class PlanetScenePageComponent {
   readonly atmosphereOn = signal(DEFAULT_PLANET_SCENE_SETTINGS.atmosphere);
   readonly morph = signal(DEFAULT_PLANET_SCENE_SETTINGS.morph);
   /** The page's own scripted move (the "play" buttons), or undefined. */
-  readonly playing = signal<PlanetMotion | undefined>(undefined);
+  readonly playing = signal<DemoMotion | undefined>(undefined);
 
   private readonly planet = viewChild(PlanetComponent);
   private readonly terrainLayer = viewChild(PlanetTerrainComponent);
@@ -213,8 +212,6 @@ export class PlanetScenePageComponent {
   readonly altitudeLabel = signal('');
   readonly triangles = computed(() => this.triangleCount().toLocaleString('en-US'));
   private readonly triangleCount = signal(0);
-  /** The terrain's one report that it draws the sphere while the morph is above 0 (shown, not a test error). */
-  readonly morphNotice = signal('');
   readonly errorLine = signal('');
   readonly bakeLine = computed(() => {
     const planet = this.planet();
@@ -228,7 +225,7 @@ export class PlanetScenePageComponent {
   /** Progress (0..1) of the scripted move a test drives, or undefined when none runs. */
   private testProgress: number | undefined;
   private testMotion: PlanetMotion | undefined;
-  private demo: { readonly motion: PlanetMotion; readonly began: number } | undefined;
+  private demo: { readonly motion: DemoMotion; readonly began: number } | undefined;
   private renderedFrames = 0;
   private engineError = '';
   private lastDrawCalls = 0;
@@ -269,7 +266,7 @@ export class PlanetScenePageComponent {
     selectionSamples: () => this.selectionSamples,
     leafSamples: () => this.leafSamples,
     resetSamples: () => { this.selectionSamples = []; this.leafSamples = []; },
-    setMotionProgress: (t) => { this.testProgress = t; },
+    setMotionProgress: (t) => this.setTestProgress(t),
     isSampling: () => this.engine.fpsController.frameSampler.isActive,
     startSampling: () => this.engine.fpsController.frameSampler.start(),
     gpuSamplesSoFar: () => this.engine.fpsController.frameSampler.gpuSamples,
@@ -284,11 +281,6 @@ export class PlanetScenePageComponent {
 
   constructor() {
     const errors = this.engine.error$.subscribe((event) => {
-      if (event.phase === 'morph') {
-        // The terrain's one-time "I draw the sphere until G6" report: a fact of this step, not a failure of a run.
-        this.morphNotice.set(event.error instanceof Error ? event.error.message : String(event.error));
-        return;
-      }
       const line = `${event.phase}: ${String(event.error)}`;
       this.engineError ||= line;
       this.errorLine.set(line);
@@ -332,7 +324,7 @@ export class PlanetScenePageComponent {
     this.pose.set(id);
   }
 
-  play(motion: PlanetMotion): void {
+  play(motion: DemoMotion): void {
     if (this.runnerBusy()) return;
     this.demo = { motion, began: performance.now() };
     this.playing.set(motion);
@@ -365,7 +357,18 @@ export class PlanetScenePageComponent {
     this.morph.set(settings.morph);
     this.pose.set(settings.pose);
     this.testMotion = settings.motion;
-    this.testProgress = settings.motion ? 0 : undefined;
+    this.setTestProgress(settings.motion ? 0 : undefined);
+  }
+
+  /**
+   * The scripted move a test runs, `t` (0..1) into it, or undefined to end it. A move that drives the morph (`morphSweep`) sets
+   * `<planet [morph]>` here, in step with the progress, so the page's morph is the sweep's value when a sample is taken.
+   */
+  private setTestProgress(t: number | undefined): void {
+    this.testProgress = t;
+    if (t === undefined || !this.testMotion) return;
+    const morph = motionMorph(this.testMotion, t);
+    if (morph !== undefined) this.morph.set(morph);
   }
 
   /**

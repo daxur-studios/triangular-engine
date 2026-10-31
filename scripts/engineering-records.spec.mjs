@@ -20,6 +20,7 @@ import {
   inspectDocuments,
   nextNumber,
   refreshReview,
+  unarchiveDocument,
 } from "./engineering-records.mjs";
 
 const SCRIPT = fileURLToPath(
@@ -684,4 +685,97 @@ test("archive via CLI rejects uncommitted changes without commit or force", asyn
   );
   assert.notEqual(run.status, 0);
   assert.match(run.stderr, /Pass --commit <hash>/);
+});
+
+test("unarchive restores original plan and record from git history and updates index", async () => {
+  // Initialize git repo in the temp root
+  spawnSync("git", ["init"], { cwd: root });
+  spawnSync("git", ["config", "user.name", "Test User"], { cwd: root });
+  spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+
+  const created = await create("unarchive-feature", "Unarchive feature");
+  const planPath = path.join(root, created.plan);
+  const planText = await readFile(planPath, "utf8");
+  const customizedPlan = planText.replace(
+    "Describe the user-visible or developer-visible result.",
+    "Custom intended outcome for testing unarchive.",
+  );
+  await writeFile(planPath, customizedPlan, "utf8");
+  await refreshReview({ root, planPath: created.plan, reviewer: "agent" });
+
+  // Commit so git history holds the original content
+  spawnSync("git", ["add", "."], { cwd: root });
+  spawnSync("git", ["commit", "-m", "Commit feature"], { cwd: root });
+
+  // Archive
+  const archiveResult = await archiveDocument({
+    root,
+    docPath: created.plan,
+  });
+  assert.ok(archiveResult.commit);
+
+  const stubText = await readFile(planPath, "utf8");
+  assert.match(stubText, /status: archived/);
+  assert.match(stubText, /This plan has been archived\./);
+
+  // Unarchive directly
+  const unarchiveResult = await unarchiveDocument({
+    root,
+    docPath: created.plan,
+  });
+  assert.equal(unarchiveResult.documentId, "plan-001");
+  assert.equal(unarchiveResult.recordId, "er-001");
+  assert.equal(unarchiveResult.status, "planned");
+
+  // Verify file contents restored
+  const restoredPlanText = await readFile(planPath, "utf8");
+  assert.match(restoredPlanText, /Custom intended outcome for testing unarchive\./);
+  assert.doesNotMatch(restoredPlanText, /status: archived/);
+  assert.doesNotMatch(restoredPlanText, /This plan has been archived\./);
+
+  const restoredRecordText = await readFile(path.join(root, created.record), "utf8");
+  assert.doesNotMatch(restoredRecordText, /status: archived/);
+
+  // Verify index restored
+  const planIndex = await readFile(path.join(root, "docs", "plans", "index.md"), "utf8");
+  assert.match(planIndex, /\|\s*\[Unarchive feature\]\(\/docs\/plans\/001_unarchive-feature\.md\)\s*\|\s*planned\s*\|/);
+
+  // Inspect manifest passes with 0 errors
+  const inspected = await inspectDocuments(root);
+  assert.deepEqual(inspected.errors, []);
+  const doc = inspected.manifest.documents.find((d) => d.id === "plan-001");
+  assert.ok(doc);
+  assert.notEqual(doc.status, "archived");
+});
+
+test("unarchive via CLI restores documents and allows status override", async () => {
+  spawnSync("git", ["init"], { cwd: root });
+  spawnSync("git", ["config", "user.name", "Test User"], { cwd: root });
+  spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+
+  const created = await create("cli-unarchive", "CLI Unarchive");
+  spawnSync("git", ["add", "."], { cwd: root });
+  spawnSync("git", ["commit", "-m", "Commit for cli unarchive"], { cwd: root });
+
+  await archiveDocument({ root, docPath: created.plan });
+
+  const run = spawnSync(
+    process.execPath,
+    [SCRIPT, "unarchive", created.plan, "--root", root, "--status", "in_progress"],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /Unarchived plan-001/);
+  assert.match(run.stdout, /status: in_progress/);
+
+  const planIndex = await readFile(path.join(root, "docs", "plans", "index.md"), "utf8");
+  assert.match(planIndex, /\|\s*\[CLI Unarchive\]\(\/docs\/plans\/001_cli-unarchive\.md\)\s*\|\s*in_progress\s*\|/);
+});
+
+test("unarchive rejects unarchived document without force", async () => {
+  const created = await create("not-archived", "Not archived");
+  await assert.rejects(
+    unarchiveDocument({ root, docPath: created.plan }),
+    /is not archived/,
+  );
 });

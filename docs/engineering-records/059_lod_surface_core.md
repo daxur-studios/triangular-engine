@@ -1972,3 +1972,19 @@ Built by a Sonnet subagent and reviewed here. Library only (`lod-surface/core`);
 - `computeMorphFrame` allocates a few objects every frame.
 - Above morph 0 the shading normal is only the bent up direction (G6e).
 - The selector sees the unbent camera. G6c's stretch metric needs the camera in the measured frame, which G6e wires.
+
+## 2026-10-31: G6d and G6e: the pole fan, the amortised metric, and the morph in the components
+
+Built by Haiku 5.5 subagents (one per unit) and reviewed here. Library only; nothing was seen on a real GPU.
+
+**What was added.**
+- **G6d, pole fan** (`lod-morph-fan.ts`, `lod-morph-fan-stage.ts`): the leaves that hold a projection pole are drawn as one fan in the vertex stage. Specs: 0 holes, rim within 1 px, no CPU rebuild on camera or morph moves (a rebuild only for a new projection centre, radius, ray count or pole leaves). The fan is the base sphere in a flat colour.
+- **G6e-a, selector:** `StretchMetric` re-measures at most `refreshBudget` nodes per pass (default 300, about 14 µs per node). The older one-pass refresh cost 25 to 36 ms in a frame. The two G6c specs that asserted one pass now run with `refreshBudget: Infinity`. The map maths now lives only in `lod-morph-frame.ts`.
+- **G6e-b/c, material and mesh:** `LodSurfaceNodes.globePosition` / `globeNormal` (with `uBendShift`, the unbent camera minus the bent one, because `today` is relative to the unbent camera). `TerrainPlanetMaterial({ morphUniforms })` uses them for `bodyFixedLocal` and the relief normal; the shading normal blends to `bentUp`; direct shadows are off above morph 0 through `receivedShadowNode`. `radialDirection` stays `nodes.up`.
+- **G6e-d, components:** `<planetTerrain>` inputs `morph`, `projection`, `projectionCentre` (standalone), the default material gets the planet's uniforms, the sphere is built with `morph` and `poleFan`, and the phase-`morph` report is removed. The stretch metric lives in `LodTerrainBody.setMorphMetric` (not in the component), because `configure()` remakes the selector on every settings change and a component-built metric would keep the old one.
+
+**Results.** The lod-surface and planet-material suites pass (439) and the library builds. On the headless WebGL renderer, the globe fields at morph 0 equal the drawn position and normal exactly (gap 0), the globe position lies on the sphere to 0.08 m at morph 0 and 1, and the globe normal matches the radial up to 1e-6 at the median. 16 of 4096 pixels on the picture's outer rows and columns reach 3e-3 (the test bounds p99 at 1e-3 and the maximum at 1e-2); the cause is not found.
+
+**A test trap.** A mesh read back through `colorNode` clamps negative values to 0 (camera-relative positions are negative), so the first G6e-c spec saw zeros. Use `fragmentNode` for readback, and give the first GPU draw a long timeout (it compiles the shader; the 5 s default is too short).
+
+**Still open.** The fan takes no terrain material, height or detail; its per-frame update allocates; the crack probe is not ported; the pole-zone float32 floor (12.8 px and 2.1 px in two emulated cases within about 60 m of the pole) needs the real GPU (G6f); the refresh default of 300 is a guess to measure there; relief fades out as the map flattens; the culling error of `'bent-bounds'` is not measured. The atmosphere, clouds and scattered objects do not morph yet.

@@ -71,8 +71,8 @@ const inlineBake: BakeClient = async (source, layout, planet) => {
  * always wins, and both keep working with no `<planet>` around them.
  *
  * **Morph.** `morph` (0 globe, 1 flat map), `projection` and `projectionCentre` are written into one set of morph
- * uniforms ({@link morphUniforms}); `morphUniform` is its `uMorph`, which the atmosphere follows. The terrain does not bend
- * yet (step G6): while `morph` is above 0 it keeps drawing the sphere and says so once on `engine.error$` (phase `morph`).
+ * uniforms ({@link morphUniforms}); `morphUniform` is its `uMorph`, which the atmosphere follows. `<planetTerrain>` bends into
+ * the same map with them (Plan 059 G6e), and so does its material.
  *
  * **World.** With `world` set, the planet bakes the heights ({@link heights}), and `<planetTerrain>` inside it draws them
  * with a `TerrainPlanetMaterial` painted from the same world ({@link cellPlanet}), unless it is given its own `heights` or
@@ -119,7 +119,7 @@ export class PlanetComponent implements PlanetContext {
 
   /**
    * The one set of morph uniforms every layer shares, written from `morph`, `projection`, `projectionCentre` and `radius`
-   * (the map extent). Owned by the planet; the globe-to-map morph (step G6) reads it.
+   * (the map extent). Owned by the planet; the globe-to-map morph of `<planetTerrain>` and its material reads it.
    */
   readonly morphUniforms: IPlanetMorphUniforms = createPlanetMorphUniforms();
   /** The shared morph uniform, `morphUniforms.uMorph`: the same object for the planet's life. */

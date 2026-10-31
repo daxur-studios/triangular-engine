@@ -4,12 +4,18 @@ import { EngineService, PLANET_CONTEXT } from 'triangular-engine';
 import {
   TERRAIN_DEFAULTS, createHeightSource, type GroundSample, type CubeWarp, type HeightSource, type LodView, type PatchCells, type Vec3,
 } from 'triangular-engine/lod-surface/core';
+import { createPlanetMorphUniforms, setPlanetMapExtent, setPlanetProjectionCentre, type IPlanetMorphUniforms } from 'triangular-engine/planet-material';
 import { TerrainPlanetMaterial } from '../terrain-planet-material';
 import { attachLodTerrain } from './attach-lod-terrain';
-import { PlanetComponent } from './planet.component';
+import { PlanetComponent, type PlanetProjection, type PlanetProjectionCentre } from './planet.component';
 
 /** The sun used when neither the terrain nor a `<planet>` gives one. */
 const DEFAULT_SUN: Vec3 = [0.4, 0.8, 0.45];
+
+/** The morph as `<planet>` clamps it: 0 (globe) to 1 (flat map); not finite is 0. */
+function clampMorph(value: number): number {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+}
 
 /**
  * The 3D ground of a sphere, with level of detail: a cube-sphere of quadtree leaves selected on the CPU from the active
@@ -33,8 +39,12 @@ const DEFAULT_SUN: Vec3 = [0.4, 0.8, 0.45];
  * when it has a `world` (flat until the bake lands, then the mesh is rebuilt); and, for that `world`, a
  * `TerrainPlanetMaterial` painted from the same cell planet, which the terrain makes, owns and disposes (on destroy and when
  * the world changes). A `material` you pass stays yours to dispose. With no radius from either, the terrain shows nothing and
- * says so once on `engine.error$` (phase `config`). While the planet's `morph` is above 0 the terrain still draws the sphere
- * (the bend arrives in step G6) and says so once on `engine.error$` (phase `morph`). Without a `<planet>` nothing changes.
+ * says so once on `engine.error$` (phase `config`).
+ *
+ * **Morph.** The sphere bends into the map as the planet's `morph` rises (0 globe, 1 flat map), in the planet's `projection` and
+ * around its `projectionCentre`, and the terrain selects in the bent frame, so it keeps its detail on the map. Its material
+ * follows the same morph (`TerrainPlanetMaterial`'s `morphUniforms`). Without a `<planet>` the same three inputs
+ * (`morph`, `projection`, `projectionCentre`) drive the terrain alone; with one, the planet's values win.
  *
  * Inputs are read when they change: changing `radius`, `warp`, `heights`, `patchCells`, `leafCap`, `material` or switching
  * the noise on or off rebuilds the mesh; the other inputs only update it. Telemetry (leaves, drawn leaves, selection time,
@@ -97,6 +107,22 @@ export class PlanetTerrainComponent {
   readonly bounds = input(true);
   /** Wireframe drawing. */
   readonly wireframe = input(false);
+  /**
+   * The globe-to-map morph: 0 is the globe, 1 the flat map; values outside are clamped. Standalone only: inside a `<planet>`
+   * the planet's `morph` is used and this input is ignored. Default 0.
+   */
+  readonly morph = input<number, number>(0, { transform: clampMorph });
+  /** The map the morph flattens to. Standalone only (see {@link morph}). Default `'equal-earth'`. */
+  readonly projection = input<PlanetProjection>('equal-earth');
+  /**
+   * Centre the map on a longitude and latitude in degrees (body frame: longitude 0 is +Z), or `null` for the baked centre.
+   * Standalone only (see {@link morph}). Default `null`.
+   */
+  readonly projectionCentre = input<PlanetProjectionCentre | null>(null);
+
+  /** The uniforms the morph is read from: `<planet>`'s inside one, else this terrain's own, written from the three inputs above. */
+  private readonly ownMorph = createPlanetMorphUniforms();
+  private readonly morphUniforms: IPlanetMorphUniforms = this.planet?.morphUniforms ?? this.ownMorph;
 
   private readonly effectiveRadius = computed(() => this.radius() ?? this.context?.radius());
   /** The material made for the enclosing planet's world, kept to dispose it when it is replaced and on destroy. */
@@ -110,7 +136,7 @@ export class PlanetTerrainComponent {
       this.ownedMaterial = undefined;
       if (!cellPlanet) return undefined;
       try {
-        this.ownedMaterial = new TerrainPlanetMaterial({ cellPlanet });
+        this.ownedMaterial = new TerrainPlanetMaterial({ cellPlanet, morphUniforms: this.morphUniforms });
       } catch (error) {
         this.report('config', error);
       }
@@ -149,6 +175,8 @@ export class PlanetTerrainComponent {
           heights: this.heights() ?? this.planet?.heights() ?? this.flat,
           detailNoise: this.detailNoise(),
           ...(detailCells === undefined ? {} : { detailCells }),
+          morph: true,
+          poleFan: true,
           leafCap: this.leafCap(),
           cellPixels: this.cellPixels(),
           patchCells: this.patchCells(),
@@ -161,29 +189,36 @@ export class PlanetTerrainComponent {
         lighting: this.lighting(),
         bounds: this.bounds(),
         wireframe: this.wireframe(),
+        morph: this.morphUniforms,
       };
     }),
   );
 
   private reportedConfig = false;
-  private reportedMorph = false;
 
   constructor() {
+    if (!this.planet) {
+      // Standalone: this terrain's own uniforms follow its inputs. Inside a `<planet>` the planet writes the shared ones.
+      effect(() => {
+        this.ownMorph.uMorph.value = this.morph();
+      });
+      effect(() => {
+        this.ownMorph.uProjectionType.value = this.projection() === 'equal-earth' ? 1 : 0;
+      });
+      effect(() => {
+        setPlanetProjectionCentre(this.ownMorph, this.projectionCentre());
+      });
+      effect(() => {
+        const radius = this.effectiveRadius();
+        if (radius !== undefined) setPlanetMapExtent(this.ownMorph, radius);
+      });
+    }
     effect(() => {
       const missing = this.effectiveRadius() === undefined;
       untracked(() => {
         if (missing && !this.reportedConfig) {
           this.reportedConfig = true;
           this.report('config', new Error('<planetTerrain> has no radius: set [radius] or put it inside a <planet [radius]>. Nothing is drawn.'));
-        }
-      });
-    });
-    effect(() => {
-      const morph = this.context?.morph() ?? 0;
-      untracked(() => {
-        if (morph > 0 && !this.reportedMorph) {
-          this.reportedMorph = true;
-          this.report('morph', new Error("<planetTerrain> draws the sphere only: the planet's morph is above 0, but the terrain does not bend into the map until the globe-to-map morph (Plan 059, step G6)."));
         }
       });
     });

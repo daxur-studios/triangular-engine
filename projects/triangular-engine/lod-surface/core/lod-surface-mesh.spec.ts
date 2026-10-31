@@ -47,6 +47,20 @@ describe('createLodSurfaceMesh morph option', () => {
     morph.dispose();
   });
 
+  it('exposes the unbent position and the globe normal only with the morph option', () => {
+    const plain = build(false);
+    const morph = build(true);
+    expect(plain.nodes.globePosition).toBeUndefined();
+    expect(plain.nodes.globeNormal).toBeUndefined();
+    expect(morph.nodes.globePosition).toBeDefined();
+    expect(morph.nodes.globeNormal).toBeDefined();
+    // The drawn position and normal are unchanged by the new fields (the position stays the bent one above morph 0).
+    expect(morph.nodes.position).toBeDefined();
+    expect(morph.nodes.normal).toBeDefined();
+    plain.dispose();
+    morph.dispose();
+  });
+
   it('refuses a plane, and setMorph without the option', () => {
     expect(() => build(true, PLANE)).toThrowError(/sphere/);
     const plain = build(false);

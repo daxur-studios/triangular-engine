@@ -2,9 +2,13 @@ import { DestroyRef, effect, signal, untracked, type Signal } from '@angular/cor
 import type { Camera, Object3D, PerspectiveCamera, Scene } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
 import type { EngineService } from 'triangular-engine';
-import { LodTerrainBody, type LodTerrainSettings, type LodView, type Vec3 } from 'triangular-engine/lod-surface/core';
+import { LodTerrainBody, type LodTerrainSettings, type LodView, type MorphUniformsLike, type Vec3 } from 'triangular-engine/lod-surface/core';
 
-/** What the terrain components read each time an input changes: the body's settings plus its debug and lighting switches. */
+/**
+ * What the terrain components read each time an input changes: the body's settings plus its debug and lighting switches.
+ * `morph`, when given (a sphere), is the shared morph uniform set the body reads every frame: the globe-to-map morph, with the
+ * stretch metric that selects in the bent frame (Plan 059 G6e).
+ */
 export interface LodTerrainInputs {
   readonly settings: LodTerrainSettings;
   readonly sunDirection: Vec3 | readonly [number, number, number];
@@ -12,6 +16,7 @@ export interface LodTerrainInputs {
   readonly lighting: boolean;
   readonly bounds: boolean;
   readonly wireframe: boolean;
+  readonly morph?: MorphUniformsLike;
 }
 
 /** The terrain is shown after this long even if `compileAsync` has not answered; its first frame then pays the compile. */
@@ -60,6 +65,10 @@ export function attachLodTerrain(engine: EngineService, destroyRef: DestroyRef, 
       body.setBounds(inputs.bounds);
       body.setWireframe(inputs.wireframe);
       body.setSun([inputs.sunDirection[0], inputs.sunDirection[1], inputs.sunDirection[2]]);
+      if (inputs.morph) {
+        body.setMorph(inputs.morph);
+        body.setMorphMetric(true);
+      }
     });
   });
 

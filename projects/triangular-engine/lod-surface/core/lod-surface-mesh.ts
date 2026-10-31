@@ -11,10 +11,12 @@ import type { HeightSource } from './lod-height';
 import { SIN_DENOMINATORS, anchorFor, latticeSteps, newAnchor } from './lod-lattice';
 import { LEAF_STRIDE, packLeaves } from './lod-leaf-pack';
 import {
-  computeMorphFrame, createMorphMap, morphSettingsFromUniforms, unbendPosition, type LodMorphSettings, type MorphFrame, type MorphMap, type MorphUniformsLike,
+  MorphMapResolver, computeMorphFrame, unbendPosition, type LodMorphSettings, type MorphFrame, type MorphMap, type MorphUniformsLike,
 } from './lod-morph-frame';
-import { instanceCapacity, packMorphLeaves, type MorphPack } from './lod-morph-leaves';
+import { MorphLeafMemo, instanceCapacity, packMorphLeavesMemo, type MorphPack } from './lod-morph-leaves';
 import { createMorphStage } from './lod-morph-stage';
+import { createPoleFanStage } from './lod-morph-fan-stage';
+import { POLE_FAN_DEFAULT_RAYS, PoleFanTopology, poleFanStatsOf, type PoleFanStats } from './lod-morph-fan';
 import { maxLevelFor, type LodSelector, type PatchCells } from './lod-selector';
 
 /**
@@ -67,6 +69,17 @@ export interface LodSurfaceNodes {
    * above 0 it is the normal of the bent ground (a flat map's up is the projection's forward axis). Absent without the option.
    */
   readonly bentUp?: any;
+  /**
+   * Preview (needs the `morph` option, G6e-c): the vertex's position on the globe, unbent, in the same camera-relative space as
+   * {@link position} (varying), so a consumer lifts it exactly as it lifts `position`. Equals `position` at morph 0; above 0 it is
+   * the globe point the bent `position` came from (the height is included, as in `position`). Absent without the option.
+   */
+  readonly globePosition?: any;
+  /**
+   * Preview (needs the `morph` option, G6e-c): the relief shading normal on the globe (varying), i.e. {@link normal} at morph 0.
+   * Above 0 `normal` turns into the bent up while this stays the globe's, so a consumer can blend the two. Absent without the option.
+   */
+  readonly globeNormal?: any;
 }
 
 /**
@@ -123,6 +136,13 @@ export interface LodSurfaceMeshOptions {
    * the morph. `<planetTerrain>` does not use it yet (G6e).
    */
   readonly morph?: boolean;
+  /**
+   * Preview (Plan 059 G6d, needs ` morph `): draws the pole leaves (a projection pole at a leaf's corner or inside it) as one fan around each
+   * pole instead of as instances, so the pole has no seam above morph 0. Add {@link LodSurfaceMesh.poleFanMesh} to the scene beside the
+   * surface. Nothing is built or drawn at morph 0. The fan is the base sphere only (no height, no detail noise), and its material is a flat
+   * colour: a supplied ` material ` does not reach it.
+   */
+  readonly poleFan?: boolean;
 }
 
 /** The drawn surface and its controls: one instanced mesh, one draw call. */
@@ -140,6 +160,12 @@ export interface LodSurfaceMesh {
    * rewritten, and the GPU buffers only marked for upload, when the selection changed since the last call.
    */
   upload(selector: LodSelector, camera: Vec3): number;
+  /**
+   * The packs made so far: the number of uploads that wrote the drawn leaves into the instance buffers. A selection that leaves the drawn
+   * leaves, their masks and the morph map's basis and projection as they were writes nothing (it is not a pack), so this counts the work
+   * of the tree, not of the frames.
+   */
+  readonly packCount: number;
   /** Debug colouring of the built-in material. */
   setView(view: LodView): void;
   /** Draws the dark outline of every leaf patch (built-in material). */
@@ -175,6 +201,15 @@ export interface LodSurfaceMesh {
   unbend(camera: Vec3, out?: Vec3): Vec3;
   /** Preview: leave the pole-fan leaves (a pole of the projection at a corner or inside) out of the instances above morph 0. G6d draws them instead. */
   setSkipPoleLeaves(on: boolean): void;
+  /**
+   * Preview (needs the ` poleFan ` option): the fan's rays per full turn, at least 3. A change rebuilds the fan's descriptions on the next
+   * {@link upload}; nothing else is rebuilt. Default {@link POLE_FAN_DEFAULT_RAYS}.
+   */
+  setPoleFanRays(rays: number): void;
+  /** Preview (needs ` poleFan `): the pole fan's mesh, to add to the scene beside {@link mesh}; ` undefined ` without the option. */
+  readonly poleFanMesh: Mesh | undefined;
+  /** Preview (needs ` poleFan `): the fan's counts and build time at its last build; ` undefined ` before one (there is none at morph 0). */
+  readonly poleFanStats: PoleFanStats | undefined;
   /** Preview: the last frame's anchor values and outline (doubles), or `undefined` at morph 0; what G6d/G6e build on. */
   readonly morphFrame: MorphFrame | undefined;
   /** Preview: the counts of the last pack above morph 0 (duplicates for the cut, torn leaves, drops for capacity). */
@@ -225,6 +260,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const { domain, patchCells, source, capacity, detail } = options;
   const sphere = domain.kind === 'sphere';
   if (options.morph && !sphere) throw new Error('The morph option needs a sphere domain');
+  if (options.poleFan && !options.morph) throw new Error('The poleFan option needs the morph option');
   const morphStage = options.morph ? createMorphStage(domain, patchCells) : undefined;
   const instances = morphStage ? instanceCapacity(capacity) : capacity;
   const equalAngle = domain.warp === 'equal-angle';
@@ -248,6 +284,8 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const uAnchorError = uniform(new Vector3()) as any;
   const uAnchorCos = uniform(new Vector3(1, 1, 1)) as any;
   const uAnchorRel = uniform(new Vector3()) as any;
+  // The unbent camera minus the bent one (above morph 0, else 0): moves a position relative to the unbent camera onto the bent one.
+  const uBendShift = uniform(new Vector3()) as any;
   const size = float(domain.sizeM);
   const cells = float(patchCells);
 
@@ -316,11 +354,13 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     const noise = detail ? detailAt(own) : undefined;
     const height = noise ? base.add(noise.height) : base;
     const today = offset.add(up.mul(height));
-    if (!morphStage) return { position: today, detailSlope: noise?.slope, morph: undefined };
+    if (!morphStage) return { position: today, globePosition: today, detailSlope: noise?.slope, morph: undefined };
     // The morph (G6b): at morph 0 the drawn position is `today`, the same node as without the option; above 0 it is P2's bent position.
     const stage = morphStage.vertex({ t: own.t, gapT: own.gapT, du: own.du, info, height });
     return {
       position: select(morphStage.atGlobe.greaterThan(0.5), today, stage.rel),
+      // The unbent point (G6e-c): `today` is relative to the unbent camera; the shift makes it relative to the camera the mesh sits at.
+      globePosition: today.add(uBendShift),
       detailSlope: noise?.slope,
       morph: { ...stage, du: own.du },
     };
@@ -365,7 +405,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const alongX = min(1, south.mul(bit(mask, 0)).add(north.mul(bit(mask, 2)))).mul(oddX).mul(uFolding);
   const alongY = min(1, east.mul(bit(mask, 1)).add(west.mul(bit(mask, 3)))).mul(oddY).mul(uFolding);
   const foldStep = vec2(alongX as any, alongY as any);
-  const { position: positionNode, detailSlope, morph: morphNodes } = surfacePoint(grid.sub(foldStep));
+  const { position: positionNode, globePosition, detailSlope, morph: morphNodes } = surfacePoint(grid.sub(foldStep));
 
   // Lighting normal from the height gradient at the vertex's own grid point. The detail noise is built once per vertex, at
   // the folded, gapped point: folded edge vertices take the coarse vertex's detail slope (they sit on it), and the debug
@@ -385,7 +425,13 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     normal: shadingNormal,
     position: varying(positionNode, 'vLodPosition') as any,
     level,
-    ...(morphNodes ? { bentUp: varying(select(morphStage!.atGlobe.greaterThan(0.5), own.up, morphNodes.bentUp), 'vLodBentUp') as any } : {}),
+    ...(morphNodes
+      ? {
+          bentUp: varying(select(morphStage!.atGlobe.greaterThan(0.5), own.up, morphNodes.bentUp), 'vLodBentUp') as any,
+          globePosition: varying(globePosition, 'vLodGlobePosition') as any,
+          globeNormal: varying(globeNormal, 'vLodGlobeNormal') as any,
+        }
+      : {}),
   };
 
   const hue = fract(level.mul(0.137).add(0.05));
@@ -421,26 +467,94 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   mesh.frustumCulled = false;
   mesh.name = 'LOD surface';
 
+  // The pole fan (G6d): above morph 0 the pole leaves are drawn as one fan around each pole instead of as instances. Its topology is CPU
+  // state, rebuilt only when the pack is (see ` upload `); its vertex stage takes the frame from uniforms.
+  const poleFanStage = options.poleFan && morphStage
+    ? createPoleFanStage(domain, patchCells, morphStage, { anchorT: uAnchorT, anchorCube: uAnchorCube, anchorError: uAnchorError, anchorCos: uAnchorCos, frames, folding: uFolding })
+    : undefined;
+  const poleFanTopology = new PoleFanTopology();
+  let poleFanRays = POLE_FAN_DEFAULT_RAYS;
+  let poleFanShown = false;
   const attributes = ['aLeaf', 'aInfo'].map((name) => geometry.getAttribute(name) as InstancedBufferAttribute);
   const [leafData, infoData] = attributes.map((attr) => attr.array as Float32Array);
   const anchor = newAnchor();
   let packedFrom: LodSelector | undefined;
   let packedVersion = -1;
-  let packedKey = '';
   let packedCount = 0;
+  // The pack's key (see `upload`): the basis, the projection and the pole flag as numbers, and whether the last pack was of the globe (0)
+  // or of a map (1), -1 when it must be made again.
+  const packKey = new Float64Array(8);
+  const packedKey = new Float64Array(8);
+  let packedKind = -1;
+  // What the last pack read from the tree, per drawn leaf: node, mask, level, cell i, cell j and root. Compared with the tree on each
+  // selection that changed, so a selection that drew the same leaves does not pack again.
+  const treeSig = new Int32Array(6 * instances);
+  let treeSigCount = -1;
+  let packs = 0;
+  // The per-leaf facts of the pack, kept across packs (G6i): a leaf that stays drawn on the same cell is not analysed again.
+  const leafMemo = new MorphLeafMemo();
   // The morph (G6b): its source, the map resolved for this frame, and the last frame and pack.
   let morphSource: LodMorphSettings | MorphUniformsLike | undefined;
   let skipPoleLeaves = false;
   let morphMap: MorphMap | undefined;
   let morphFrame: MorphFrame | undefined;
+  let frameBuffer: MorphFrame | undefined;
   let morphPack: MorphPack | undefined;
+  const morphResolver = new MorphMapResolver();
   const resolveMap = (): MorphMap | undefined => {
     if (!morphStage || !morphSource) return (morphMap = undefined);
-    const settings = 'uMorph' in morphSource ? morphSettingsFromUniforms(morphSource) : morphSource;
-    const next = createMorphMap(settings, domain.sizeM);
+    const next = morphResolver.resolve(morphSource, domain.sizeM);
     return (morphMap = next.morph > 0 ? next : undefined);
   };
   const unbent = { lon: 0, lat: 0, height: 0, position: [0, 0, 0] as Vec3 };
+
+  /** The pack's key of a map, as numbers in `out`: forward and up (the sides and the cut depend on them), the projection, and the pole flag. */
+  const fillPackKey = (map: MorphMap, out: Float64Array): void => {
+    const b = map.basis;
+    for (let c = 0; c < 3; c++) {
+      out[c] = b.forward[c];
+      out[3 + c] = b.up[c];
+    }
+    out[6] = map.projection === 'equal-earth' ? 1 : 0;
+    out[7] = skipPoleLeaves || poleFanStage !== undefined ? 1 : 0;
+  };
+  const sameKey = (a: Float64Array, b: Float64Array): boolean => {
+    for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return false;
+    return true;
+  };
+  /** The number of leaves a pack reads from `selector`: its drawn leaves, up to the instance capacity. */
+  const packedLeafCount = (selector: LodSelector): number => Math.min(selector.stats.drawn, instances);
+  /** Writes the pack's inputs of the tree into `treeSig`: what `packMorphLeaves` and `packLeaves` read per drawn leaf. */
+  const signTree = (selector: LodSelector): void => {
+    const count = packedLeafCount(selector);
+    const { leaves, masks, level, i, j, root } = selector;
+    for (let k = 0; k < count; k++) {
+      const node = leaves[k];
+      const o = k * 6;
+      treeSig[o] = node;
+      treeSig[o + 1] = masks[k];
+      treeSig[o + 2] = level[node];
+      treeSig[o + 3] = i[node];
+      treeSig[o + 4] = j[node];
+      treeSig[o + 5] = root[node];
+    }
+    treeSigCount = count;
+  };
+  /** Whether the tree's pack inputs are the ones `treeSig` holds (so the instances already written are right for it). */
+  const treeMatchesSignature = (selector: LodSelector): boolean => {
+    const count = packedLeafCount(selector);
+    if (count !== treeSigCount) return false;
+    const { leaves, masks, level, i, j, root } = selector;
+    for (let k = 0; k < count; k++) {
+      const node = leaves[k];
+      const o = k * 6;
+      if (
+        treeSig[o] !== node || treeSig[o + 1] !== masks[k] || treeSig[o + 2] !== level[node] ||
+        treeSig[o + 3] !== i[node] || treeSig[o + 4] !== j[node] || treeSig[o + 5] !== root[node]
+      ) return false;
+    }
+    return true;
+  };
 
   return {
     mesh,
@@ -456,6 +570,16 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     get morphPack() {
       return morphPack;
     },
+    get packCount() {
+      return packs;
+    },
+    get poleFanMesh() {
+      return poleFanStage?.mesh;
+    },
+    get poleFanStats(): PoleFanStats | undefined {
+      const specs = poleFanTopology.specs;
+      return specs ? poleFanStatsOf(specs, poleFanTopology.rebuilds) : undefined;
+    },
     setMorph(source) {
       if (!morphStage) throw new Error('setMorph needs a mesh created with the morph option');
       morphSource = source;
@@ -463,6 +587,12 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     },
     setSkipPoleLeaves(on) {
       skipPoleLeaves = on;
+    },
+    setPoleFanRays(rays) {
+      if (!(rays >= 3)) throw new Error('setPoleFanRays needs at least 3 rays');
+      if (rays === poleFanRays) return;
+      poleFanRays = rays;
+      packedKind = -1;
     },
     unbend(camera, out = [0, 0, 0]) {
       const map = resolveMap();
@@ -480,41 +610,69 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     },
     upload(selector, camera) {
       const map = resolveMap();
-      // Above morph 0 the instances are packed by `packMorphLeaves` (sides, cut duplicates); the key says when that pack is stale.
-      const key = map ? `${map.basis.forward}|${map.basis.up}|${map.projection}|${skipPoleLeaves}` : 'globe';
-      if (selector !== packedFrom || selector.version !== packedVersion || key !== packedKey) {
+      // Above morph 0 the instances are packed by `packMorphLeavesMemo` (sides, cut duplicates); the key says when that pack is stale. A
+      // selection re-packs when the selector is new, the key changed, or the drawn leaves changed (the selector's version moves on
+      // every rebuild, which a refresh of the morph geometry can make without changing the leaves: then nothing is written).
+      const kind = map ? 1 : 0;
+      if (map) fillPackKey(map, packKey);
+      const keyUnchanged = kind === packedKind && (kind === 0 || sameKey(packKey, packedKey));
+      if (selector !== packedFrom || selector.version !== packedVersion || !keyUnchanged) {
+        const repack = selector !== packedFrom || !keyUnchanged || !treeMatchesSignature(selector);
         packedFrom = selector;
         packedVersion = selector.version;
-        packedKey = key;
-        if (map) {
-          morphPack = packMorphLeaves(selector, { domain, patchCells, capacity: instances, basis: map.basis, morph: map.morph, skipPoleLeaves }, leafData, infoData);
-          packedCount = morphPack.instances;
-        } else {
-          morphPack = undefined;
-          packedCount = packLeaves(selector, patchCells, maxLevel, capacity, leafData, infoData);
-        }
-        // Reuse the one update range of each attribute instead of allocating a new one per upload.
-        for (const attr of attributes) {
-          const ranges = attr.updateRanges;
-          if (ranges.length === 1) {
-            ranges[0].start = 0;
-            ranges[0].count = Math.max(1, packedCount) * LEAF_STRIDE;
+        packedKind = kind;
+        if (map) packedKey.set(packKey);
+        if (repack) {
+          packs++;
+          signTree(selector);
+          if (map) {
+            morphPack = packMorphLeavesMemo(leafMemo, selector, { domain, patchCells, capacity: instances, basis: map.basis, morph: map.morph, skipPoleLeaves: skipPoleLeaves || poleFanStage !== undefined }, leafData, infoData);
+            packedCount = morphPack.instances;
+            if (poleFanStage) {
+              if (poleFanTopology.update(selector, domain, patchCells, selector.stats.drawn, map, poleFanRays)) poleFanStage.upload(poleFanTopology.specs);
+              poleFanShown = true;
+            }
           } else {
-            ranges.length = 0;
-            ranges.push({ start: 0, count: Math.max(1, packedCount) * LEAF_STRIDE });
+            morphPack = undefined;
+            packedCount = packLeaves(selector, patchCells, maxLevel, capacity, leafData, infoData);
+            if (poleFanStage && poleFanShown) {
+              poleFanStage.upload(undefined);
+              poleFanTopology.reset();
+              poleFanShown = false;
+            }
           }
-          attr.needsUpdate = true;
+          // Reuse the one update range of each attribute instead of allocating a new one per upload.
+          for (const attr of attributes) {
+            const ranges = attr.updateRanges;
+            if (ranges.length === 1) {
+              ranges[0].start = 0;
+              ranges[0].count = Math.max(1, packedCount) * LEAF_STRIDE;
+            } else {
+              ranges.length = 0;
+              ranges.push({ start: 0, count: Math.max(1, packedCount) * LEAF_STRIDE });
+            }
+            attr.needsUpdate = true;
+          }
+          geometry.instanceCount = packedCount;
         }
-        geometry.instanceCount = packedCount;
       }
       if (map && morphStage) {
-        // `camera` is the bent camera; the lattice anchor is that of the camera's unbent position, which the frame computes.
-        morphFrame = computeMorphFrame(map, domain, steps, camera, anchor);
+        // `camera` is the bent camera; the lattice anchor is that of the camera's unbent position, which the frame computes. The frame is
+        // written into the last one (its arrays are kept), so a morph animation allocates nothing here.
+        frameBuffer = computeMorphFrame(map, domain, steps, camera, anchor, frameBuffer);
+        morphFrame = frameBuffer;
         morphStage.setFrame(morphFrame);
+        poleFanStage?.setFrame(morphFrame);
+        // The unbent points are relative to the unbent camera: above morph 0 shift them onto the bent camera the mesh sits at (G6e-c).
+        const unbentCamera = morphFrame.selectorCamera;
+        const bend = uBendShift.value as Vector3;
+        if (map.morph > 0) bend.set(unbentCamera[0] - camera[0], unbentCamera[1] - camera[1], unbentCamera[2] - camera[2]);
+        else bend.set(0, 0, 0);
       } else {
         morphFrame = undefined;
         morphStage?.setGlobe();
         anchorFor(domain, camera, steps, anchor);
+        (uBendShift.value as Vector3).set(0, 0, 0);
       }
       setVector(uAnchorT.value as Vector3, anchor.t);
       setVector(uAnchorCube.value as Vector3, anchor.cube);
@@ -539,6 +697,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
       geometry.dispose();
       if (ownMaterial) material.dispose();
       probeMaterial.dispose();
+      poleFanStage?.dispose();
     },
   };
 }

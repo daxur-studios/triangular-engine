@@ -1,12 +1,15 @@
 import { buildTestBatchLaunchUrl, buildTestLaunchUrl, parseTestLaunch, validateTestHistory, type TestContext, type TestScenario } from 'triangular-engine/testing';
 import {
   EYE_ALTITUDE_M, GROUND_PITCH_RAD, MID_ALTITUDE_M, ORBIT_ALTITUDE_M, ORBIT_PITCH_RAD, PLANET_RADIUS_M,
-  descentView, motionView, nearPlaneFor, planetPoseView, resolvePlanetCamera, sceneSunDirection, yawView,
+  descentView, morphSweepValue, motionMorph, motionView, morphSweepView, nearPlaneFor, planetPoseView, resolvePlanetCamera,
+  sceneSunDirection, yawView,
 } from './planet-camera';
 import { createPlanetSceneTestAdapter, settingsMismatches, type PlanetSceneTestHost } from './planet-scene-test-adapter';
 import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_TEST_HISTORY, type PlanetSceneTestSettings } from './planet-scene-tests';
 
-const SUITE = PLANET_SCENE_TEST_HISTORY[0];
+/** The final entry of the history: the version the runner selects. */
+const SUITE = PLANET_SCENE_TEST_HISTORY[PLANET_SCENE_TEST_HISTORY.length - 1];
+const V1_IDS = ['orbit', 'mid-20km', 'ground', 'descent', 'yaw-360', 'orbit-atmosphere-off', 'ground-atmosphere-off'];
 const BASE = 'http://triangular-demo.localhost:4200/planet-scene';
 
 function scenarioOf(id: string): TestScenario<PlanetSceneTestSettings> {
@@ -56,18 +59,54 @@ function makeHost(override: Partial<PlanetSceneTestHost> = {}, state: { read?: (
 }
 
 describe('Plan 059 G5 planet-scene suite', () => {
-  it('is a valid history: v1 only, unique case ids, plain JSON settings, the planned cases and no morph case', () => {
+  it('is a valid history: v1 then v2, unique case ids, plain JSON settings, the planned cases', () => {
     expect(() => validateTestHistory(PLANET_SCENE_TEST_HISTORY)).not.toThrow();
-    expect(PLANET_SCENE_TEST_HISTORY.map((suite) => [suite.id, suite.version])).toEqual([['planet-scene', 1]]);
+    expect(PLANET_SCENE_TEST_HISTORY.map((suite) => [suite.id, suite.version])).toEqual([['planet-scene', 1], ['planet-scene', 2]]);
+    expect(SUITE.version).toBe(2);
     const ids = SUITE.scenarios.map((scenario) => scenario.id);
-    expect(ids).toEqual(['orbit', 'mid-20km', 'ground', 'descent', 'yaw-360', 'orbit-atmosphere-off', 'ground-atmosphere-off']);
+    expect(ids).toEqual([...V1_IDS, 'orbit-morph-0.5', 'orbit-morph-1', 'ground-morph-0.5', 'ground-morph-1', 'morph-sweep']);
     expect(new Set(ids).size).toBe(ids.length);
     for (const scenario of SUITE.scenarios) {
       expect(JSON.parse(JSON.stringify(scenario.settings))).toEqual(scenario.settings);
-      expect(scenario.settings.morph).withContext(scenario.id).toBe(0);
       expect(scenario.settings.terrain).withContext(scenario.id).toBeTrue();
+      expect(scenario.settings.atmosphere).withContext(scenario.id).toBe(!scenario.id.endsWith('atmosphere-off'));
     }
     expect(SUITE.purpose).toBe('performance');
+    expect(SUITE.requiresVisualReview).toBeTrue();
+  });
+
+  it('keeps v1 as it was shared: the same seven cases with the same settings, all at morph 0', () => {
+    const v1 = PLANET_SCENE_TEST_HISTORY[0];
+    expect(v1.title).toContain('G5');
+    expect(v1.scenarios.map((scenario) => scenario.id)).toEqual(V1_IDS);
+    for (const scenario of v1.scenarios) {
+      expect(scenario.settings.morph).withContext(scenario.id).toBe(0);
+      expect(SUITE.scenarios.find((item) => item.id === scenario.id)?.settings).withContext(scenario.id).toEqual(scenario.settings);
+    }
+  });
+
+  it('gives the v2 morph cases the morph they name, at orbit and at the 2 m eye, with still timing', () => {
+    const morphs: [string, string, number][] = [
+      ['orbit-morph-0.5', 'orbit', 0.5], ['orbit-morph-1', 'orbit', 1],
+      ['ground-morph-0.5', 'ground', 0.5], ['ground-morph-1', 'ground', 1],
+    ];
+    for (const [id, pose, morph] of morphs) {
+      const scenario = scenarioOf(id);
+      expect(scenario.settings).withContext(id).toEqual({ ...DEFAULT_PLANET_SCENE_SETTINGS, pose: pose as PlanetSceneTestSettings['pose'], morph });
+      expect(scenario.settings.motion).withContext(id).toBeUndefined();
+      expect(scenario.label).withContext(id).toMatch(/morph/);
+      expect(scenario.durationMs).toBe(scenarioOf('orbit').durationMs);
+    }
+    expect(scenarioOf('orbit-morph-0.5').label).toBe('orbit · morph 0.5');
+  });
+
+  it('defines the morph sweep at orbit with the same timing as the other scripted cases', () => {
+    const sweep = scenarioOf('morph-sweep');
+    expect(sweep.settings).toEqual({ ...DEFAULT_PLANET_SCENE_SETTINGS, pose: 'orbit', morph: 0, motion: 'morphSweep' });
+    expect(sweep.warmupMs).toBe(500);
+    expect(sweep.durationMs).toBe(12_000);
+    expect(sweep.quickMs).toBe(6000);
+    expect(sweep.quickMs).toBeLessThan(sweep.durationMs);
   });
 
   it('makes each atmosphere-off case differ from its partner only in the atmosphere', () => {
@@ -81,7 +120,9 @@ describe('Plan 059 G5 planet-scene suite', () => {
   it('runs the scripted cases on a motion and the still cases on none', () => {
     expect(scenarioOf('descent').settings.motion).toBe('descent');
     expect(scenarioOf('yaw-360').settings.motion).toBe('yaw360');
-    for (const id of ['orbit', 'mid-20km', 'ground', 'orbit-atmosphere-off', 'ground-atmosphere-off']) expect(scenarioOf(id).settings.motion).toBeUndefined();
+    expect(scenarioOf('morph-sweep').settings.motion).toBe('morphSweep');
+    const still = ['orbit', 'mid-20km', 'ground', 'orbit-atmosphere-off', 'ground-atmosphere-off', 'orbit-morph-0.5', 'orbit-morph-1', 'ground-morph-0.5', 'ground-morph-1'];
+    for (const id of still) expect(scenarioOf(id).settings.motion).withContext(id).toBeUndefined();
     expect(scenarioOf('descent').quickMs).toBeLessThan(scenarioOf('descent').durationMs);
   });
 
@@ -93,15 +134,20 @@ describe('Plan 059 G5 planet-scene suite', () => {
 
   it('builds and parses launch links for the suite and for one case', () => {
     const url = buildTestLaunchUrl(BASE, SUITE, 'visible-browser', 1, 'quick');
-    expect(url).toBe(`${BASE}?testSuite=planet-scene&testVersion=1&testProfile=visible-browser&testMode=quick&testRepetitions=1&testAutoStart=1`);
-    expect(parseTestLaunch(new URL(url), PLANET_SCENE_TEST_HISTORY)?.key).toBe('planet-scene@1');
-    const batch = buildTestBatchLaunchUrl(BASE, [{ suiteId: 'planet-scene', suiteVersion: 1, scenarioId: 'orbit' }], 'visible-browser', 1, 'quick');
+    expect(url).toBe(`${BASE}?testSuite=planet-scene&testVersion=2&testProfile=visible-browser&testMode=quick&testRepetitions=1&testAutoStart=1`);
+    expect(parseTestLaunch(new URL(url), PLANET_SCENE_TEST_HISTORY)?.key).toBe('planet-scene@2');
+    const batch = buildTestBatchLaunchUrl(BASE, [{ suiteId: 'planet-scene', suiteVersion: 2, scenarioId: 'orbit' }], 'visible-browser', 1, 'quick');
     expect(batch).toContain('testCases=orbit');
-    expect(parseTestLaunch(new URL(batch), PLANET_SCENE_TEST_HISTORY)?.cases).toEqual([{ suiteId: 'planet-scene', suiteVersion: 1, scenarioId: 'orbit' }]);
+    expect(parseTestLaunch(new URL(batch), PLANET_SCENE_TEST_HISTORY)?.cases).toEqual([{ suiteId: 'planet-scene', suiteVersion: 2, scenarioId: 'orbit' }]);
     for (const scenario of SUITE.scenarios) {
-      const link = buildTestBatchLaunchUrl(BASE, [{ suiteId: 'planet-scene', suiteVersion: 1, scenarioId: scenario.id }], 'visible-browser', 1, 'quick');
+      const link = buildTestBatchLaunchUrl(BASE, [{ suiteId: 'planet-scene', suiteVersion: 2, scenarioId: scenario.id }], 'visible-browser', 1, 'quick');
       expect(parseTestLaunch(new URL(link), PLANET_SCENE_TEST_HISTORY)?.cases?.length).withContext(scenario.id).toBe(1);
     }
+  });
+
+  it('still launches the v1 suite by its exact version', () => {
+    const url = buildTestLaunchUrl(BASE, PLANET_SCENE_TEST_HISTORY[0], 'visible-browser', 1, 'quick');
+    expect(parseTestLaunch(new URL(url), PLANET_SCENE_TEST_HISTORY)?.key).toBe('planet-scene@1');
   });
 });
 
@@ -156,6 +202,35 @@ describe('Plan 059 G5 planet-scene cameras', () => {
     expect(yawView(0.5).altitudeM).toBe(EYE_ALTITUDE_M);
     expect(motionView('yaw360', 0.25)).toEqual(yawView(0.25));
     expect(motionView('descent', 0.25)).toEqual(descentView(0.25));
+  });
+
+  it('sweeps the morph 0 to 1 and back to 0, exactly at both ends, smoothly and without leaving 0..1', () => {
+    expect(morphSweepValue(0)).toBe(0);
+    expect(morphSweepValue(1)).toBe(0);
+    expect(morphSweepValue(0.5)).toBe(1);
+    expect(morphSweepValue(-1)).toBe(0);
+    expect(morphSweepValue(2)).toBe(0);
+    const steps = Array.from({ length: 201 }, (_, k) => morphSweepValue(k / 200));
+    expect(Math.min(...steps)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...steps)).toBeLessThanOrEqual(1);
+    for (let k = 1; k < steps.length; k++) {
+      expect(steps[k] - steps[k - 1]).toBeLessThan(0.03);
+      expect(steps[k] - steps[k - 1]).toBeGreaterThan(-0.03);
+      // Rises up to the peak, falls after it.
+      if (k <= 100) expect(steps[k]).toBeGreaterThanOrEqual(steps[k - 1]);
+      else expect(steps[k]).toBeLessThanOrEqual(steps[k - 1]);
+    }
+  });
+
+  it('keeps the camera on the orbit pose for the whole morph sweep and sets the morph only for that move', () => {
+    for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+      expect(motionView('morphSweep', t)).toEqual(planetPoseView('orbit'));
+    }
+    expect(morphSweepView()).toEqual(planetPoseView('orbit'));
+    expect(motionMorph('morphSweep', 0.5)).toBe(1);
+    expect(motionMorph('morphSweep', 0)).toBe(0);
+    expect(motionMorph('descent', 0.5)).toBeUndefined();
+    expect(motionMorph('yaw360', 0.5)).toBeUndefined();
   });
 
   it('keeps the near plane between 2 cm and 1 km and the sun a unit vector above the pose ground', () => {
@@ -252,6 +327,63 @@ describe('Plan 059 G5 planet-scene adapter', () => {
       expect(observation.details?.['gpuAdapter']).toBe('test adapter');
       expect(observation.checks?.every((check) => check.passed)).toBeTrue();
       expect(observation.limitations?.some((line) => /placeholder/.test(line))).toBeTrue();
+      expect(observation.limitations?.some((line) => /bends the terrain into the map/.test(line))).toBeTrue();
+      expect(observation.limitations?.some((line) => /sky is the globe/.test(line))).toBeTrue();
+      expect(observation.limitations?.some((line) => /morph is 0/.test(line))).toBeFalse();
+    });
+
+    it('checks the morph of a morph case: a page that keeps the globe fails the state check', async () => {
+      const morph1 = scenarioOf('orbit-morph-1');
+      const made = makeHost({}, { read: () => ({ ...DEFAULT_PLANET_SCENE_SETTINGS, morph: 0 }) });
+      const observation = await createPlanetSceneTestAdapter(made.host).measure(morph1, made.context);
+      const check = observation.checks?.find((item) => item.name === 'Scenario state applied as specified');
+      expect(check?.passed).toBeFalse();
+      expect(check?.detail).toBe('morph: expected 1, found 0');
+    });
+
+    it('measures a morph still case at its morph with no motion', async () => {
+      const morph05 = scenarioOf('ground-morph-0.5');
+      const made = makeHost({}, { read: () => morph05.settings });
+      const observation = await createPlanetSceneTestAdapter(made.host).measure(morph05, made.context);
+      expect(observation.checks?.every((check) => check.passed)).toBeTrue();
+      expect(observation.details?.['motionSeconds']).toBeUndefined();
+    });
+
+    it('runs the morph sweep with the morph following its progress, ends at morph 0 and passes the state check', async () => {
+      let progress: number | undefined;
+      let morph = 0;
+      const seen: number[] = [];
+      const made = makeHost({
+        setMotionProgress: (t) => {
+          progress = t;
+          if (t !== undefined) {
+            morph = motionMorph('morphSweep', t) ?? 0;
+            seen.push(morph);
+          }
+        },
+      }, { read: () => ({ ...DEFAULT_PLANET_SCENE_SETTINGS, morph, ...(progress !== undefined ? { motion: 'morphSweep' as const } : {}) }) });
+      const scenario = scenarioOf('morph-sweep');
+      const observation = await createPlanetSceneTestAdapter(made.host).measure(scenario, made.context);
+      expect(observation.checks?.find((check) => check.name === 'Scenario state applied as specified')?.passed).toBeTrue();
+      expect(observation.checks?.find((check) => check.name.startsWith('No rebuild storm'))?.passed).toBeTrue();
+      expect(seen[0]).toBe(0);
+      expect(seen[seen.length - 1]).toBe(0);
+      expect(Math.max(...seen)).toBeGreaterThan(0.99);
+      expect(Math.max(...seen)).toBeLessThanOrEqual(1);
+      expect(morph).toBe(0);
+      expect(progress).toBeUndefined();
+      expect(made.now()).toBeGreaterThanOrEqual(scenario.quickMs!);
+      expect(observation.details?.['motionSeconds']).toBeCloseTo(scenario.quickMs! / 1000, 1);
+    });
+
+    it('captures the morph the page shows, and restores a snapshot that holds a morph', async () => {
+      const shown = { ...DEFAULT_PLANET_SCENE_SETTINGS, morph: 0.5 };
+      const made = makeHost({}, { read: () => shown });
+      const adapter = createPlanetSceneTestAdapter(made.host);
+      expect(adapter.capture!(made.context)).toEqual(shown);
+      await adapter.restore!(shown, made.context);
+      expect(made.applied).toEqual([shown]);
+      expect(made.applied[0].morph).toBe(0.5);
     });
 
     it('fails the state check when the page shows other settings', async () => {
