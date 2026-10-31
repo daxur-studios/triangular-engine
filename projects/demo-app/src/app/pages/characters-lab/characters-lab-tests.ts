@@ -6,7 +6,7 @@ import type {
   CapsuleLocomotionMode,
   ExtendedEmotionName,
 } from 'triangular-engine/characters';
-import type { CameraFramingPreset } from './characters-lab-page.component';
+import type { CameraFramingPreset, CapsuleLayoutMode } from './characters-lab-page.component';
 
 /**
  * Settings configuration for a Characters Lab scenario.
@@ -18,6 +18,7 @@ export interface CharactersLabTestSettings {
   readonly emotion: ExtendedEmotionName;
   readonly gait: CapsuleCatGaitMode | CapsuleLocomotionMode;
   readonly cameraFraming: CameraFramingPreset;
+  readonly layout: CapsuleLayoutMode;
   readonly speak?: boolean;
   readonly speechText?: string;
   readonly panicked?: boolean;
@@ -25,7 +26,7 @@ export interface CharactersLabTestSettings {
   readonly restMouthPose?: CapsuleCatMouthPose;
   readonly rightHandAction?: CapsuleHandActionMode;
   readonly leftHandAction?: CapsuleHandActionMode;
-  readonly motion?: 'turntable' | 'still';
+  readonly motion?: 'turntable' | 'camera-orbit' | 'still';
 }
 
 export const DEFAULT_CAT_TEST_SETTINGS: CharactersLabTestSettings = {
@@ -34,6 +35,7 @@ export const DEFAULT_CAT_TEST_SETTINGS: CharactersLabTestSettings = {
   emotion: 'happy',
   gait: 'goofy_walk',
   cameraFraming: 'front',
+  layout: 'hero',
   panicked: false,
   tuft: false,
   restMouthPose: 'cat_smile',
@@ -42,10 +44,11 @@ export const DEFAULT_CAT_TEST_SETTINGS: CharactersLabTestSettings = {
 
 export const DEFAULT_HUMAN_TEST_SETTINGS: CharactersLabTestSettings = {
   characterType: 'human',
-  presetId: 'wacky-hair-cosmonaut',
+  presetId: 'wacky-helmet-waver',
   emotion: 'happy',
   gait: 'idle',
   cameraFraming: 'front',
+  layout: 'hero',
   rightHandAction: 'wave',
   leftHandAction: 'none',
   motion: 'still',
@@ -272,6 +275,52 @@ export const HUMANOID_BASELINES_SUITE_V1: TestSuite<CharactersLabTestSettings> =
 };
 
 /**
+ * Suite 5: visual evidence for both procedural capsule character families.
+ * Each case pairs a moving gait with a camera path that covers a horizontal orbit and a vertical sweep.
+ */
+export const CAPSULE_VISUAL_VERIFICATION_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
+  id: 'capsule-visual-verification',
+  version: 1,
+  title: 'Capsule Human and Cat Visual Verification',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: [
+    scenario(
+      'human-walk-orbit',
+      'Capsule Human: Walk Cycle with Horizontal and Vertical Camera Sweep',
+      {
+        characterType: 'human',
+        presetId: 'wacky-helmet-waver',
+        emotion: 'happy',
+        gait: 'walk',
+        cameraFraming: 'full-shot',
+        layout: 'hero',
+        motion: 'camera-orbit',
+      },
+      DEFAULT_HUMAN_TEST_SETTINGS,
+      8_000,
+      8_000,
+    ),
+    scenario(
+      'cat-goofy-walk-orbit',
+      'Capsule Cat: Goofy Walk with Horizontal and Vertical Camera Sweep',
+      {
+        characterType: 'cat',
+        presetId: 'space-cat-goofy',
+        emotion: 'happy',
+        gait: 'goofy_walk',
+        cameraFraming: 'full-shot',
+        layout: 'hero',
+        motion: 'camera-orbit',
+      },
+      DEFAULT_CAT_TEST_SETTINGS,
+      8_000,
+      8_000,
+    ),
+  ],
+};
+
+/**
  * Full test history for Characters Lab, oldest first.
  * The final entry is the default latest test suite.
  */
@@ -280,4 +329,5 @@ export const CHARACTERS_LAB_TEST_HISTORY: readonly TestSuite<CharactersLabTestSe
   CAT_SPEECH_SUITE_V1,
   HUMANOID_BASELINES_SUITE_V1,
   CAT_EMOTIONS_SUITE_V1,
+  CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
 ];

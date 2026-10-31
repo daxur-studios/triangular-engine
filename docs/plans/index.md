@@ -38,6 +38,7 @@ tags: [plans, index]
 | [Remove Takram integration from the engine](/docs/plans/069_remove-takram.md) | planned | [ER 069](/docs/engineering-records/069_remove-takram.md) |
 | [Capsule Doodle Space Cats](/docs/plans/070_capsule-doodle-space-cats.md) | planned | [ER 070](/docs/engineering-records/070_capsule-doodle-space-cats.md) |
 | [Triangular CLI and Consensus Reviews](/docs/plans/071_triangular-cli-consensus-reviews.md) | planned | [ER 071](/docs/engineering-records/071_triangular-cli-consensus-reviews.md) |
-| [Optional test video recordings](/docs/plans/072_testing-video-recordings.md) | planned | [ER 072](/docs/engineering-records/072_testing-video-recordings.md) |
+| [Optional test video recordings](/docs/plans/072_testing-video-recordings.md) | complete | [ER 072](/docs/engineering-records/072_testing-video-recordings.md) |
+| [Visual verification evidence and retention](/docs/plans/073_visual-verification-evidence-retention.md) | planned | [ER 073](/docs/engineering-records/073_visual-verification-evidence-retention.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

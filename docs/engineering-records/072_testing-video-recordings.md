@@ -57,6 +57,18 @@ Evaluated an optional sharing conversion. A Daxur-compressed MP4 sample was made
 
 **Verification.** `npm run build:triangular-engine` passed. `npm run test:triangular-engine:sink` passed 57/57 after the receiver additions. `npm run test:triangular-engine:testing` passed 201/201 headless tests; this includes the recording lifecycle and the updated generic artifact-drop message assertion. The targeted session spec passed 44/44 after selecting its headless profile. `npx ng build demo-app` passed with existing CSS-budget and Mermaid CommonJS warnings. `node projects/triangular-engine/bin/triangular.mjs docs records check` passed for all 7 mapped and 23 legacy plans, and `git diff --check` found no whitespace errors. The visible-browser audio-lab POC saved and displayed its sidecar recording as described above.
 
+## Follow-up: phone playback and GIF preview (2026-10-31)
+
+The user confirmed that both tested MP4 files display on the laptop but neither displays on the phone in the same remote chat: the H.264/AAC and HEVC/AAC variants were both affected. The silent GIF preview is visible on the phone. It is 672,122 bytes (about 656 KiB) at 320×180 and 8 fps, compared with the 381,817-byte WebM (about 373 KiB, 960×540), 355,260-byte H.264/AAC MP4 (about 347 KiB), and 219,931-byte HEVC/AAC MP4 (about 215 KiB). GIF therefore serves as a useful compatibility derivative, but its larger size and lack of audio make it a poor default recording format.
+
+The user noted that deterministic test runs can regenerate the video when needed; the near-term value is having media available during a review/sharing session. This motivates a short TTL for unpinned media, with generated derivatives eligible for cleanup before source videos and bookmarks protecting selected clips. The exact TTL and total quota remain open.
+
+## Follow-up direction: visual verification and retention (2026-10-31)
+
+The user expanded the follow-up from clip curation to reusable final visual verification for the demo and consumer games: deterministic camera/view and animation evidence, optional GIF/contact/sprite-sheet derivatives, distinct human and agent review records, and toggleable non-destructive annotations. Test definitions, build/environment fingerprints and scenario inputs must remain sufficient to regenerate expired media; compact run and review metadata remain after cleanup.
+
+Plan 073, [Visual verification evidence and retention](/docs/plans/073_visual-verification-evidence-retention.md), tracks this follow-up. Its initial proposal is a seven-day TTL for unpinned media and a per-app 1 GiB quota, pruning generated GIF/contact-sheet derivatives before videos in oldest-first order. Those policy values are open assumptions pending confirmation and a regeneration check; Plan 072 remains complete and unchanged in scope.
+
 ## Scope history
 
 <!-- tri:scope-history -->

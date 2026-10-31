@@ -7,8 +7,10 @@ import {
   type CharactersLabTestSettings,
 } from './characters-lab-tests';
 import {
+  createCharactersLabRecordingCapture,
   createCharactersLabTestAdapter,
   type CharactersLabTestHost,
+  type CharactersLabTestSnapshot,
 } from './characters-lab-test-adapter';
 import {
   AnimationMixer,
@@ -107,6 +109,10 @@ export type CapsuleLayoutMode = 'hero' | 'lineup';
 const WALK_RADIUS = 1.6;
 const TARGET_SWING_RADIUS = 2.5;
 const TARGET_SWING_HEIGHT = 1.5;
+const HUMAN_VISUAL_ORBIT_RADIUS = 2.7;
+const HUMAN_VISUAL_ORBIT_TARGET_Y = 1.2;
+const CAT_VISUAL_ORBIT_RADIUS = 2.0;
+const CAT_VISUAL_ORBIT_TARGET_Y = 0.36;
 
 function lerpAngle(from: number, to: number, t: number): number {
   let diff = (to - from) % (Math.PI * 2);
@@ -242,12 +248,34 @@ export class CharactersLabPageComponent {
   private readonly renderCompleteCallbacks = new Set<(renderedAt: number) => void>();
 
   private readonly testHost: CharactersLabTestHost = {
+    snapshot: () => ({
+      settings: this.testHost.read(),
+      viewMode: this.viewMode,
+      capsuleLayoutMode: this.capsuleLayoutMode,
+      capsuleCatLayoutMode: this.capsuleCatLayoutMode,
+      cameraPosition: [...this.cameraPosition()] as [number, number, number],
+      cameraTarget: [...this.cameraTarget()] as [number, number, number],
+      humanActorYaw: this.capsuleHeroActor.root.rotation.y,
+      catActorYaw: this.capsuleCatHeroActor.root.rotation.y,
+    }),
+    restore: (snapshot: CharactersLabTestSnapshot) => {
+      this.testHost.apply(snapshot.settings);
+      this.setCapsuleLayoutMode(snapshot.capsuleLayoutMode);
+      this.setCapsuleCatLayoutMode(snapshot.capsuleCatLayoutMode);
+      this.setViewMode(snapshot.viewMode);
+      this.cameraPosition.set([...snapshot.cameraPosition] as [number, number, number]);
+      this.cameraTarget.set([...snapshot.cameraTarget] as [number, number, number]);
+      this.capsuleHeroActor.root.rotation.y = snapshot.humanActorYaw;
+      this.capsuleCatHeroActor.root.rotation.y = snapshot.catActorYaw;
+      this.cdr.markForCheck();
+    },
     read: () => ({
       characterType: this.viewMode === 'capsule-cats' ? 'cat' : 'human',
       presetId: this.viewMode === 'capsule-cats' ? this.selectedCatPresetId : this.selectedPresetId,
       emotion: this.activeEmotion,
       gait: this.viewMode === 'capsule-cats' ? this.capsuleCatLocomotion : this.capsuleLocomotion,
       cameraFraming: this.cameraFraming,
+      layout: this.viewMode === 'capsule-cats' ? this.capsuleCatLayoutMode : this.capsuleLayoutMode,
       panicked: this.capsuleCatHeroActor.dna.panicked,
       tuft: this.capsuleCatHeroActor.dna.tuft,
       restMouthPose: this.capsuleCatHeroActor.dna.restMouthPose,
@@ -259,6 +287,7 @@ export class CharactersLabPageComponent {
         if (this.viewMode !== 'capsule-cats') {
           this.setViewMode('capsule-cats');
         }
+        this.setCapsuleCatLayoutMode(settings.layout);
         if (settings.presetId && settings.presetId !== this.selectedCatPresetId) {
           this.selectCapsuleCatPreset(settings.presetId);
         }
@@ -278,6 +307,7 @@ export class CharactersLabPageComponent {
         if (this.viewMode !== 'capsule-doodle') {
           this.setViewMode('capsule-doodle');
         }
+        this.setCapsuleLayoutMode(settings.layout);
         if (settings.presetId && settings.presetId !== this.selectedPresetId) {
           this.selectCapsulePreset(settings.presetId);
         }
@@ -322,8 +352,23 @@ export class CharactersLabPageComponent {
         this.capsuleHeroActor.root.rotation.y = radians !== undefined ? radians : 0;
       }
     },
+    setCameraOrbit: (azimuthRadians, elevationRadians) => {
+      const isCat = this.viewMode === 'capsule-cats';
+      const radius = isCat ? CAT_VISUAL_ORBIT_RADIUS : HUMAN_VISUAL_ORBIT_RADIUS;
+      const targetY = isCat ? CAT_VISUAL_ORBIT_TARGET_Y : HUMAN_VISUAL_ORBIT_TARGET_Y;
+      const horizontalRadius = radius * Math.cos(elevationRadians);
+      const target = [0, targetY, 0] as [number, number, number];
+      this.cameraPosition.set([
+        Math.sin(azimuthRadians) * horizontalRadius,
+        targetY + Math.sin(elevationRadians) * radius,
+        Math.cos(azimuthRadians) * horizontalRadius,
+      ]);
+      this.cameraTarget.set(target);
+    },
+    recording: () => createCharactersLabRecordingCapture(this.engine.canvas),
     environment: () => ({
       browser: typeof navigator !== 'undefined' ? navigator.userAgent : 'node',
+      'visual-recording.profile': '960x540@20fps, aspect-preserving, silent, requested 450 kb/s video',
     }),
     thumbnail: async () => {
       const canvas = this.engine.renderer?.domElement;

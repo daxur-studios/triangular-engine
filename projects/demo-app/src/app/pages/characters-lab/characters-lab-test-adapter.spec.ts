@@ -1,6 +1,7 @@
 import {
   CAT_EMOTIONS_SUITE_V1,
   CAT_LINEUP_SUITE_V1,
+  CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
   CHARACTERS_LAB_TEST_HISTORY,
   DEFAULT_CAT_TEST_SETTINGS,
   type CharactersLabTestSettings,
@@ -71,13 +72,41 @@ describe('CharactersLabTestAdapter & Suites', () => {
     }
   });
 
+  it('defines visual evidence cases for both capsule characters with moving gaits and camera orbits', () => {
+    expect(CAPSULE_VISUAL_VERIFICATION_SUITE_V1.requiresVisualReview).toBeTrue();
+    expect(CAPSULE_VISUAL_VERIFICATION_SUITE_V1.scenarios.map((scenario) => scenario.settings.characterType)).toEqual([
+      'human',
+      'cat',
+    ]);
+    for (const scenario of CAPSULE_VISUAL_VERIFICATION_SUITE_V1.scenarios) {
+      expect(scenario.settings.motion).toBe('camera-orbit');
+      expect(scenario.settings.layout).toBe('hero');
+      expect(scenario.settings.gait).not.toBe('idle');
+      expect(scenario.durationMs).toBeGreaterThanOrEqual(8_000);
+    }
+  });
+
   it('captures, applies, measures and restores settings via the test adapter', async () => {
     let currentSettings: CharactersLabTestSettings = { ...DEFAULT_CAT_TEST_SETTINGS };
     let renderListener: ((t: number) => void) | undefined;
     let frames = 0;
     let spokenText = '';
+    const cameraPath: Array<readonly [number, number]> = [];
 
     const mockHost: CharactersLabTestHost = {
+      snapshot: () => ({
+        settings: { ...currentSettings },
+        viewMode: 'capsule-cats',
+        capsuleLayoutMode: 'hero',
+        capsuleCatLayoutMode: 'hero',
+        cameraPosition: [0, 0, 2],
+        cameraTarget: [0, 0.4, 0],
+        humanActorYaw: 0,
+        catActorYaw: 0,
+      }),
+      restore: (snapshot) => {
+        currentSettings = { ...snapshot.settings };
+      },
       read: () => ({ ...currentSettings }),
       apply: (s) => {
         currentSettings = { ...s };
@@ -96,6 +125,12 @@ describe('CharactersLabTestAdapter & Suites', () => {
       },
       isSpeaking: () => spokenText.length > 0,
       setTurntableAngle: () => {},
+      setCameraOrbit: (azimuth, elevation) => {
+        cameraPath.push([azimuth, elevation]);
+        frames++;
+        renderListener?.(performance.now());
+      },
+      recording: () => ({ stop: async () => { throw new Error('recording is not used by this test'); }, dispose: () => {} }),
       environment: () => ({}),
     };
 
@@ -120,7 +155,7 @@ describe('CharactersLabTestAdapter & Suites', () => {
     };
 
     const initial = await adapter.capture(mockContext);
-    expect(initial.presetId).toBe('space-cat-goofy');
+    expect(initial.settings.presetId).toBe('space-cat-goofy');
 
     const testScenario = CAT_EMOTIONS_SUITE_V1.scenarios[1]; // cat-angry
     await adapter.apply(testScenario, mockContext);
@@ -132,6 +167,65 @@ describe('CharactersLabTestAdapter & Suites', () => {
 
     await adapter.restore(initial, mockContext);
     expect(currentSettings.emotion).toBe('happy');
+  });
+
+  it('drives both camera axes through the visual orbit path and reports the completed coverage', async () => {
+    let renderListener: ((t: number) => void) | undefined;
+    const path: Array<readonly [number, number]> = [];
+    const currentSettings = { ...DEFAULT_CAT_TEST_SETTINGS };
+    const mockHost: CharactersLabTestHost = {
+      snapshot: () => ({
+        settings: currentSettings,
+        viewMode: 'capsule-cats',
+        capsuleLayoutMode: 'hero',
+        capsuleCatLayoutMode: 'hero',
+        cameraPosition: [0, 0, 2],
+        cameraTarget: [0, 0.4, 0],
+        humanActorYaw: 0,
+        catActorYaw: 0,
+      }),
+      restore: () => {},
+      read: () => currentSettings,
+      apply: () => {},
+      renderedFrames: () => path.length,
+      errors: () => '',
+      resetErrors: () => {},
+      onRenderComplete: (callback) => {
+        renderListener = callback;
+        return () => { renderListener = undefined; };
+      },
+      speak: () => {},
+      isSpeaking: () => false,
+      setTurntableAngle: () => {},
+      setCameraOrbit: (azimuth, elevation) => {
+        path.push([azimuth, elevation]);
+        renderListener?.(performance.now());
+      },
+      recording: () => ({ stop: async () => { throw new Error('recording is not used by this test'); }, dispose: () => {} }),
+      environment: () => ({}),
+    };
+    const adapter = createCharactersLabTestAdapter(mockHost);
+    const scenario = {
+      ...CAPSULE_VISUAL_VERIFICATION_SUITE_V1.scenarios[1],
+      durationMs: 200,
+      quickMs: 200,
+    };
+    const context: TestContext = {
+      mode: 'quick',
+      profile: 'headless-hardware',
+      repetition: 1,
+      signal: new AbortController().signal,
+      wait: async (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      measureWindow: async () => ({ mode: 'quick', elapsedMs: 0, stoppedBy: 'fixed' }),
+    };
+
+    const observation = await adapter.measure(scenario, context);
+
+    expect(path.length).toBeGreaterThan(2);
+    expect(Math.max(...path.map(([azimuth]) => azimuth))).toBeGreaterThan(5.5);
+    expect(Math.min(...path.map(([, elevation]) => elevation))).toBeLessThan(-0.1);
+    expect(Math.max(...path.map(([, elevation]) => elevation))).toBeGreaterThan(0.85);
+    expect(observation.checks?.find((check) => check.name === 'Horizontal and vertical camera path completed')?.passed).toBeTrue();
   });
 
   it('detects setting mismatches correctly', () => {
