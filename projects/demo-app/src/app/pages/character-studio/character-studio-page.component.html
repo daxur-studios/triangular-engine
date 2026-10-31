@@ -90,7 +90,7 @@
     </aside>
 
     <main class="viewport-panel" aria-label="Character preview">
-      <scene>
+      <scene [showFps]="true">
         <orbitControls [cameraPosition]="cameraPosition()" [target]="cameraTarget()" [isActive]="!runnerBusy()" />
         <ambientLight [intensity]="1.3" />
         <directionalLight [position]="[3.2, 5.4, 4.2]" [intensity]="2.5" />
@@ -98,21 +98,27 @@
         <directionalLight [position]="[0.5, 3.8, -4.5]" [intensity]="1.8" />
       </scene>
 
-      <div class="viewport-topline">
+      <ng-template portalTarget="overlay" lane="topStart">
         <div class="viewport-live-label"><span class="live-dot"></span> Live preview</div>
+      </ng-template>
+
+      <ng-template portalTarget="overlay" lane="topCenter">
         <div class="viewport-model-name">{{ activeFamily().name }} <span>/</span> {{ selectedPresetLabel() }}</div>
+      </ng-template>
+
+      <ng-template portalTarget="overlay" lane="topEnd" [order]="10">
         <button class="rotate-toggle" type="button" [disabled]="runnerBusy()" [class.active]="autoRotate()" (click)="setAutoRotate()">
           <span class="rotate-icon" aria-hidden="true">⟳</span>
           {{ autoRotate() ? 'Auto rotate on' : 'Auto rotate' }}
         </button>
-      </div>
+      </ng-template>
 
       <div class="viewport-side-label">
         <span class="side-label-index">01</span>
         <span>3D VIEWPORT</span>
       </div>
 
-      <div class="viewport-bottomline">
+      <ng-template portalTarget="overlay" lane="bottomStart">
         <div class="view-switcher" aria-label="Camera view">
           @for (view of viewOptions; track view.id) {
             <button
@@ -123,8 +129,11 @@
             >{{ view.id === 'hair' && selectedFamilyId() === 'human' ? 'Hair' : view.label }}</button>
           }
         </div>
+      </ng-template>
+
+      <ng-template portalTarget="overlay" lane="bottomEnd" [order]="10">
         <span class="viewport-hint">Drag to orbit <i></i> Scroll to zoom</span>
-      </div>
+      </ng-template>
     </main>
 
     <aside class="inspector-panel" aria-label="Character inspector">

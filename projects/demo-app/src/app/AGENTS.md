@@ -2,6 +2,30 @@
 
 Scoped to `projects/demo-app/src/app/`. See the repo-root `AGENTS.md` first.
 
+## Demo scene layout
+
+These rules apply whenever a page or component under this directory creates or
+modifies a Triangular Engine scene.
+
+- Set both `EngineService.provide({ showFPS: true })` on the scene host and
+  `[showFps]="true"` on its `<scene>`. Keep the engine FPS panel visible in demo
+  scenes so rendering cost is immediately inspectable.
+- Use the Triangular Engine portal layout for every independently placed UI
+  element over the scene: controls, hints, labels and status/HUD blocks belong
+  in `<ng-template portalTarget="overlay" lane="...">`, not in locally
+  absolute-positioned viewport markup. Use `topStart`, `topCenter`, `topEnd`,
+  `center`, `bottomStart`, `bottomCenter` or `bottomEnd`.
+- Portal entries in the same lane flex-stack with a gap and sort by ascending
+  numeric `[order]`; group elements that should stay together in one template.
+  The built-in `engine-stats` panel uses `overlay/topEnd` at order `0`. The
+  app-wide catalog-thumbnail control uses `overlay/bottomEnd` at order `0`.
+  Give additional entries in those lanes a higher explicit order (for example
+  `[order]="10"`) so they stack predictably. Local absolute positioning is for
+  panel decoration only, not UI that competes for the same viewport space.
+- `EngineModule` provides the `portalTarget` directive. Read
+  `projects/triangular-engine/docs/core-concepts.md`, “Portal Layout (Dynamic UI
+  Overlay System)”, for available areas and lanes.
+
 ## Spikes: always start from the template
 
 A "spike" (top-level `<name>-spike/` folder, e.g. `gpu-morph-lod-spike/`,
@@ -28,7 +52,7 @@ actually testing.
 
 ### Rules
 
-- **Use `<scene>` + `EngineService.provide({ showFPS: true })`.** This
+- **Use `<scene [showFps]="true">` + `EngineService.provide({ showFPS: true })` for every spike scene.** This
   gives you the renderer, camera, resize handling, tick loop, and an FPS
   overlay for free. Do not construct your own `WebGLRenderer`,
   `PerspectiveCamera`, `OrbitControls`, or `requestAnimationFrame` loop

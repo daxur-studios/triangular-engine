@@ -165,7 +165,7 @@ import { EngineModule, EngineService } from "triangular-engine";
   imports: [EngineModule],
   providers: EngineService.provide({ showFPS: true }),
   template: `
-    <scene>
+    <scene [showFps]="true">
       <!-- 3D content here -->
     </scene>
   `,
@@ -318,8 +318,8 @@ All components are standalone. Import `EngineModule` for convenience.
 | `sceneTree`          | Optional Material viewer (`triangular-engine/scene-tree`) |
 | `engine-ui`          | UI shell with portal areas   |
 | `engine-stats`       | Stats overlay                |
-| `engine-portal-outlet`| Portal outlet element       |
-| `[enginePortal]`     | Dynamic portal registration  |
+| `portalOutlet`       | Portal outlet from `@daxur-studios/portal-layout` |
+| `[portalTarget]`     | Dynamic portal registration from `@daxur-studios/portal-layout` |
 | `[raycast]`          | Raycast directive            |
 
 Scene Tree is not included in core `EngineModule`. Import its component from `triangular-engine/scene-tree` for direct use, or add that entry's `provideSceneTree()` beside the scene's engine provider and set `userInterface.showSceneTree` to enable the built-in panel.
@@ -471,7 +471,7 @@ await this.audioService.playPositionalOneShot(bufferOrSrc, [x, y, z], {
   imports: [EngineModule],
   providers: EngineService.provide({ showFPS: true }),
   template: `
-    <scene>
+    <scene [showFps]="true">
       <camera [position]="[4, 3, 6]" [lookAt]="[0, 0, 0]" />
       <directionalLight [position]="[3, 5, 2]" />
       <mesh>
@@ -508,7 +508,7 @@ export class DemoComponent {}
 ### Post-Processing
 
 ```html
-<scene>
+<scene [showFps]="true">
   <camera [position]="[0, 0, 6]" [lookAt]="[0, 0, 0]" />
   <!-- scene content -->
 
@@ -526,7 +526,7 @@ export class DemoComponent {}
 ### Physics Scene (Rapier)
 
 ```html
-<scene>
+<scene [showFps]="true">
   <camera [position]="[4, 3, 6]" [lookAt]="[0, 0, 0]" />
   <directionalLight [position]="[3, 5, 2]" />
 
@@ -555,7 +555,7 @@ export class DemoComponent {}
 ### Physics Scene (Jolt)
 
 ```html
-<scene>
+<scene [showFps]="true">
   <camera [position]="[4, 3, 6]" [lookAt]="[0, 0, 0]" />
   <directionalLight [position]="[3, 5, 2]" />
 
@@ -603,37 +603,50 @@ export class AnimatedSceneComponent implements OnInit {
 ### Orbit Controls
 
 ```html
-<scene>
+<scene [showFps]="true">
   <orbitControls [cameraPosition]="[0, 5, 10]" [target]="[0, 0, 0]" [isActive]="true" />
   <!-- scene content -->
 </scene>
 ```
 
-### Engine Portals (Dynamic HUD Overlay)
+### Engine Portal Layout (Viewport HUD and Controls)
 
-Use the engine portal system to register UI components on top of the 3D HUD canvas from any component context dynamically:
+For UI that floats over or is anchored to a `<scene>` viewport, use the current
+Triangular Engine portal API. The scene provides `engine-ui` outlets; register
+each independently positioned block with `portalTarget` so multiple controls
+sharing a corner are stacked and ordered by the same layout system. Do not use
+local absolute/fixed positioning for competing viewport controls or HUD.
 
 ```html
-<!-- Inside a page or custom dashboard component -->
-<ng-template enginePortal="top" lane="content" [order]="10">
-  <div class="hud-controls">
-    <button (click)="openInventory()">Inventory</button>
-  </div>
+<scene [showFps]="true">
+  <!-- 3D content -->
+</scene>
+
+<ng-template portalTarget="overlay" lane="topStart">
+  <button (click)="openInventory()">Inventory</button>
 </ng-template>
 
-<ng-template enginePortal="left" lane="before">
-  <div class="quest-log">
-    <h3>Quests</h3>
-    <ul>
-      <li>Fly to Mars</li>
-    </ul>
-  </div>
+<ng-template portalTarget="overlay" lane="topEnd" [order]="10">
+  <button (click)="openSettings()">Settings</button>
 </ng-template>
 ```
 
-- **Areas**: `'top'`, `'bottom'`, `'left'`, `'right'`, `'main'`, `'modal'`, `'notification'`
-- **Lanes**: `'before'`, `'content'`, `'after'` (governs sorting layout order inside the area)
-- **Order**: numerical priority sorting inside the lane.
+- **Areas**: `toolbarTop`, `toolbarBottom`, `leftSidebar`, `rightSidebar`,
+  `main`, `overlay`, `modal`, and `notification`.
+- **Overlay lanes**: `topStart`, `topEnd`, `topCenter`, `center`, `bottomStart`,
+  `bottomEnd`, and `bottomCenter`. Each lane flex-stacks its entries with a gap;
+  use the same lane when items must share its space instead of creating
+  overlapping local overlays.
+- **Order**: entries in one area/lane are sorted by ascending numeric `order`
+  (default `0`). The built-in FPS panel is `overlay/topEnd` order `0`; assign a
+  higher order to app controls that should sit below it.
+- **Other layouts**: toolbars and sidebars use the `content` lane. Use regular
+  page layout for controls outside the scene viewport; reserve absolute
+  positioning for decoration that cannot collide with portal content.
+
+See `docs/core-concepts.md`, “Portal Layout (Dynamic UI Overlay System)”, for
+the consumer API. Use `portalTarget`/`portalOutlet`; legacy `enginePortal` names
+do not match the current selectors.
 
 ---
 
@@ -728,7 +741,7 @@ Each sublibrary's `public-api.ts` is the source of truth for its surface, and it
 ## 11. Agent Conventions
 
 - **Import from entry points only.** Take each feature from its secondary entry (see the guide table in the entry points section). Do not reach into another entry's internals.
-- **One engine provider per scene.** Provide `EngineService` in the component that owns `<scene>`: `providers: EngineService.provide({ showFPS: true })`. Create exactly one `<scene>` per viewport. Switch cameras with `isActive` on a `<camera>` or `<orbitControls>`.
+- **One engine provider per scene.** Provide `EngineService` in the component that owns `<scene>`: `providers: EngineService.provide({ showFPS: true })`, and set `<scene [showFps]="true">`. Create exactly one `<scene>` per viewport. Switch cameras with `isActive` on a `<camera>` or `<orbitControls>`.
 - **Selectors.** When generating templates, use the selectors in §3. `docs/api/selectors.md` lists the deterministic set.
 - **Frame and input.** Write scene state in `tick$` or `postTick$` (§9). For gameplay input, bind actions with `EngineInputService.bind(action, ...keys)` and read `actions$`. The raw streams on `EngineService` (`keydown$`, `mousemove$`, …) are for low-level integrations.
 - **Physics.** Drive bodies by id with `PhysicsService.getRigidBodyById(id)`. To drag a dynamic body, set it to `KinematicPositionBased` while dragging and restore it afterwards. For many similar objects, use `instancedRigidBody` (Rapier) or `instancedMesh`.

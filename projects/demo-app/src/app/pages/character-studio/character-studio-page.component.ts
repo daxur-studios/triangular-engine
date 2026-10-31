@@ -72,7 +72,7 @@ interface CharacterStudioViewOption {
   templateUrl: './character-studio-page.component.html',
   styleUrl: './character-studio-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [EngineService.provide({ showFPS: false }), provideBrowserImageCompression()],
+  providers: [EngineService.provide({ showFPS: true }), provideBrowserImageCompression()],
   host: { class: 'flex-page' },
 })
 export class CharacterStudioPageComponent {

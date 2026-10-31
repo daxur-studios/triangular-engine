@@ -118,4 +118,13 @@ In any child component or page that lives inside the engine context, register te
 
 - **Engine UI areas**: `'toolbarTop' | 'toolbarBottom' | 'leftSidebar' | 'rightSidebar' | 'main' | 'overlay' | 'modal' | 'notification'`
 - **Sidebar/toolbar lanes**: use `'content'`; the overlay outlet additionally supports `'topStart' | 'topEnd' | 'topCenter' | 'center' | 'bottomStart' | 'bottomEnd' | 'bottomCenter'`
-- **Order**: numerical sorting priority within the lane.
+- **Order and stacking**: entries in an area/lane are sorted by ascending numeric `order` (default `0`). Each overlay lane is a flex column with spacing between entries, so separate portal templates in the same corner stack instead of covering each other. The built-in FPS panel uses `overlay/topEnd` at order `0`; choose a higher order for other top-end controls.
+- **Positioning rule**: put independently positioned UI that competes for viewport space in portal templates. Local absolute positioning bypasses the shared lanes and can overlap controls registered by the engine or another component. Use absolute positioning only for decoration that stays inside its own panel and cannot collide with portal UI.
+
+For example, a scene hint can share the bottom-right lane with another component's capture button and set an explicit order so both remain visible:
+
+```html
+<ng-template portalTarget="overlay" lane="bottomEnd" [order]="10">
+  <span>Drag to orbit · Scroll to zoom</span>
+</ng-template>
+```
