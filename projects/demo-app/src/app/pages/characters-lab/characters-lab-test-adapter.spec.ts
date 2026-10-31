@@ -303,4 +303,73 @@ describe('CharactersLabTestAdapter & Suites', () => {
     expect(later).toBeUndefined();
     expect(capturedSettings).toEqual([scenario.settings]);
   });
+
+  it('records resolved focus-target framing check and details in observation', async () => {
+    const scenario = CAPSULE_FACIAL_EMOTIONS_SUITE_V1.scenarios[0];
+    let currentSettings = { ...scenario.settings };
+    const host: CharactersLabTestHost = {
+      snapshot: () => ({
+        settings: { ...currentSettings },
+        viewMode: 'capsule-doodle',
+        capsuleLayoutMode: 'hero',
+        capsuleCatLayoutMode: 'hero',
+        cameraPosition: [0, 1.5, 0.9],
+        cameraTarget: [0, 1.5, 0.2],
+        humanActorYaw: 0,
+        catActorYaw: -0.28,
+      }),
+      restore: () => {},
+      read: () => ({ ...currentSettings }),
+      apply: (s) => {
+        currentSettings = { ...s };
+      },
+      renderedFrames: () => 5,
+      errors: () => '',
+      resetErrors: () => {},
+      onRenderComplete: (cb) => {
+        cb(16);
+        return () => {};
+      },
+      speak: () => {},
+      isSpeaking: () => false,
+      setTurntableAngle: () => {},
+      setCameraOrbit: () => {},
+      recording: () => ({ stop: async () => { throw new Error('unused'); }, dispose: () => {} }),
+      environment: () => ({}),
+      resolveFocusFraming: () => ({
+        targetId: 'human-face',
+        label: 'Human Face',
+        boundsKind: 'composite',
+        cameraPosition: [0, 1.52, 0.98],
+        cameraTarget: [0, 1.5, 0.25],
+        cameraDistance: 0.73,
+        worldMin: [-0.36, 1.32, 0.1],
+        worldMax: [0.36, 1.72, 0.45],
+        projectedRect: [0.22, 0.14, 0.56, 0.72],
+        shaderMouthRect: [0.38, 0.62, 0.24, 0.18],
+        inFrame: true,
+        occupancy: 0.72,
+        limitations: ['Synthetic shader mouth bounds combined with 3D eye/brow meshes.'],
+      }),
+    };
+
+    const adapter = createCharactersLabTestAdapter(host);
+    const context: TestContext = {
+      mode: 'quick',
+      profile: 'headless-hardware',
+      repetition: 1,
+      signal: new AbortController().signal,
+      wait: async () => {},
+      measureWindow: async () => ({ mode: 'quick', elapsedMs: 50, stoppedBy: 'settled' }),
+    };
+
+    const obs = await adapter.measure(scenario, context);
+    const focusCheck = obs.checks?.find((c) => c.name === 'Focus target framed within viewport');
+    expect(focusCheck?.passed).toBeTrue();
+    expect(obs.details?.['focusTarget']).toBe('human-face');
+    expect(obs.details?.['focusBoundsKind']).toBe('composite');
+    expect(obs.details?.['focusInFrame']).toBe(true);
+    expect(obs.details?.['focusProjectedRect']).toBe('0.22,0.14,0.56,0.72');
+    expect(obs.details?.['focusShaderMouthRect']).toBe('0.38,0.62,0.24,0.18');
+  });
 });

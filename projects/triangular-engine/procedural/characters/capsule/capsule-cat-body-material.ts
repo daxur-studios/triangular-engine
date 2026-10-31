@@ -10,6 +10,7 @@
  */
 
 import {
+  Box3,
   CapsuleGeometry,
   Color,
   Mesh,
@@ -47,6 +48,40 @@ export interface CapsuleCatBodyMeshResult {
   readonly uniforms: CapsuleCatBodyUniformMap;
   readonly updateDna: (dna: CapsuleCatCharacterDNA) => void;
   readonly updateMouth: (mouth: CapsuleCatSdfMouthUniforms) => void;
+  /** Computes the local-space 3D bounding box of the 2D SDF cat mouth from current shader uniforms. */
+  readonly getMouthLocalBounds: (target?: Box3) => Box3;
+  /** Computes the world-space 3D bounding box of the 2D SDF cat mouth using `mesh.matrixWorld`. */
+  readonly getMouthWorldBounds: (target?: Box3) => Box3;
+}
+
+/**
+ * Derives the local-space 3D bounding box of the front-snout 2D SDF cat mouth
+ * (`:3` twin arch, philtrum, and open `MEOW` cavity) directly from shader uniforms.
+ */
+export function computeCapsuleCatMouthLocalBounds(
+  uniforms: CapsuleCatBodyUniformMap,
+  target = new Box3(),
+): Box3 {
+  const r = Math.max(0.1, uniforms.uBodyRadius.value);
+  const neckZ = uniforms.uNeckZ.value;
+  const centerY = uniforms.uMouthCenterY.value;
+  const halfW = Math.max(0.08, Math.min(0.38, uniforms.uMouthWidth.value * 0.32));
+  const openAmt = Math.max(0, Math.min(1, uniforms.uMouthOpen.value));
+  const meowAmt = Math.max(0, Math.min(1, uniforms.uMouthMeow.value));
+  const halfH = (0.014 + (0.16 - 0.014) * openAmt) * (1.0 + 0.25 * meowAmt);
+  const curve = uniforms.uMouthCurve.value;
+  const asym = Math.abs(uniforms.uMouthAsymmetry.value) * halfW * 0.16;
+  const rimPad = 0.028;
+
+  const xHalf = (halfW + rimPad) * r;
+  const yMin = centerY + (-halfH * 1.28 + Math.min(0, curve * 0.11) - asym - rimPad) * r;
+  const yMax = centerY + (Math.max(0.14, halfH) + Math.max(0, curve * 0.09) + asym + rimPad) * r;
+  const zMin = neckZ + r * 0.72;
+  const zMax = neckZ + r * 1.02;
+
+  target.min.set(-xHalf, yMin, zMin);
+  target.max.set(xHalf, yMax, zMax);
+  return target;
 }
 
 function patternToFloat(pattern: CapsuleCatBodyPatternId): number {
@@ -316,10 +351,22 @@ export function buildCapsuleCatBodyMesh(dna: CapsuleCatCharacterDNA): CapsuleCat
     uniforms.uMouthAsymmetry.value = mouth.mouthAsymmetry ?? 0;
   };
 
+  const getMouthLocalBounds = (target = new Box3()): Box3 =>
+    computeCapsuleCatMouthLocalBounds(uniforms, target);
+
+  const getMouthWorldBounds = (target = new Box3()): Box3 => {
+    mesh.updateWorldMatrix(true, false);
+    computeCapsuleCatMouthLocalBounds(uniforms, target);
+    target.applyMatrix4(mesh.matrixWorld);
+    return target;
+  };
+
   return {
     mesh,
     uniforms,
     updateDna,
     updateMouth,
+    getMouthLocalBounds,
+    getMouthWorldBounds,
   };
 }

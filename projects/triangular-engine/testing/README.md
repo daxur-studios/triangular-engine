@@ -301,6 +301,24 @@ diagnostic and functional-only. Artifacts use a separate bounded upload, receive
 allowlisted `/video?file=` read route. The saved JSON and copied agent summary contain filenames and metadata, never
 the clip bytes. A failed/oversized upload is visible as a case limitation.
 
+## Choose and report visual evidence
+
+Choose media for the claim being reviewed. One test run can produce several focused derivatives; do not combine views with very different scale or purpose just to make one sheet.
+
+| Review goal | Useful evidence |
+| --- | --- |
+| Walk cycle, camera orbit or other motion | Keep the optional WebM as the source clip. Generate a GIF preview only when the target client benefits from animated images; GIF is silent and can be larger than WebM. Make a labeled contact sheet from selected timestamps for quick view/phase coverage. If sound matters, verify the WebM includes the audio stream. |
+| Face, shader feature, silhouette or part detail | Save a still at the intended detail framing and make a separate, labeled still contact sheet. For example, keep `walk-cycle` and `facial-emotions` as separate sheets. |
+| Complete animation sprite atlas | The current media CLI does not generate a full-cycle sprite atlas. A timestamp contact sheet shows selected samples, not every frame or phase. |
+
+The `triangular testing media contact-sheet` command accepts video captures (`--source` with two to sixteen `--capture "<seconds>=<label>"` values) or two to sixteen saved case stills (`--image "<path>=<label>"`). Still inputs must be in the same run sidecar under the configured artifact root. See the [CLI guide](../docs/cli.md) for command details. Each derivative is tracked in `media-manifest.json`; source media stays unchanged.
+
+For agentic review, read `test:summary` and `triangular testing media list` first. They report verdicts and artifact metadata without opening media pixels. Give a vision agent only the relevant labeled sheet or stills; use video playback when the claim depends on motion, timing or sound. Verify the WebM contains the relevant audio stream when audio matters. Report which media was inspected and include paths and sizes. Record a human or agent review with `triangular testing review add` only after inspecting the artifact and against a specific claim. Automated success or a visible image is not a visual pass.
+
+In the user-facing handoff, use a GIF only as a motion preview when the chat supports it; link the WebM separately for full playback and any audio it contains. Show labeled contact sheets for still comparison and use separate sheets for distinct claims such as walking and facial expressions. Call a sampled contact sheet a contact sheet, not a full sprite atlas. If inline media is unavailable, give the absolute artifact path and size.
+
+Concept-art assets are not automatically linked to tests by the engine. Keep references and part/view mappings app-owned, and explicitly associate a rendered case with a named reference, view and focus target. For shader-only features, supply focus bounds from the parameters that control the shader; ordinary mesh bounds cannot describe them.
+
 ## Results page
 
 `TestResultsComponent` (`<tri-test-results>`, same entry, no engine or router dependency) browses the runs the receiver saved.

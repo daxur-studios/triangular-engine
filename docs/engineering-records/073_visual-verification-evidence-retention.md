@@ -91,6 +91,22 @@ The first run revealed that the human test settings used a stale preset ID (`wac
 
 **Status and next work.** This is high-detail visual evidence, not an automated expression-quality check. The generated contact sheet still needs a human or agent review against a concrete claim; no facial-expression pass has been recorded. Motion evidence, close-up still evidence, GIFs and sheet derivatives remain optional and locally generated. Full-cycle sprite atlases, consumer-app proof, and retention policy/tooling remain open; Q1 still blocks any automatic pruning.
 
+## 2026-10-31 — Future exploration: concept references and approved traces
+
+**Discussion.** A concept-reference workflow could link source artwork to a character, named procedural part, view or pose, test case and scene focus target. A compact app-owned manifest could let tooling compose only the relevant concept crop beside its matching rendered still, so human or vision review does not need to identify a character or feature inside a large sheet. Candidate prompt templates discussed were a 2×4 eight-view turnaround (front through back at 45-degree steps), a 2×4 facial-expression sheet, and a 4×4 component sheet whose rows follow real generator component IDs and whose columns are front/back/left/right views. Labels and cell mappings should be added or verified by tooling rather than trusted to generated text.
+
+A later extension could let a vision agent propose an SVG outline and named landmarks (for example, hair/head silhouette, eye centers, mouth bounds or cockpit-frame corners). A human would correct and approve/version that trace before it becomes a guide or benchmark. Comparisons should use registered orthographic views and preferably a flat silhouette/feature pass, with the trace kept separate from source renders. One 2D trace describes only one projection; depth and curvature need other views or CAD/dimensioned references. This also applies to shader-only details: their declared shape/focus bounds should come from the same parameters that control the shader.
+
+**Disposition.** Future exploration only; no new phase scope, reference-manifest format, command or engine API is accepted here. Start with the current external consumer-app experiment and paired image/render review. Use its feedback to decide whether concept-to-render pairing is useful before building prompt-pack or trace tooling. No media cleanup policy changes.
+
+## 2026-10-31 — Visual evidence selection and handoff guidance
+
+**Change.** Updated the packaged `triangular-engine-testing` skill and `testing/README.md` so a fresh consumer-app session can select evidence by review goal: optional WebM for source playback/audio, GIF as a silent motion preview when useful, labeled video-sampled contact sheets for motion/view coverage, and separate still contact sheets for detail claims such as facial expressions. The guidance explicitly permits multiple focused sheets, calls sampled sheets distinct from a full sprite atlas, recommends metadata-first/limited vision review, and describes claim-scoped review records. It also says concept-art mappings remain app-owned and shader-feature bounds need app-provided data.
+
+**Verification.** The skill is included in package output by `ng-package.json` from `.agents/skills`; the testing README ships with the testing entry point. Mapped Plan/Record validation and `git diff --check` pass. No runtime API changed. Existing installed consumers need a package build/update to receive the new skill text.
+
+**Status.** The current external consumer-app experiment remains the next feedback gate. This documentation makes the established media workflow discoverable in a fresh session; it does not accept the proposed concept-reference manifest or SVG tracing work into implementation scope.
+
 ## Scope history
 
 <!-- tri:scope-history -->

@@ -13,6 +13,12 @@ import {
   type CharactersLabTestSnapshot,
 } from './characters-lab-test-adapter';
 import {
+  fitCameraToFocusTarget,
+  resolveCharactersLabFocusTarget,
+  type ResolvedFocusFraming,
+  type VisualFocusTargetId,
+} from './characters-lab-focus';
+import {
   AnimationMixer,
   Bone,
   Box3,
@@ -21,6 +27,7 @@ import {
   Mesh,
   MeshStandardMaterial,
   Object3D,
+  PerspectiveCamera,
   PlaneGeometry,
   Skeleton,
   SkinnedMesh,
@@ -35,9 +42,11 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
 import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import {
+  ALL_CAPSULE_CHARACTER_PRESETS,
   applyLookAt,
   blendPoses,
   CAPSULE_ACCESSORY_IDS,
+  CAPSULE_ALT_CHARACTER_PRESETS,
   CAPSULE_CAT_BODY_PATTERN_IDS,
   CAPSULE_CAT_PACK_IDS,
   CAPSULE_CAT_PRESETS,
@@ -104,7 +113,13 @@ import {
 
 export type TargetSourceMode = 'door-knob' | 'chair' | 'manual';
 export type CharactersLabViewMode = 'capsule-doodle' | 'capsule-cats' | 'face-studio' | 'full-body';
-export type CameraFramingPreset = 'front' | 'face-close-up' | 'three-quarter' | 'profile' | 'full-shot';
+export type CameraFramingPreset =
+  | 'front'
+  | 'face-close-up'
+  | 'head-close-up'
+  | 'three-quarter'
+  | 'profile'
+  | 'full-shot';
 export type CapsuleLayoutMode = 'hero' | 'lineup';
 
 const WALK_RADIUS = 1.6;
@@ -145,6 +160,8 @@ export class CharactersLabPageComponent {
   // Capsule Doodle Studio state
   protected capsuleLayoutMode: CapsuleLayoutMode = 'hero';
   protected readonly capsulePresets = CAPSULE_CHARACTER_PRESETS;
+  protected readonly capsuleAltPresets = CAPSULE_ALT_CHARACTER_PRESETS;
+  protected readonly allCapsulePresets = ALL_CAPSULE_CHARACTER_PRESETS;
   protected readonly capsuleHairStyles = CAPSULE_HAIR_STYLE_IDS;
   protected readonly capsuleFacialHairStyles = CAPSULE_FACIAL_HAIR_IDS;
   protected readonly capsuleAccessories = CAPSULE_ACCESSORY_IDS;
@@ -152,6 +169,8 @@ export class CharactersLabPageComponent {
   protected readonly capsuleSkinTones = DEFAULT_CAPSULE_SKIN_TONES;
   protected readonly capsuleHairColors = DEFAULT_CAPSULE_HAIR_COLORS;
   protected readonly capsuleBootColors = DEFAULT_CAPSULE_BOOT_COLORS;
+  protected activeFocusTarget?: VisualFocusTargetId;
+  protected latestFocusFraming?: ResolvedFocusFraming;
 
   protected selectedPresetId = CAPSULE_CHARACTER_PRESETS[5].id!; // Wacky Hair Cosmonaut
   protected capsuleLocomotion: CapsuleLocomotionMode = 'idle';
@@ -241,7 +260,7 @@ export class CharactersLabPageComponent {
   // triangular-engine/testing runner integration
   protected readonly testHistory = CHARACTERS_LAB_TEST_HISTORY;
   protected readonly allowTestAutoStart = isDevMode();
-  protected readonly runnerReady = signal(true);
+  protected readonly runnerReady = signal(false);
   protected readonly runnerBusy = signal(false);
   protected readonly activeTestScenario = signal<string | null>(null);
 
@@ -277,6 +296,7 @@ export class CharactersLabPageComponent {
       emotion: this.activeEmotion,
       gait: this.viewMode === 'capsule-cats' ? this.capsuleCatLocomotion : this.capsuleLocomotion,
       cameraFraming: this.cameraFraming,
+      ...(this.activeFocusTarget ? { focusTarget: this.activeFocusTarget } : {}),
       layout: this.viewMode === 'capsule-cats' ? this.capsuleCatLayoutMode : this.capsuleLayoutMode,
       panicked: this.capsuleCatHeroActor.dna.panicked,
       tuft: this.capsuleCatHeroActor.dna.tuft,
@@ -326,8 +346,21 @@ export class CharactersLabPageComponent {
       if (settings.emotion) {
         this.setFaceExpression(settings.emotion);
       }
+      // Step the facial controller and active actor so expression-driven mouth/brow/ear bounds
+      // are settled before computing camera focus framing.
+      const settledFrame = this.facialController.update(0.35);
+      this.currentFrameState = settledFrame;
+      if (settings.characterType === 'cat') {
+        this.capsuleCatHeroActor.update(0, settledFrame);
+      } else {
+        this.capsuleHeroActor.update(0, settledFrame);
+      }
+
       if (settings.cameraFraming) {
         this.setCameraFraming(settings.cameraFraming);
+      }
+      if (settings.focusTarget) {
+        this.applyFocusTargetFraming(settings.focusTarget);
       }
       this.cdr.markForCheck();
     },
@@ -373,7 +406,10 @@ export class CharactersLabPageComponent {
       'visual-recording.profile': '960x540@20fps, aspect-preserving, silent, requested 450 kb/s video',
     }),
     thumbnail: async (settings) => {
-      const detail = settings.cameraFraming === 'face-close-up';
+      const detail =
+        settings.focusTarget !== undefined ||
+        settings.cameraFraming === 'face-close-up' ||
+        settings.cameraFraming === 'head-close-up';
       return this.screenshot.capture({
         engine: this.engine,
         format: 'image/webp',
@@ -386,6 +422,16 @@ export class CharactersLabPageComponent {
           quality: detail ? 0.88 : 0.6,
         },
       });
+    },
+    resolveFocusFraming: (settings) => {
+      const targetId: VisualFocusTargetId =
+        settings.focusTarget ??
+        (settings.characterType === 'cat'
+          ? 'cat-face'
+          : settings.cameraFraming === 'head-close-up'
+            ? 'human-head-hair'
+            : 'human-face');
+      return this.computeFocusTargetFraming(targetId);
     },
   };
   readonly testAdapter = createCharactersLabTestAdapter(this.testHost);
@@ -521,6 +567,9 @@ export class CharactersLabPageComponent {
     this.loadReferenceModel();
 
     const destroyRef = inject(DestroyRef);
+    this.engine.renderComplete$
+      .pipe(takeUntilDestroyed(destroyRef))
+      .subscribe(() => this.updateTestRunnerReadiness());
     this.engine.error$
       .pipe(takeUntilDestroyed(destroyRef))
       .subscribe((event) => {
@@ -530,6 +579,23 @@ export class CharactersLabPageComponent {
       .pipe(takeUntilDestroyed(destroyRef))
       .subscribe((deltaSeconds) => this.update(deltaSeconds));
     destroyRef.onDestroy(() => this.dispose());
+  }
+
+  /** Autostart only after the scene has rendered at its measured viewport size. */
+  private updateTestRunnerReadiness(): void {
+    if (this.runnerReady()) return;
+    const canvas = this.engine.canvas;
+    if (!canvas.isConnected) return;
+
+    const bounds = canvas.getBoundingClientRect();
+    if (bounds.width <= 1 || bounds.height <= 1 ||
+        Math.abs(this.engine.width - bounds.width) > 1 || Math.abs(this.engine.height - bounds.height) > 1) return;
+
+    const camera = this.engine.camera;
+    if (camera instanceof PerspectiveCamera && Math.abs(camera.aspect - bounds.width / bounds.height) > 0.01) return;
+
+    this.runnerReady.set(true);
+    this.cdr.markForCheck();
   }
 
   private createPedestalMesh(radius = 0.58): Mesh {
@@ -649,21 +715,46 @@ export class CharactersLabPageComponent {
   }
 
   protected selectCapsulePreset(presetId: string): void {
-    const found = CAPSULE_CHARACTER_PRESETS.find((p) => p.id === presetId);
+    const found = ALL_CAPSULE_CHARACTER_PRESETS.find((p) => p.id === presetId);
     if (!found) return;
     this.selectedPresetId = presetId;
     this.capsuleHeroActor.setDna(found);
+    if (this.activeFocusTarget) {
+      this.applyFocusTargetFraming(this.activeFocusTarget);
+    }
   }
 
   protected randomizeCapsuleDna(): void {
     this.seedCounter += 1;
     this.selectedPresetId = 'custom';
     this.capsuleHeroActor.setSeed(`cosmonaut-${this.seedCounter}`);
+    if (this.activeFocusTarget) {
+      this.applyFocusTargetFraming(this.activeFocusTarget);
+    }
   }
 
   protected updateCapsuleDna(partial: Partial<CapsuleCharacterDNA>): void {
     this.selectedPresetId = 'custom';
     this.capsuleHeroActor.setDna(partial);
+    if (this.activeFocusTarget) {
+      this.applyFocusTargetFraming(this.activeFocusTarget);
+    }
+  }
+
+  protected onCapsuleNumericDnaChange(
+    field:
+      | 'eyeSizeAsymmetry'
+      | 'eyeHeightAsymmetry'
+      | 'gazeAsymmetryYaw'
+      | 'gazeAsymmetryPitch'
+      | 'noseScale'
+      | 'eyeScale'
+      | 'eyeSpacing',
+    rawValue: string | number,
+  ): void {
+    const val = typeof rawValue === 'string' ? parseFloat(rawValue) : rawValue;
+    if (Number.isNaN(val)) return;
+    this.updateCapsuleDna({ [field]: val });
   }
 
   protected setCapsuleHairStyle(hairStyleId: CapsuleHairStyleId): void {
@@ -915,8 +1006,31 @@ export class CharactersLabPageComponent {
     }
   }
 
+  protected computeFocusTargetFraming(targetId: VisualFocusTargetId): ResolvedFocusFraming {
+    const target = resolveCharactersLabFocusTarget(targetId, {
+      humanActor: this.capsuleHeroActor,
+      catActor: this.capsuleCatHeroActor,
+    });
+    const camera = this.engine?.camera;
+    const fovDegrees = camera && 'fov' in camera && typeof camera.fov === 'number' ? camera.fov : 75;
+    return fitCameraToFocusTarget(target, {
+      fovDegrees,
+      aspect: 16 / 9,
+    });
+  }
+
+  protected applyFocusTargetFraming(targetId: VisualFocusTargetId): ResolvedFocusFraming {
+    this.activeFocusTarget = targetId;
+    const framing = this.computeFocusTargetFraming(targetId);
+    this.latestFocusFraming = framing;
+    this.cameraPosition.set([...framing.cameraPosition]);
+    this.cameraTarget.set([...framing.cameraTarget]);
+    return framing;
+  }
+
   protected setCameraFraming(framing: CameraFramingPreset): void {
     this.cameraFraming = framing;
+    this.activeFocusTarget = undefined;
     if (this.viewMode === 'capsule-cats') {
       if (this.capsuleCatLayoutMode === 'lineup') {
         this.cameraPosition.set([0, 2.35, 4.6]);
@@ -924,9 +1038,8 @@ export class CharactersLabPageComponent {
       } else if (framing === 'full-shot') {
         this.cameraPosition.set([1.25, 0.58, 1.45]);
         this.cameraTarget.set([0, 0.28, 0.05]);
-      } else if (framing === 'face-close-up') {
-        this.cameraPosition.set([0, 0.48, 0.76]);
-        this.cameraTarget.set([0, 0.45, 0.30]);
+      } else if (framing === 'face-close-up' || framing === 'head-close-up') {
+        this.applyFocusTargetFraming('cat-face');
       } else if (framing === 'front') {
         this.cameraPosition.set([0, 0.40, 0.92]);
         this.cameraTarget.set([0, 0.35, 0.30]);
@@ -944,8 +1057,9 @@ export class CharactersLabPageComponent {
         this.cameraPosition.set([0.75, 1.38, 2.45]);
         this.cameraTarget.set([0, 0.92, 0]);
       } else if (framing === 'face-close-up') {
-        this.cameraPosition.set([0, 1.62, 0.72]);
-        this.cameraTarget.set([0, 1.60, 0]);
+        this.applyFocusTargetFraming('human-face');
+      } else if (framing === 'head-close-up') {
+        this.applyFocusTargetFraming('human-head-hair');
       } else if (framing === 'front') {
         this.cameraPosition.set([0, 1.42, 1.38]);
         this.cameraTarget.set([0, 1.36, 0]);
@@ -959,7 +1073,7 @@ export class CharactersLabPageComponent {
       return;
     }
 
-    if (framing === 'front' || framing === 'face-close-up') {
+    if (framing === 'front' || framing === 'face-close-up' || framing === 'head-close-up') {
       this.cameraPosition.set([0, 1.58, 0.46]);
     } else if (framing === 'three-quarter') {
       this.cameraPosition.set([0.26, 1.62, 0.38]);

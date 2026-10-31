@@ -188,6 +188,36 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   and agent summaries contain metadata and filenames, never media bytes. `<tri-test-results>` uses a native player with
   `preload="none"`. Do not send or read the video through an agent vision/audio path when the user's goal is only to
   provide a clickable playback artifact; point the person to the saved path/URL instead.
+- **Choose media for the visual question.** Use separate evidence for separate claims when their framing or review
+  goal differs. A full-body walk/orbit sheet and a face-detail/expression sheet should normally be titled and reviewed
+  separately. Close-ups of shader details need app-provided focus bounds derived from the shader's controlling data;
+  the generic recorder cannot infer a shader's visible footprint from mesh bounds.
+  - For motion or camera coverage, keep the optional WebM as the source clip and make a GIF only when a target client
+    benefits from an animated-image preview. GIFs are silent and can be larger than WebM; give the user both paths and
+    their sizes when both are useful. If audio matters, verify that the saved WebM includes the relevant audio stream;
+    GIF cannot carry it.
+  - Use `triangular testing media contact-sheet --source <webm> --capture "<seconds>=<label>"` for labeled motion/camera
+    samples. It supports two to sixteen timestamps and is representative evidence, not a complete animation atlas. The
+    current media CLI does not generate a full-cycle sprite atlas; do not label a sampled contact sheet as one.
+  - Use `triangular testing media contact-sheet --image "<path>=<label>"` for two to sixteen saved case stills when
+    expression, silhouette, shader footprint or component detail matters. Inputs must be in the same run sidecar. Make
+    multiple titled sheets if needed (for example, `walk-cycle` and `facial-emotions`) instead of mixing wide and
+    close-up views. The saved stills and case IDs remain the source inputs.
+  - First read the compact result with `npm run test:summary` and artifact sizes/paths with
+    `triangular testing media list`. Do not automatically load a full video into vision context. Inspect only the
+    relevant labeled sheets/stills; use video playback or vision review when the claim depends on motion or sound.
+  - Concept artwork is not automatically associated with test cases. Keep artwork and any part/view mapping app-owned;
+    explicitly link a rendered case to a named reference, view and focus target. Do not ask a vision agent to infer the
+    target from a large unlabelled sheet.
+- **Present media to the user by purpose.** In the handoff, show a GIF only as a motion preview when the current chat
+  supports it; link the unchanged WebM separately when the user needs audio or full playback quality. Show labeled
+  contact sheets for still comparison, view coverage or close-up detail, with separate sheets for different claims
+  such as walking and facial expressions. Do not call selected-frame contact sheets full sprite atlases. If inline
+  display is unavailable, provide the absolute artifact path and size instead of claiming it was displayed.
+- **Record visual reviews after inspecting the evidence.** Use `triangular testing review add` with reviewer identity,
+  artifact and a claim-scoped verdict; do not infer a visual pass from automated test success, image visibility, or the
+  existence of an overlay. Use `target` overlays for areas needing inspection. A `passed` overlay requires an already
+  recorded passing claim. `triangular testing review view` exposes the layers independently.
 - The user can press **Copy for agent** on the result card: a few lines with the suite,
   mode, verdicts, saved file and problems. Read the run with `test:summary` from there.
 - **Run a hardware suite yourself, unattended:** `npx triangular-test-run --url <page url> --suite <id> --version <n>`

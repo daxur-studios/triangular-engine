@@ -59,5 +59,9 @@ The triangular CLI operates on each app's configured artifact directory, so the 
 
 The first demo proof of concept is on the capsule character lab. See the dated run and evidence in [ER 073](../engineering-records/073_visual-verification-evidence-retention.md). On-demand GIF previews, labeled video/still contact sheets, attributed review records and toggleable vector overlays are implemented. The lab has motion and close-up expression suites; full-cycle sprite sheets and retention tooling remain later work. The owner confirmed the original sheets render in chat; facial-expression quality still needs review against a claim.
 
+Future exploration, not yet committed scope: link concept-reference sets, named parts/views and test cases in an app-owned manifest; generate aligned concept/render comparisons; and investigate human-approved SVG outlines or landmarks as view-specific guides for silhouette/feature review. See the dated discussion in ER 073. First wait for feedback from the current consumer-app experiment before choosing a shared CLI/API shape.
+
+The `triangular-engine-testing` skill and testing guide now explain how to select and present GIFs, sampled contact sheets and detail stills, including multiple sheets for separate review goals and the current lack of full-cycle sprite-atlas generation.
+
 Scope history in the Engineering Record is append-only. Confirm a specific baseline only after
 explicit developer confirmation; document review and checked boxes do not imply confirmation.

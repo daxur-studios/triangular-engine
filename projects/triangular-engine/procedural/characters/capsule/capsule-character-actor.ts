@@ -211,6 +211,22 @@ export class CapsuleCharacterActor {
     return this.lastFaceProjection;
   }
 
+  get capsuleBody(): CapsuleBodyMeshResult {
+    return this.body;
+  }
+
+  get capsuleFaceRig(): CapsuleFaceRigResult {
+    return this.faceRig;
+  }
+
+  get capsuleHairKit(): CapsuleHairKitResult {
+    return this.hairKit;
+  }
+
+  get capsuleSpaceGear(): CapsuleSpaceGearResult {
+    return this.spaceGear;
+  }
+
   /**
    * Updates the character's DNA in-place, rebuilding geometry only when structural
    * dimensions or modular style IDs change.
@@ -225,7 +241,10 @@ export class CapsuleCharacterActor {
     const eyeGeometryChanged =
       geometryChanged ||
       prev.eyeSpacing !== next.eyeSpacing ||
-      prev.eyeScale !== next.eyeScale;
+      prev.eyeScale !== next.eyeScale ||
+      prev.eyeSizeAsymmetry !== next.eyeSizeAsymmetry ||
+      prev.eyeHeightAsymmetry !== next.eyeHeightAsymmetry ||
+      prev.noseScale !== next.noseScale;
 
     if (geometryChanged) {
       this.body.mesh.geometry.dispose();

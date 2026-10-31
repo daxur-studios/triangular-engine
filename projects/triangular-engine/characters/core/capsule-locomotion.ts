@@ -261,7 +261,13 @@ function resolveHandActionTarget(
       return {
         target: defaultWrist,
         pole: characterVector3(sign * 0.65, -0.35, -0.75),
-        pose: dna.accessory === 'walkie_talkie' && side === 'left' ? 'grip' : 'open',
+        pose:
+          (dna.accessory === 'walkie_talkie' ||
+            dna.accessory === 'coffee_mug' ||
+            dna.accessory === 'tablet') &&
+          side === 'left'
+            ? 'grip'
+            : 'open',
       };
   }
 }
@@ -416,10 +422,13 @@ export function sampleCapsuleLocomotion(
     rightArmSwing,
   );
 
-  // Automatic walkie-talkie hold if accessory is equipped and no explicit left-hand override
+  // Automatic handheld gadget/prop hold if accessory is equipped and no explicit left-hand override
   const effectiveLeftAction: CapsuleHandActionRequest | undefined =
     input.leftHandAction ??
-    (dna.accessory === 'walkie_talkie' || dna.accessory === 'flag'
+    (dna.accessory === 'walkie_talkie' ||
+    dna.accessory === 'flag' ||
+    dna.accessory === 'coffee_mug' ||
+    dna.accessory === 'tablet'
       ? { mode: 'hold_gadget' }
       : undefined);
 

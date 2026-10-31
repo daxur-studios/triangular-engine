@@ -11,10 +11,12 @@
  */
 
 import {
+  Box3,
   CapsuleGeometry,
   Color,
   Mesh,
   MeshStandardMaterial,
+  Vector3,
   type WebGLProgramParametersWithUniforms,
 } from 'three';
 import type {
@@ -41,6 +43,42 @@ export interface CapsuleBodyMeshResult {
   readonly uniforms: CapsuleBodyUniformMap;
   readonly updateDna: (dna: CapsuleCharacterDNA) => void;
   readonly updateMouth: (mouth: CapsuleSdfMouthUniforms) => void;
+  /** Computes the local-space 3D bounding box of the 2D SDF mouth directly from current shader uniforms. */
+  readonly getMouthLocalBounds: (target?: Box3) => Box3;
+  /** Computes the world-space 3D bounding box of the 2D SDF mouth using `mesh.matrixWorld`. */
+  readonly getMouthWorldBounds: (target?: Box3) => Box3;
+}
+
+/**
+ * Derives the exact local-space 3D bounding box of the front-projected 2D SDF mouth
+ * directly from the shader uniforms (`uBodyRadius`, `uMouthCenterY`, `uMouthWidth`,
+ * `uMouthOpen`, `uMouthCurve`, `uMouthWave`), including the parabolic smile/frown
+ * vertical excursion and outer rim shadow margin.
+ */
+export function computeCapsuleMouthLocalBounds(
+  uniforms: CapsuleBodyUniformMap,
+  target = new Box3(),
+): Box3 {
+  const r = Math.max(0.15, uniforms.uBodyRadius.value);
+  const centerY = uniforms.uMouthCenterY.value;
+  const widthNorm = Math.max(0.08, Math.min(0.42, uniforms.uMouthWidth.value * 0.34));
+  const openAmt = Math.max(0, Math.min(1, uniforms.uMouthOpen.value));
+  const halfH = 0.014 + (0.19 - 0.014) * openAmt;
+  const curve = uniforms.uMouthCurve.value;
+  const minParabola = Math.min(-0.35 * curve, 0.65 * curve) * 0.085;
+  const maxParabola = Math.max(-0.35 * curve, 0.65 * curve) * 0.085;
+  const wavePad = Math.abs(uniforms.uMouthWave.value) * 0.024;
+  const rimPad = 0.026;
+
+  const xHalf = Math.min(r * 0.96, (widthNorm + rimPad) * r);
+  const yMin = centerY + (minParabola - halfH - wavePad - rimPad) * r;
+  const yMax = centerY + (maxParabola + halfH + wavePad + rimPad) * r;
+  const zMin = Math.sqrt(Math.max(0.04, r * r - xHalf * xHalf));
+  const zMax = r * 1.015;
+
+  target.min.set(-xHalf, yMin, zMin);
+  target.max.set(xHalf, yMax, zMax);
+  return target;
 }
 
 export function createCapsuleBodyUniforms(dna: CapsuleCharacterDNA): CapsuleBodyUniformMap {
@@ -246,10 +284,22 @@ export function buildCapsuleBodyMesh(dna: CapsuleCharacterDNA): CapsuleBodyMeshR
     uniforms.uTongueVisible.value = mouth.tongueVisible;
   };
 
+  const getMouthLocalBounds = (target = new Box3()): Box3 =>
+    computeCapsuleMouthLocalBounds(uniforms, target);
+
+  const getMouthWorldBounds = (target = new Box3()): Box3 => {
+    mesh.updateWorldMatrix(true, false);
+    computeCapsuleMouthLocalBounds(uniforms, target);
+    target.applyMatrix4(mesh.matrixWorld);
+    return target;
+  };
+
   return {
     mesh,
     uniforms,
     updateDna,
     updateMouth,
+    getMouthLocalBounds,
+    getMouthWorldBounds,
   };
 }

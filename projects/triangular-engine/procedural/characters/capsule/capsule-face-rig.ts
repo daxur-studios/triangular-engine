@@ -36,6 +36,7 @@ export interface CapsuleFaceRigResult {
   readonly rightEye: CapsuleEyeAssembly;
   readonly leftBrow: Mesh;
   readonly rightBrow: Mesh;
+  readonly noseMesh: Mesh;
   readonly updateFromProjection: (projection: CapsuleFaceProjection) => void;
   readonly updateColorsAndStyle: (dna: CapsuleCharacterDNA) => void;
   readonly dispose: () => void;
@@ -51,7 +52,9 @@ function buildSingleGooglyEye(
   lashMat: MeshStandardMaterial,
 ): CapsuleEyeAssembly {
   const sign = side === 'left' ? -1 : 1;
-  const eyeRadius = dna.bodyRadius * 0.255 * dna.eyeScale;
+  const sizeAsym = (dna.eyeSizeAsymmetry ?? 0) * sign * 0.5;
+  const sideEyeScale = Math.max(0.55, dna.eyeScale * (1 + sizeAsym));
+  const eyeRadius = dna.bodyRadius * 0.255 * sideEyeScale;
 
   const root = new Group();
   root.name = `capsule-eye-${side}`;
@@ -59,7 +62,8 @@ function buildSingleGooglyEye(
   // Place on the front cylindrical surface of the upper capsule head
   const angle = sign * dna.eyeSpacing;
   const surfaceR = dna.bodyRadius * 0.95;
-  const eyeY = dna.suitSplitY + dna.bodyHeight * 0.34;
+  const heightShift = (dna.eyeHeightAsymmetry ?? 0) * sign * dna.bodyRadius;
+  const eyeY = dna.suitSplitY + dna.bodyHeight * 0.34 + heightShift;
   root.position.set(
     Math.sin(angle) * surfaceR,
     eyeY,
@@ -174,7 +178,10 @@ function buildFloatingEyebrow(
 
   const angle = sign * dna.eyeSpacing * 1.02;
   const surfaceR = r * 1.01;
-  const baseBrowY = dna.suitSplitY + dna.bodyHeight * 0.34 + r * 0.33 * dna.eyeScale;
+  const sizeAsym = (dna.eyeSizeAsymmetry ?? 0) * sign * 0.5;
+  const sideEyeScale = Math.max(0.55, dna.eyeScale * (1 + sizeAsym));
+  const heightShift = (dna.eyeHeightAsymmetry ?? 0) * sign * r;
+  const baseBrowY = dna.suitSplitY + dna.bodyHeight * 0.34 + heightShift + r * 0.33 * sideEyeScale;
 
   browMesh.position.set(
     Math.sin(angle) * surfaceR,
@@ -185,6 +192,25 @@ function buildFloatingEyebrow(
   browMesh.userData['baseY'] = baseBrowY;
 
   return browMesh;
+}
+
+function buildButtonNose(dna: CapsuleCharacterDNA, noseMat: MeshStandardMaterial): Mesh {
+  const r = dna.bodyRadius;
+  const noseGeo = new SphereGeometry(r * 0.082, 16, 12);
+  noseGeo.scale(1.08, 0.88, 0.95);
+  const noseMesh = new Mesh(noseGeo, noseMat);
+  noseMesh.name = 'capsule-button-nose';
+  noseMesh.castShadow = true;
+  noseMesh.receiveShadow = true;
+  const nScale = Math.max(0, dna.noseScale ?? 0);
+  noseMesh.visible = nScale > 0.01;
+  noseMesh.scale.setScalar(Math.max(0.01, nScale));
+  noseMesh.position.set(
+    0,
+    dna.suitSplitY + dna.bodyHeight * 0.245,
+    r * 0.99,
+  );
+  return noseMesh;
 }
 
 /**
@@ -252,8 +278,14 @@ export function buildCapsuleFaceRig(dna: CapsuleCharacterDNA): CapsuleFaceRigRes
 
   const leftBrow = buildFloatingEyebrow('left', dna, browMat);
   const rightBrow = buildFloatingEyebrow('right', dna, browMat);
+  const noseMat = new MeshStandardMaterial({
+    color: new Color(dna.skinTone).multiplyScalar(0.92),
+    roughness: 0.58,
+    metalness: 0.04,
+  });
+  const noseMesh = buildButtonNose(dna, noseMat);
 
-  root.add(leftEye.root, rightEye.root, leftBrow, rightBrow);
+  root.add(leftEye.root, rightEye.root, leftBrow, rightBrow, noseMesh);
 
   const applyEyePose = (eye: CapsuleEyeAssembly, pose: CapsuleEyeRigPose): void => {
     eye.gazePivot.rotation.set(pose.gazePitch * 0.75, pose.gazeYaw * 0.75, 0);
@@ -282,9 +314,13 @@ export function buildCapsuleFaceRig(dna: CapsuleCharacterDNA): CapsuleFaceRigRes
 
   const updateColorsAndStyle = (nextDna: CapsuleCharacterDNA): void => {
     skinMat.color.set(nextDna.skinTone);
+    noseMat.color.set(nextDna.skinTone).multiplyScalar(0.92);
     browMat.color.set(nextDna.hairColor);
     leftEye.lashesGroup.visible = nextDna.eyelashes;
     rightEye.lashesGroup.visible = nextDna.eyelashes;
+    const nScale = Math.max(0, nextDna.noseScale ?? 0);
+    noseMesh.visible = nScale > 0.01;
+    noseMesh.scale.setScalar(Math.max(0.01, nScale));
   };
 
   const dispose = (): void => {
@@ -294,6 +330,7 @@ export function buildCapsuleFaceRig(dna: CapsuleCharacterDNA): CapsuleFaceRigRes
       }
     });
     skinMat.dispose();
+    noseMat.dispose();
     scleraMat.dispose();
     pupilMat.dispose();
     catchlightMat.dispose();
@@ -307,6 +344,7 @@ export function buildCapsuleFaceRig(dna: CapsuleCharacterDNA): CapsuleFaceRigRes
     rightEye,
     leftBrow,
     rightBrow,
+    noseMesh,
     updateFromProjection,
     updateColorsAndStyle,
     dispose,

@@ -7,6 +7,7 @@ import type {
   ExtendedEmotionName,
 } from 'triangular-engine/characters';
 import type { CameraFramingPreset, CapsuleLayoutMode } from './characters-lab-page.component';
+import type { VisualFocusTargetId } from './characters-lab-focus';
 
 /**
  * Settings configuration for a Characters Lab scenario.
@@ -18,6 +19,7 @@ export interface CharactersLabTestSettings {
   readonly emotion: ExtendedEmotionName;
   readonly gait: CapsuleCatGaitMode | CapsuleLocomotionMode;
   readonly cameraFraming: CameraFramingPreset;
+  readonly focusTarget?: VisualFocusTargetId;
   readonly layout: CapsuleLayoutMode;
   readonly speak?: boolean;
   readonly speechText?: string;
@@ -333,36 +335,90 @@ export const CAPSULE_FACIAL_EMOTIONS_SUITE_V1: TestSuite<CharactersLabTestSettin
   scenarios: [
     scenario('human-happy-detail', 'Capsule Human: Happy eyes and smile', {
       characterType: 'human', presetId: 'wacky-helmet-waver', emotion: 'happy', gait: 'idle',
-      cameraFraming: 'face-close-up', rightHandAction: 'none', leftHandAction: 'none',
+      cameraFraming: 'face-close-up', focusTarget: 'human-face', rightHandAction: 'none', leftHandAction: 'none',
     }, DEFAULT_HUMAN_TEST_SETTINGS),
     scenario('human-angry-detail', 'Capsule Human: Angry brows and narrowed eyes', {
       characterType: 'human', presetId: 'wacky-helmet-waver', emotion: 'angry', gait: 'idle',
-      cameraFraming: 'face-close-up', rightHandAction: 'none', leftHandAction: 'none',
+      cameraFraming: 'face-close-up', focusTarget: 'human-face', rightHandAction: 'none', leftHandAction: 'none',
     }, DEFAULT_HUMAN_TEST_SETTINGS),
     scenario('human-sad-detail', 'Capsule Human: Sad brows and mouth', {
       characterType: 'human', presetId: 'wacky-helmet-waver', emotion: 'sad', gait: 'idle',
-      cameraFraming: 'face-close-up', rightHandAction: 'none', leftHandAction: 'none',
+      cameraFraming: 'face-close-up', focusTarget: 'human-face', rightHandAction: 'none', leftHandAction: 'none',
     }, DEFAULT_HUMAN_TEST_SETTINGS),
     scenario('human-skeptical-detail', 'Capsule Human: Skeptical brow and smirk', {
       characterType: 'human', presetId: 'wacky-helmet-waver', emotion: 'skeptical', gait: 'idle',
-      cameraFraming: 'face-close-up', rightHandAction: 'none', leftHandAction: 'none',
+      cameraFraming: 'face-close-up', focusTarget: 'human-face', rightHandAction: 'none', leftHandAction: 'none',
     }, DEFAULT_HUMAN_TEST_SETTINGS),
     scenario('cat-happy-detail', 'Capsule Cat: Happy eyes and muzzle', {
       characterType: 'cat', presetId: 'space-cat-goofy', emotion: 'happy', gait: 'idle',
-      cameraFraming: 'face-close-up', restMouthPose: 'cat_smile',
+      cameraFraming: 'face-close-up', focusTarget: 'cat-face', restMouthPose: 'cat_smile',
     }, DEFAULT_CAT_TEST_SETTINGS),
     scenario('cat-angry-detail', 'Capsule Cat: Angry eyes, ears and fangs', {
       characterType: 'cat', presetId: 'space-cat-goofy', emotion: 'angry', gait: 'idle',
-      cameraFraming: 'face-close-up',
+      cameraFraming: 'face-close-up', focusTarget: 'cat-face',
     }, DEFAULT_CAT_TEST_SETTINGS),
     scenario('cat-fearful-detail', 'Capsule Cat: Fearful eyes and pinned ears', {
       characterType: 'cat', presetId: 'space-cat-goofy', emotion: 'fearful', gait: 'idle',
-      cameraFraming: 'face-close-up', panicked: true,
+      cameraFraming: 'face-close-up', focusTarget: 'cat-face', panicked: true,
     }, DEFAULT_CAT_TEST_SETTINGS),
     scenario('cat-skeptical-detail', 'Capsule Cat: Asymmetric skeptical expression', {
       characterType: 'cat', presetId: 'space-cat-goofy', emotion: 'skeptical', gait: 'idle',
-      cameraFraming: 'face-close-up',
+      cameraFraming: 'face-close-up', focusTarget: 'cat-face',
     }, DEFAULT_CAT_TEST_SETTINGS),
+  ],
+};
+
+/**
+ * Suite 7: Capsule Human A/B Variant Comparison (Baseline vs. Alt Space Variants & Wonky Eyes)
+ * Evaluates new hairstyles, wonky eye/gaze asymmetry, button nose, headgear, and scene-owned focus framing.
+ */
+export const CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
+  id: 'capsule-human-ab-variants',
+  version: 1,
+  title: 'Capsule Human A/B Comparison: Baseline vs. Alt Space Variants',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: [
+    scenario('baseline-helmet-waver-face', 'Baseline A: Wacky Helmet Waver (Symmetric Eyes, No Nose)', {
+      characterType: 'human', presetId: 'wacky-helmet-waver', emotion: 'happy', gait: 'idle',
+      cameraFraming: 'face-close-up', focusTarget: 'human-face', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('variant-sprout-wonky-face', 'Variant A: Sprout Wonky Doodle (Asymmetric Eyes, Divergent Gaze, Button Nose)', {
+      characterType: 'human', presetId: 'sprout-wonky-doodle', emotion: 'happy', gait: 'idle',
+      cameraFraming: 'face-close-up', focusTarget: 'human-face', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('baseline-helmet-waver-head', 'Baseline B: Wacky Helmet Waver Head & Hair (Curly Puff + Helmet)', {
+      characterType: 'human', presetId: 'wacky-helmet-waver', emotion: 'happy', gait: 'idle',
+      cameraFraming: 'head-close-up', focusTarget: 'human-head-hair', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('variant-spiky-wonky-head', 'Variant B: Alt Spiky Wonky Waver (Spiky Hair + Wonky Eyes + Button Nose + Helmet)', {
+      characterType: 'human', presetId: 'alt-spiky-wonky-waver', emotion: 'happy', gait: 'idle',
+      cameraFraming: 'head-close-up', focusTarget: 'human-head-hair', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('baseline-buck-buns-head', 'Baseline C: Buck-Tooth Buns (Low Pigtail Buns, Symmetric Eyes)', {
+      characterType: 'human', presetId: 'buck-tooth-buns', emotion: 'happy', gait: 'idle',
+      cameraFraming: 'head-close-up', focusTarget: 'human-head-hair', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('variant-space-buns-pink-head', 'Variant C: Alt Space Buns Pink (High Twin Buns + Fringe + Button Nose)', {
+      characterType: 'human', presetId: 'alt-space-buns-pink', emotion: 'happy', gait: 'idle',
+      cameraFraming: 'head-close-up', focusTarget: 'human-head-hair', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('variant-bob-cut-head', 'Variant D: Alt Bob Cut (Rounded Bob + Fringe Bangs + Wonky Gaze)', {
+      characterType: 'human', presetId: 'alt-bob-cut', emotion: 'happy', gait: 'idle',
+      cameraFraming: 'head-close-up', focusTarget: 'human-head-hair', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('variant-goggles-mechanic-head', 'Variant E: Alt Goggles Mechanic (Forehead Goggles + Curly Hair + Wonky Eye)', {
+      characterType: 'human', presetId: 'alt-goggles-mechanic', emotion: 'skeptical', gait: 'idle',
+      cameraFraming: 'head-close-up', focusTarget: 'human-head-hair', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('variant-afro-groove-head', 'Variant F: Alt Afro Groove (Voluminous Curly Afro + Coral Suit + Button Nose)', {
+      characterType: 'human', presetId: 'alt-afro-groove', emotion: 'happy', gait: 'idle',
+      cameraFraming: 'head-close-up', focusTarget: 'human-head-hair', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('variant-glasses-coffee-full', 'Variant G: Alt Glasses & Coffee (Round Glasses + Mustache + Held Coffee Mug)', {
+      characterType: 'human', presetId: 'alt-glasses-coffee', emotion: 'happy', gait: 'idle',
+      cameraFraming: 'front', focusTarget: 'human-full-body', rightHandAction: 'none', leftHandAction: 'hold_gadget',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
   ],
 };
 
@@ -377,4 +433,5 @@ export const CHARACTERS_LAB_TEST_HISTORY: readonly TestSuite<CharactersLabTestSe
   CAT_EMOTIONS_SUITE_V1,
   CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
   CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
+  CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1,
 ];

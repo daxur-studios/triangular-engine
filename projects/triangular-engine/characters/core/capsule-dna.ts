@@ -5,9 +5,11 @@
 
 export const CAPSULE_HAIR_STYLE_IDS = [
   'bald',
+  'sprout',
   'ponytail',
   'pigtails',
   'buns',
+  'space_buns',
   'top_bun',
   'spiky',
   'wacky',
@@ -15,6 +17,9 @@ export const CAPSULE_HAIR_STYLE_IDS = [
   'swept',
   'receding',
   'mohawk',
+  'bob_cut',
+  'afro',
+  'curly',
 ] as const;
 
 export type CapsuleHairStyleId = (typeof CAPSULE_HAIR_STYLE_IDS)[number];
@@ -42,6 +47,12 @@ export const CAPSULE_ACCESSORY_IDS = [
   'headset',
   'walkie_talkie',
   'flag',
+  'space_cap',
+  'goggles',
+  'beanie',
+  'glasses',
+  'coffee_mug',
+  'tablet',
 ] as const;
 
 export type CapsuleAccessoryId = (typeof CAPSULE_ACCESSORY_IDS)[number];
@@ -83,6 +94,29 @@ export interface CapsuleCharacterDNA {
   readonly eyeScale: number;
   /** Baseline pupil radius relative to eye radius ([0.16, 0.55], default 0.28). */
   readonly pupilScale: number;
+  /**
+   * Wonky eye-size asymmetry in [-0.35, 0.35] (default 0).
+   * Positive values enlarge the right eye and shrink the left eye; negative values do the reverse.
+   */
+  readonly eyeSizeAsymmetry: number;
+  /**
+   * Wonky vertical eye-height offset in [-0.08, 0.08] relative to `bodyRadius` (default 0).
+   * Shifts one eye and brow slightly higher and the other slightly lower.
+   */
+  readonly eyeHeightAsymmetry: number;
+  /**
+   * Horizontal pupil gaze divergence/convergence in radians ([-0.45, 0.45], default 0).
+   * Positive values push pupils slightly outward (wall-eyed); negative values pull them inward (cross-eyed).
+   */
+  readonly gazeAsymmetryYaw: number;
+  /**
+   * Vertical pupil gaze offset between left and right eyes in radians ([-0.35, 0.35], default 0).
+   */
+  readonly gazeAsymmetryPitch: number;
+  /**
+   * Rounded 3D button nose scale in [0, 1.4] (default 0 = no nose bump as in original baseline; 1.0 = standard button nose).
+   */
+  readonly noseScale: number;
   /** Whether to attach outer eyelash ticks on the upper eyelids (female variant). */
   readonly eyelashes: boolean;
   /** Whether the upper teeth render as prominent split buck teeth instead of a continuous bar. */
@@ -121,6 +155,9 @@ export const DEFAULT_CAPSULE_HAIR_COLORS: readonly string[] = [
   '#784b2a', // Warm medium brown
   '#d9822b', // Amber / honey blonde
   '#3f271b', // Dark espresso
+  '#d88ca0', // Pastel space-bun pink
+  '#3b8ea5', // Zero-G cosmic teal
+  '#e8c374', // Sandy blonde
 ];
 
 export const DEFAULT_CAPSULE_BOOT_COLORS: readonly string[] = [
@@ -144,6 +181,11 @@ export const DEFAULT_CAPSULE_DNA: CapsuleCharacterDNA = {
   eyeSpacing: 0.34,
   eyeScale: 1.0,
   pupilScale: 0.28,
+  eyeSizeAsymmetry: 0,
+  eyeHeightAsymmetry: 0,
+  gazeAsymmetryYaw: 0,
+  gazeAsymmetryPitch: 0,
+  noseScale: 0,
   eyelashes: false,
   buckTeeth: false,
   hairStyleId: 'wacky',
@@ -334,6 +376,234 @@ export const CAPSULE_CHARACTER_PRESETS: readonly CapsuleCharacterDNA[] = [
   },
 ];
 
+/**
+ * Alt Space Variants & Wonky-Eye Presets derived from the second Capsule Doodle
+ * reference sheets (Sprout Doodle & Alt Space Variants).
+ * Preserves `CAPSULE_CHARACTER_PRESETS` unchanged as the baseline catalog.
+ */
+export const CAPSULE_ALT_CHARACTER_PRESETS: readonly CapsuleCharacterDNA[] = [
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'sprout-wonky-doodle',
+    label: 'Sprout Wonky Doodle (Alt)',
+    bodyRadius: 0.36,
+    bodyHeight: 0.85,
+    skinTone: '#f5be8f',
+    bootColor: '#f4f1ea',
+    eyeSpacing: 0.34,
+    eyeScale: 1.05,
+    pupilScale: 0.26,
+    eyeSizeAsymmetry: 0.22,
+    eyeHeightAsymmetry: 0.035,
+    gazeAsymmetryYaw: 0.22,
+    gazeAsymmetryPitch: 0.09,
+    noseScale: 1.0,
+    hairStyleId: 'sprout',
+    hairColor: '#362b26',
+    helmet: true,
+    jetpack: true,
+    chestPatch: 'circle_badge',
+    accessory: 'none',
+  },
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'alt-spiky-wonky-waver',
+    label: 'Wonky Spiky Cadet (Alt)',
+    bodyRadius: 0.36,
+    bodyHeight: 0.85,
+    skinTone: '#efb786',
+    bootColor: '#f4f1ea',
+    eyeSpacing: 0.34,
+    eyeScale: 1.04,
+    pupilScale: 0.27,
+    eyeSizeAsymmetry: 0.18,
+    eyeHeightAsymmetry: 0.025,
+    gazeAsymmetryYaw: 0.16,
+    gazeAsymmetryPitch: 0.06,
+    noseScale: 1.0,
+    hairStyleId: 'spiky',
+    hairColor: '#2d2926',
+    helmet: false,
+    jetpack: true,
+    chestPatch: 'circle_badge',
+    accessory: 'none',
+  },
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'alt-space-buns-pink',
+    label: 'Pink Space Buns (Alt)',
+    bodyRadius: 0.35,
+    bodyHeight: 0.85,
+    skinTone: '#f4c299',
+    bootColor: '#f4f1ea',
+    eyeSpacing: 0.34,
+    eyeScale: 1.02,
+    pupilScale: 0.27,
+    eyeSizeAsymmetry: -0.10,
+    eyeHeightAsymmetry: 0.015,
+    gazeAsymmetryYaw: 0.08,
+    noseScale: 0.95,
+    eyelashes: true,
+    hairStyleId: 'space_buns',
+    hairColor: '#d88ca0',
+    hairHighlightColor: '#f4f1ea',
+    helmet: false,
+    jetpack: true,
+    chestPatch: 'circle_badge',
+    accessory: 'none',
+  },
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'alt-space-cap-cadet',
+    label: 'Space Cap Pilot (Alt)',
+    bodyRadius: 0.36,
+    bodyHeight: 0.86,
+    skinTone: '#eeb482',
+    bootColor: '#f4f1ea',
+    eyeSpacing: 0.33,
+    eyeScale: 1.0,
+    pupilScale: 0.26,
+    noseScale: 1.0,
+    hairStyleId: 'swept',
+    hairColor: '#4b3628',
+    helmet: false,
+    jetpack: true,
+    chestPatch: 'circle_badge',
+    accessory: 'space_cap',
+  },
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'alt-afro-groove',
+    label: 'Curly Afro Specialist (Alt)',
+    bodyRadius: 0.36,
+    bodyHeight: 0.85,
+    skinTone: '#c98252',
+    bootColor: '#f4f1ea',
+    eyeSpacing: 0.34,
+    eyeScale: 1.02,
+    pupilScale: 0.27,
+    noseScale: 1.0,
+    eyelashes: true,
+    hairStyleId: 'afro',
+    hairColor: '#3f271b',
+    helmet: false,
+    jetpack: true,
+    chestPatch: 'circle_badge',
+    accessory: 'none',
+  },
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'alt-goggles-mechanic',
+    label: 'Forehead Goggles Tech (Alt)',
+    bodyRadius: 0.36,
+    bodyHeight: 0.86,
+    skinTone: '#f2be91',
+    bootColor: '#f4f1ea',
+    eyeSpacing: 0.34,
+    eyeScale: 1.03,
+    pupilScale: 0.26,
+    eyeSizeAsymmetry: 0.14,
+    eyeHeightAsymmetry: -0.02,
+    gazeAsymmetryYaw: 0.14,
+    noseScale: 1.0,
+    hairStyleId: 'wacky',
+    hairColor: '#e8c374',
+    helmet: false,
+    jetpack: true,
+    chestPatch: 'circle_badge',
+    accessory: 'goggles',
+  },
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'alt-bob-cut',
+    label: 'Bob Cut Navigator (Alt)',
+    bodyRadius: 0.35,
+    bodyHeight: 0.84,
+    skinTone: '#f4c299',
+    bootColor: '#f4f1ea',
+    eyeSpacing: 0.34,
+    eyeScale: 1.02,
+    pupilScale: 0.27,
+    noseScale: 0.95,
+    eyelashes: true,
+    hairStyleId: 'bob_cut',
+    hairColor: '#26282e',
+    helmet: false,
+    jetpack: true,
+    chestPatch: 'circle_badge',
+    accessory: 'none',
+  },
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'alt-curly-helmet-walker',
+    label: 'Curly Ginger Cosmonaut (Alt)',
+    bodyRadius: 0.36,
+    bodyHeight: 0.85,
+    skinTone: '#f2be91',
+    bootColor: '#f4f1ea',
+    eyeSpacing: 0.34,
+    eyeScale: 1.05,
+    pupilScale: 0.26,
+    eyeSizeAsymmetry: 0.16,
+    eyeHeightAsymmetry: 0.02,
+    gazeAsymmetryYaw: 0.12,
+    noseScale: 1.0,
+    hairStyleId: 'curly',
+    hairColor: '#e06829',
+    helmet: true,
+    jetpack: true,
+    chestPatch: 'circle_badge',
+    accessory: 'none',
+  },
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'alt-glasses-coffee',
+    label: 'Caffeinated Scientist (Alt)',
+    bodyRadius: 0.36,
+    bodyHeight: 0.85,
+    skinTone: '#f2be91',
+    bootColor: '#f4f1ea',
+    eyeSpacing: 0.35,
+    eyeScale: 1.02,
+    pupilScale: 0.23,
+    eyeSizeAsymmetry: -0.14,
+    eyeHeightAsymmetry: 0.025,
+    gazeAsymmetryYaw: -0.18,
+    gazeAsymmetryPitch: 0.08,
+    noseScale: 1.0,
+    hairStyleId: 'wacky',
+    hairColor: '#e8c374',
+    helmet: false,
+    jetpack: true,
+    chestPatch: 'circle_badge',
+    accessory: 'glasses',
+  },
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'alt-beanie-explorer',
+    label: 'Knit Beanie Explorer (Alt)',
+    bodyRadius: 0.35,
+    bodyHeight: 0.85,
+    skinTone: '#eeb482',
+    bootColor: '#f4f1ea',
+    eyeSpacing: 0.34,
+    eyeScale: 1.02,
+    pupilScale: 0.27,
+    noseScale: 1.0,
+    hairStyleId: 'mullet',
+    hairColor: '#4b3628',
+    helmet: false,
+    jetpack: true,
+    chestPatch: 'circle_badge',
+    accessory: 'beanie',
+  },
+];
+
+export const ALL_CAPSULE_CHARACTER_PRESETS: readonly CapsuleCharacterDNA[] = [
+  ...CAPSULE_CHARACTER_PRESETS,
+  ...CAPSULE_ALT_CHARACTER_PRESETS,
+];
+
 function clampNumber(value: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.max(min, Math.min(max, value));
@@ -398,6 +668,31 @@ export function normalizeCapsuleCharacterDNA(
     eyeSpacing: clampNumber(partial.eyeSpacing ?? base.eyeSpacing, 0.22, 0.55, base.eyeSpacing),
     eyeScale: clampNumber(partial.eyeScale ?? base.eyeScale, 0.7, 1.35, base.eyeScale),
     pupilScale: clampNumber(partial.pupilScale ?? base.pupilScale, 0.16, 0.55, base.pupilScale),
+    eyeSizeAsymmetry: clampNumber(
+      partial.eyeSizeAsymmetry ?? base.eyeSizeAsymmetry,
+      -0.35,
+      0.35,
+      base.eyeSizeAsymmetry,
+    ),
+    eyeHeightAsymmetry: clampNumber(
+      partial.eyeHeightAsymmetry ?? base.eyeHeightAsymmetry,
+      -0.08,
+      0.08,
+      base.eyeHeightAsymmetry,
+    ),
+    gazeAsymmetryYaw: clampNumber(
+      partial.gazeAsymmetryYaw ?? base.gazeAsymmetryYaw,
+      -0.45,
+      0.45,
+      base.gazeAsymmetryYaw,
+    ),
+    gazeAsymmetryPitch: clampNumber(
+      partial.gazeAsymmetryPitch ?? base.gazeAsymmetryPitch,
+      -0.35,
+      0.35,
+      base.gazeAsymmetryPitch,
+    ),
+    noseScale: clampNumber(partial.noseScale ?? base.noseScale, 0, 1.4, base.noseScale),
     eyelashes: Boolean(partial.eyelashes ?? base.eyelashes),
     buckTeeth: Boolean(partial.buckTeeth ?? base.buckTeeth),
     hairStyleId,
@@ -419,14 +714,27 @@ export function generateCapsuleCharacterDNA(seed: string | number): CapsuleChara
   const pick = <T>(items: readonly T[]): T => items[Math.floor(rng() * items.length)];
 
   const eyelashes = rng() < 0.35;
-  const femaleHairPool: readonly CapsuleHairStyleId[] = ['ponytail', 'pigtails', 'buns', 'top_bun', 'swept'];
+  const femaleHairPool: readonly CapsuleHairStyleId[] = [
+    'ponytail',
+    'pigtails',
+    'buns',
+    'space_buns',
+    'top_bun',
+    'bob_cut',
+    'afro',
+    'curly',
+    'swept',
+  ];
   const generalHairPool: readonly CapsuleHairStyleId[] = [
+    'sprout',
     'spiky',
     'wacky',
     'mullet',
     'swept',
     'receding',
     'mohawk',
+    'curly',
+    'afro',
     'bald',
   ];
   const hairStyleId = eyelashes ? pick(femaleHairPool) : pick(generalHairPool);
@@ -438,11 +746,25 @@ export function generateCapsuleCharacterDNA(seed: string | number): CapsuleChara
         : 'full_beard';
 
   const helmet = rng() < 0.45;
+  const helmetCompatibleAccessories: readonly CapsuleAccessoryId[] = [
+    'none',
+    'walkie_talkie',
+    'tablet',
+    'coffee_mug',
+    'glasses',
+  ];
   const accessory: CapsuleAccessoryId = helmet
-    ? rng() < 0.25
-      ? 'walkie_talkie'
+    ? rng() < 0.35
+      ? pick(helmetCompatibleAccessories)
       : 'none'
     : pick(CAPSULE_ACCESSORY_IDS);
+
+  const hasWonkyEyes = rng() < 0.45;
+  const eyeSizeAsymmetry = hasWonkyEyes ? Number(((rng() - 0.5) * 0.44).toFixed(3)) : 0;
+  const eyeHeightAsymmetry = hasWonkyEyes ? Number(((rng() - 0.5) * 0.06).toFixed(3)) : 0;
+  const gazeAsymmetryYaw = hasWonkyEyes ? Number(((rng() - 0.5) * 0.38).toFixed(3)) : 0;
+  const gazeAsymmetryPitch = hasWonkyEyes ? Number(((rng() - 0.5) * 0.18).toFixed(3)) : 0;
+  const noseScale = rng() < 0.65 ? Number((0.75 + rng() * 0.4).toFixed(3)) : 0;
 
   return normalizeCapsuleCharacterDNA({
     id: `capsule-seed-${String(seed)}`,
@@ -458,6 +780,11 @@ export function generateCapsuleCharacterDNA(seed: string | number): CapsuleChara
     eyeSpacing: Number((0.30 + rng() * 0.09).toFixed(3)),
     eyeScale: Number((0.92 + rng() * 0.18).toFixed(3)),
     pupilScale: Number((0.22 + rng() * 0.12).toFixed(3)),
+    eyeSizeAsymmetry,
+    eyeHeightAsymmetry,
+    gazeAsymmetryYaw,
+    gazeAsymmetryPitch,
+    noseScale,
     eyelashes,
     buckTeeth: rng() < 0.22,
     hairStyleId,

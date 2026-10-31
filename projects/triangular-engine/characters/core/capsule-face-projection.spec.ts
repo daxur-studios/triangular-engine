@@ -35,4 +35,17 @@ describe('capsule-face-projection', () => {
     expect(proj.leftEye.upperLidAngle).toBeGreaterThan(proj.rightEye.upperLidAngle);
     expect(proj.rightBrow.heightOffset).toBeGreaterThan(proj.leftBrow.heightOffset);
   });
+
+  it('applies wonky gaze asymmetry offsets between left and right eyes', () => {
+    const ctrl = new FacialAnimationController();
+    const frame = ctrl.update(0.05);
+
+    const proj = projectCapsuleFaceState(frame, {
+      ...DEFAULT_CAPSULE_DNA,
+      gazeAsymmetryYaw: 0.24,
+      gazeAsymmetryPitch: 0.14,
+    });
+    expect(proj.rightEye.gazeYaw - proj.leftEye.gazeYaw).toBeCloseTo(0.24, 3);
+    expect(proj.rightEye.gazePitch - proj.leftEye.gazePitch).toBeCloseTo(0.14, 3);
+  });
 });

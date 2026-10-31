@@ -151,6 +151,191 @@ function buildHairStyleMeshes(
   if (style === 'bald') return;
 
   switch (style) {
+    case 'sprout': {
+      // Minimal 2-stem antenna hair sprout from the 3-character Capsule Doodle concept art
+      const leftStemGeo = createTaperedSplineLockGeometry(
+        [
+          new Vector3(-r * 0.04, r * 0.94, r * 0.08),
+          new Vector3(-r * 0.16, r * 1.20, r * 0.12),
+          new Vector3(-r * 0.32, r * 1.32, r * 0.14),
+        ],
+        r * 0.082,
+        12,
+        8,
+        0.78,
+      );
+      const rightStemGeo = createTaperedSplineLockGeometry(
+        [
+          new Vector3(r * 0.04, r * 0.94, r * 0.06),
+          new Vector3(r * 0.08, r * 1.24, r * 0.10),
+          new Vector3(-r * 0.04, r * 1.40, r * 0.12),
+        ],
+        r * 0.078,
+        12,
+        8,
+        0.78,
+      );
+      const leftMesh = new Mesh(leftStemGeo, hairMat);
+      const rightMesh = new Mesh(rightStemGeo, hairMat);
+      leftMesh.castShadow = true;
+      rightMesh.castShadow = true;
+      secondaryGroup.add(leftMesh, rightMesh);
+      break;
+    }
+
+    case 'space_buns': {
+      // Twin high buns with long face-framing front locks ("SPACE BUNS" in charsP2.png)
+      addScalpBaseCap(staticCrown, r, hairMat, Math.PI * 0.45);
+      addPartedFrontBangs(staticCrown, r, hairMat);
+
+      for (const sign of [-1, 1] as const) {
+        const bunGeo = new SphereGeometry(r * 0.40, 18, 14);
+        bunGeo.scale(1.02, 0.94, 1.02);
+        const bun = new Mesh(bunGeo, hairMat);
+        bun.position.set(sign * r * 0.88, r * 0.88, -r * 0.06);
+        bun.castShadow = true;
+        secondaryGroup.add(bun);
+
+        // Long draped front-side lock framing the face down past the googly eyes
+        const sideLockGeo = createTaperedSplineLockGeometry(
+          [
+            new Vector3(sign * r * 0.56, r * 0.78, r * 0.48),
+            new Vector3(sign * r * 0.96, r * 0.42, r * 0.42),
+            new Vector3(sign * r * 1.06, -r * 0.08, r * 0.34),
+            new Vector3(sign * r * 0.98, -r * 0.56, r * 0.24),
+          ],
+          r * 0.22,
+          14,
+          8,
+          0.6,
+        );
+        const sideLockMesh = new Mesh(sideLockGeo, hairMat);
+        sideLockMesh.castShadow = true;
+        secondaryGroup.add(sideLockMesh);
+      }
+      break;
+    }
+
+    case 'bob_cut': {
+      // Smooth rounded bob helmet-cut with blunt fringe bangs + symmetric side/back panels ("BOB CUT" in charsP2.png)
+      addScalpBaseCap(staticCrown, r, hairMat, Math.PI * 0.48);
+
+      // Blunt fringe bangs across upper forehead (rooted inside the scalp cap so top dome stays smooth)
+      for (let i = -2; i <= 2; i++) {
+        const xOff = (i / 2) * r * 0.56;
+        const zFront = Math.sqrt(Math.max(0.25, 1 - (i / 2.6) ** 2)) * r;
+        const fringeGeo = createTaperedSplineLockGeometry(
+          [
+            new Vector3(xOff * 0.72, r * 0.78, zFront * 0.52),
+            new Vector3(xOff * 0.94, r * 0.64, zFront * 0.96),
+            new Vector3(xOff * 0.98, r * 0.40, zFront * 1.02),
+          ],
+          r * 0.19,
+          10,
+          8,
+          0.45,
+        );
+        const fringeMesh = new Mesh(fringeGeo, hairMat);
+        fringeMesh.castShadow = true;
+        staticCrown.add(fringeMesh);
+      }
+
+      // Symmetric left, right, and back chin-length bob panels (azimuth = 0 is +Z front)
+      const panelCount = 9;
+      for (let i = 0; i < panelCount; i++) {
+        const t = i / (panelCount - 1);
+        const azimuth = 0.72 + t * (Math.PI * 2 - 1.44);
+        const sinA = Math.sin(azimuth); // X direction (-1 left .. +1 right)
+        const cosA = Math.cos(azimuth); // Z direction (+1 front .. -1 back)
+
+        const panelGeo = createTaperedSplineLockGeometry(
+          [
+            new Vector3(sinA * r * 0.68, r * 0.80, cosA * r * 0.68),
+            new Vector3(sinA * r * 1.08, r * 0.28, cosA * r * 1.06),
+            new Vector3(sinA * r * 1.14, -r * 0.30, cosA * r * 1.10),
+            new Vector3(sinA * r * 1.06, -r * 0.72, cosA * r * 1.04),
+          ],
+          r * 0.28,
+          14,
+          8,
+          0.58,
+        );
+        const panelMesh = new Mesh(panelGeo, hairMat);
+        panelMesh.castShadow = true;
+        secondaryGroup.add(panelMesh);
+      }
+      break;
+    }
+
+    case 'afro': {
+      // Voluminous curly puff cloud enveloping crown, sides, and back (charsP2.png Row 1 Col 4)
+      addScalpBaseCap(staticCrown, r, hairMat, Math.PI * 0.48);
+      const puffRings: ReadonlyArray<readonly [number, number, number, number]> = [
+        [0, 1.24, 0.05, 0.36],
+        [-0.46, 1.16, 0.18, 0.34],
+        [0.46, 1.16, 0.18, 0.34],
+        [-0.82, 0.92, 0.16, 0.33],
+        [0.82, 0.92, 0.16, 0.33],
+        [-1.08, 0.56, 0.10, 0.32],
+        [1.08, 0.56, 0.10, 0.32],
+        [-1.16, 0.14, 0.02, 0.30],
+        [1.16, 0.14, 0.02, 0.30],
+        [-1.06, -0.26, -0.10, 0.28],
+        [1.06, -0.26, -0.10, 0.28],
+        [0, 1.06, 0.56, 0.26],
+        [-0.42, 0.96, 0.58, 0.25],
+        [0.42, 0.96, 0.58, 0.25],
+        [0, 1.14, -0.48, 0.36],
+        [-0.56, 0.98, -0.52, 0.35],
+        [0.56, 0.98, -0.52, 0.35],
+        [-0.92, 0.54, -0.48, 0.34],
+        [0.92, 0.54, -0.48, 0.34],
+        [0, 0.62, -0.88, 0.38],
+        [-0.52, 0.22, -0.84, 0.34],
+        [0.52, 0.22, -0.84, 0.34],
+        [0, 0.08, -0.96, 0.35],
+      ];
+      for (const [px, py, pz, pr] of puffRings) {
+        const puffGeo = new SphereGeometry(r * pr, 14, 12);
+        const puffMesh = new Mesh(puffGeo, hairMat);
+        puffMesh.position.set(r * px, r * py, r * pz);
+        puffMesh.castShadow = true;
+        secondaryGroup.add(puffMesh);
+      }
+      break;
+    }
+
+    case 'curly': {
+      // Compact curly locks over forehead & crown that fit inside the bubble helmet (charsP2.png Row 2 Col 3)
+      addScalpBaseCap(staticCrown, r, hairMat, Math.PI * 0.45);
+      const curls: ReadonlyArray<readonly [number, number, number, number]> = [
+        [0, 1.06, 0.32, 0.25],
+        [-0.36, 1.02, 0.38, 0.24],
+        [0.36, 1.02, 0.38, 0.24],
+        [-0.66, 0.82, 0.34, 0.23],
+        [0.66, 0.82, 0.34, 0.23],
+        [-0.86, 0.52, 0.18, 0.22],
+        [0.86, 0.52, 0.18, 0.22],
+        [-0.92, 0.18, -0.04, 0.21],
+        [0.92, 0.18, -0.04, 0.21],
+        [0, 0.82, 0.68, 0.20],
+        [-0.32, 0.78, 0.66, 0.19],
+        [0.32, 0.78, 0.66, 0.19],
+        [0, 1.12, -0.18, 0.27],
+        [-0.45, 0.96, -0.32, 0.26],
+        [0.45, 0.96, -0.32, 0.26],
+        [0, 0.68, -0.74, 0.28],
+      ];
+      for (const [cx, cy, cz, cr] of curls) {
+        const curlGeo = new SphereGeometry(r * cr, 14, 12);
+        const curlMesh = new Mesh(curlGeo, hairMat);
+        curlMesh.position.set(r * cx, r * cy, r * cz);
+        curlMesh.castShadow = true;
+        secondaryGroup.add(curlMesh);
+      }
+      break;
+    }
+
     case 'ponytail': {
       addScalpBaseCap(staticCrown, r, hairMat);
       addPartedFrontBangs(staticCrown, r, hairMat);

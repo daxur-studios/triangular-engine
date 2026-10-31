@@ -160,6 +160,9 @@ export function projectCapsuleFaceState(
       ? -0.28 * Math.max(frown, wideRight)
       : (browLowerRight * 0.42) - (browRaiseRight * 0.14);
 
+  const asymYaw = (dna.gazeAsymmetryYaw ?? 0) * 0.5;
+  const asymPitch = (dna.gazeAsymmetryPitch ?? 0) * 0.5;
+
   return {
     mouth: {
       mouthOpen,
@@ -170,16 +173,16 @@ export function projectCapsuleFaceState(
       tongueVisible: mouthOpen > 0.12 ? clamp((mouthOpen - 0.12) / 0.35, 0, 1) : 0,
     },
     leftEye: {
-      gazeYaw: frame.gaze.left.yaw,
-      gazePitch: frame.gaze.left.pitch,
+      gazeYaw: clamp(frame.gaze.left.yaw - asymYaw, -0.75, 0.75),
+      gazePitch: clamp(frame.gaze.left.pitch - asymPitch, -0.65, 0.65),
       pupilScale,
       upperLidAngle: computeUpperLid(blinkLeft, squintLeft, wideLeft, browLowerLeft),
       lowerLidAngle: computeLowerLid(blinkLeft, squintLeft, smile),
       lidTiltZ: leftGlareTilt,
     },
     rightEye: {
-      gazeYaw: frame.gaze.right.yaw,
-      gazePitch: frame.gaze.right.pitch,
+      gazeYaw: clamp(frame.gaze.right.yaw + asymYaw, -0.75, 0.75),
+      gazePitch: clamp(frame.gaze.right.pitch + asymPitch, -0.65, 0.65),
       pupilScale,
       upperLidAngle: computeUpperLid(blinkRight, squintRight, wideRight, browLowerRight),
       lowerLidAngle: computeLowerLid(blinkRight, squintRight, smile),

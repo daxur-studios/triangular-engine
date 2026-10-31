@@ -11,6 +11,7 @@ import {
   type TestSetting,
 } from 'triangular-engine/testing';
 import type { CharactersLabTestSettings } from './characters-lab-tests';
+import type { ResolvedFocusFraming } from './characters-lab-focus';
 
 /**
  * Host interface providing the testing harness direct control and inspection
@@ -32,6 +33,7 @@ export interface CharactersLabTestHost {
   recording(): TestRecordingCapture;
   environment(): Readonly<Record<string, TestSetting>>;
   thumbnail?(settings: CharactersLabTestSettings): Promise<Blob | undefined>;
+  resolveFocusFraming?(settings: CharactersLabTestSettings): ResolvedFocusFraming | undefined;
 }
 
 export interface CharactersLabTestSnapshot {
@@ -302,6 +304,21 @@ export function createCharactersLabTestAdapter(
         });
       }
 
+      const focusFraming =
+        settings.focusTarget || settings.cameraFraming === 'face-close-up' || settings.cameraFraming === 'head-close-up'
+          ? host.resolveFocusFraming?.(settings)
+          : undefined;
+      if (focusFraming) {
+        checks.push({
+          name: 'Focus target framed within viewport',
+          passed:
+            focusFraming.inFrame &&
+            focusFraming.occupancy >= 0.35 &&
+            focusFraming.occupancy <= 0.96,
+          detail: `${focusFraming.targetId} (${focusFraming.boundsKind}) rect=[${focusFraming.projectedRect.join(', ')}] occupancy=${focusFraming.occupancy}`,
+        });
+      }
+
       const metrics: TestMetric[] = [
         {
           name: 'frameInterval',
@@ -311,15 +328,36 @@ export function createCharactersLabTestAdapter(
         },
       ];
 
+      const details: Record<string, TestSetting> = {};
+      if (orbitResult) {
+        details['cameraPath'] = 'one horizontal turn followed by a vertical elevation sweep';
+        details['horizontalRadians'] = orbitResult.horizontalRadians;
+        details['minimumElevationRadians'] = orbitResult.minimumElevationRadians;
+        details['maximumElevationRadians'] = orbitResult.maximumElevationRadians;
+      }
+      if (focusFraming) {
+        details['focusTarget'] = focusFraming.targetId;
+        details['focusBoundsKind'] = focusFraming.boundsKind;
+        details['focusCameraPosition'] = focusFraming.cameraPosition.join(',');
+        details['focusCameraTarget'] = focusFraming.cameraTarget.join(',');
+        details['focusCameraDistance'] = focusFraming.cameraDistance;
+        details['focusWorldMin'] = focusFraming.worldMin.join(',');
+        details['focusWorldMax'] = focusFraming.worldMax.join(',');
+        details['focusProjectedRect'] = focusFraming.projectedRect.join(',');
+        if (focusFraming.shaderMouthRect) {
+          details['focusShaderMouthRect'] = focusFraming.shaderMouthRect.join(',');
+        }
+        details['focusInFrame'] = focusFraming.inFrame;
+        details['focusOccupancy'] = focusFraming.occupancy;
+        if (focusFraming.limitations.length > 0) {
+          details['focusLimitations'] = focusFraming.limitations.join(' | ');
+        }
+      }
+
       return {
         checks,
         metrics,
-        ...(orbitResult ? { details: {
-          cameraPath: 'one horizontal turn followed by a vertical elevation sweep',
-          horizontalRadians: orbitResult.horizontalRadians,
-          minimumElevationRadians: orbitResult.minimumElevationRadians,
-          maximumElevationRadians: orbitResult.maximumElevationRadians,
-        } } : {}),
+        ...(Object.keys(details).length > 0 ? { details } : {}),
       };
     },
     recording: (_scenario, context) => {
@@ -327,7 +365,11 @@ export function createCharactersLabTestAdapter(
       return host.recording();
     },
     thumbnail: async (scenario, context) => {
-      if (context.repetition > 1 || !host.thumbnail || scenario.settings.cameraFraming !== 'face-close-up') return undefined;
+      const wantsStill =
+        scenario.settings.focusTarget !== undefined ||
+        scenario.settings.cameraFraming === 'face-close-up' ||
+        scenario.settings.cameraFraming === 'head-close-up';
+      if (context.repetition > 1 || !host.thumbnail || !wantsStill) return undefined;
       context.signal.throwIfAborted();
       const image = await host.thumbnail(scenario.settings);
       context.signal.throwIfAborted();

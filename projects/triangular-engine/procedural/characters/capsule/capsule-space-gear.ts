@@ -3,7 +3,8 @@
  * - Bubble Helmet ("Helmit") with dark metallic neck seal & glossy transparent dome
  * - Twin-Cylinder Orange Jetpack ("Jetpack") with intake pipes, thruster cones & telemetry box
  * - Over-Ear Comms Headset ("Headset") with antenna & boom mic
- * - Handheld Space Gadget ("Walkie-Talkie") & Plantable Pennant Flag
+ * - Space Cap, Forehead Goggles, Ribbed Knit Beanie, Round Glasses
+ * - Handheld Space Gadget ("Walkie-Talkie"), Plantable Pennant Flag, Coffee Mug & Control Tablet
  * - Spacesuit Chest Patch ("circle_badge" / "square_pack") & Neck Collar Ring
  */
 
@@ -278,6 +279,228 @@ function buildSpacePennantFlag(
   return grp;
 }
 
+function buildSpaceCap(
+  r: number,
+  whiteMat: MeshStandardMaterial,
+  orangeMat: MeshStandardMaterial,
+): Group {
+  const grp = new Group();
+  grp.name = 'capsule-space-cap';
+
+  const domeGeo = new SphereGeometry(r * 1.07, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.46);
+  const domeMesh = new Mesh(domeGeo, whiteMat);
+  domeMesh.castShadow = true;
+  grp.add(domeMesh);
+
+  const billGeo = new CylinderGeometry(
+    r * 1.04,
+    r * 1.12,
+    r * 0.06,
+    24,
+    1,
+    false,
+    -Math.PI * 0.34,
+    Math.PI * 0.68,
+  );
+  const billMesh = new Mesh(billGeo, orangeMat);
+  billMesh.position.set(0, r * 0.08, r * 0.24);
+  billMesh.rotation.x = 0.14;
+  billMesh.castShadow = true;
+  grp.add(billMesh);
+
+  const badgeGeo = new SphereGeometry(r * 0.11, 12, 10);
+  badgeGeo.scale(1.0, 0.85, 0.35);
+  const badgeMesh = new Mesh(badgeGeo, orangeMat);
+  badgeMesh.position.set(0, r * 0.44, r * 0.98);
+  grp.add(badgeMesh);
+
+  const ringGeo = new TorusGeometry(r * 0.15, r * 0.018, 8, 18);
+  ringGeo.rotateX(Math.PI * 0.38);
+  ringGeo.rotateZ(-0.28);
+  const ringMesh = new Mesh(ringGeo, orangeMat);
+  ringMesh.position.set(0, r * 0.44, r * 1.0);
+  grp.add(ringMesh);
+
+  return grp;
+}
+
+function buildForeheadGoggles(
+  r: number,
+  orangeMat: MeshStandardMaterial,
+  darkMat: MeshStandardMaterial,
+  greyMat: MeshStandardMaterial,
+): Group {
+  const grp = new Group();
+  grp.name = 'capsule-forehead-goggles';
+
+  const strapGeo = new TorusGeometry(r * 1.02, r * 0.048, 10, 28);
+  strapGeo.rotateX(Math.PI * 0.5);
+  const strap = new Mesh(strapGeo, darkMat);
+  strap.rotation.x = -0.18;
+  grp.add(strap);
+
+  for (const sign of [-1, 1] as const) {
+    const angle = sign * 0.32;
+    const cupGrp = new Group();
+    cupGrp.position.set(Math.sin(angle) * r * 1.02, r * 0.14, Math.cos(angle) * r * 1.02);
+    cupGrp.rotation.y = angle * 0.85;
+    cupGrp.rotation.x = -0.22;
+
+    const rimGeo = new TorusGeometry(r * 0.23, r * 0.055, 12, 22);
+    const rimMesh = new Mesh(rimGeo, orangeMat);
+    rimMesh.castShadow = true;
+
+    const lensGeo = new CylinderGeometry(r * 0.21, r * 0.21, r * 0.06, 20);
+    lensGeo.rotateX(Math.PI * 0.5);
+    const lensMesh = new Mesh(lensGeo, darkMat);
+
+    cupGrp.add(rimMesh, lensMesh);
+    grp.add(cupGrp);
+  }
+
+  const bridgeGeo = new CapsuleGeometry(r * 0.032, r * 0.14, 6, 8);
+  bridgeGeo.rotateZ(Math.PI * 0.5);
+  const bridge = new Mesh(bridgeGeo, greyMat);
+  bridge.position.set(0, r * 0.14, r * 1.05);
+  grp.add(bridge);
+
+  return grp;
+}
+
+function buildKnitBeanie(
+  r: number,
+  orangeMat: MeshStandardMaterial,
+): Group {
+  const grp = new Group();
+  grp.name = 'capsule-knit-beanie';
+
+  const domeGeo = new SphereGeometry(r * 1.06, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.46);
+  const dome = new Mesh(domeGeo, orangeMat);
+  dome.position.y = r * 0.06;
+  dome.castShadow = true;
+  grp.add(dome);
+
+  const cuffGeo = new TorusGeometry(r * 1.03, r * 0.13, 14, 32);
+  cuffGeo.rotateX(Math.PI * 0.5);
+  const cuff = new Mesh(cuffGeo, orangeMat);
+  cuff.position.y = r * 0.12;
+  cuff.rotation.x = -0.08;
+  cuff.castShadow = true;
+  grp.add(cuff);
+
+  return grp;
+}
+
+function buildRoundGlasses(
+  dna: CapsuleCharacterDNA,
+  darkMat: MeshStandardMaterial,
+): Group {
+  const grp = new Group();
+  grp.name = 'capsule-round-glasses';
+  const r = dna.bodyRadius;
+  const eyeBaseY = dna.suitSplitY + dna.bodyHeight * 0.34;
+
+  for (const side of ['left', 'right'] as const) {
+    const sign = side === 'left' ? -1 : 1;
+    const sizeAsym = (dna.eyeSizeAsymmetry ?? 0) * sign * 0.5;
+    const sideEyeScale = Math.max(0.55, dna.eyeScale * (1 + sizeAsym));
+    const eyeRadius = r * 0.255 * sideEyeScale;
+    const heightShift = (dna.eyeHeightAsymmetry ?? 0) * sign * r;
+    const angle = sign * dna.eyeSpacing;
+    const surfaceR = r * 0.99;
+
+    const frameGeo = new TorusGeometry(eyeRadius * 1.12, r * 0.036, 12, 26);
+    const frameMesh = new Mesh(frameGeo, darkMat);
+    frameMesh.position.set(
+      Math.sin(angle) * surfaceR,
+      eyeBaseY + heightShift,
+      Math.cos(angle) * surfaceR + eyeRadius * 0.52,
+    );
+    frameMesh.rotation.y = angle * 0.45;
+    frameMesh.castShadow = true;
+    grp.add(frameMesh);
+  }
+
+  const bridgeGeo = new CapsuleGeometry(r * 0.026, r * 0.14, 6, 8);
+  bridgeGeo.rotateZ(Math.PI * 0.5);
+  const bridgeMesh = new Mesh(bridgeGeo, darkMat);
+  bridgeMesh.position.set(0, eyeBaseY, r * 1.10);
+  grp.add(bridgeMesh);
+
+  return grp;
+}
+
+function buildCoffeeMug(
+  orangeMat: MeshStandardMaterial,
+  whiteMat: MeshStandardMaterial,
+  darkMat: MeshStandardMaterial,
+): Group {
+  const grp = new Group();
+  grp.name = 'capsule-coffee-mug';
+
+  const cupGeo = new CylinderGeometry(0.068, 0.064, 0.14, 20);
+  const cupMesh = new Mesh(cupGeo, orangeMat);
+  cupMesh.castShadow = true;
+  grp.add(cupMesh);
+
+  const coffeeGeo = new CylinderGeometry(0.056, 0.056, 0.01, 18);
+  const coffeeMesh = new Mesh(coffeeGeo, darkMat);
+  coffeeMesh.position.y = 0.068;
+  grp.add(coffeeMesh);
+
+  const handleGeo = new TorusGeometry(0.038, 0.012, 10, 18, Math.PI);
+  handleGeo.rotateZ(-Math.PI * 0.5);
+  const handleMesh = new Mesh(handleGeo, orangeMat);
+  handleMesh.position.set(0.064, 0, 0);
+  grp.add(handleMesh);
+
+  const emblemGeo = new SphereGeometry(0.018, 10, 8);
+  emblemGeo.scale(1, 1, 0.35);
+  const emblem = new Mesh(emblemGeo, whiteMat);
+  emblem.position.set(0, 0, 0.066);
+  grp.add(emblem);
+
+  grp.position.set(0.02, 0.05, 0.03);
+  grp.rotation.set(-0.3, 0.2, 0);
+  return grp;
+}
+
+function buildControlTablet(
+  greyMat: MeshStandardMaterial,
+  darkMat: MeshStandardMaterial,
+  orangeMat: MeshStandardMaterial,
+): Group {
+  const grp = new Group();
+  grp.name = 'capsule-control-tablet';
+
+  const bodyGeo = new BoxGeometry(0.18, 0.24, 0.028);
+  const bodyMesh = new Mesh(bodyGeo, greyMat);
+  bodyMesh.castShadow = true;
+  grp.add(bodyMesh);
+
+  const screenGeo = new BoxGeometry(0.145, 0.19, 0.01);
+  const screenMesh = new Mesh(screenGeo, darkMat);
+  screenMesh.position.set(0, 0, 0.014);
+  grp.add(screenMesh);
+
+  const btnPositions: ReadonlyArray<readonly [number, number]> = [
+    [-0.035, 0.045],
+    [0.035, 0.045],
+    [-0.035, -0.015],
+    [0.035, -0.015],
+  ];
+  const btnGeo = new BoxGeometry(0.042, 0.036, 0.012);
+  for (const [bx, by] of btnPositions) {
+    const btn = new Mesh(btnGeo, orangeMat);
+    btn.position.set(bx, by, 0.018);
+    grp.add(btn);
+  }
+
+  grp.position.set(0.03, 0.06, 0.03);
+  grp.rotation.set(-0.42, 0.32, -0.1);
+  return grp;
+}
+
 /**
  * Builds the complete Space Gear & Accessories kit for a Capsule Doodle character.
  */
@@ -410,15 +633,33 @@ export function buildCapsuleSpaceGear(dna: CapsuleCharacterDNA): CapsuleSpaceGea
       headGearGroup.add(helmetMesh);
     }
 
-    // Accessories: Headset, Walkie-Talkie, or Flag
+    // Accessories: Headgear, Eyewear & Handheld Gadgets
     if (nextDna.accessory === 'headset' && !nextDna.helmet) {
       const headset = buildCommsHeadset(r, greyMat, darkMat, orangeMat);
       headset.position.set(0, splitY + nextDna.bodyHeight * 0.25, 0);
       headGearGroup.add(headset);
+    } else if (nextDna.accessory === 'space_cap' && !nextDna.helmet) {
+      const cap = buildSpaceCap(r, whiteMat, orangeMat);
+      cap.position.set(0, nextDna.bodyHeight * 0.5, 0);
+      headGearGroup.add(cap);
+    } else if (nextDna.accessory === 'goggles' && !nextDna.helmet) {
+      const goggles = buildForeheadGoggles(r, orangeMat, darkMat, greyMat);
+      goggles.position.set(0, splitY + nextDna.bodyHeight * 0.52, 0);
+      headGearGroup.add(goggles);
+    } else if (nextDna.accessory === 'beanie' && !nextDna.helmet) {
+      const beanie = buildKnitBeanie(r, orangeMat);
+      beanie.position.set(0, nextDna.bodyHeight * 0.5, 0);
+      headGearGroup.add(beanie);
+    } else if (nextDna.accessory === 'glasses') {
+      headGearGroup.add(buildRoundGlasses(nextDna, darkMat));
     } else if (nextDna.accessory === 'walkie_talkie') {
       handPropGroup.add(buildWalkieTalkieGadget(greyMat, darkMat, orangeMat));
     } else if (nextDna.accessory === 'flag') {
       handPropGroup.add(buildSpacePennantFlag(greyMat, orangeMat));
+    } else if (nextDna.accessory === 'coffee_mug') {
+      handPropGroup.add(buildCoffeeMug(orangeMat, whiteMat, darkMat));
+    } else if (nextDna.accessory === 'tablet') {
+      handPropGroup.add(buildControlTablet(greyMat, darkMat, orangeMat));
     }
   };
 
