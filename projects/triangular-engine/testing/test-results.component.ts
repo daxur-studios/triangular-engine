@@ -1,8 +1,10 @@
+import { DecimalPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, InjectionToken, input, signal, untracked } from '@angular/core';
 import type { TestRunResult } from './test-contracts';
+import type { TestRecordingReference } from './test-contracts';
 import { DEFAULT_TEST_SINK_PATH, digestTestRun } from './test-runner.component';
 import {
-  baselineCandidates, changeKind, compareToBaseline, defaultBaseline, filterRuns, formatChange, formatMetricValue, formatRunDate, imageUrl,
+  baselineCandidates, changeKind, compareToBaseline, defaultBaseline, filterRuns, formatChange, formatMetricValue, formatRunDate, imageUrl, videoUrl,
   indexUrl, metricKeys, pairCases, parseTestRunIndex, resultUrl, runCounts, runFilterOptions, runGpu, runKey, runMode, runTime, splitMetricKey,
   thumbnailFrames, type TestChangeKind, type TestRunFilter, type TestRunIndexCase, type TestRunIndexEntry, type TestRunIndexMetric,
 } from './test-results';
@@ -37,6 +39,7 @@ export interface TestCaseRow {
   readonly id: string;
   readonly label: string;
   readonly frames: readonly string[];
+  readonly recordings: readonly TestRecordingReference[];
   readonly windowText: string;
   readonly notes: readonly string[];
   readonly failed: readonly string[];
@@ -67,7 +70,7 @@ const DEFAULT_METRICS = 4;
 @Component({
   selector: 'tri-test-results',
   standalone: true,
-  imports: [TestThumbnailComponent],
+  imports: [TestThumbnailComponent, DecimalPipe],
   templateUrl: './test-results.component.html',
   styleUrl: './test-results.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -204,6 +207,7 @@ export class TestResultsComponent {
   back(): void { this.view.set('list'); }
 
   thumbnailUrls(frames: readonly string[]): string[] { return frames.map((file) => imageUrl(this.source(), file)); }
+  recordingUrl(file: string): string { return videoUrl(this.source(), file); }
 
   /** Whether the matching metrics of a case show: the first few until "all metrics", or those matching the filter. */
   private shownCount(): number {
@@ -254,6 +258,7 @@ export class TestResultsComponent {
       id,
       label: labels.get(id) ?? id,
       frames: thumbnailFrames(item.thumbnails),
+      recordings: item.recordings ?? [],
       windowText: item.window ? `${item.window.stoppedBy} · ${item.window.s.toFixed(1)} s` : '',
       notes: this.caseNotes(item),
       failed: item.failed,

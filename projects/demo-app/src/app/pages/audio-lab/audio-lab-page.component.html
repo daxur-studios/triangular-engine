@@ -17,6 +17,16 @@
       </div>
     }
 
+    <tri-test-runner
+      class="audio-test-runner"
+      [suites]="testSuites"
+      [adapter]="testAdapter"
+      [available]="testAvailable()"
+      (progressChange)="onTestProgress($event)"
+    />
+
+    <fieldset class="manual-controls" [disabled]="testRunning()">
+
     <!-- Channel Mixer Section -->
     <section class="control-section">
       <h3>Audio Buses (Channels)</h3>
@@ -198,12 +208,13 @@
         </button>
       </div>
     </section>
+    </fieldset>
   </aside>
 
   <!-- 3D Scene -->
   <scene>
     <!-- Orbit Controls (creates & controls active PerspectiveCamera) -->
-    <orbitControls [cameraPosition]="[0, 5, 12]" [target]="[0, 1, 0]" />
+    <orbitControls [cameraPosition]="[0, 5, 12]" [target]="[0, 1, 0]" [isActive]="!testRunning()" />
     <audioListener [(masterVolume)]="masterVolume" />
 
     <!-- Central Beacon: Stationary 3D Sound Source -->

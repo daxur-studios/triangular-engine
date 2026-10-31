@@ -37,5 +37,6 @@ tags: [runbook, index]
 | [Remove Takram integration from the engine](/docs/engineering-records/069_remove-takram.md) | [PLAN-069](/docs/plans/069_remove-takram.md) |
 | [Capsule Doodle Space Cats](/docs/engineering-records/070_capsule-doodle-space-cats.md) | [PLAN-070](/docs/plans/070_capsule-doodle-space-cats.md) |
 | [Triangular CLI and Consensus Reviews](/docs/engineering-records/071_triangular-cli-consensus-reviews.md) | [PLAN-071](/docs/plans/071_triangular-cli-consensus-reviews.md) |
+| [Optional test video recordings](/docs/engineering-records/072_testing-video-recordings.md) | [PLAN-072](/docs/plans/072_testing-video-recordings.md) |
 
 Existing records retain their `docs/runbook/` paths. Legacy runbooks `001`–`042` retain their historical formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

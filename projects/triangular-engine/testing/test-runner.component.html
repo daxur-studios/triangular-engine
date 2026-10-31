@@ -22,6 +22,10 @@
       </label>
       <label>Repetitions <input type="number" formControlName="repetitions" min="1" [max]="maxRepetitions" /></label>
       <label class="check"><input type="checkbox" formControlName="thumbnails" /> Case thumbnails (taken after each measurement, never inside it)</label>
+      <label class="check" title="Adds encoding work; use for visual or functional diagnostics, not performance measurements.">
+        <input type="checkbox" formControlName="recordings" /> Record short video around each case
+      </label>
+      @if (!recordingAvailable()) { <p class="muted">Video recording needs a recording adapter and the development result sink.</p> }
       @if (copyOnFinish()) {
         <label class="check"><input type="checkbox" [formControl]="copyWhenDone" /> Copy for agent when done</label>
       }
@@ -84,6 +88,14 @@
       <p class="headline">Run {{ run.status }} · {{ run.mode ?? 'standard' }} · {{ sum?.seconds?.toFixed(0) }} s</p>
       <p class="muted">{{ sum?.valid }} valid · {{ sum?.invalid }} invalid · {{ sum?.failed }} failed@if (sum?.warnings) { · {{ sum?.warnings }} warnings }</p>
       @if (saveStatus()) { <p class="save-status muted" [class.issue]="saveStatus().startsWith('Result not saved')">{{ saveStatus() }}</p> }
+      @for (recording of savedRecordings(); track recording.file) {
+        <video class="saved-recording" controls preload="none" playsinline [attr.width]="recording.width" [attr.height]="recording.height"
+          [attr.aria-label]="recording.case + ' test video recording'">
+          <source [src]="recordingUrl(recording.file)" [type]="recording.mimeType" />
+          Video playback is not supported by this browser.
+        </video>
+        <p class="muted">{{ (recording.durationMs / 1000).toFixed(1) }} s · {{ (recording.bytes / 1024).toFixed(0) }} KB · {{ recording.width }}×{{ recording.height }} · {{ recording.audio ? 'audio' : 'silent' }} · {{ recording.mimeType }}</p>
+      }
       @for (line of sum?.ablations ?? []; track $index) { <p class="ablation">A/B {{ line }}</p> }
       @if (sum?.problems?.length) {
         <ul class="problems">

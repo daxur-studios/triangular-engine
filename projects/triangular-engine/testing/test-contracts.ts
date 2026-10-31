@@ -331,6 +331,13 @@ export interface TestRunAdapter<TSettings extends object, TSnapshot = unknown> {
    * Images over `MAX_THUMBNAIL_BYTES` are dropped. The entry has no renderer: the page captures the pictures itself.
    */
   thumbnail?(scenario: TestScenario<TSettings>, context: TestContext): Promise<readonly Blob[] | undefined>;
+  /**
+   * Start a bounded video capture immediately before `measure`. This is called only when the user enables recording
+   * for a non-performance run. The page supplies its canvas/audio tracks; the session always calls `stop` and
+   * `dispose`, including failure, timeout and cancellation paths. Recording adds work to the page and is diagnostic
+   * evidence, never a performance measurement.
+   */
+  recording?(scenario: TestScenario<TSettings>, context: TestContext): TestRecordingCapture | undefined;
 }
 
 export interface TestCaseResult<TSettings extends object> {
@@ -356,6 +363,43 @@ export interface TestCaseResult<TSettings extends object> {
    * receiver's output folder (`<suite>@v<n>/<result-file-stem>/<case>-r<rep>-<i>.webp`). No pixel data lives in the JSON.
    */
   readonly thumbnails?: readonly string[];
+  /** Video artifact references added by the development receiver. The result JSON carries metadata, never video bytes. */
+  readonly recordings?: readonly TestRecordingReference[];
+}
+
+/** A short browser-recorded clip returned by the host adapter after a case finishes. */
+export interface TestRecordingArtifact {
+  readonly blob: Blob;
+  /** Actual `MediaRecorder.mimeType`, including codec parameters when provided by the browser. */
+  readonly mimeType: string;
+  readonly durationMs: number;
+  readonly width: number;
+  readonly height: number;
+  readonly audio: boolean;
+}
+
+/** Host-owned recorder handle. `dispose` must stop every stream track and release temporary canvases/nodes. */
+export interface TestRecordingCapture {
+  stop(): Promise<TestRecordingArtifact>;
+  dispose(): void;
+}
+
+/** Saved clip metadata. `file` is relative to the receiver's output folder and is absent before a successful save. */
+export interface TestRecordingReference {
+  readonly file?: string;
+  readonly mimeType: string;
+  readonly bytes: number;
+  readonly durationMs: number;
+  readonly width: number;
+  readonly height: number;
+  readonly audio: boolean;
+}
+
+/** One case's video data for the receiver. Pixel/audio data is kept out of the serializable run result. */
+export interface TestCaseRecording {
+  readonly scenarioId: string;
+  readonly repetition: number;
+  readonly recording: TestRecordingArtifact;
 }
 
 /** Completed automation, usable performance evidence and human acceptance are separate outcomes. */
@@ -413,6 +457,10 @@ export interface TestRunOptions {
   readonly thumbnails?: boolean;
   /** Receives each kept case's thumbnails (`TestSession` keeps no pixel data in the result). */
   readonly onThumbnails?: (thumbnails: TestCaseThumbnails) => void;
+  /** Record one clip around each selected case's `measure` call (default `false`; rejected for performance suites). */
+  readonly recordings?: boolean;
+  /** Receives bounded recordings; `TestSession` never puts Blob data in `TestRunResult`. */
+  readonly onRecordings?: (recording: TestCaseRecording) => void;
 }
 
 /** The pictures `TestAdapter.thumbnail` returned for one kept case. */

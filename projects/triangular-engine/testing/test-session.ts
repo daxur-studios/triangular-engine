@@ -1,6 +1,6 @@
 import type {
-  TestCaseResult, TestContext, TestMetric, TestProgress, TestRunAdapter, TestRunOptions, TestRunResult, TestSetting, TestSuite,
-  TestAblationOutcome, TestWindow,
+  TestCaseRecording, TestCaseResult, TestContext, TestMetric, TestProgress, TestRunAdapter, TestRunOptions, TestRunResult,
+  TestRecordingArtifact, TestRecordingCapture, TestRecordingReference, TestSetting, TestSuite, TestAblationOutcome, TestWindow,
 } from './test-contracts';
 import { gpuVendorIssue, MACHINE_PREPARE_TIMEOUT_MS, sendMachineMessage } from './test-machine';
 import { MAX_TEST_REPETITIONS, TEST_LOADS, TEST_MODES, TEST_PROFILES, validateTestHistory } from './test-launch';
@@ -9,6 +9,7 @@ import { summarizeTestSamples } from './test-stats';
 import { assessPerformance } from './test-performance';
 import { modeWarmupMs, modeWindowMs, runMeasureWindow, TEST_CAP_MS, waitForSettled } from './test-window';
 import { keepThumbnails, THUMBNAIL_TIMEOUT_MS } from './test-thumbnails';
+import { keepTestRecording, TEST_RECORDING_STOP_TIMEOUT_MS } from './test-recordings';
 import { describeJsEngine } from './core/test-timer';
 
 export { nearestRankPercentile, summarizeTestSamples } from './test-stats';
@@ -116,6 +117,10 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
     }
     const mode = options.mode ?? 'standard';
     if (mode !== 'standard' && !adapter.windowModes) throw new Error(`This page's tests run fixed-length windows; use standard mode, not ${mode}`);
+    if (options.recordings && suiteInput.purpose === 'performance') throw new Error('Video recording is unavailable for performance suites; run a visual/functional diagnostic instead');
+    if (options.recordings && (suiteInput.evidence === 'cpu' || adapter.cpuOnly)) throw new Error('Video recording is unavailable for CPU-only suites');
+    if (options.recordings && !adapter.recording) throw new Error('This page does not provide video recording');
+    if (options.recordings && !options.onRecordings) throw new Error('A result sink is required to save video recordings');
     // Retain resolved inputs even if the caller changes its history while a run is active.
     const suite = structuredClone(suiteInput);
     this.running = true;
@@ -175,6 +180,7 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
       sendMachineMessage(machineSink as string, kind, { runId, suiteId: suite.id, suiteVersion: suite.version, scenarioId, repetition }, timeoutMs);
     // Thumbnails run after a kept case's measurement, with the run's own byte budget.
     let thumbnailBytes = 0;
+    let recordingBytes = 0;
     const takeThumbnails = async (scenario: typeof suite.scenarios[number], repetition: number): Promise<string[]> => {
       const attemptAbort = new AbortController();
       const forward = () => attemptAbort.abort(controller.signal.reason);
@@ -190,6 +196,23 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
         return [...kept.notes];
       } catch (error) { return [`Thumbnail not taken: ${errorMessage(error)}`]; }
       finally { clearTimeout(giveUp); controller.signal.removeEventListener('abort', forward); }
+    };
+    const stopRecording = async (capture: TestRecordingCapture): Promise<{ recording?: TestRecordingArtifact; reference?: TestRecordingReference; notes: string[] }> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const artifact = await Promise.race([
+          capture.stop(),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`timed out after ${TEST_RECORDING_STOP_TIMEOUT_MS / 1000} s`)), TEST_RECORDING_STOP_TIMEOUT_MS); }),
+        ]);
+        const kept = keepTestRecording(artifact, recordingBytes);
+        recordingBytes += kept.bytes;
+        return { recording: kept.recording, reference: kept.reference, notes: [...kept.notes] };
+      } catch (error) {
+        return { notes: [`Recording not saved: ${errorMessage(error)}`] };
+      } finally {
+        clearTimeout(timer);
+        try { capture.dispose(); } catch { /* recorder cleanup must not fail a case */ }
+      }
     };
     let snapshot: TSnapshot | undefined;
     let captured = false;
@@ -270,6 +293,25 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
                 if (started) void started.then(() => machineMessage('stop', scenario.id, repetition));
               };
               let caseWindow: TestWindow | undefined;
+              let videoCapture: TestRecordingCapture | undefined;
+              let recording: TestRecordingArtifact | undefined;
+              let recordingReference: TestRecordingReference | undefined;
+              let recordingEmitted = false;
+              const recordingNotes: string[] = [];
+              const finishRecording = async () => {
+                if (!videoCapture) return;
+                const capture = videoCapture;
+                videoCapture = undefined;
+                const finished = await stopRecording(capture);
+                recording = finished.recording;
+                recordingReference = finished.reference;
+                recordingNotes.push(...finished.notes);
+              };
+              const emitRecording = () => {
+                if (!recording || recordingEmitted || !options.onRecordings) return;
+                recordingEmitted = true;
+                options.onRecordings({ scenarioId: scenario.id, repetition, recording } satisfies TestCaseRecording);
+              };
               try {
                 const ctx = context(attempt.signal, repetition, (value) => { caseWindow = value; });
                 progress('applying', repetition, scenario, retry);
@@ -300,9 +342,17 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
                 progress('measuring', repetition, scenario, retry);
                 checkVisibility();
                 if (machineSink) machineStarted = machineMessage('start', scenario.id, repetition);
+                if (options.recordings && adapter.recording) {
+                  try {
+                    videoCapture = adapter.recording(scenario, ctx);
+                    if (!videoCapture) recordingNotes.push('Recording not started: the page did not provide a capture session');
+                  }
+                  catch (error) { recordingNotes.push(`Recording not started: ${errorMessage(error)}`); }
+                }
                 const observation = await abortable(() => adapter.measure(scenario, ctx), attempt.signal);
                 checkVisibility();
                 if (attempt.signal.aborted) throw attempt.signal.reason;
+                await finishRecording();
                 // The attempt is kept. Whatever the thumbnail costs must stay outside the timing, the focus watch and the
                 // machine block, so those are closed first.
                 const thumbnailNotes: string[] = [];
@@ -330,24 +380,32 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
                 const caseFailed = checks.some((check) => !check.passed);
                 const window = caseWindow && caseFailed ? { ...caseWindow, stoppedBy: 'failed' as const } : caseWindow;
                 cases.push({ scenario, repetition, status: caseFailed ? 'failed' : 'completed', metrics: observation.metrics.map(withSummary),
-                  checks, validityIssues: [...validityIssues], limitations: [...(observation.limitations ?? []), ...(cpuOnly && suite.purpose === 'performance' ? [CPU_ONLY_LIMITATION] : []), ...thumbnailNotes], details: observation.details,
+                  checks, validityIssues: [...validityIssues], limitations: [...(observation.limitations ?? []), ...(cpuOnly && suite.purpose === 'performance' ? [CPU_ONLY_LIMITATION] : []), ...thumbnailNotes, ...recordingNotes], details: observation.details,
                   stopReason: caseFailed ? 'failed' : window?.stoppedBy ?? 'fixed',
-                  ...(window ? { window } : {}), ...(retry ? { retries: retry } : {}) });
+                  ...(window ? { window } : {}), ...(retry ? { retries: retry } : {}), ...(recordingReference ? { recordings: [recordingReference] } : {}) });
+                emitRecording();
                 if (caseFailed) { failed = true; throw new Error(`Checks failed: ${scenario.id}`); }
                 break;
               } catch (error) {
+                await finishRecording();
                 const reason = attempt.signal.reason;
                 if (!controller.signal.aborted && !testTimedOut && reason instanceof FocusLost) {
+                  if (recordingReference) recordingBytes = Math.max(0, recordingBytes - recordingReference.bytes);
+                  recording = undefined;
+                  recordingReference = undefined;
+                  recordingNotes.length = 0;
                   await waitForPage(reason.message, repetition, scenario, retry + 1);
                   continue;
                 }
                 if (cases.at(-1)?.scenario.id !== scenario.id || cases.at(-1)?.repetition !== repetition) {
                   cases.push({ scenario, repetition, status: controller.signal.aborted ? 'cancelled' : 'failed',
-                    metrics: [], checks: [], validityIssues: [...validityIssues], limitations: [], error: errorMessage(error),
-                    stopReason: 'failed', ...(retry ? { retries: retry } : {}) });
+                    metrics: [], checks: [], validityIssues: [...validityIssues], limitations: [...recordingNotes], error: errorMessage(error),
+                    stopReason: 'failed', ...(retry ? { retries: retry } : {}), ...(recordingReference ? { recordings: [recordingReference] } : {}) });
                 }
+                emitRecording();
                 throw error;
               } finally {
+                await finishRecording();
                 testAbort.signal.removeEventListener('abort', forward);
                 stopMachine();
                 stopObserving();

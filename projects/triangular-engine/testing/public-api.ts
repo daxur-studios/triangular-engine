@@ -5,6 +5,7 @@ export * from './test-window';
 export * from './test-helpers';
 export * from './test-cpu-bench';
 export * from './test-thumbnails';
+export * from './test-recordings';
 export * from './test-ablation';
 export * from './test-performance';
 export * from './test-machine';

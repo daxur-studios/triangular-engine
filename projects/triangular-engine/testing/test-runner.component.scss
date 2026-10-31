@@ -33,6 +33,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .bar div { height: 100%; background: var(--ui-accent, #8ac9ff); transition: width 0.2s; }
 .paused { color: var(--ui-warning, #ffd479); }
 .result-card { margin-block: 0.5rem; padding: 0.5rem 0.6rem; border: 1px solid var(--ui-border, #627080); border-radius: 0.4rem; }
+.saved-recording { display: block; width: min(100%, 640px); max-height: 360px; margin-block: 0.5rem; background: #000; border-radius: 0.3rem; }
 .result-card.bad { border-color: var(--ui-danger, #ff9aa2); }
 .problems { margin: 0.35rem 0; padding-inline-start: 1.1rem; font-size: 0.85rem; color: var(--ui-warning, #ffd479); }
 .muted, .issue { display: block; font-size: 0.85rem; }

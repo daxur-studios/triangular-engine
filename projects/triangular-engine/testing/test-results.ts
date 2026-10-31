@@ -1,4 +1,4 @@
-import type { TestLoad, TestMode, TestStopReason } from './test-contracts';
+import type { TestLoad, TestMode, TestRecordingReference, TestStopReason } from './test-contracts';
 
 /** Nearest-rank statistics of one metric in a run's index line (`npm run test:summary` reads the same). */
 export interface TestRunIndexMetric {
@@ -22,6 +22,7 @@ export interface TestRunIndexCase {
   readonly retries?: number;
   /** File names relative to the receiver's output folder. */
   readonly thumbnails?: readonly string[];
+  readonly recordings?: readonly TestRecordingReference[];
 }
 
 /** One line of the receiver's `index.jsonl`. */
@@ -71,7 +72,7 @@ export function parseTestRunIndex(body: unknown): TestRunIndexEntry[] {
     // Lines written by older receivers lack some keys.
     .map((item) => ({
       ...item, errors: item.errors ?? [],
-      cases: Object.fromEntries(Object.entries(item.cases).map(([id, entry]) => [id, { ...entry, metrics: entry?.metrics ?? {}, failed: entry?.failed ?? [], invalid: entry?.invalid ?? [] }])),
+      cases: Object.fromEntries(Object.entries(item.cases).map(([id, entry]) => [id, { ...entry, metrics: entry?.metrics ?? {}, failed: entry?.failed ?? [], invalid: entry?.invalid ?? [], recordings: entry?.recordings ?? [] }])),
     }))
     .sort((a, b) => runTime(b) - runTime(a));
 }
@@ -221,3 +222,5 @@ export const receiverBase = (receiver: string): string => receiver.trim().replac
 export const indexUrl = (receiver: string, limit = 300): string => `${receiverBase(receiver)}/runs?limit=${limit}`;
 export const resultUrl = (receiver: string, file: string): string => `${receiverBase(receiver)}/run?file=${encodeURIComponent(file)}`;
 export const imageUrl = (receiver: string, file: string): string => `${receiverBase(receiver)}/image?file=${encodeURIComponent(file)}`;
+/** Video artifact route. Players request byte ranges so saved clips can seek without loading their full contents. */
+export const videoUrl = (receiver: string, file: string): string => `${receiverBase(receiver)}/video?file=${encodeURIComponent(file)}`;

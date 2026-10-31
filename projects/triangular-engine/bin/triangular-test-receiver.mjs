@@ -18,9 +18,13 @@ export const DEFAULT_PORT = 4723;
 /** One thumbnail is a helper picture; a run's thumbnails together stay small too. Over either, the image is dropped and said so. */
 export const MAX_IMAGE_BYTES = 64 * 1024;
 export const MAX_RUN_IMAGE_BYTES = 2 * 1024 * 1024;
+/** One short test recording remains small enough for the bounded JSON upload. */
+export const MAX_RECORDING_BYTES = 1024 * 1024;
+export const MAX_RUN_RECORDING_BYTES = 5 * 1024 * 1024;
 const DEFAULTS = {
   port: DEFAULT_PORT, outputDir: 'artifacts/test-runs', fingerprintPaths: ['projects'], maxBytes: 20 * 1024 * 1024, machineSampling: true, gpuIndex: 0,
   maxImageBytes: MAX_IMAGE_BYTES, maxRunImageBytes: MAX_RUN_IMAGE_BYTES,
+  maxRecordingBytes: MAX_RECORDING_BYTES, maxRunRecordingBytes: MAX_RUN_RECORDING_BYTES,
 };
 
 export function loadConfig(root) {
@@ -100,6 +104,7 @@ export function caseSummaries(run) {
     if (c.window) entry.window = { stoppedBy: c.window.stoppedBy, s: round(c.window.elapsedMs / 1000), ...(c.window.drift ? { drift: c.window.drift } : {}) };
     if (c.retries) entry.retries = (entry.retries ?? 0) + c.retries;
     if (c.thumbnails?.length) (entry.thumbnails ??= []).push(...c.thumbnails);
+    if (c.recordings?.length) (entry.recordings ??= []).push(...c.recordings);
     for (const m of c.metrics ?? []) {
       if (!m.samples?.length) continue;
       const key = `${m.name} (${m.unit})`;
@@ -142,7 +147,11 @@ const IMAGE_TYPES = {
   'image/png': { ext: 'png', is: (b) => b.length > 8 && b.subarray(0, 8).equals(PNG_SIGNATURE) },
   'image/jpeg': { ext: 'jpg', is: (b) => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
 };
-const CONTENT_TYPES = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', json: 'application/json' };
+const VIDEO_TYPES = {
+  'video/webm': { ext: 'webm', is: (b) => b.length > 4 && b.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])) },
+  'video/mp4': { ext: 'mp4', is: (b) => b.length > 12 && b.toString('ascii', 4, 8) === 'ftyp' },
+};
+const CONTENT_TYPES = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', json: 'application/json', webm: 'video/webm', mp4: 'video/mp4' };
 
 /**
  * Decodes the `thumbnailUploads` of a result and writes them to `<dir>/<stem>/<case>-r<rep>-<i>.<ext>`. Returns the
@@ -178,14 +187,58 @@ export function storeThumbnails(config, dir, prefix, stem, result, uploads) {
 }
 
 /**
- * Writes the run, its thumbnails and one index line. `machine` (from the monitor) adds a `machine` block per case and
+ * Decodes bounded video sidecars, validates the claimed container against its signature, and stores files beside the
+ * result. The result JSON retains only metadata and relative file names.
+ */
+export function storeRecordings(config, dir, prefix, stem, result, uploads) {
+  const byCase = new Map();
+  const dropped = [];
+  const files = [];
+  if (!Array.isArray(uploads)) return { byCase, dropped, files };
+  let total = 0;
+  for (const upload of uploads) {
+    const mediaType = typeof upload?.mimeType === 'string' ? upload.mimeType.split(';', 1)[0].trim().toLowerCase() : '';
+    const type = VIDEO_TYPES[mediaType];
+    const owner = (result.cases ?? []).some((c) => c.scenario?.id === upload?.case && c.repetition === upload?.repetition);
+    const label = `${upload?.case}${Number.isInteger(upload?.repetition) && result.repetitions > 1 ? ` #${upload.repetition}` : ''}`;
+    const drop = (reason) => { dropped.push({ key: `${upload?.case}#${upload?.repetition}`, text: `${label}: recording dropped, ${reason}` }); };
+    if (!type || typeof upload?.data !== 'string' || !owner || upload.index !== 0 ||
+        !Number.isFinite(upload.durationMs) || upload.durationMs <= 0 || upload.durationMs > 15_000 ||
+        !Number.isInteger(upload.width) || upload.width < 1 || upload.width > 4096 ||
+        !Number.isInteger(upload.height) || upload.height < 1 || upload.height > 4096 || typeof upload.audio !== 'boolean') {
+      drop('invalid metadata or not a recording of this run');
+      continue;
+    }
+    if (upload.data.length * 0.75 > config.maxRecordingBytes + 4) { drop(`over ${Math.round(config.maxRecordingBytes / 1024)} KB`); continue; }
+    const bytes = Buffer.from(upload.data, 'base64');
+    if (!type.is(bytes)) drop('container signature does not match the MIME type');
+    else if (bytes.length > config.maxRecordingBytes) drop(`${Math.round(bytes.length / 1024)} KB is over ${Math.round(config.maxRecordingBytes / 1024)} KB`);
+    else if (total + bytes.length > config.maxRunRecordingBytes) drop(`the run's ${(config.maxRunRecordingBytes / 1024 / 1024).toFixed(0)} MB recording budget is used up`);
+    else {
+      const name = `${safe(upload.case)}-r${upload.repetition}-${upload.index}.${type.ext}`;
+      mkdirSync(join(dir, stem), { recursive: true });
+      writeFileSync(join(dir, stem, name), bytes);
+      total += bytes.length;
+      const file = `${prefix}/${stem}/${name}`;
+      const reference = { file, mimeType: upload.mimeType, bytes: bytes.length, durationMs: upload.durationMs,
+        width: upload.width, height: upload.height, audio: upload.audio };
+      const key = `${upload.case}#${upload.repetition}`;
+      byCase.set(key, [...(byCase.get(key) ?? []), reference]);
+      files.push({ case: upload.case, repetition: upload.repetition, ...reference });
+    }
+  }
+  return { byCase, dropped, files };
+}
+
+/**
+ * Writes the run, its image/video sidecars and one index line. `machine` (from the monitor) adds a `machine` block per case and
  * the preflight to the file, and a tiny summary to the index line. `thumbnailUploads` (base64 images) never reach the
  * stored JSON: each case keeps `thumbnails`, names relative to the output folder.
  * Returns `{ file, thumbnails, dropped }`; `dropped` says why an image was not kept.
  */
 export function saveRunWithImages(root, config, input, machine) {
   if (!input || typeof input !== 'object' || input.schemaVersion !== 1 || !input.suite?.id || !input.runId) throw new Error('Not a triangular test result');
-  const { thumbnailUploads, ...result } = input;
+  const { thumbnailUploads, recordingUploads, ...result } = input;
   const fp = computeFingerprint(root, config.fingerprintPaths);
   const prefix = `${safe(result.suite.id)}@v${safe(result.suite.version)}`;
   const dir = join(root, config.outputDir, prefix);
@@ -195,13 +248,17 @@ export function saveRunWithImages(root, config, input, machine) {
   const stem = `${stamp}_${safe(result.profile)}${mode}_${fp.hash}`;
   const name = `${stem}.json`;
   const images = storeThumbnails(config, dir, prefix, stem, result, thumbnailUploads);
-  const withImages = images.byCase.size || images.dropped.length ? {
+  const recordings = storeRecordings(config, dir, prefix, stem, result, recordingUploads);
+  const withImages = images.byCase.size || images.dropped.length || recordings.byCase.size || recordings.dropped.length ? {
     ...result,
     cases: (result.cases ?? []).map((c) => {
       const key = `${c.scenario?.id}#${c.repetition}`;
-      const files = images.byCase.get(key);
-      const notes = images.dropped.filter((d) => d.key === key).map((d) => d.text);
-      return files || notes.length ? { ...c, ...(files ? { thumbnails: files } : {}), ...(notes.length ? { limitations: [...(c.limitations ?? []), ...notes] } : {}) } : c;
+      const imageFiles = images.byCase.get(key);
+      const videoFiles = recordings.byCase.get(key);
+      const notes = [...images.dropped.filter((d) => d.key === key).map((d) => d.text),
+        ...recordings.dropped.filter((d) => d.key === key).map((d) => d.text)];
+      return imageFiles || videoFiles || notes.length ? { ...c, ...(imageFiles ? { thumbnails: imageFiles } : {}),
+        ...(videoFiles ? { recordings: videoFiles } : {}), ...(notes.length ? { limitations: [...(c.limitations ?? []), ...notes] } : {}) } : c;
     }),
   } : result;
   const attached = attachMachine(withImages, machine);
@@ -217,7 +274,8 @@ export function saveRunWithImages(root, config, input, machine) {
     errors: result.errors ?? [], cases: caseSummaries(withImages), ...(result.ablations ? { ablations: ablationSummaries(result) } : {}),
     gpu: result.environment?.['gpu.vendor'], gpuBackend: result.environment?.['gpu.backend'], machine: attached.index,
   }) + '\n');
-  return { file, thumbnails: [...images.byCase.values()].flat(), dropped: images.dropped.map((d) => d.text) };
+  return { file, thumbnails: [...images.byCase.values()].flat(), recordings: recordings.files,
+    dropped: [...images.dropped, ...recordings.dropped].map((d) => d.text) };
 }
 
 /** Writes the run and one index line; returns the stored relative file name. See {@link saveRunWithImages}. */
@@ -296,11 +354,31 @@ export function createReceiver(root, config = loadConfig(root), {
         });
         return reply(200, 'application/json', JSON.stringify({ runs: runs.slice(-limit), total: runs.length }));
       }
-      const file = resolveStored(root, config, query.get('file'), route === 'run' ? ['json'] : Object.values(IMAGE_TYPES).map((type) => type.ext));
+      const extensions = route === 'run' ? ['json'] : route === 'image' ? Object.values(IMAGE_TYPES).map((type) => type.ext)
+        : Object.values(VIDEO_TYPES).map((type) => type.ext);
+      const file = resolveStored(root, config, query.get('file'), extensions);
       if (!file) return fail(400, 'not a stored result');
       const ext = file.split('.').at(-1).toLowerCase();
       // Stored names carry the run's timestamp and fingerprint, so a name never changes meaning.
-      return reply(200, CONTENT_TYPES[ext], readFileSync(file), { 'cache-control': 'private, max-age=3600' });
+      const data = readFileSync(file);
+      const headers = { 'cache-control': 'private, max-age=3600' };
+      if (route === 'video') {
+        headers['accept-ranges'] = 'bytes';
+        const range = req.headers.range;
+        if (range) {
+          const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+          if (!match || (!match[1] && !match[2])) return reply(416, CONTENT_TYPES[ext], '', { ...headers, 'content-range': `bytes */${data.length}` });
+          let start = match[1] ? Number(match[1]) : Math.max(0, data.length - Number(match[2]));
+          let end = match[2] ? Number(match[2]) : data.length - 1;
+          if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || start >= data.length) {
+            return reply(416, CONTENT_TYPES[ext], '', { ...headers, 'content-range': `bytes */${data.length}` });
+          }
+          end = Math.min(end, data.length - 1);
+          const chunk = data.subarray(start, end + 1);
+          return reply(206, CONTENT_TYPES[ext], chunk, { ...headers, 'content-length': chunk.length, 'content-range': `bytes ${start}-${end}/${data.length}` });
+        }
+      }
+      return reply(200, CONTENT_TYPES[ext], data, { ...headers, 'content-length': data.length });
     } catch { return fail(404, 'not found'); }
   };
   return createServer(async (req, res) => {
@@ -326,7 +404,7 @@ export function createReceiver(root, config = loadConfig(root), {
         return send(200, { ok: true, sampling: Boolean(monitor) });
       } catch (error) { return send(400, { error: error instanceof Error ? error.message : String(error) }); }
     }
-    if (path.startsWith(`${SINK_PATH}/`) && ['runs', 'run', 'image'].includes(path.slice(SINK_PATH.length + 1))) return readRoute(req, res, path.slice(SINK_PATH.length + 1));
+    if (path.startsWith(`${SINK_PATH}/`) && ['runs', 'run', 'image', 'video'].includes(path.slice(SINK_PATH.length + 1))) return readRoute(req, res, path.slice(SINK_PATH.length + 1));
     if (path !== SINK_PATH && path !== `${SINK_PATH}/`) return send(404, { error: 'not found' });
     // `ok` stays for the router's health check; `receiver` and `root` tell one app's receiver from another's.
     if (req.method === 'GET') return send(200, { ok: true, receiver: 'triangular-test', root: identity });

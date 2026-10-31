@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
@@ -64,6 +65,20 @@ function validDate(value) {
 function projectPath(root, value) {
   if (value.startsWith("/")) return path.resolve(root, value.slice(1));
   return path.resolve(root, value);
+}
+
+function yamlEscape(value) {
+  return String(value ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r?\n/g, " ");
+}
+
+function slugify(text) {
+  return String(text ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 async function markdownFiles(directory) {
@@ -675,6 +690,150 @@ async function readPlans(root, errors) {
       errors.push(`${filename}: unsupported map_schema ${fields.map_schema}`);
       continue;
     }
+    const isArchived = fields.status === "archived";
+    if (isArchived) {
+      if (!fields.title)
+        errors.push(`${filename}: frontmatter title is required`);
+      if (fields.type !== "Plan")
+        errors.push(
+          `${filename}: map_schema: 1 documents must retain type: Plan`,
+        );
+      if (!recordRef)
+        errors.push(`${filename}: reciprocal record reference is required`);
+      const recordPath = recordRef ? projectPath(root, recordRef) : "";
+      const recordRelative = recordRef
+        ? path.relative(path.join(root, recordsDirName), recordPath)
+        : "";
+      if (
+        recordRef &&
+        (recordRelative === ".." ||
+          recordRelative.startsWith(`..${path.sep}`) ||
+          path.isAbsolute(recordRelative) ||
+          !recordRelative.toLowerCase().endsWith(".md"))
+      )
+        errors.push(
+          `${filename}: record must point to an Engineering Record under ${recordsDirName}`,
+        );
+      const documentId = fields.document_id;
+      const idNumber = /^plan-(\d+)$/.exec(documentId ?? "")?.[1];
+      if (!idNumber)
+        errors.push(
+          `${filename}: document_id must be a stable plan-NNN identifier`,
+        );
+      const filenameNumber = numericPrefix(path.basename(filename));
+      if (
+        filenameNumber &&
+        idNumber &&
+        Number(filenameNumber) !== Number(idNumber)
+      )
+        errors.push(`${filename}: filename number does not match document_id`);
+      const recordText = recordRef ? await readFileIfPresent(recordPath) : "";
+      if (
+        recordRef &&
+        !frontmatterList(recordText, "plans").includes(`/${relative}`)
+      )
+        errors.push(
+          `${filename}: Engineering Record must reciprocally list /${relative} in plans:`,
+        );
+      const recordFields = recordText
+        ? frontmatter(recordText, recordPath, errors)
+        : {};
+      if (recordRef && recordFields.status !== "archived")
+        errors.push(
+          `${filename}: paired Engineering Record must retain status: archived`,
+        );
+      if (recordRef && !/^er-\d+$/.test(recordFields.record_id ?? ""))
+        errors.push(
+          `${recordPath || filename}: record_id must be a stable er-NNN identifier`,
+        );
+      const recordNumber = /^er-(\d+)$/.exec(recordFields.record_id ?? "")?.[1];
+      const recordFilenameNumber = recordRelative
+        ? numericPrefix(path.basename(recordRelative))
+        : undefined;
+      if (
+        recordFilenameNumber &&
+        recordNumber &&
+        Number(recordFilenameNumber) !== Number(recordNumber)
+      )
+        errors.push(`${recordPath}: filename number does not match record_id`);
+      if (!planIndex.includes(`(${`/${relative}`})`))
+        errors.push(`${filename}: add the plan to docs/plans/index.md`);
+      if (recordRef && !recordIndex.includes(`(${recordRef})`))
+        errors.push(
+          `${filename}: add the Engineering Record to ${recordsDirName}/index.md`,
+        );
+
+      const outcome =
+        fields.outcome ||
+        /## (?:Summary & Outcome|Summary and Outcome|Outcome|Summary)\s*\r?\n([\s\S]*?)(?=\r?\n## |$)/.exec(
+          text,
+        )?.[1]?.trim() ||
+        "Archived.";
+
+      const branch = fields.branch?.trim() || null;
+      const exampleId = fields.example_id?.trim() || null;
+      const example = exampleId
+        ? {
+            id: exampleId,
+            title: fields.example_title?.trim() || fields.title,
+            href: fields.example_href?.trim() || `/examples/${exampleId}`,
+          }
+        : null;
+
+      documents.push({
+        id: documentId ?? "",
+        number: Number(idNumber ?? filenameNumber ?? 0),
+        initiativeId: fields.initiative_id ?? "",
+        title: fields.title,
+        status: "archived",
+        archivedCommit: fields.archived_commit ?? null,
+        archivedDate: fields.archived_date ?? null,
+        outcome,
+        plan: `/${relative}`,
+        record: recordRef ?? "",
+        recordId: recordFields.record_id ?? null,
+        scopeHash: null,
+        mapped: true,
+        branch,
+        example,
+        evidenceSuites: [],
+        review: {
+          state: "reviewed",
+          reviewed: fields.archived_date ?? null,
+          reviewer: "archive",
+          items: [],
+        },
+        phases: [
+          {
+            id: "archived",
+            title: "Archived",
+            acceptance: outcome,
+            progress: "done",
+            readiness: {
+              state: "ready",
+              open: 0,
+              blockers: 0,
+            },
+          },
+        ],
+        progress: {
+          done: 1,
+          total: 1,
+          percent: 100,
+        },
+        relations: [],
+        scopeHistory: {
+          baseline: {
+            state: "confirmed",
+            goals: [],
+          },
+          changes: [],
+        },
+        _filename: filename,
+        _text: text,
+      });
+      continue;
+    }
     const scope = block(text, "scope", filename, errors);
     const phases = scope ? parsePhases(scope, filename, errors) : [];
     const progress = parseProgress(text, phases, filename, errors);
@@ -811,6 +970,9 @@ async function readPlans(root, errors) {
       number: Number(idNumber ?? filenameNumber ?? 0),
       initiativeId: initiative ?? "",
       title: fields.title,
+      status:
+        fields.status ||
+        (done === phases.length && phases.length > 0 ? "done" : "in_progress"),
       outcome:
         /## Intended outcome\s*\r?\n([\s\S]*?)(?=\r?\n## |$)/.exec(scope ?? "")?.[1]
           ?.trim() ?? "",
@@ -890,6 +1052,7 @@ function validateRelationGraph(root, documents, errors) {
       if (!target) continue; // Existing unconverted plans remain valid relation targets.
       if (
         relation.phase &&
+        target.status !== "archived" &&
         !target.phases.some((phase) => phase.id === relation.phase)
       )
         errors.push(

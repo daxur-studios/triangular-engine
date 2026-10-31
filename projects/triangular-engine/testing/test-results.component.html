@@ -115,6 +115,16 @@
               <tri-test-thumbnail class="case-thumb" [urls]="thumbnailUrls(row.frames)" [label]="row.label" [autoplay]="autoplay()" />
               <div class="case-body">
                 <p class="case-title"><b>{{ row.label }}</b>@if (row.label !== row.id) { <span class="muted"> {{ row.id }}</span> }</p>
+                @for (recording of row.recordings; track recording.file ?? $index) {
+                  @if (recording.file) {
+                    <video class="recording" controls preload="none" playsinline [attr.width]="recording.width" [attr.height]="recording.height"
+                      [attr.aria-label]="row.label + ' video recording'">
+                      <source [src]="recordingUrl(recording.file)" [type]="recording.mimeType" />
+                      Video playback is not supported by this browser.
+                    </video>
+                    <p class="muted">{{ recording.durationMs / 1000 | number: '1.1-1' }} s · {{ (recording.bytes / 1024) | number: '1.0-0' }} KB · {{ recording.width }}×{{ recording.height }} · {{ recording.audio ? 'audio' : 'silent' }} · {{ recording.mimeType }}</p>
+                  }
+                }
                 @if (row.windowText || row.notes.length) {
                   <p class="muted">{{ row.windowText }}@for (note of row.notes; track note) { <span class="note"> · {{ note }}</span> }</p>
                 }

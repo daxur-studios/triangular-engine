@@ -5,6 +5,7 @@ import {
   DestroyRef,
   inject,
   signal,
+  ViewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
@@ -22,7 +23,11 @@ import {
   AudioService,
   EngineModule,
   EngineService,
+  OrbitControlsComponent,
 } from 'triangular-engine';
+import { TestRunnerComponent, type TestProgress } from 'triangular-engine/testing';
+import { createAudioLabTestAdapter } from './audio-lab-test-adapter';
+import { AUDIO_LAB_TESTS } from './audio-lab-tests';
 import {
   createAmbientPadBuffer,
   createBeaconLoopBuffer,
@@ -33,7 +38,7 @@ import {
 @Component({
   selector: 'app-audio-lab-page',
   standalone: true,
-  imports: [RouterLink, EngineModule, DecimalPipe],
+  imports: [RouterLink, EngineModule, DecimalPipe, TestRunnerComponent],
   templateUrl: './audio-lab-page.component.html',
   styleUrl: './audio-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -44,6 +49,17 @@ export class AudioLabPageComponent {
   private readonly engine = inject(EngineService);
   readonly audioService = inject(AudioService);
   private readonly destroyRef = inject(DestroyRef);
+  @ViewChild(OrbitControlsComponent) private orbitControlsComponent?: OrbitControlsComponent;
+
+  readonly testSuites = AUDIO_LAB_TESTS;
+  readonly testAdapter = createAudioLabTestAdapter({
+    engine: this.engine,
+    audio: this.audioService,
+    controls: () => this.orbitControlsComponent,
+    contextRunning: () => this.audioContextState() === 'running',
+  });
+  readonly testRunning = signal(false);
+  readonly testAvailable = signal(false);
 
   // Audio Context State
   readonly audioContextState = signal<AudioContextState>('suspended');
@@ -126,6 +142,7 @@ export class AudioLabPageComponent {
     this.pingBuffer = createOneShotPingBuffer(ctx);
 
     this.audioContextState.set(ctx.state);
+    this.testAvailable.set(ctx.state === 'running');
   }
 
   #initTickLoop(): void {
@@ -147,6 +164,7 @@ export class AudioLabPageComponent {
         const ctx = this.audioService.getOrCreateListener().context;
         if (ctx && ctx.state !== this.audioContextState()) {
           this.audioContextState.set(ctx.state);
+          this.testAvailable.set(ctx.state === 'running');
         }
       });
   }
@@ -219,9 +237,14 @@ export class AudioLabPageComponent {
   // #region One-Shot SFX Triggers
 
   async unlockAudio(): Promise<void> {
-    this.audioService.resumeContext();
     const ctx = this.audioService.getOrCreateListener().context;
+    await ctx.resume();
     this.audioContextState.set(ctx.state);
+    this.testAvailable.set(ctx.state === 'running');
+  }
+
+  onTestProgress(progress: TestProgress | null): void {
+    this.testRunning.set(progress !== null);
   }
 
   async trigger2DOneShot(): Promise<void> {

@@ -2,10 +2,12 @@ import { DOCUMENT } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, input, isDevMode, OnInit, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import type { TestAblationOutcome, TestBatchTest, TestCaseThumbnails, TestLoad, TestMetric, TestMode, TestProfile, TestProgress, TestRunAdapter, TestRunResult, TestStopReason, TestSuite } from './test-contracts';
+import type { TestAblationOutcome, TestBatchTest, TestCaseRecording, TestCaseThumbnails, TestLoad, TestMetric, TestMode, TestProfile, TestProgress, TestRecordingReference, TestRunAdapter, TestRunResult, TestStopReason, TestSuite } from './test-contracts';
 import { buildTestBatchLaunchUrl, buildTestLaunchUrl, MAX_TEST_REPETITIONS, parseTestLaunch, TEST_MODES, TEST_PROFILES, testSuiteKey, validateTestHistory } from './test-launch';
 import { nearestRankPercentile, TestSession } from './test-session';
 import { encodeThumbnailUploads } from './test-thumbnails';
+import { encodeTestRecordingUploads } from './test-recordings';
+import { videoUrl } from './test-results';
 
 /** Same-origin path the dev-server proxy forwards to the result receiver. */
 export const DEFAULT_TEST_SINK_PATH = '/__triangular-test-sink';
@@ -107,6 +109,13 @@ export function testRunStopReason(run: TestRunResult<object>): Exclude<TestStopR
 export interface TestBatchEntry {
   readonly run: TestRunResult<object>;
   readonly savedFile?: string;
+  readonly recordings?: readonly SavedTestRecording[];
+}
+
+export interface SavedTestRecording extends TestRecordingReference {
+  readonly file: string;
+  readonly case: string;
+  readonly repetition: number;
 }
 
 /** Every test's hand-off text, blank-line separated, each block starting with its stop reason. */
@@ -157,6 +166,8 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     mode: new FormControl<TestMode>('standard', { nonNullable: true }),
     /** Small pictures of what each case looks at, saved with the result (needs the result sink). */
     thumbnails: new FormControl(true, { nonNullable: true }),
+    /** Short case clips can alter rendering cost; available only to visual/functional diagnostics. */
+    recordings: new FormControl(false, { nonNullable: true }),
   });
   readonly reviewNotes = new FormControl('', { nonNullable: true });
   /** The viewer's choice to copy for the agent when a run finishes; the `copyOnFinish` input is the host's switch. */
@@ -169,6 +180,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   readonly saveStatus = signal('');
   /** Stored file name the receiver returned for the last save. */
   readonly savedFile = signal<string | undefined>(undefined);
+  readonly savedRecordings = signal<readonly SavedTestRecording[]>([]);
   readonly digest = computed(() => { const run = this.result(); return run ? digestTestRun(run) : null; });
   readonly agentText = computed(() => { const run = this.result(); return run ? testRunAgentText(run, this.savedFile()) : ''; });
   /** Fraction of cases done, for the progress bar. */
@@ -199,6 +211,8 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   private pendingCases: { tests: readonly TestBatchTest[]; mode: TestMode } | undefined;
   private destroyed = false;
   private abort?: AbortController;
+  private lastRunThumbnails: TestCaseThumbnails[] = [];
+  private lastRunRecordings: TestCaseRecording[] = [];
 
   constructor() {
     effect(() => {
@@ -210,6 +224,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
       }
     });
     this.copyWhenDone.valueChanges.pipe(takeUntilDestroyed()).subscribe((value) => writeStoredFlag(COPY_WHEN_DONE_KEY, value));
+    this.form.controls.suite.valueChanges.pipe(takeUntilDestroyed()).subscribe(() => this.syncRecordingAvailability());
     this.destroyRef.onDestroy(() => { this.destroyed = true; this.abort?.abort(); });
   }
 
@@ -224,7 +239,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
       if (launch) {
         this.launchLoad = launch.load;
         if (!this.modes().includes(launch.mode)) throw new Error(`This page runs standard mode only, not ${launch.mode}`);
-        this.form.setValue({ suite: launch.key, repetitions: launch.repetitions, profile: launch.profile, mode: launch.mode, thumbnails: launch.thumbnails });
+        this.form.setValue({ suite: launch.key, repetitions: launch.repetitions, profile: launch.profile, mode: launch.mode, thumbnails: launch.thumbnails, recordings: false });
         if (launch.autoStart && !this.allowAutoStart()) this.message.set('Autostart is disabled by this application. Use Run selected.');
         this.pendingAutoStart = launch.autoStart && this.allowAutoStart();
         if (launch.cases) {
@@ -234,6 +249,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
       }
     } catch (error) { this.message.set(error instanceof Error ? error.message : String(error)); }
     this.initialized.set(true);
+    this.syncRecordingAvailability();
   }
 
   runLatest(): Promise<void> {
@@ -248,11 +264,16 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     const options = { ...this.form.getRawValue(), ...(mode ? { mode } : {}) };
     const suite = this.suites().find((item) => testSuiteKey(item) === options.suite);
     if (!suite) { this.message.set('Unknown test selection'); return; }
+    if (options.recordings && (!this.recordingAvailable() || suite.purpose === 'performance' || suite.evidence === 'cpu')) {
+      this.message.set('Video recording needs a dev result sink and a visual/functional suite with a recording adapter.');
+      return;
+    }
     this.running.set(true);
     this.form.disable({ emitEvent: false });
     this.result.set(null);
     this.batchEntries.set([]);
     this.savedFile.set(undefined);
+    this.savedRecordings.set([]);
     this.saveStatus.set('');
     this.reviewNotes.reset();
     this.message.set('');
@@ -264,22 +285,27 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
       // Pictures go only to the receiver, so without one they are not taken.
       const thumbnails: TestCaseThumbnails[] = [];
       const onThumbnails = machineSink && options.thumbnails ? (entry: TestCaseThumbnails) => { thumbnails.push(entry); } : undefined;
-      const result = await this.session.run(suite, this.adapter(), { ...options, ...(this.launchLoad ? { load: this.launchLoad } : {}), machineSink, onThumbnails }, (progress) => {
+      const recordings: TestCaseRecording[] = [];
+      const onRecordings = machineSink && options.recordings ? (entry: TestCaseRecording) => { recordings.push(entry); } : undefined;
+      const result = await this.session.run(suite, this.adapter(), { ...options, recordings: !!onRecordings, ...(this.launchLoad ? { load: this.launchLoad } : {}), machineSink, onThumbnails, onRecordings }, (progress) => {
         if (this.destroyed) return;
         this.progress.set(progress);
         this.progressChange.emit(progress);
       }, this.abort.signal);
       if (!this.destroyed) {
         const withLink = { ...result, rerunUrl: buildTestLaunchUrl(this.doc.location.href, result.suite, options.profile, options.repetitions, options.mode, options.thumbnails) };
+        this.lastRunThumbnails = thumbnails;
+        this.lastRunRecordings = recordings;
         this.result.set(withLink);
         this.completed.emit(withLink);
-        void this.saveResult(withLink, thumbnails).then(() => this.copyWhenFinished(withLink));
+        void this.saveResult(withLink, thumbnails, recordings).then(() => this.copyWhenFinished(withLink));
       }
     } catch (error) {
       if (!this.destroyed) this.message.set(error instanceof Error ? error.message : String(error));
     } finally {
       this.running.set(false);
       this.form.enable({ emitEvent: false });
+      this.syncRecordingAvailability();
     }
   }
 
@@ -322,10 +348,15 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   async runBatch(tests: readonly TestBatchTest[] = this.batchTests(), mode?: TestMode): Promise<void> {
     if (this.running() || !this.available() || this.externalBusy() || this.form.invalid || !tests.length) return;
     const options = { ...this.form.getRawValue(), ...(mode ? { mode } : {}) };
+    if (options.recordings && !this.recordingAvailable()) {
+      this.message.set('Video recording needs a dev result sink and a recording adapter.');
+      return;
+    }
     this.running.set(true);
     this.form.disable({ emitEvent: false });
     this.result.set(null);
     this.savedFile.set(undefined);
+    this.savedRecordings.set([]);
     this.saveStatus.set('');
     this.message.set('');
     this.batchEntries.set([]);
@@ -344,9 +375,11 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
         this.activeSuite.set(single);
         const thumbnails: TestCaseThumbnails[] = [];
         const onThumbnails = machineSink && options.thumbnails ? (entry: TestCaseThumbnails) => { thumbnails.push(entry); } : undefined;
+        const recordings: TestCaseRecording[] = [];
+        const onRecordings = machineSink && options.recordings ? (entry: TestCaseRecording) => { recordings.push(entry); } : undefined;
         const repetitions = test.repetitions ?? options.repetitions;
         try {
-          const result = await this.session.run(single, this.adapter(), { ...options, repetitions, ...(this.launchLoad ? { load: this.launchLoad } : {}), machineSink, onThumbnails }, (progress) => {
+          const result = await this.session.run(single, this.adapter(), { ...options, recordings: !!onRecordings, repetitions, ...(this.launchLoad ? { load: this.launchLoad } : {}), machineSink, onThumbnails, onRecordings }, (progress) => {
             if (this.destroyed) return;
             this.progress.set(progress ? { ...progress, label: `test ${index + 1} of ${tests.length}${progress.label ? ` · ${progress.label}` : ''}` } : progress);
             this.progressChange.emit(progress);
@@ -355,8 +388,8 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
           const withLink = { ...result, rerunUrl: buildTestLaunchUrl(this.doc.location.href, result.suite, options.profile, repetitions, options.mode, options.thumbnails) };
           this.completed.emit(withLink);
           // Saved before the next test starts, so a later crash keeps this result.
-          const savedFile = await this.saveResult(withLink, thumbnails);
-          this.batchEntries.update((entries) => [...entries, { run: withLink, savedFile }]);
+          const savedFile = await this.saveResult(withLink, thumbnails, recordings);
+          this.batchEntries.update((entries) => [...entries, { run: withLink, savedFile, recordings: [...this.savedRecordings()] }]);
           if (result.status === 'cancelled') { cancelled = true; break; }
         } catch (error) {
           if (!this.destroyed) this.message.set(error instanceof Error ? error.message : String(error));
@@ -365,6 +398,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     } finally {
       this.running.set(false);
       this.form.enable({ emitEvent: false });
+      this.syncRecordingAvailability();
     }
     if (!this.destroyed && !cancelled && this.batchEntries().length) await this.copyBatchWhenFinished();
   }
@@ -394,26 +428,57 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     const reviewed = { ...result, visualReview: verdict, reviewNotes: this.reviewNotes.value };
     this.result.set(reviewed);
     this.completed.emit(reviewed);
-    void this.saveResult(reviewed, []);
+    void this.saveResult(reviewed, this.lastRunThumbnails, this.lastRunRecordings);
   }
 
-  /** `thumbnails` ride in the same POST as base64 `thumbnailUploads`; the result JSON the panel shows and copies never has them. */
-  private async saveResult(result: TestRunResult<TSettings>, thumbnails: readonly TestCaseThumbnails[]): Promise<string | undefined> {
+  /** Whether this page can persist host-created recordings through its development receiver. */
+  recordingAvailable(): boolean {
+    const sink = this.resultSink();
+    return isDevMode() && !!sink && !!this.adapter().recording;
+  }
+
+  canRecordSelectedSuite(): boolean {
+    const suite = this.suites().find((item) => testSuiteKey(item) === this.form.controls.suite.value);
+    return this.recordingAvailable() && suite?.purpose !== 'performance' && suite?.evidence !== 'cpu';
+  }
+
+  private syncRecordingAvailability(): void {
+    if (this.running()) return;
+    const control = this.form.controls.recordings;
+    if (this.canRecordSelectedSuite()) {
+      if (control.disabled) control.enable({ emitEvent: false });
+    } else {
+      if (control.value) control.setValue(false, { emitEvent: false });
+      if (control.enabled) control.disable({ emitEvent: false });
+    }
+  }
+
+  recordingUrl(file: string): string {
+    const sink = this.resultSink();
+    return videoUrl(typeof sink === 'string' ? sink : DEFAULT_TEST_SINK_PATH, file);
+  }
+
+  /** Image/video data ride in bounded upload fields; the result JSON shown and copied never contains media bytes. */
+  private async saveResult(result: TestRunResult<TSettings>, thumbnails: readonly TestCaseThumbnails[], recordings: readonly TestCaseRecording[] = []): Promise<string | undefined> {
     const sink = this.resultSink();
     if (!sink || !isDevMode()) { this.saveStatus.set(''); return undefined; }
     const url = typeof sink === 'string' ? sink : DEFAULT_TEST_SINK_PATH;
     const failed = 'Result not saved (receiver unreachable): use Download JSON.';
     try {
       const thumbnailUploads = thumbnails.length ? await encodeThumbnailUploads(thumbnails) : undefined;
-      const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(thumbnailUploads ? { ...result, thumbnailUploads } : result) });
-      const body = response.ok ? await response.json().catch(() => null) as { ok?: boolean; file?: string; thumbnails?: readonly string[]; dropped?: readonly string[] } | null : null;
+      const recordingUploads = recordings.length ? await encodeTestRecordingUploads(recordings) : undefined;
+      const upload = { ...result, ...(thumbnailUploads ? { thumbnailUploads } : {}), ...(recordingUploads ? { recordingUploads } : {}) };
+      const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(upload) });
+      const body = response.ok ? await response.json().catch(() => null) as { ok?: boolean; file?: string; thumbnails?: readonly string[]; recordings?: readonly SavedTestRecording[]; dropped?: readonly string[] } | null : null;
       if (this.destroyed) return undefined;
       // A dev server without the sink proxy answers 200 with the app's HTML: that is not a save.
       if (response.ok && body?.ok !== true) { this.saveStatus.set(`Result not saved: ${url} is not the test receiver (is the sink proxy set up?). Use Download JSON.`); return undefined; }
       this.savedFile.set(body?.file);
+      this.savedRecordings.set(body?.recordings ?? []);
       const images = body?.thumbnails?.length ? ` with ${body.thumbnails.length} thumbnail${body.thumbnails.length > 1 ? 's' : ''}` : '';
-      const dropped = body?.dropped?.length ? `; ${body.dropped.length} thumbnail${body.dropped.length > 1 ? 's' : ''} dropped (${body.dropped[0]})` : '';
-      this.saveStatus.set(body ? `Result saved${body.file ? `: ${body.file}` : ''}${images}${dropped}` : `${failed} (HTTP ${response.status})`);
+      const videos = body?.recordings?.length ? ` with ${body.recordings.length} video recording${body.recordings.length > 1 ? 's' : ''}` : '';
+      const dropped = body?.dropped?.length ? `; ${body.dropped.length} artifact${body.dropped.length > 1 ? 's' : ''} dropped (${body.dropped[0]})` : '';
+      this.saveStatus.set(body ? `Result saved${body.file ? `: ${body.file}` : ''}${images}${videos}${dropped}` : `${failed} (HTTP ${response.status})`);
       return body?.file;
     } catch { if (!this.destroyed) this.saveStatus.set(failed); return undefined; }
   }
