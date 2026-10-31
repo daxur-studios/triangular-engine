@@ -4,6 +4,7 @@ import { Subject } from 'rxjs';
 import { PerspectiveCamera, Scene } from 'three';
 import { uniform } from 'three/tsl';
 import { EngineService, PLANET_CONTEXT, type PlanetContext } from 'triangular-engine';
+import { createPlanetMorphUniforms } from 'triangular-engine/planet-material';
 import { PlanetCloudsComponent } from './planet-clouds.component';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -83,6 +84,51 @@ describe('PlanetCloudsComponent', () => {
       TestBed.configureTestingModule({ providers: [{ provide: PLANET_CONTEXT, useValue: context }] });
       return { context, morphUniform };
     }
+
+    it('bends with the planet morph, not a fade, when the planet exposes its morph uniforms', () => {
+      const morphUniforms = createPlanetMorphUniforms();
+      const context = {
+        radius: signal(64_000),
+        sunDirection: signal<readonly [number, number, number]>([0, 1, 0]),
+        morph: signal(0),
+        morphUniform: morphUniforms.uMorph,
+        morphUniforms,
+      } as unknown as PlanetContext;
+      TestBed.configureTestingModule({ providers: [{ provide: PLANET_CONTEXT, useValue: context }] });
+      const fixture = TestBed.createComponent(PlanetCloudsComponent);
+      fixture.detectChanges();
+
+      const shell = fixture.componentInstance.shell()!;
+      beforeRender$.next();
+      expect(shell.object.visible).toBeTrue();
+      morphUniforms.uMorph.value = 0.8;
+      beforeRender$.next();
+      expect(shell.morph).toBe(0.8);
+      expect(shell.object.visible).toBeTrue();
+      expect((shell as any).uOpacity.value).toBe(1);
+      fixture.destroy();
+    });
+
+    it('keeps the morph fade for an explicit numeric morph input, even when the planet exposes its morph uniforms', () => {
+      const morphUniforms = createPlanetMorphUniforms();
+      const context = {
+        radius: signal(64_000),
+        sunDirection: signal<readonly [number, number, number]>([0, 1, 0]),
+        morph: signal(0),
+        morphUniform: morphUniforms.uMorph,
+        morphUniforms,
+      } as unknown as PlanetContext;
+      TestBed.configureTestingModule({ providers: [{ provide: PLANET_CONTEXT, useValue: context }] });
+      const fixture = TestBed.createComponent(PlanetCloudsComponent);
+      fixture.componentRef.setInput('morph', 0.8);
+      fixture.detectChanges();
+
+      const shell = fixture.componentInstance.shell()!;
+      beforeRender$.next();
+      expect(shell.morph).toBe(0.8);
+      expect(shell.object.visible).toBeFalse();
+      fixture.destroy();
+    });
 
     it('takes the radius, the sun and the morph from the planet', () => {
       const { morphUniform } = provideContext();

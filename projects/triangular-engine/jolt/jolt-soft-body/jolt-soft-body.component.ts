@@ -1,7 +1,7 @@
 import { Component, effect, inject, input, output } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { BufferAttribute, BufferGeometry, DoubleSide, Mesh, MeshStandardMaterial } from 'three';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, type Subscription } from 'rxjs';
 import { GroupComponent, provideObject3DComponent } from 'triangular-engine';
 import { LAYER_MOVING, wrapQuat, wrapVec3 } from '../example';
 import { Jolt, JoltPhysicsService } from '../jolt-physics';
@@ -60,6 +60,8 @@ export class JoltSoftBodyComponent extends GroupComponent {
   #mesh?: Mesh;
   #material?: MeshStandardMaterial;
   #settings?: Jolt.SoftBodySharedSettings;
+  #creationSettings?: Jolt.SoftBodyCreationSettings;
+  #subscription?: Subscription;
 
   constructor() {
     super();
@@ -121,11 +123,23 @@ export class JoltSoftBodyComponent extends GroupComponent {
     settings.mVertexRadius = this.vertexRadius();
     const maxLinearVelocity = this.maxLinearVelocity();
     if (maxLinearVelocity !== undefined) settings.mMaxLinearVelocity = maxLinearVelocity;
-    const bodyId = metadata.bodyInterface.CreateAndAddSoftBody(settings, metadata.Jolt.EActivation_Activate);
-    this.#body = metadata.physicsSystem.GetBodyLockInterface().TryGetBody(bodyId);
-    if (!this.#body) return;
+    // `CreateSoftBody` creates the body without adding it, so pair it with `AddBody` exactly
+    // like the official Jolt.js examples do. (`CreateAndAddSoftBody` adds it but returns an id
+    // that has to be resolved through the body lock interface, whose handle is unsafe to cache.)
+    const body = metadata.bodyInterface.CreateSoftBody(settings);
+    metadata.bodyInterface.AddBody(body.GetID(), metadata.Jolt.EActivation_Activate);
+    metadata.Jolt.destroy(bodyPosition); metadata.Jolt.destroy(bodyRotation);
+    if (this.destroyRef.destroyed) {
+      metadata.bodyInterface.RemoveBody(body.GetID());
+      metadata.bodyInterface.DestroyBody(body.GetID());
+      metadata.Jolt.destroy(settings);
+      return;
+    }
+    this.#body = body;
     this.#settings = shared;
-    metadata.Jolt.destroy(settings); metadata.Jolt.destroy(bodyPosition); metadata.Jolt.destroy(bodyRotation);
+    // The binding's `mSettings` does not add a reference, so destroying the creation settings
+    // releases the shared settings. Keep both alive until the body is gone.
+    this.#creationSettings = settings;
 
     const geometry = new BufferGeometry();
     const positionData = new Float32Array(vertices.length * 3);
@@ -139,12 +153,12 @@ export class JoltSoftBodyComponent extends GroupComponent {
     this.#material = material;
     this.object3D().add(mesh);
     this.#setParticleVelocity(metadata.Jolt, this.velocity());
-    const motion = metadata.Jolt.castObject(this.#body.GetMotionProperties(), metadata.Jolt.SoftBodyMotionProperties);
+    const motion = metadata.Jolt.castObject(body.GetMotionProperties(), metadata.Jolt.SoftBodyMotionProperties);
     motion.SetPressure(this.pressure());
     this.#syncVertices(metadata.Jolt);
-    this.body$.next(this.#body);
-    this.service.physicsUpdated$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.#syncVertices(metadata.Jolt));
-    this.created.emit({ body: this.#body, owner: this, vertexCount: vertices.length });
+    this.body$.next(body);
+    this.#subscription = this.service.physicsUpdated$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.#syncVertices(metadata.Jolt));
+    this.created.emit({ body, owner: this, vertexCount: vertices.length });
   }
 
   #setParticleVelocity(jolt: typeof Jolt, velocity: readonly [number, number, number]): void {
@@ -159,19 +173,21 @@ export class JoltSoftBodyComponent extends GroupComponent {
   }
 
   #syncVertices(jolt: typeof Jolt): void {
-    if (!this.#body || !this.#mesh) return;
-    this.object3D().position.copy(wrapVec3(this.#body.GetPosition()));
-    this.object3D().quaternion.copy(wrapQuat(this.#body.GetRotation()));
-    const motion = jolt.castObject(this.#body.GetMotionProperties(), jolt.SoftBodyMotionProperties);
+    const body = this.#body;
+    const mesh = this.#mesh;
+    if (!body || !mesh) return;
+    this.object3D().position.copy(wrapVec3(body.GetPosition()));
+    this.object3D().quaternion.copy(wrapQuat(body.GetRotation()));
+    const motion = jolt.castObject(body.GetMotionProperties(), jolt.SoftBodyMotionProperties);
     const vertices = motion.GetVertices();
     const offset = jolt.SoftBodyVertexTraits.prototype.mPositionOffset;
-    const attribute = this.#mesh.geometry.getAttribute('position') as BufferAttribute;
+    const attribute = mesh.geometry.getAttribute('position') as BufferAttribute;
     for (let i = 0; i < vertices.size(); i++) {
       const position = new Float32Array(jolt.HEAP32.buffer, jolt.getPointer(vertices.at(i)) + offset, 3);
       attribute.setXYZ(i, position[0], position[1], position[2]);
     }
     attribute.needsUpdate = true;
-    this.#mesh.geometry.computeVertexNormals();
+    mesh.geometry.computeVertexNormals();
   }
 
   override ngOnDestroy(): void {
@@ -179,19 +195,37 @@ export class JoltSoftBodyComponent extends GroupComponent {
     super.ngOnDestroy();
   }
 
-  /** Removes the live Jolt body before a topology replacement is created. */
+  /** Removes the live Jolt body and its subscription; safe to call more than once. */
   dispose(): void {
+    this.#subscription?.unsubscribe();
+    this.#subscription = undefined;
     const body = this.#body;
     const metadata = this.service.metaData$.value;
-    if (body && metadata) {
-      metadata.bodyInterface.RemoveBody(body.GetID());
-      metadata.bodyInterface.DestroyBody(body.GetID());
-    }
-    if (this.#settings && metadata) metadata.Jolt.destroy(this.#settings);
-    this.#mesh?.geometry.dispose();
-    this.#material?.dispose();
     this.#body = undefined;
-    this.#mesh = undefined;
+    if (body && metadata) {
+      try {
+        metadata.bodyInterface.RemoveBody(body.GetID());
+        metadata.bodyInterface.DestroyBody(body.GetID());
+      } catch (error) {
+        console.warn('[JoltSoftBody] Could not destroy the soft body:', error);
+      }
+    }
+    if (this.#settings && this.#creationSettings && metadata) {
+      // Destroying the creation settings releases the shared settings it points at; do not
+      // release `#settings` a second time.
+      metadata.Jolt.destroy(this.#creationSettings);
+      this.#creationSettings = undefined;
+      this.#settings = undefined;
+    } else if (this.#settings && metadata) {
+      metadata.Jolt.destroy(this.#settings);
+      this.#settings = undefined;
+    }
+    if (this.#mesh) {
+      this.object3D().remove(this.#mesh);
+      this.#mesh.geometry.dispose();
+      this.#mesh = undefined;
+    }
+    this.#material?.dispose();
     this.#material = undefined;
     this.body$.next(undefined);
   }

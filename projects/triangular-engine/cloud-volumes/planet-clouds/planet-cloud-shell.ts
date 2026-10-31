@@ -1,7 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Camera, FrontSide, Mesh, Object3D, SphereGeometry, Vector3 } from 'three';
 import { NodeMaterial } from 'three/webgpu';
-import { clamp, dot, float, int, max, mix, mx_fractal_noise_float, normalize, normalWorld, positionLocal, smoothstep, uniform, varying, vec3, vec4 } from 'three/tsl';
+import { clamp, dot, float, int, max, mix, mx_fractal_noise_float, normalize, positionGeometry, smoothstep, uniform, varying, vec3, vec4 } from 'three/tsl';
+import type { IPlanetMorphUniforms } from 'triangular-engine/planet-material';
+import { cloudShellBendPosition } from './planet-cloud-bend';
 
 /**
  * The morph fade of the cloud shell: 0 on the globe, 1 once the planet has unrolled into its flat map. Same curve as the
@@ -41,6 +43,12 @@ export interface PlanetCloudShellOptions {
   readonly scale?: number;
   /** How fast the clouds drift, in noise units per second. Default 0.002. Set 0 to hold them still. */
   readonly drift?: number;
+  /**
+   * The enclosing planet's shared morph uniforms (`<planet>`'s `morphUniforms`). With them the vertex stage bends the layer
+   * into the same flat map as the terrain, so it stays a thin band above the bent ground at every morph, and the morph fade
+   * is off (see {@link PlanetCloudShell.morph}). Without them the layer does not bend: it fades out as the morph rises.
+   */
+  readonly morphUniforms?: IPlanetMorphUniforms;
 }
 
 const DEFAULT_ALTITUDE_RATIO = 0.0015;
@@ -53,7 +61,12 @@ const SUN_TAP_OFFSET = 0.04;
 /**
  * A planet-wide 2D cloud layer: a sphere just above the surface, shaded with procedural noise and the same analytic
  * sun colour that a `PlanetAtmosphere` uses at the surface. It is a far shell, not a volume: there is no flying through
- * it, and it does not bend into a flat map yet, so it fades out with the morph.
+ * it.
+ *
+ * With `morphUniforms` (a `<planet>`'s) the vertices bend into the flat map with the planet's morph, as the terrain does,
+ * and the layer stays a thin band above the ground at every morph. Without them it does not bend and fades out as the
+ * morph rises. The shading uses the unbent globe direction as its normal, not the bent ground's: a known simplification
+ * (the terrain's shading follows the bent ground; the clouds are lit as on the globe at every morph).
  *
  * Add {@link PlanetCloudShell.object} to the scene and call {@link PlanetCloudShell.update} once a frame. It needs a
  * `WebGPURenderer` (the shader is TSL). Use {@link PlanetCloudShell.dispose} when you are done with it.
@@ -76,6 +89,9 @@ export class PlanetCloudShell {
   private readonly uTime = uniform(0);
   private readonly uSun = uniform(new Vector3(0, 0, 1));
   private readonly uOpacity = uniform(1);
+  /** The shell's radius in world units (radius plus altitude), for the bend. Written by `applyScale`. */
+  private readonly uShellRadius = uniform(0);
+  private readonly bendUniforms: IPlanetMorphUniforms | undefined;
 
   private radiusUnitsValue: number;
   private altitudeOverride: number | undefined;
@@ -99,6 +115,7 @@ export class PlanetCloudShell {
     this.softness = options.softness ?? DEFAULT_SOFTNESS;
     this.scale = options.scale ?? DEFAULT_SCALE;
     this.drift = options.drift ?? DEFAULT_DRIFT;
+    this.bendUniforms = options.morphUniforms;
 
     this.geometry = new SphereGeometry(1, 128, 64);
     this.material = new NodeMaterial();
@@ -106,6 +123,9 @@ export class PlanetCloudShell {
     this.material.depthWrite = false;
     this.material.side = FrontSide;
     this.material.fragmentNode = this.buildFragmentNode();
+    if (this.bendUniforms) {
+      this.material.positionNode = cloudShellBendPosition(this.bendUniforms, normalize(positionGeometry), this.uShellRadius);
+    }
 
     const mesh = new Mesh(this.geometry, this.material);
     mesh.renderOrder = 10;
@@ -159,7 +179,8 @@ export class PlanetCloudShell {
   }
 
   /**
-   * The planet's morph, 0 (globe) to 1 (flat map). The layer fades out as it rises, and is hidden at 1. Set it each
+   * The planet's morph, 0 (globe) to 1 (flat map). Without `morphUniforms` the layer fades out as it rises, and is hidden
+   * at 1. With `morphUniforms` the layer bends with the morph instead: it is never faded or hidden by it. Set it each
    * frame, or read it from the planet's shared morph uniform before calling {@link PlanetCloudShell.update}.
    */
   get morph(): number {
@@ -197,7 +218,7 @@ export class PlanetCloudShell {
     this.object.getWorldPosition(this.centre);
     camera.getWorldPosition(this.eye);
     const cameraFade = cloudShellCameraFade(this.eye.distanceTo(this.centre), shellRadius, altitude);
-    const morphOpacity = 1 - cloudShellMorphFade(this.morphValue);
+    const morphOpacity = this.bendUniforms ? 1 : 1 - cloudShellMorphFade(this.morphValue);
 
     const opacity = this.enabledValue ? morphOpacity * cameraFade : 0;
     this.uOpacity.value = opacity;
@@ -215,12 +236,16 @@ export class PlanetCloudShell {
   }
 
   private applyScale(): void {
-    this.object.scale.setScalar(this.radiusUnitsValue + this.altitude);
+    const shellRadius = this.radiusUnitsValue + this.altitude;
+    this.uShellRadius.value = shellRadius;
+    // A bent shell is placed in world units by its vertex stage, so its mesh is not scaled.
+    this.object.scale.setScalar(this.bendUniforms ? 1 : shellRadius);
   }
 
   private buildFragmentNode() {
-    // Unit direction from the planet's centre, interpolated from the sphere's vertices.
-    const dir = varying(normalize(positionLocal));
+    // Unit direction from the planet's centre, interpolated from the sphere's vertices. It is the unbent geometry
+    // direction, so the cloud pattern stays on the globe's geography while the vertices bend.
+    const dir = varying(normalize(positionGeometry));
     const drift = vec3(this.uTime.mul(this.uDrift), 0, 0);
     const fractal = (p: any) =>
       clamp(mx_fractal_noise_float(p, int(5), float(2.0), float(0.5)).mul(0.5).add(0.5), 0, 1);
@@ -233,7 +258,8 @@ export class PlanetCloudShell {
     const shade = clamp(float(1).sub(densitySun.sub(density).mul(2.0)), 0.35, 1);
 
     // Analytic sun on the shell point (the same shape as the surface lighting): orange near the terminator, dark at night.
-    const n = normalize(normalWorld);
+    // The normal is the unbent direction (see `dir`), so the lighting does not follow the bend.
+    const n = normalize(dir);
     const sunDot = dot(n, this.uSun);
     const day = smoothstep(-0.12, 0.25, sunDot);
     const sunColour = mix(vec3(1.0, 0.55, 0.3), vec3(1.0, 0.97, 0.92), smoothstep(0.0, 0.35, sunDot));

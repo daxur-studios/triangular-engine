@@ -8,7 +8,10 @@ record_id: er-074
 scope_history_schema: 1
 plans:
   - /docs/plans/074_procedural-character-studio.md
-performance: []
+performance:
+  - id: character-studio-human-performance-v1
+    url: http://triangular-demo.localhost:4200/character-studio?testSuite=character-studio-human-performance&testVersion=1&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1
+    status: runnable-hardware-unmeasured
 ---
 
 # Engineering Record 074: Procedural character studio
@@ -73,6 +76,18 @@ Plan: [PLAN-074](/docs/plans/074_procedural-character-studio.md).
 
 **Next.** Start `hair-generation-coverage` with deterministic close-up views of selected hairstyles from front, side and rear. The generated Character Studio media still needs a human visual verdict; this migration does not record one.
 
+## 2026-10-31 — Character performance matrix
+
+**Change.** Added the `character-studio-human-performance@v1` suite to the Character Studio test selector. It compares 1, 16 and 48 capsule humans at idle, walking in place, and walking along deterministic per-character scene paths. The adapter measures display-paced frame intervals, per-tick actor-update CPU time, main-thread render-submit time, Three.js draw calls and triangles, and scenario setup time (extra actor construction, population placement and camera fit; primary human construction is excluded). This is a diagnostic performance suite; video capture and visual review are not part of its measurement.
+
+**Decision.** Use p95 frame cadence of 16.7 ms as a provisional 60 Hz target for the first diagnostic run. Do not call it a production performance baseline; the intended device and clean visible-browser run still need review. The other measurements help identify whether the cost is primarily actor updates, scene submission, draw count, triangle count or setup.
+
+**Run.** [Launch the visible standard performance matrix](http://triangular-demo.localhost:4200/character-studio?testSuite=character-studio-human-performance&testVersion=1&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1).
+
+**Verification.** `npx ng build demo-app` passed, the focused Character Studio adapter spec passed 12/12, and `triangular docs records check` passed. The build reports the existing Mermaid CommonJS optimization warnings. A visible hardware run remains pending; Computer Use was stopped with Escape before the browser suite could be launched. No performance result or hardware baseline is claimed yet.
+
+**Next.** Run the suite on the intended device, inspect the compact saved summary and machine context, then decide whether the 60 Hz budget and largest actor count match the games this studio should guide.
+
 ## History
 
 Append dated findings, decisions, scope changes and verification. Do not erase earlier outcomes when a plan is superseded.
@@ -80,6 +95,11 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 ## Scope history
 
 <!-- tri:scope-history -->
+<!-- tri:scope-change id="SC-074-PERF" date="2026-10-31" kind="addition" origin="requested" disposition="accepted" scope-ids="character-performance-matrix" -->
+- Summary: Add a Character Studio performance matrix for one and many capsule humans across idle, walk-cycle and scene-path motion.
+- Reason: Visual verification demonstrates appearance and motion but does not establish frame performance or scaling cost as more human actors are displayed and updated.
+- Impact: Add reproducible population cases and diagnostic CPU, frame-cadence and renderer-counter measurements; keep performance runs separate from video recording and visual verdicts.
+<!-- /tri:scope-change -->
 <!-- tri:scope-change id="SC-074-HAIR" date="2026-10-31" kind="addition" origin="requested" disposition="accepted" scope-ids="hair-generation-coverage,hair-motion-and-helmet" -->
 - Summary: Add later visual-verification phases for procedural hair generation, walking behavior and clear dome-helmet fit.
 - Reason: Hair is a prominent procedural feature whose silhouette and attachment need close-up multi-view review; walking and helmet cases can expose motion, clipping and occlusion issues that ordinary character sheets miss.

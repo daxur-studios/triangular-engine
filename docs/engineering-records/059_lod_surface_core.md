@@ -2042,3 +2042,23 @@ Built by one Haiku 5.5 agent from a written brief; reviewed here. Files: `cloud-
 **Evidence.** 33 of 33 cloud-volumes specs pass (headless), including a 128x128 readback (0 covered pixels at coverage 0, over 1000 at coverage 1). The library builds. The `planet-scene` specs pass (36 of 36). The demo app build currently fails in another person's soft-body lab page, unrelated to these files.
 
 **Not done or not verified.** Nobody has looked at the clouds in a browser. The `planet-scene` suite stays at version 2 although its frame now includes the shell, so its timings are not comparable with earlier ones; bump to 3 when perf runs resume. Its `drawCalls` expectation still reads 2 with the shell drawn, which has not been explained.
+
+## 2026-10-31: `<planetSurfaceDetail>` (Plan 063 scope 1-2 as a composable layer)
+
+Built by a Haiku 5.5 agent from a written brief, reviewed here.
+
+**Decision.** Generic machinery only. `flatFeatureLayer`, `FlatFeaturePageWindow` and `FlatFeatureSet` were already in the library; the runway, road, building, forest and rock content stays in the spike. The component takes `[surface]` (explicit, like `<planetAtmosphere [surfaces]>`), `[layers]`, optional `[flatFeatures]`, `[radius]` and `[enabled]`.
+
+**Evidence.** Component spec 10 of 10; lod-surface glob 357 of 360, the 3 failures being the known deliberate ones (settle, two budget-300 bench cases); planet-scene specs 36 of 36; library build OK. `/planet-scene` shows one demo grid layer. Not looked at in a browser.
+
+**Open.** (1) The height stamp is not applied by the component; with a baked source it belongs in the bake's `modifyElevation`. (2) A layer id clash on one material throws from the effect (kept; documented). (3) `terrain.surface()` is typed `NodeMaterial`, so the demo narrows it with `instanceof PlanetSurfaceMaterial`; typing the signal more precisely would be a small follow-up. (4) Demo build still fails in the soft-body lab (not ours).
+
+## 2026-10-31: `<planetClouds>` bends with the morph; mouse orbit on `/planet-scene`
+
+Built by Haiku 5.5 agents from briefs; reviewed here. Nothing seen on a GPU.
+
+- **Cloud bend.** Inside a `<planet>` the shell's `positionNode` bends with `planetBentSurfaceNodes` and the planet's morph uniforms (`PlanetCloudShellOptions.morphUniforms`); the morph fade is off there. Noise direction and sun lighting use the unbent geometry direction, so the pattern stays on the globe's geography and the clouds are lit as on the globe (the terrain blends its shading normal; the clouds do not). Standalone or with its own `[morph]` it still fades. `cloud-volumes` now imports `planet-material` (as `lod-surface` does).
+- **Accuracy.** GPU against CPU reference (`bendPlanetSurfacePoint`; it agrees with the lod-surface frame bend within 0.01 m at the default centre): worst 117.6 m at R = 600 km (morph 1), 95 m at morph 0. The brief's 1 m target was unreachable: this headless backend's `asin` is off by up to 6.8e-5 rad (about 40 m). The spec floors are 150 m (position) and 5e-2 (morph-0 render difference, measured 1.6e-2), set by the coordinator from these measurements, not by the agent. Re-measure on hardware. The terrain shares the same `asin` helper, so it likely has the same floor (not measured).
+- **Open.** The `[morph]` input is read once at init (bend or fade mode is fixed then). `PlanetContext` has no typed `morphUniforms` field; the component reads it through a local type. The camera fade uses the distance from the centre, which may be wrong on the flat map. The sky backdrop is still a faded full-screen quad; bending it would use the table path measured in record 049, not a per-pixel march.
+- **Mouse orbit.** `/planet-scene` has an optional "Mouse orbit" box (drag spins, shift or right-drag looks, wheel zooms) built on the page's own camera view; the planet-scene suite is unchanged (v2). Pure maths in `planet-camera.ts` (`freeDrag`, `freeLook`, `freeZoom`), 13 specs; 49 of 49 planet-scene specs pass.
+- **Evidence.** cloud-volumes specs 41 of 41; library build OK.

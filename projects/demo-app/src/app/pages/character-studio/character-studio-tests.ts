@@ -10,6 +10,7 @@ import type { VisualFocusTargetId } from './character-studio-focus';
 
 export type CameraFramingPreset = 'front' | 'face-close-up' | 'head-close-up' | 'three-quarter' | 'profile' | 'full-shot';
 export type CapsuleLayoutMode = 'hero' | 'lineup';
+export type CharacterStudioPerformanceMotion = 'idle' | 'walk' | 'walk-path';
 
 /**
  * Settings configuration for a capsule character verification scenario.
@@ -31,6 +32,10 @@ export interface CharacterStudioTestSettings {
   readonly rightHandAction?: CapsuleHandActionMode;
   readonly leftHandAction?: CapsuleHandActionMode;
   readonly motion?: 'turntable' | 'camera-orbit' | 'still';
+  /** Number of capsule humans to create for an opt-in Character Studio performance case. */
+  readonly performancePopulation?: number;
+  /** Idle pose, walk cycle in place, or walk cycle while moving through a deterministic grid path. */
+  readonly performanceMotion?: CharacterStudioPerformanceMotion;
 }
 
 export const DEFAULT_CAT_TEST_SETTINGS: CharacterStudioTestSettings = {
@@ -424,6 +429,59 @@ export const CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1: TestSuite<CharacterStudioTestSe
   ],
 };
 
+const CHARACTER_PERFORMANCE_FRAME_BUDGET_MS = 16.7;
+
+function performanceScenario(
+  id: string,
+  label: string,
+  population: number,
+  performanceMotion: CharacterStudioPerformanceMotion,
+): TestScenario<CharacterStudioTestSettings> {
+  return {
+    id,
+    label,
+    settings: {
+      ...DEFAULT_HUMAN_TEST_SETTINGS,
+      characterType: 'human',
+      presetId: 'wacky-helmet-waver',
+      emotion: 'happy',
+      gait: performanceMotion === 'idle' ? 'idle' : 'walk',
+      cameraFraming: 'full-shot',
+      layout: 'lineup',
+      motion: 'still',
+      rightHandAction: 'none',
+      leftHandAction: 'none',
+      performancePopulation: population,
+      performanceMotion,
+    },
+    warmupMs: 800,
+    durationMs: 8_000,
+    quickMs: 3_000,
+    budgets: { frameInterval: { p95: CHARACTER_PERFORMANCE_FRAME_BUDGET_MS } },
+  };
+}
+
+/**
+ * Diagnostic scaling matrix for the procedural capsule-human scene on the current device.
+ * The 16.7 ms p95 frame-cadence budget is an initial 60 Hz target hypothesis, not a production baseline.
+ */
+export const CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1: TestSuite<CharacterStudioTestSettings> = {
+  id: 'character-studio-human-performance',
+  version: 1,
+  title: 'Capsule Human Rendering and Animation Performance',
+  purpose: 'performance',
+  scenarios: [
+    performanceScenario('human-idle-1', '1 human · idle baseline', 1, 'idle'),
+    performanceScenario('human-walk-1', '1 human · walk cycle', 1, 'walk'),
+    performanceScenario('human-idle-16', '16 humans · idle grid', 16, 'idle'),
+    performanceScenario('human-idle-48', '48 humans · idle grid', 48, 'idle'),
+    performanceScenario('human-walk-16', '16 humans · walk cycles', 16, 'walk'),
+    performanceScenario('human-walk-48', '48 humans · walk cycles', 48, 'walk'),
+    performanceScenario('human-walk-path-16', '16 humans · walk cycles and scene paths', 16, 'walk-path'),
+    performanceScenario('human-walk-path-48', '48 humans · walk cycles and scene paths', 48, 'walk-path'),
+  ],
+};
+
 /**
  * Full test history for Character Studio, oldest first.
  * The final entry is the default latest test suite.
@@ -436,4 +494,5 @@ export const CHARACTER_STUDIO_TEST_HISTORY: readonly TestSuite<CharacterStudioTe
   CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
   CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
   CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1,
+  CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1,
 ];

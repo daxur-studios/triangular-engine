@@ -25,7 +25,9 @@ export interface CharacterStudioTestHost {
   renderedFrames(): number;
   errors(): string;
   resetErrors(): void;
-  onRenderComplete(callback: (renderedAt: number) => void): () => void;
+  onRenderComplete(callback: (renderedAt: number, stats?: CharacterStudioRenderedFrameStats) => void): () => void;
+  beginPerformanceWindow(): void;
+  endPerformanceWindow(): CharacterStudioPerformanceCapture;
   speak(text: string): void;
   isSpeaking(): boolean;
   setTurntableAngle(radians: number | undefined): void;
@@ -34,6 +36,20 @@ export interface CharacterStudioTestHost {
   environment(): Readonly<Record<string, TestSetting>>;
   thumbnail?(settings: CharacterStudioTestSettings): Promise<Blob | undefined>;
   resolveFocusFraming?(settings: CharacterStudioTestSettings): ResolvedFocusFraming | undefined;
+}
+
+export interface CharacterStudioRenderedFrameStats {
+  /** Main-thread time from beforeRender$ to renderComplete$, not GPU execution time. */
+  readonly renderSubmitCpuMs?: number;
+  readonly drawCalls?: number;
+  readonly triangles?: number;
+}
+
+export interface CharacterStudioPerformanceCapture {
+  /** Main-thread duration of updating the active human and every additional benchmark actor, per engine tick. */
+  readonly actorUpdateCpuMs: readonly number[];
+  /** Time spent creating the extra actors, arranging the population and fitting the camera; excludes primary human creation. */
+  readonly scenarioSetupCpuMs: number;
 }
 
 export interface CharacterStudioTestSnapshot {
@@ -83,6 +99,12 @@ export function settingsMismatches(
   }
   if (actual.layout !== expected.layout) {
     out.push(`layout: expected ${expected.layout}, found ${actual.layout}`);
+  }
+  if (expected.performancePopulation !== undefined && actual.performancePopulation !== expected.performancePopulation) {
+    out.push(`performancePopulation: expected ${expected.performancePopulation}, found ${actual.performancePopulation ?? 'unset'}`);
+  }
+  if (expected.performanceMotion !== undefined && actual.performanceMotion !== expected.performanceMotion) {
+    out.push(`performanceMotion: expected ${expected.performanceMotion}, found ${actual.performanceMotion ?? 'unset'}`);
   }
   return out;
 }
@@ -243,15 +265,23 @@ export function createCharacterStudioTestAdapter(
     measure: async (scenario, context): Promise<TestObservation> => {
       const settings = scenario.settings;
       const intervals: number[] = [];
+      const renderSubmitCpuMs: number[] = [];
+      const drawCalls: number[] = [];
+      const triangles: number[] = [];
       let frames = 0;
       let previousAt: number | undefined;
       let orbitResult: CameraOrbitResult | undefined;
+      const performanceCase = settings.performancePopulation !== undefined;
+      let performanceCapture: CharacterStudioPerformanceCapture | undefined;
 
-      const offRender = host.onRenderComplete((renderedAt) => {
+      const offRender = host.onRenderComplete((renderedAt, stats) => {
         frames++;
         if (previousAt !== undefined) {
           intervals.push(renderedAt - previousAt);
         }
+        if (stats?.renderSubmitCpuMs !== undefined) renderSubmitCpuMs.push(stats.renderSubmitCpuMs);
+        if (stats?.drawCalls !== undefined) drawCalls.push(stats.drawCalls);
+        if (stats?.triangles !== undefined) triangles.push(stats.triangles);
         previousAt = renderedAt;
       });
 
@@ -259,6 +289,7 @@ export function createCharacterStudioTestAdapter(
         host.speak(settings.speechText);
       }
 
+      if (performanceCase) host.beginPerformanceWindow();
       try {
         if (settings.motion === 'turntable') {
           await runTurntable(scenario, context);
@@ -269,6 +300,7 @@ export function createCharacterStudioTestAdapter(
         }
       } finally {
         offRender();
+        if (performanceCase) performanceCapture = host.endPerformanceWindow();
         if (settings.motion === 'turntable') {
           host.setTurntableAngle(undefined);
         }
@@ -294,6 +326,13 @@ export function createCharacterStudioTestAdapter(
         passed: frames >= 1,
         detail: `${frames} frames rendered`,
       });
+      if (performanceCase) {
+        checks.push({
+          name: 'Enough rendered frames for a useful performance sample',
+          passed: frames >= 30,
+          detail: `${frames} frames measured; 30 is the minimum for this diagnostic`,
+        });
+      }
       if (orbitResult) {
         const elevationRange = orbitResult.maximumElevationRadians - orbitResult.minimumElevationRadians;
         checks.push({
@@ -326,6 +365,48 @@ export function createCharacterStudioTestAdapter(
           source: 'Inter-frame interval on main render loop (performance.now)',
           samples: intervals,
         },
+        ...(performanceCase && performanceCapture ? [
+          {
+            name: 'actorUpdateCpuMs',
+            unit: 'ms',
+            source: 'Main-thread time to update the active capsule human and every additional benchmark actor on each engine tick; not GPU time',
+            samples: [...performanceCapture.actorUpdateCpuMs],
+            optional: true,
+            unavailableReason: performanceCapture.actorUpdateCpuMs.length ? undefined : 'No actor updates were sampled during the performance window',
+          } satisfies TestMetric,
+          {
+            name: 'renderSubmitCpuMs',
+            unit: 'ms',
+            source: 'Main-thread time from EngineService.beforeRender$ to renderComplete$; CPU scene rendering/submission, not GPU completion',
+            samples: renderSubmitCpuMs,
+            optional: true,
+            unavailableReason: renderSubmitCpuMs.length ? undefined : 'No complete render submissions were sampled',
+          } satisfies TestMetric,
+          {
+            name: 'drawCalls',
+            unit: 'calls/frame',
+            source: 'Three.js renderer.info.render.calls after each completed studio scene frame, including the floor',
+            samples: drawCalls,
+            optional: true,
+            unavailableReason: drawCalls.length ? undefined : 'Renderer draw-call counters were unavailable',
+          } satisfies TestMetric,
+          {
+            name: 'triangles',
+            unit: 'triangles/frame',
+            source: 'Three.js renderer.info.render.triangles after each completed studio scene frame, including the floor',
+            samples: triangles,
+            optional: true,
+            unavailableReason: triangles.length ? undefined : 'Renderer triangle counters were unavailable',
+          } satisfies TestMetric,
+          {
+            name: 'scenarioSetupCpuMs',
+            unit: 'ms',
+            source: 'Main-thread time to construct extra benchmark actors, arrange the population and fit the camera before warmup; excludes primary human creation, one sample per case',
+            samples: [performanceCapture.scenarioSetupCpuMs],
+            optional: true,
+            unavailableReason: Number.isFinite(performanceCapture.scenarioSetupCpuMs) ? undefined : 'Scenario setup time was unavailable',
+          } satisfies TestMetric,
+        ] : []),
       ];
 
       const details: Record<string, TestSetting> = {};
@@ -334,6 +415,12 @@ export function createCharacterStudioTestAdapter(
         details['horizontalRadians'] = orbitResult.horizontalRadians;
         details['minimumElevationRadians'] = orbitResult.minimumElevationRadians;
         details['maximumElevationRadians'] = orbitResult.maximumElevationRadians;
+      }
+      if (performanceCase) {
+        details['performancePopulation'] = settings.performancePopulation!;
+        details['performanceMotion'] = settings.performanceMotion ?? settings.gait;
+        details['frameCadenceTargetMs'] = 16.7;
+        details['frameIntervalLimitations'] = 'Frame cadence is display paced and quantized; compare only runs with matching profile, viewport and machine context.';
       }
       if (focusFraming) {
         details['focusTarget'] = focusFraming.targetId;

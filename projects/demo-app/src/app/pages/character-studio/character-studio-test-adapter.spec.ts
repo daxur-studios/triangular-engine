@@ -3,6 +3,7 @@ import {
   CAT_LINEUP_SUITE_V1,
   CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
   CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
+  CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1,
   CHARACTER_STUDIO_TEST_HISTORY,
   DEFAULT_CAT_TEST_SETTINGS,
   type CharacterStudioTestSettings,
@@ -100,6 +101,24 @@ describe('CharacterStudioTestAdapter & Suites', () => {
     }
   });
 
+  it('defines a measured human scaling matrix for idle, animation and scene movement', () => {
+    expect(CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1.purpose).toBe('performance');
+    expect(CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1.scenarios.map(({ settings }) => [
+      settings.performancePopulation,
+      settings.performanceMotion,
+    ])).toEqual([
+      [1, 'idle'], [1, 'walk'],
+      [16, 'idle'], [48, 'idle'],
+      [16, 'walk'], [48, 'walk'],
+      [16, 'walk-path'], [48, 'walk-path'],
+    ]);
+    for (const scenario of CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1.scenarios) {
+      expect(scenario.settings.characterType).toBe('human');
+      expect(scenario.settings.layout).toBe('lineup');
+      expect(scenario.budgets?.['frameInterval']?.p95).toBe(16.7);
+    }
+  });
+
   it('captures, applies, measures and restores settings via the test adapter', async () => {
     let currentSettings: CharacterStudioTestSettings = { ...DEFAULT_CAT_TEST_SETTINGS };
     let renderListener: ((t: number) => void) | undefined;
@@ -125,6 +144,8 @@ describe('CharacterStudioTestAdapter & Suites', () => {
       renderedFrames: () => frames,
       errors: () => '',
       resetErrors: () => {},
+      beginPerformanceWindow: () => {},
+      endPerformanceWindow: () => ({ actorUpdateCpuMs: [], scenarioSetupCpuMs: 0 }),
       onRenderComplete: (cb) => {
         renderListener = cb;
         return () => {
@@ -180,6 +201,67 @@ describe('CharacterStudioTestAdapter & Suites', () => {
     expect(currentSettings.emotion).toBe('happy');
   });
 
+  it('returns frame cadence, update CPU and renderer counters for performance scenarios', async () => {
+    const scenario = CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1.scenarios[4];
+    let renderListener: ((t: number, stats?: { renderSubmitCpuMs?: number; drawCalls?: number; triangles?: number }) => void) | undefined;
+    let windowActive = false;
+    const currentSettings = scenario.settings;
+    const host: CharacterStudioTestHost = {
+      snapshot: () => ({
+        settings: currentSettings,
+        cameraPosition: [0, 2, 4],
+        cameraTarget: [0, 1, 0],
+        humanActorYaw: 0,
+        catActorYaw: 0,
+      }),
+      restore: () => {},
+      read: () => currentSettings,
+      apply: () => {},
+      renderedFrames: () => 40,
+      errors: () => '',
+      resetErrors: () => {},
+      beginPerformanceWindow: () => { windowActive = true; },
+      endPerformanceWindow: () => {
+        windowActive = false;
+        return { actorUpdateCpuMs: [0.7, 0.8], scenarioSetupCpuMs: 14 };
+      },
+      onRenderComplete: (callback) => {
+        renderListener = callback;
+        return () => { renderListener = undefined; };
+      },
+      speak: () => {},
+      isSpeaking: () => false,
+      setTurntableAngle: () => {},
+      setCameraOrbit: () => {},
+      recording: () => ({ stop: async () => { throw new Error('recording is not used by performance tests'); }, dispose: () => {} }),
+      environment: () => ({}),
+    };
+    const adapter = createCharacterStudioTestAdapter(host);
+    const context: TestContext = {
+      mode: 'standard',
+      profile: 'visible-browser',
+      repetition: 1,
+      signal: new AbortController().signal,
+      wait: async () => {},
+      measureWindow: async () => {
+        expect(windowActive).toBeTrue();
+        for (let frame = 0; frame < 40; frame++) {
+          renderListener?.(frame * 16.7, { renderSubmitCpuMs: 2.1, drawCalls: 123, triangles: 456 });
+        }
+        return { mode: 'standard', elapsedMs: 8_000, stoppedBy: 'fixed' };
+      },
+    };
+
+    const observation = await adapter.measure(scenario, context);
+    expect(windowActive).toBeFalse();
+    expect(observation.checks?.find((check) => check.name === 'Enough rendered frames for a useful performance sample')?.passed).toBeTrue();
+    expect(observation.metrics.find((metric) => metric.name === 'renderSubmitCpuMs')?.samples).toEqual([2.1, ...Array(39).fill(2.1)]);
+    expect(observation.metrics.find((metric) => metric.name === 'actorUpdateCpuMs')?.samples).toEqual([0.7, 0.8]);
+    expect(observation.metrics.find((metric) => metric.name === 'drawCalls')?.samples).toHaveSize(40);
+    expect(observation.metrics.find((metric) => metric.name === 'triangles')?.samples).toHaveSize(40);
+    expect(observation.metrics.find((metric) => metric.name === 'scenarioSetupCpuMs')?.samples).toEqual([14]);
+  });
+
   it('drives both camera axes through the visual orbit path and reports the completed coverage', async () => {
     let renderListener: ((t: number) => void) | undefined;
     const path: Array<readonly [number, number]> = [];
@@ -198,6 +280,8 @@ describe('CharacterStudioTestAdapter & Suites', () => {
       renderedFrames: () => path.length,
       errors: () => '',
       resetErrors: () => {},
+      beginPerformanceWindow: () => {},
+      endPerformanceWindow: () => ({ actorUpdateCpuMs: [], scenarioSetupCpuMs: 0 }),
       onRenderComplete: (callback) => {
         renderListener = callback;
         return () => { renderListener = undefined; };
@@ -261,6 +345,8 @@ describe('CharacterStudioTestAdapter & Suites', () => {
       renderedFrames: () => 0,
       errors: () => '',
       resetErrors: () => {},
+      beginPerformanceWindow: () => {},
+      endPerformanceWindow: () => ({ actorUpdateCpuMs: [], scenarioSetupCpuMs: 0 }),
       onRenderComplete: () => () => {},
       speak: () => {},
       isSpeaking: () => false,
@@ -314,6 +400,8 @@ describe('CharacterStudioTestAdapter & Suites', () => {
       renderedFrames: () => 5,
       errors: () => '',
       resetErrors: () => {},
+      beginPerformanceWindow: () => {},
+      endPerformanceWindow: () => ({ actorUpdateCpuMs: [], scenarioSetupCpuMs: 0 }),
       onRenderComplete: (cb) => {
         cb(16);
         return () => {};

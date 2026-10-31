@@ -1,4 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { FloatType, Mesh, NearestFilter, PerspectiveCamera, RGBAFormat, RenderTarget, Scene } from 'three';
+import { createPlanetMorphUniforms, setPlanetMapExtent } from 'triangular-engine/planet-material';
 import { getCloudTestRenderer } from '../gpu-renderer.testing';
 import { PlanetCloudShell, cloudShellCameraFade, cloudShellMorphFade } from './planet-cloud-shell';
 
@@ -149,6 +151,23 @@ describe('PlanetCloudShell', () => {
     target.dispose();
     shell.dispose();
   }, 60000);
+
+  it('bends instead of fading with morph uniforms: unscaled mesh, shown at morph 1', () => {
+    const uniforms = createPlanetMorphUniforms();
+    setPlanetMapExtent(uniforms, 100);
+    const shell = new PlanetCloudShell({ radiusUnits: 100, altitude: 1, morphUniforms: uniforms });
+    const camera = new PerspectiveCamera();
+    camera.position.set(0, 0, 1000);
+    camera.updateMatrixWorld();
+
+    expect(shell.object.scale.x).toBe(1);
+    uniforms.uMorph.value = 1;
+    shell.morph = 1;
+    shell.update(camera, 0);
+    expect(shell.object.visible).toBeTrue();
+    expect((shell as any).uOpacity.value).toBe(1);
+    shell.dispose();
+  });
 
   it('draws after the terrain and is never frustum culled', () => {
     const shell = new PlanetCloudShell({ radiusUnits: 1 });

@@ -5,7 +5,7 @@ import { EngineModule, EngineService } from 'triangular-engine';
 import { JoltPhysicsModule, JoltSoftBodyComponent } from 'triangular-engine/jolt';
 import { TestRunnerComponent, waitRenderedFrames, type TestContext, type TestProgress, type TestSetting } from 'triangular-engine/testing';
 import { clothDropSpheres, createClothMesh, createSoftSphereMesh, meshRestShape } from './soft-body-example-meshes';
-import { sampleSoftBody } from './soft-body-metrics';
+import { sampleSoftBody, type SoftBodySample } from './soft-body-metrics';
 import {
   createSoftBodyLabTestAdapter,
   type SoftBodyLabAggregate,
@@ -180,8 +180,14 @@ export class SoftBodyLabPageComponent {
     for (const component of this.softBodies()) {
       const body = component.body();
       if (!body) continue;
-      const sample = sampleSoftBody(body, rest, mesh.faces);
-      if (sample.vertexCount !== mesh.vertices.length) continue;
+      // A component can still be listed for the frame it is destroyed in; its body is gone.
+      let sample: SoftBodySample | undefined;
+      try {
+        sample = sampleSoftBody(body, rest, mesh.faces);
+      } catch {
+        continue;
+      }
+      if (!sample || sample.vertexCount !== mesh.vertices.length) continue;
       softBodies++;
       vertices += sample.vertexCount;
       shapeErrorRms = Math.max(shapeErrorRms, sample.shapeErrorRms);
@@ -215,7 +221,7 @@ export class SoftBodyLabPageComponent {
       else this.stopErrorWatch?.();
     }
     this.testStatus.set(progress
-      ? `${progress.phase} ${progress.completed}/${progress.total} Â· repetition ${progress.repetition}${progress.label ? ` Â· ${progress.label}` : ''}`
+      ? `${progress.phase} ${progress.completed}/${progress.total} Ã‚Â· repetition ${progress.repetition}${progress.label ? ` Ã‚Â· ${progress.label}` : ''}`
       : '');
   }
 

@@ -13,21 +13,26 @@ import { RouterLink } from '@angular/router';
 import {
   Color,
   CylinderGeometry,
+  Group,
   Mesh,
   MeshStandardMaterial,
   PlaneGeometry,
   PerspectiveCamera,
 } from 'three';
 import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
+import { CapsuleCharacterActor } from 'triangular-engine/procedural';
 import {
+  ALL_CAPSULE_CHARACTER_PRESETS,
   EXTENDED_EMOTION_NAMES,
   type ExtendedEmotionName,
 } from 'triangular-engine/characters';
 import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
-import { TestRunnerComponent, type TestProgress } from 'triangular-engine/testing';
+import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestSetting } from 'triangular-engine/testing';
 import {
   createCharacterStudioTestAdapter,
   createCharacterStudioRecordingCapture,
+  type CharacterStudioPerformanceCapture,
+  type CharacterStudioRenderedFrameStats,
   type CharacterStudioTestHost,
   type CharacterStudioTestSnapshot,
 } from './character-studio-test-adapter';
@@ -35,8 +40,10 @@ import {
   CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
   CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1,
   CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
+  CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1,
   type CharacterStudioTestSettings,
   type CameraFramingPreset,
+  type CharacterStudioPerformanceMotion,
 } from './character-studio-tests';
 import type { VisualFocusTargetId } from './character-studio-focus';
 import {
@@ -46,6 +53,13 @@ import {
 } from './character-studio-contributions';
 
 type CharacterStudioView = 'front' | 'three-quarter' | 'profile' | 'back' | 'face' | 'hair';
+
+interface PerformanceActorPlacement {
+  readonly root: Group;
+  readonly anchorX: number;
+  readonly anchorZ: number;
+  readonly phaseRadians: number;
+}
 
 interface CharacterStudioViewOption {
   readonly id: CharacterStudioView;
@@ -73,7 +87,19 @@ export class CharacterStudioPageComponent {
   private activeFocusTarget?: VisualFocusTargetId;
   private engineError = '';
   private totalRenderedFrames = 0;
-  private readonly renderCompleteCallbacks = new Set<(renderedAt: number) => void>();
+  private renderStartedAt = 0;
+  private readonly renderCompleteCallbacks = new Set<(
+    renderedAt: number,
+    stats?: CharacterStudioRenderedFrameStats,
+  ) => void>();
+  private readonly performanceActors: CapsuleCharacterActor[] = [];
+  private readonly performancePlacements: PerformanceActorPlacement[] = [];
+  private performancePopulation?: number;
+  private performanceMotion?: CharacterStudioPerformanceMotion;
+  private performanceElapsedSeconds = 0;
+  private performanceSetupCpuMs = 0;
+  private performanceWindowActive = false;
+  private readonly actorUpdateSamples: number[] = [];
 
   readonly familyOptions: readonly CharacterStudioContribution[] = [
     this.contributions.human,
@@ -105,6 +131,7 @@ export class CharacterStudioPageComponent {
     CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
     CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
     CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1,
+    CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1,
   ] as const;
   readonly allowTestAutoStart = isDevMode();
   readonly activeControls = computed(() => {
@@ -157,7 +184,11 @@ export class CharacterStudioPageComponent {
         gait: this.selectedMotionId() as CharacterStudioTestSettings['gait'],
         cameraFraming: this.cameraFraming,
         ...(this.activeFocusTarget ? { focusTarget: this.activeFocusTarget } : {}),
-        layout: 'hero',
+        layout: this.performancePopulation !== undefined ? 'lineup' : 'hero',
+        ...(this.performancePopulation !== undefined ? {
+          performancePopulation: this.performancePopulation,
+          performanceMotion: this.performanceMotion ?? 'idle',
+        } : {}),
         ...(family.id === 'cat' ? {
           panicked: controlValue('panicked') === 'true',
           tuft: controlValue('tuft') === 'true',
@@ -188,6 +219,11 @@ export class CharacterStudioPageComponent {
       this.autoRotate.set(false);
       this.setCameraFraming(settings.cameraFraming);
       if (settings.focusTarget) this.applyFocusTargetFraming(settings.focusTarget);
+      if (settings.performancePopulation !== undefined && settings.performanceMotion !== undefined) {
+        this.preparePerformanceScenario(settings);
+      } else {
+        this.clearPerformanceScenario();
+      }
       this.refreshControls();
     },
     renderedFrames: () => this.totalRenderedFrames,
@@ -196,6 +232,17 @@ export class CharacterStudioPageComponent {
     onRenderComplete: (callback) => {
       this.renderCompleteCallbacks.add(callback);
       return () => this.renderCompleteCallbacks.delete(callback);
+    },
+    beginPerformanceWindow: () => {
+      this.actorUpdateSamples.length = 0;
+      this.performanceWindowActive = true;
+    },
+    endPerformanceWindow: (): CharacterStudioPerformanceCapture => {
+      this.performanceWindowActive = false;
+      return {
+        actorUpdateCpuMs: [...this.actorUpdateSamples],
+        scenarioSetupCpuMs: this.performanceSetupCpuMs,
+      };
     },
     speak: () => {},
     isSpeaking: () => false,
@@ -215,9 +262,13 @@ export class CharacterStudioPageComponent {
       this.cameraTarget.set([0, targetY, 0]);
     },
     recording: () => createCharacterStudioRecordingCapture(this.engine.canvas),
-    environment: () => ({
+    environment: (): Readonly<Record<string, TestSetting>> => ({
       browser: typeof navigator !== 'undefined' ? navigator.userAgent : 'node',
-      'visual-recording.profile': '960x540@20fps, aspect-preserving, silent, requested 450 kb/s video',
+      ...describeRendererGpu(this.engine.renderer as Parameters<typeof describeRendererGpu>[0]),
+      'canvas.drawingBufferWidth': this.engine.renderer.domElement.width,
+      'canvas.drawingBufferHeight': this.engine.renderer.domElement.height,
+      devicePixelRatio: globalThis.devicePixelRatio ?? 1,
+      'performance.targetFrameIntervalMs': 16.7,
     }),
     thumbnail: async (settings) => {
       const detail = settings.focusTarget !== undefined ||
@@ -275,11 +326,20 @@ export class CharacterStudioPageComponent {
     this.engine.tick$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((deltaSeconds) => this.update(deltaSeconds));
+    this.engine.beforeRender$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => { this.renderStartedAt = performance.now(); });
     this.engine.renderComplete$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(({ renderedAt }) => {
         this.totalRenderedFrames++;
-        for (const callback of this.renderCompleteCallbacks) callback(renderedAt);
+        const renderInfo = this.engine.renderer.info.render;
+        const stats: CharacterStudioRenderedFrameStats = {
+          ...(this.renderStartedAt > 0 ? { renderSubmitCpuMs: Math.max(0, renderedAt - this.renderStartedAt) } : {}),
+          drawCalls: renderInfo.calls,
+          triangles: renderInfo.triangles,
+        };
+        for (const callback of this.renderCompleteCallbacks) callback(renderedAt, stats);
         this.updateTestRunnerReadiness();
       });
     this.engine.error$
@@ -289,6 +349,7 @@ export class CharacterStudioPageComponent {
       });
 
     this.destroyRef.onDestroy(() => {
+      this.clearPerformanceScenario();
       for (const family of this.familyOptions) {
         this.engine.scene.remove(family.root);
         family.dispose();
@@ -450,10 +511,99 @@ export class CharacterStudioPageComponent {
   }
 
   private update(deltaSeconds: number): void {
+    const updateStartedAt = this.performanceWindowActive ? performance.now() : 0;
     this.activeFamily().update(deltaSeconds);
+    if (this.performancePopulation !== undefined) {
+      if (this.performanceMotion === 'walk-path') {
+        this.performanceElapsedSeconds += deltaSeconds;
+        for (const placement of this.performancePlacements) {
+          const angle = this.performanceElapsedSeconds * 0.55 + placement.phaseRadians;
+          placement.root.position.set(
+            placement.anchorX + Math.cos(angle) * 0.38,
+            0,
+            placement.anchorZ + Math.sin(angle) * 0.38,
+          );
+          placement.root.rotation.y = -angle;
+        }
+      }
+      for (const actor of this.performanceActors) actor.update(deltaSeconds);
+    }
+    if (this.performanceWindowActive) this.actorUpdateSamples.push(performance.now() - updateStartedAt);
     if (!this.autoRotate()) return;
     this.elapsedSeconds += deltaSeconds;
     this.activeFamily().root.rotation.y = Math.sin(this.elapsedSeconds * 0.32) * 0.48;
+  }
+
+  private preparePerformanceScenario(settings: CharacterStudioTestSettings): void {
+    this.clearPerformanceScenario();
+    const startedAt = performance.now();
+    const population = Math.min(48, Math.max(1, Math.floor(settings.performancePopulation ?? 1)));
+    const motion = settings.performanceMotion ?? 'idle';
+    const preset = ALL_CAPSULE_CHARACTER_PRESETS.find((candidate) => candidate.id === settings.presetId);
+    if (!preset) throw new Error(`Unknown capsule human preset for performance case: ${settings.presetId}`);
+
+    this.pedestal.visible = false;
+    this.performancePopulation = population;
+    this.performanceMotion = motion;
+    this.performanceElapsedSeconds = 0;
+    this.performancePlacements.length = 0;
+
+    const columns = Math.ceil(Math.sqrt(population));
+    const rows = Math.ceil(population / columns);
+    const spacing = 1.7;
+    const humanRoot = this.contributions.human.root;
+    for (let index = 0; index < population; index++) {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const anchorX = (column - (columns - 1) / 2) * spacing;
+      const anchorZ = (row - (rows - 1) / 2) * spacing;
+      const root = index === 0 ? humanRoot : this.createPerformanceActor(index, preset, settings.gait);
+      root.position.set(anchorX, 0, anchorZ);
+      root.rotation.y = 0;
+      root.visible = true;
+      this.performancePlacements.push({
+        root,
+        anchorX,
+        anchorZ,
+        phaseRadians: (index / Math.max(1, population)) * Math.PI * 2,
+      });
+    }
+
+    const aspect = this.engine.height > 0 ? this.engine.width / this.engine.height : 16 / 9;
+    const fov = this.engine.camera instanceof PerspectiveCamera ? this.engine.camera.fov : 42;
+    const verticalHalfFov = (fov * Math.PI) / 360;
+    const horizontalHalfFov = Math.atan(Math.tan(verticalHalfFov) * aspect);
+    const boundsRadius = Math.hypot(((columns - 1) * spacing + 1.4) / 2, ((rows - 1) * spacing + 1.4) / 2) + 1.2;
+    const distance = Math.max(4.2, boundsRadius / Math.sin(Math.min(verticalHalfFov, horizontalHalfFov)) * 0.72);
+    this.cameraTarget.set([0, 0.96, 0]);
+    this.cameraPosition.set([0, 0.96 + distance * 0.22, distance * Math.sqrt(1 - 0.22 * 0.22)]);
+    this.performanceSetupCpuMs = performance.now() - startedAt;
+  }
+
+  private createPerformanceActor(index: number, preset: typeof ALL_CAPSULE_CHARACTER_PRESETS[number], gait: CharacterStudioTestSettings['gait']): Group {
+    const actor = new CapsuleCharacterActor({ dna: preset, autoBlink: true });
+    actor.root.name = `character-studio-performance-human-${index + 1}`;
+    actor.setLocomotion(gait === 'idle' ? 'idle' : 'walk');
+    actor.facialController.setExpression('happy', 1, 0);
+    this.engine.scene.add(actor.root);
+    this.performanceActors.push(actor);
+    return actor.root;
+  }
+
+  private clearPerformanceScenario(): void {
+    this.performanceWindowActive = false;
+    for (const actor of this.performanceActors) {
+      this.engine.scene.remove(actor.root);
+      actor.dispose();
+    }
+    this.performanceActors.length = 0;
+    this.performancePlacements.length = 0;
+    this.contributions.human.root.position.set(0, 0, 0);
+    this.pedestal.visible = true;
+    this.performancePopulation = undefined;
+    this.performanceMotion = undefined;
+    this.performanceElapsedSeconds = 0;
+    this.performanceSetupCpuMs = 0;
   }
 
   onTestProgress(progress: TestProgress | null): void {

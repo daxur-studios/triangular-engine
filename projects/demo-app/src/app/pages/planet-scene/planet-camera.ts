@@ -146,3 +146,74 @@ export function nearPlaneFor(clearanceM: number): number {
 export function groundUp(view: PlanetView): Vec3 {
   return groundFrame('sphere', view.ground).up;
 }
+
+/** The lowest altitude the mouse orbit mode reaches: the 2 m eye. */
+export const FREE_MIN_ALTITUDE_M = EYE_ALTITUDE_M;
+/** The highest altitude the mouse orbit mode reaches: twice the orbit altitude (2.4 million m). */
+export const FREE_MAX_ALTITUDE_M = 2 * ORBIT_ALTITUDE_M;
+/** The largest ground angle one drag step may move the camera, radians. */
+const FREE_MAX_DRAG_STEP_RAD = 0.5;
+
+function wrapAngle(angleRad: number): number {
+  const turn = 2 * Math.PI;
+  return angleRad - turn * Math.round(angleRad / turn);
+}
+
+/**
+ * Mouse orbit, drag: grabs the globe. The ground direction turns about the planet's centre so the surface under the cursor
+ * roughly follows it: the angle per pixel is the field of view per pixel times the altitude over the radius (the view's
+ * ground width per pixel, as an angle at the centre), capped at 0.5 rad per step. Dragging right turns the camera west,
+ * dragging down turns it north. Altitude, heading and pitch are unchanged. Returns a new view.
+ *
+ * @param view The view to move.
+ * @param dxPx Horizontal drag, CSS pixels (positive is right).
+ * @param dyPx Vertical drag, CSS pixels (positive is down).
+ * @param viewportHeightPx The canvas height in CSS pixels.
+ * @param fovDeg The vertical field of view, degrees.
+ */
+export function freeDrag(view: PlanetView, dxPx: number, dyPx: number, viewportHeightPx: number, fovDeg: number): PlanetView {
+  const pixels = Math.hypot(dxPx, dyPx);
+  if (pixels === 0) return { ...view };
+  const { up, east, north } = groundFrame('sphere', view.ground);
+  const radPerPx = (fovDeg * DEG / viewportHeightPx) * (Math.max(1, view.altitudeM) / PLANET_RADIUS_M);
+  const angle = Math.min(FREE_MAX_DRAG_STEP_RAD, pixels * radPerPx);
+  const tangent: Vec3 = [0, 1, 2].map((k) => (-dxPx * east[k] + dyPx * north[k]) / pixels) as Vec3;
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const moved = [0, 1, 2].map((k) => c * up[k] + s * tangent[k]);
+  const length = Math.hypot(moved[0], moved[1], moved[2]);
+  return { ...view, ground: [moved[0] / length, moved[1] / length, moved[2] / length] };
+}
+
+/**
+ * Mouse orbit, look: turns the heading by the drag's horizontal part and the pitch by its vertical part, at the field of
+ * view per pixel. The heading wraps to -PI..PI; the pitch clamps to -PI/2 (straight down) .. PI/2 (straight up). Ground and
+ * altitude are unchanged. Returns a new view.
+ *
+ * @param view The view to turn.
+ * @param dxPx Horizontal drag, CSS pixels (positive is right).
+ * @param dyPx Vertical drag, CSS pixels (positive is down).
+ * @param viewportHeightPx The canvas height in CSS pixels.
+ * @param fovDeg The vertical field of view, degrees.
+ */
+export function freeLook(view: PlanetView, dxPx: number, dyPx: number, viewportHeightPx: number, fovDeg: number): PlanetView {
+  const radPerPx = fovDeg * DEG / viewportHeightPx;
+  return {
+    ...view,
+    headingRad: wrapAngle(view.headingRad - dxPx * radPerPx),
+    pitchRad: Math.min(Math.PI / 2, Math.max(-Math.PI / 2, view.pitchRad - dyPx * radPerPx)),
+  };
+}
+
+/**
+ * Mouse orbit, zoom: the altitude scales by `exp(wheelDeltaY * 0.001)`, so a wheel step zooms by the same factor whatever the
+ * altitude. A positive delta zooms out. The altitude clamps to {@link FREE_MIN_ALTITUDE_M} .. {@link FREE_MAX_ALTITUDE_M}.
+ * Returns a new view.
+ *
+ * @param view The view to zoom.
+ * @param wheelDeltaY The wheel event's `deltaY`.
+ */
+export function freeZoom(view: PlanetView, wheelDeltaY: number): PlanetView {
+  const altitude = view.altitudeM * Math.exp(wheelDeltaY * 0.001);
+  return { ...view, altitudeM: Math.min(FREE_MAX_ALTITUDE_M, Math.max(FREE_MIN_ALTITUDE_M, altitude)) };
+}

@@ -8,7 +8,10 @@ record: /docs/engineering-records/074_procedural-character-studio.md
 map_schema: 1
 document_id: plan-074
 initiative_id: "procedural-character-studio"
-performance: []
+performance:
+  - id: character-studio-human-performance-v1
+    url: http://triangular-demo.localhost:4200/character-studio?testSuite=character-studio-human-performance&testVersion=1&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1
+    status: runnable-hardware-unmeasured
 ---
 
 # Plan 074: Procedural character studio
@@ -31,6 +34,7 @@ This plan covers separating the capsule character experience from the mixed-purp
 - **legacy-lab-separation** — Remove capsule customization from `/characters-lab` after its tests and evidence workflow have moved. Acceptance: `/characters-lab` continues to host its face-rig and general humanoid demonstrations without duplicate capsule controls or suites.
 - **hair-generation-coverage** — Add deterministic, close-up visual verification for procedural human hairstyles across representative presets and head views. Acceptance: reviewed front, side and rear evidence covers the selected generated styles and identifies attachment, silhouette, coverage, floating or head-intersection issues; fixes can be reproduced from the recorded recipe.
 - **hair-motion-and-helmet** — Verify representative hairstyles during walking and inside a clear dome-style space helmet. Acceptance: focused motion and helmet-fit cases produce reviewable close-up evidence, define expected hair movement and helmet interaction, and pass human review for unintended clipping, occlusion or detachment; implement any behavior changes established by that review.
+- **character-performance-matrix** — Measure one and many procedural humans while idle, walking in place and moving on repeatable scene paths. Acceptance: a visible-browser performance run records actor-update CPU time, render-submit CPU time, frame cadence, draw calls, triangles and scenario setup time at populations of 1, 16 and 48; scenario setup includes constructing additional actors, arranging the population and fitting the camera, but excludes construction of the studio's pre-existing primary human. The 16.7 ms p95 frame-cadence budget is labeled as an initial 60 Hz target hypothesis, and no hardware baseline is accepted before reviewing a clean run on the intended device.
 
 ## Relationships
 
@@ -48,13 +52,16 @@ This plan covers separating the capsule character experience from the mixed-purp
 | legacy-lab-separation  | done        |
 | hair-generation-coverage | planned   |
 | hair-motion-and-helmet | planned     |
+| character-performance-matrix | in_progress |
 
-<!-- tri:review version="1" scope-hash="4f44eb20469145052888ec56cbd9f46a73cc9cdecfed0050fd5eae04eb428fce" reviewed="2026-10-31" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="b93cfe7b2642c1484a175013ade107f6892717707276403ca857fe6c442903be" reviewed="2026-10-31" reviewer="agent" -->
 <!-- /tri:review -->
 
 ## Delivery progress
 
-The shell and app-local human/cat contributions are in place. The studio hosts all capsule suites with recording, thumbnails and review sheets; the three newest suites ran with passing automated checks. Human visual verdicts for the generated media remain pending review. Capsule actors, test suites, adapters and focus framing now belong to Character Studio. `/characters-lab` keeps only the face-rig and general humanoid demonstrations. Next, begin deterministic close-up coverage for procedural hair. Broader themed character packs and promotion of the contribution contract into a public engine entry point require later evidence and scope review.
+The shell and app-local human/cat contributions are in place. The studio hosts capsule visual suites with recordings, thumbnails and review sheets; human visual verdicts for generated media remain pending review. Capsule actors, test suites, adapters and focus framing now belong to Character Studio. `/characters-lab` keeps only the face-rig and general humanoid demonstrations. The new human performance matrix is active; its first visible hardware run and target-device review are pending. Broader themed character packs and promotion of the contribution contract into a public engine entry point require later evidence and scope review.
+
+Latest diagnostic: [run the human performance matrix](http://triangular-demo.localhost:4200/character-studio?testSuite=character-studio-human-performance&testVersion=1&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1).
 
 Scope history in the Engineering Record is append-only. Confirm a specific baseline only after
 explicit developer confirmation; document review and checked boxes do not imply confirmation.

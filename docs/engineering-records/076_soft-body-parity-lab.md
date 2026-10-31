@@ -70,10 +70,49 @@ pages, which did not demonstrate the feature.
 - No gameplay integration: BSP landing balls, coupling a soft body to a vessel, and
   floating-origin rebasing are separate work.
 
+## 2026-10-31 — Lifecycle fix after the visible-browser run
+
+**Symptom.** After the suite finished, the console filled with `Uncaught RuntimeError: memory
+access out of bounds` from `GetPosition` / `GetMotionProperties`, followed by
+`[Jolt] Physics fault during 'jolt:step'`. One suite repetition looked clean; two consecutive
+repetitions reproduced it every time.
+
+**Cause 1 — the body handle.** `<joltSoftBody>` used
+`bodyInterface.CreateAndAddSoftBody(settings, ...)`, which returns a `BodyID`, then resolved it
+with `physicsSystem.GetBodyLockInterface().TryGetBody(id)` and cached that `Jolt.Body`. The
+engine's default `maxWorkerThreads` is `4`, so the lock interface is the locking variant and the
+resolved handle is not a stable body to cache. Some bodies synced against freed memory every
+frame, and `RemoveBody`/`DestroyBody` later corrupted the world.
+
+**Cause 2 — creation settings ownership.** `Jolt.destroy(settings)` right after creation also
+released the `SoftBodySharedSettings` the component still owned (the binding's `mSettings` does
+not add a reference), leaving `#settings` dangling and double-freeing it in `dispose()`.
+
+**Fix.** Create with the official path, `CreateSoftBody(settings)` followed by
+`AddBody(body.GetID(), EActivation_Activate)`; keep the creation settings until the body is
+destroyed, then release the creation settings only (which releases the shared settings). The
+component also unsubscribes from `physicsUpdated$` in `dispose()`, clears `#body` before removal,
+removes the mesh from the group, logs instead of throwing if a body cannot be destroyed, and the
+page skips a component whose body is sampled in the frame it is destroyed.
+
+**Checks.**
+
+- Two suite repetitions in a row (`testRepetitions=2`): 0 console errors, `[Jolt]` heap flat
+  (+456 KB baseline, no growth between samples).
+- `jolt-soft-body-examples@v1` quick headless run: pass; cloth 1.38 % / 2.60 % shape strain,
+  pressure volume ratio 1.01, penetration 0.00 m.
+- `tsc -p projects/demo-app/tsconfig.app.json --noEmit`: pass.
+
+**Limitation.** The suite's "no console error" check stops with the run, so it did not catch this
+teardown-only fault; it was found by watching the page and by running two repetitions. A future
+suite could keep the error watcher alive through `restore`.
+
 ## History
 
 - 2026-10-31 — Plan created and implemented in the same session; three archived pages removed.
   Measured parity suite passes; visual review pending.
+- 2026-10-31 — Fixed the soft-body body-handle and creation-settings lifetime; two consecutive
+  repetitions run without console errors.
 
 ## Scope history
 

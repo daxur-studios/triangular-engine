@@ -13,8 +13,8 @@ import { cellPlanetFor, createGroundSample, type Vec3 } from 'triangular-engine/
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import { bakeInWorker } from '../lod-surface-lab/lod-height-bake-client';
 import {
-  PLANET_POSES, PLANET_RADIUS_M, groundUp, motionMorph, motionView, nearPlaneFor, planetPoseView, resolvePlanetCamera, sceneSunDirection,
-  type PlanetMotion, type PlanetPoseId, type PlanetView,
+  PLANET_POSES, PLANET_RADIUS_M, freeDrag, freeLook, freeZoom, groundUp, motionMorph, motionView, nearPlaneFor, planetPoseView,
+  resolvePlanetCamera, sceneSunDirection, type PlanetMotion, type PlanetPoseId, type PlanetView,
 } from './planet-camera';
 import { createPlanetSceneTestAdapter, type PlanetSceneTestHost } from './planet-scene-test-adapter';
 import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_TEST_HISTORY, type PlanetSceneTestSettings } from './planet-scene-tests';
@@ -22,8 +22,8 @@ import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_TEST_HISTORY, type PlanetSc
 /**
  * Plan 059 step G5: the planet scene. `<planet>` with `<planetTerrain>` and `<planetAtmosphere>` inside it, written the way
  * a game writes it: the radius, the sun and the baked cell-planet world are given to the planet once, and the layers read them.
- * WebGPU only. The clouds are a v1 far shell (`<planetClouds>`) that fades out with the morph rather than bending. The morph
- * slider is bound to `<planet [morph]>`: the terrain bends into the flat map; the sky and the clouds fade out, they do not bend yet.
+ * WebGPU only. The clouds are a far shell (`<planetClouds>`) whose vertices bend into the map with the morph. The morph
+ * slider is bound to `<planet [morph]>`: the terrain, the cloud shell and the atmosphere's lighting and haze bend into the flat map; the sky backdrop still dissolves when the camera is high.
  *
  * The camera stands in the scene frame (the planet's centre is the origin) and is placed every tick from a pose or a scripted
  * move; the terrain's `groundAt` keeps the eye above the drawn ground. Reversed float depth, so a 2 cm near plane and an orbit
@@ -115,9 +115,13 @@ interface RendererLike {
 
       <fieldset class="controls" [disabled]="runnerBusy()">
         <p class="label">Camera pose</p>
+        <label class="feature">
+          <input type="checkbox" data-testid="free-orbit" [checked]="freeOn()" (change)="setFreeOrbit($any($event.target).checked)" />
+          Mouse orbit: drag to spin the planet, shift or right-drag to look, wheel to zoom
+        </label>
         <p class="row">
           @for (item of poses; track item.id) {
-            <button (click)="setPose(item.id)" [class.active]="!playing() && pose() === item.id">{{ item.label }}</button>
+            <button (click)="setPose(item.id)" [class.active]="!playing() && !freeOn() && pose() === item.id">{{ item.label }}</button>
           }
         </p>
         <p class="label">Scripted moves</p>
@@ -136,7 +140,7 @@ interface RendererLike {
           Atmosphere (sky, and lighting and haze on the terrain)
         </label>
         <p class="note">Atmosphere on the terrain: {{ surfaceLine() }}</p>
-        <p class="note" data-testid="clouds">Clouds: a v1 shell (<code>&lt;planetClouds&gt;</code>) that fades with the morph; not bent into the map yet.</p>
+        <p class="note" data-testid="clouds">Clouds: a shell (<code>&lt;planetClouds&gt;</code>) bent into the map with the morph (lit as on the globe). Not yet looked at on a GPU.</p>
 
         <p class="row">morph {{ morph().toFixed(2) }}
           <input type="range" min="0" max="1" step="0.05" aria-label="Globe to map morph" [value]="morph()" (input)="setMorph(+$any($event.target).value)" />
@@ -190,6 +194,8 @@ export class PlanetScenePageComponent {
   readonly morph = signal(DEFAULT_PLANET_SCENE_SETTINGS.morph);
   /** The page's own scripted move (the "play" buttons), or undefined. */
   readonly playing = signal<DemoMotion | undefined>(undefined);
+  /** Mouse orbit: the canvas drags, looks and zooms the camera (see {@link setFreeOrbit}). Off by default. */
+  readonly freeOn = signal(false);
 
   private readonly planet = viewChild(PlanetComponent);
   private readonly terrainLayer = viewChild(PlanetTerrainComponent);
@@ -254,6 +260,41 @@ export class PlanetScenePageComponent {
   private readonly groundSample = createGroundSample();
   private readonly basis = new Matrix4();
   private readonly axes = [new Vector3(), new Vector3(), new Vector3()] as const;
+  /** The view mouse orbit edits while it is on; undefined otherwise. */
+  private freeView: PlanetView | undefined;
+  /** The canvas the mouse orbit listeners are attached to, or undefined while they are not. */
+  private freeCanvas: HTMLCanvasElement | undefined;
+  private freeGesture: { readonly pointerId: number; x: number; y: number; readonly look: boolean } | undefined;
+
+  private readonly onFreePointerDown = (event: PointerEvent): void => {
+    if ((event.button !== 0 && event.button !== 2) || !this.freeCanvas) return;
+    this.freeGesture = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, look: event.button === 2 || event.shiftKey };
+    this.freeCanvas.setPointerCapture(event.pointerId);
+  };
+
+  private readonly onFreePointerMove = (event: PointerEvent): void => {
+    const gesture = this.freeGesture;
+    if (!gesture || gesture.pointerId !== event.pointerId || !this.freeView || !this.freeCanvas) return;
+    const dx = event.clientX - gesture.x;
+    const dy = event.clientY - gesture.y;
+    gesture.x = event.clientX;
+    gesture.y = event.clientY;
+    const height = this.freeCanvas.clientHeight || 1;
+    this.freeView = gesture.look
+      ? freeLook(this.freeView, dx, dy, height, FOV_DEG)
+      : freeDrag(this.freeView, dx, dy, height, FOV_DEG);
+  };
+
+  private readonly onFreePointerUp = (event: PointerEvent): void => {
+    if (this.freeGesture?.pointerId === event.pointerId) this.freeGesture = undefined;
+  };
+
+  private readonly onFreeWheel = (event: WheelEvent): void => {
+    event.preventDefault();
+    if (this.freeView) this.freeView = freeZoom(this.freeView, event.deltaY);
+  };
+
+  private readonly onFreeContextMenu = (event: Event): void => event.preventDefault();
 
   private readonly testHost: PlanetSceneTestHost = {
     read: () => this.readSettings(),
@@ -327,6 +368,7 @@ export class PlanetScenePageComponent {
     this.destroyRef.onDestroy(() => {
       this.pageDestroyed = true;
       this.runnerReady.set(false);
+      this.detachFreeListeners();
       errors.unsubscribe();
       tick.unsubscribe();
       rendered.unsubscribe();
@@ -336,6 +378,7 @@ export class PlanetScenePageComponent {
   }
 
   setPose(id: PlanetPoseId): void {
+    this.setFreeOrbit(false);
     this.demo = undefined;
     this.playing.set(undefined);
     this.pose.set(id);
@@ -343,8 +386,54 @@ export class PlanetScenePageComponent {
 
   play(motion: DemoMotion): void {
     if (this.runnerBusy()) return;
+    this.setFreeOrbit(false);
     this.demo = { motion, began: performance.now() };
     this.playing.set(motion);
+  }
+
+  /**
+   * Turns the mouse orbit mode on or off. On, the camera keeps the view it has now and the canvas drags (left button: spin
+   * the planet; shift or right button: look), and the wheel zooms. Off, the camera goes back to the selected pose.
+   */
+  setFreeOrbit(on: boolean): void {
+    if (on) {
+      this.freeView = this.currentView();
+      this.demo = undefined;
+      this.playing.set(undefined);
+      this.freeOn.set(true);
+      this.attachFreeListeners();
+    } else {
+      this.freeView = undefined;
+      this.freeOn.set(false);
+      this.detachFreeListeners();
+    }
+  }
+
+  /** Attaches the mouse orbit listeners to the canvas, once it exists (a later tick retries). */
+  private attachFreeListeners(): void {
+    if (this.freeCanvas || this.pageDestroyed) return;
+    const canvas = this.engine.renderer?.domElement;
+    if (!canvas) return;
+    this.freeCanvas = canvas;
+    canvas.addEventListener('pointerdown', this.onFreePointerDown);
+    canvas.addEventListener('pointermove', this.onFreePointerMove);
+    canvas.addEventListener('pointerup', this.onFreePointerUp);
+    canvas.addEventListener('pointercancel', this.onFreePointerUp);
+    canvas.addEventListener('wheel', this.onFreeWheel, { passive: false });
+    canvas.addEventListener('contextmenu', this.onFreeContextMenu);
+  }
+
+  private detachFreeListeners(): void {
+    const canvas = this.freeCanvas;
+    this.freeGesture = undefined;
+    if (!canvas) return;
+    canvas.removeEventListener('pointerdown', this.onFreePointerDown);
+    canvas.removeEventListener('pointermove', this.onFreePointerMove);
+    canvas.removeEventListener('pointerup', this.onFreePointerUp);
+    canvas.removeEventListener('pointercancel', this.onFreePointerUp);
+    canvas.removeEventListener('wheel', this.onFreeWheel);
+    canvas.removeEventListener('contextmenu', this.onFreeContextMenu);
+    this.freeCanvas = undefined;
   }
 
   setTerrain(on: boolean): void { this.terrainOn.set(on); }
@@ -354,6 +443,7 @@ export class PlanetScenePageComponent {
   onTestProgress(progress: TestProgress | null): void {
     this.runnerBusy.set(progress !== null);
     if (progress !== null) {
+      this.setFreeOrbit(false);
       this.demo = undefined;
       this.playing.set(undefined);
     }
@@ -367,6 +457,7 @@ export class PlanetScenePageComponent {
   }
 
   private applySettings(settings: PlanetSceneTestSettings): void {
+    this.setFreeOrbit(false);
     this.demo = undefined;
     this.playing.set(undefined);
     this.terrainOn.set(settings.terrain);
@@ -414,6 +505,7 @@ export class PlanetScenePageComponent {
 
   private currentView(): PlanetView {
     if (this.testProgress !== undefined && this.testMotion) return motionView(this.testMotion, this.testProgress);
+    if (this.freeOn() && this.freeView) return this.freeView;
     const demo = this.demo;
     if (demo) {
       const t = (performance.now() - demo.began) / (PLAY_SECONDS[demo.motion] * 1000);
@@ -428,6 +520,7 @@ export class PlanetScenePageComponent {
 
   /** Every tick: place the camera on the view, with the eye kept above the drawn ground. The terrain selects in `beforeRender$`. */
   private update(): void {
+    if (this.freeOn()) this.attachFreeListeners();
     const view = this.currentView();
     const up = groundUp(view);
     const layer = this.terrainLayer();
