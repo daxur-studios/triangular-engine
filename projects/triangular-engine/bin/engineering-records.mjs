@@ -1452,7 +1452,6 @@ export async function main(
     if (command === "manifest" || command === "map") {
       if (command === "map") {
         if (!flags.output) flags.output = "public/development-map/manifest.json";
-        if (!flags["export-docs"]) flags["export-docs"] = "public/development-map/docs";
       }
       const serialized = `${JSON.stringify({ ...manifest, diagnostics: errors }, null, 2)}\n`;
       if (flags.output === true) throw new Error("--output requires a file path");

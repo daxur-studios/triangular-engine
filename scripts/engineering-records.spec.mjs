@@ -6,6 +6,7 @@ import {
   readFile,
   readdir,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -589,7 +590,7 @@ test("manifest includes branch, example, and evidence metadata and exports docum
   assert.match(recordCopied, /# Engineering Record 001: Procedural branch/);
 });
 
-test("map command defaults to public/development-map paths and exports documents", async () => {
+test("map command defaults to public/development-map/manifest.json without duplicating docs", async () => {
   const created = await create("map-branch", "Map branch");
   const planFile = path.join(root, created.plan);
   const original = await readFile(planFile, "utf8");
@@ -613,9 +614,6 @@ test("map command defaults to public/development-map paths and exports documents
   assert.ok(doc, "plan-001 should exist");
   assert.equal(doc.branch, "Map Feature");
 
-  const planCopied = await readFile(
-    path.join(root, "public", "development-map", "docs", "plan-001.md"),
-    "utf8",
-  );
-  assert.match(planCopied, /# Plan 001: Map branch/);
+  // Verify docs/ directory is NOT created by default
+  await assert.rejects(stat(path.join(root, "public", "development-map", "docs")));
 });
