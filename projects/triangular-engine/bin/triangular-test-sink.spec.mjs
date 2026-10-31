@@ -329,6 +329,9 @@ test('a receiver without machine sampling still answers the timing messages', as
 
 const webp = (size) => Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP'), Buffer.alloc(Math.max(0, size - 12), 7)]);
 const upload = (caseId, index, bytes, type = 'image/webp') => ({ case: caseId, repetition: 1, index, type, data: bytes.toString('base64') });
+const webm = (size) => Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(Math.max(0, size - 4), 7)]);
+const recordingUpload = (caseId, bytes, mimeType = 'video/webm;codecs=vp8,opus') => ({ case: caseId, repetition: 1, index: 0, mimeType,
+  durationMs: 1200, width: 640, height: 360, audio: true, data: bytes.toString('base64') });
 
 async function listening(root, config = loadConfig(root)) {
   const server = createReceiver(root, { ...config, machineSampling: false });
@@ -370,6 +373,37 @@ test('thumbnails are stored beside the result, only names reach the JSON and ind
   // A result without images is stored exactly as before.
   const plain = await (await fetch(base, { method: 'POST', body: JSON.stringify(run('r2', '2026-10-18T11:00:00Z')) })).json();
   assert.deepEqual(plain.thumbnails, []);
+});
+
+test('recordings are bounded sidecars with metadata-only results and a range-enabled video route', async (t) => {
+  const root = repo();
+  const { server, base } = await listening(root, { ...loadConfig(root), maxRecordingBytes: 1000, maxRunRecordingBytes: 4096 });
+  t.after(() => server.closeAllConnections() ?? server.close());
+  const bytes = webm(32);
+  const body = run('video-run', '2026-10-18T10:00:00Z');
+  body.recordingUploads = [
+    recordingUpload('s1', bytes),
+    recordingUpload('s1', webm(1600)),
+    recordingUpload('s1', bytes, 'video/mp4'),
+    recordingUpload('ghost', bytes),
+  ];
+  const saved = await (await fetch(base, { method: 'POST', body: JSON.stringify(body) })).json();
+  assert.equal(saved.recordings.length, 1);
+  assert.equal(saved.dropped.length, 3);
+  const [row] = readFileSync(join(root, 'artifacts/test-runs/index.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  const stored = JSON.parse(readFileSync(join(root, 'artifacts/test-runs', row.file), 'utf8'));
+  assert.equal(stored.recordingUploads, undefined);
+  assert.equal(stored.cases[0].recordings[0].file, saved.recordings[0].file);
+  assert.equal(stored.cases[0].recordings[0].bytes, bytes.length);
+  assert.match(stored.cases[0].limitations.join('\n'), /recording dropped, over 1 KB/);
+
+  const url = `${base}/video?file=${encodeURIComponent(saved.recordings[0].file)}`;
+  const range = await fetch(url, { headers: { range: 'bytes=0-3' } });
+  assert.equal(range.status, 206);
+  assert.equal(range.headers.get('content-type'), 'video/webm');
+  assert.equal(range.headers.get('content-range'), `bytes 0-3/${bytes.length}`);
+  assert.ok(Buffer.from(await range.arrayBuffer()).equals(bytes.subarray(0, 4)));
+  assert.equal((await fetch(url, { headers: { range: 'bytes=999-' } })).status, 416);
 });
 
 test('read routes serve the index, one result and one image, and refuse anything outside the output folder', async (t) => {

@@ -13,7 +13,7 @@ performance: []
 
 # Plan 072: Optional test video recordings
 
-Status: **in progress**. Evidence and decisions: [ER 072](/docs/engineering-records/072_testing-video-recordings.md).
+Status: **complete**. Evidence and decisions: [ER 072](/docs/engineering-records/072_testing-video-recordings.md).
 
 <!-- tri:scope -->
 
@@ -37,10 +37,10 @@ Status: **in progress**. Evidence and decisions: [ER 072](/docs/engineering-reco
 
 | Phase    | State   |
 | -------- | ------- |
-| recording-contract | in_progress |
-| artifact-storage | planned |
-| audio-lab-poc | planned |
-| verification | planned |
+| recording-contract | done |
+| artifact-storage | done |
+| audio-lab-poc | done |
+| verification | done |
 
 <!-- tri:review version="1" scope-hash="a1551f441d71c345d22d0795a07d42a2201b53b1ecbe9e2d096297322c663efb" reviewed="2026-10-31" reviewer="agent" -->
 <!-- tri:item id="Q1" kind="assumption" applies-to="recording-contract,audio-lab-poc" blocks="recording-contract" state="resolved" -->

@@ -132,10 +132,24 @@
                               </div>
                               <span
                                 class="status"
-                                [attr.data-state]="document.readiness"
-                                >{{ document.readiness }}</span
+                                [attr.data-state]="
+                                  document.status === 'archived'
+                                    ? 'archived'
+                                    : document.readiness
+                                "
+                                >{{
+                                  document.status === 'archived'
+                                    ? 'archived'
+                                    : document.readiness
+                                }}</span
                               >
                             </div>
+                            @if (document.archivedCommit) {
+                              <p class="archived-notice">
+                                Archived at commit
+                                <code>{{ document.archivedCommit }}</code>
+                              </p>
+                            }
                             @if (document.progress) {
                               <div
                                 class="progress-line"

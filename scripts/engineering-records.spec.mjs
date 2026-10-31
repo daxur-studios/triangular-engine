@@ -14,6 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, test } from "node:test";
 import {
+  archiveDocument,
   confirmScopeBaseline,
   createPair,
   inspectDocuments,
@@ -616,4 +617,71 @@ test("map command defaults to public/development-map/manifest.json without dupli
 
   // Verify docs/ directory is NOT created by default
   await assert.rejects(stat(path.join(root, "public", "development-map", "docs")));
+});
+
+test("archive replaces plan and record with stubs, updates index, and passes check and map", async () => {
+  const created = await create("archive-feature", "Archive feature");
+  const result = await archiveDocument({
+    root,
+    docPath: created.plan,
+    commit: "a1b2c3d",
+    outcome: "Feature successfully completed and verified in production.",
+    date: "2026-10-31",
+  });
+
+  assert.equal(result.commit, "a1b2c3d");
+  assert.equal(result.documentId, "plan-001");
+  assert.equal(result.recordId, "er-001");
+
+  const planText = await readFile(path.join(root, created.plan), "utf8");
+  assert.match(planText, /status: archived/);
+  assert.match(planText, /archived_commit: "a1b2c3d"/);
+  assert.match(planText, /archived_date: "2026-10-31"/);
+  assert.match(planText, /git show a1b2c3d:docs\/plans\/001_archive-feature\.md/);
+  assert.match(planText, /Feature successfully completed and verified in production\./);
+
+  const recordText = await readFile(path.join(root, created.record), "utf8");
+  assert.match(recordText, /status: archived/);
+  assert.match(recordText, /archived_commit: "a1b2c3d"/);
+  assert.match(recordText, /git show a1b2c3d:docs\/runbook\/001_archive-feature\.md/);
+
+  const planIndex = await readFile(path.join(root, "docs", "plans", "index.md"), "utf8");
+  assert.match(planIndex, /\|\s*\[Archive feature\]\(\/docs\/plans\/001_archive-feature\.md\)\s*\|\s*archived\s*\|/);
+
+  // Verification via inspectDocuments (records check)
+  const inspected = await inspectDocuments(root);
+  assert.deepEqual(inspected.errors, []);
+  const doc = inspected.manifest.documents.find((d) => d.id === "plan-001");
+  assert.ok(doc);
+  assert.equal(doc.status, "archived");
+  assert.equal(doc.archivedCommit, "a1b2c3d");
+  assert.equal(doc.archivedDate, "2026-10-31");
+  assert.equal(doc.progress?.percent, 100);
+
+  // Reviewing or baselining an archived plan must fail
+  await assert.rejects(
+    refreshReview({ root, planPath: created.plan, reviewer: "agent" }),
+    /Cannot review an archived document\./,
+  );
+  await assert.rejects(
+    confirmScopeBaseline({ root, planPath: created.plan, developerConfirmed: true }),
+    /Cannot baseline an archived document\./,
+  );
+
+  // Re-archiving an already archived document must reject
+  await assert.rejects(
+    archiveDocument({ root, docPath: created.plan, commit: "second" }),
+    /already archived/,
+  );
+});
+
+test("archive via CLI rejects uncommitted changes without commit or force", async () => {
+  const created = await create("cli-archive", "CLI Archive");
+  const run = spawnSync(
+    process.execPath,
+    [SCRIPT, "archive", created.plan, "--root", root],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /Pass --commit <hash>/);
 });

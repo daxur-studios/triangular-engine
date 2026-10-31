@@ -74,12 +74,17 @@ The existing document helper is available under the same command:
 triangular docs records new --title "Water scattering" --slug water-scattering
 triangular docs records check
 triangular docs plan new --title "Water scattering" --slug water-scattering
+triangular docs archive docs/plans/043_optional_scene_tree.md
+triangular docs map
 ```
 
 `docs records new` and its `docs plan new` alias create the reciprocal pair and update its indexes.
+`docs archive` archives a completed or superseded plan and its paired Engineering Record by saving
+the final commit hash, updating index statuses to `archived`, and replacing their full text with clean stubs.
+`docs map` generates `public/development-map/manifest.json`.
 If a project has no plan or Engineering Record index yet, creation scaffolds both from the packaged
 templates; existing indexes are preserved and extended. Other record operations (`next`, `review`,
-`baseline`, `manifest`) are forwarded to the existing helper. Its retention and explicit-baseline rules
+`baseline`, `archive`, `manifest`, `map`) are forwarded to the existing helper. Its retention and explicit-baseline rules
 still apply.
 
 The testing commands delegate to the package's existing tools:

@@ -1408,6 +1408,9 @@ export async function refreshReview({
   if (Number.isNaN(Date.parse(`${date}T00:00:00Z`)))
     throw new Error("Review date must be a valid YYYY-MM-DD date");
   const text = await readFile(filename, "utf8");
+  const fields = frontmatter(text, filename, []);
+  if (fields.status === "archived")
+    throw new Error("Cannot review an archived document.");
   const errors = [];
   const scope = block(text, "scope", filename, errors);
   if (!scope || errors.length) throw new Error(errors.join("\n"));
@@ -1482,6 +1485,8 @@ export async function confirmScopeBaseline({
   const errors = [];
   const text = await readFile(filename, "utf8");
   const fields = frontmatter(text, filename, errors);
+  if (fields.status === "archived")
+    throw new Error("Cannot baseline an archived document.");
   if (fields.map_schema !== "1")
     throw new Error("Only mapped Plan schema 1 documents can establish a baseline.");
   const scope = block(text, "scope", filename, errors);
@@ -1522,6 +1527,265 @@ export async function confirmScopeBaseline({
   return { recordPath, baselineId: `baseline-${fields.document_id}`, scopeHash, confirmedDate };
 }
 
+function resolveGitCommit(
+  root,
+  planRelative,
+  recordRelative,
+  explicitCommit,
+  force,
+) {
+  if (explicitCommit) return String(explicitCommit).trim();
+  let statusOutput = "";
+  try {
+    statusOutput = execFileSync(
+      "git",
+      ["status", "--porcelain", "--", planRelative, recordRelative],
+      { cwd: root, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] },
+    ).trim();
+  } catch {
+    throw new Error(
+      `Cannot determine git commit for ${planRelative}. Git command failed or directory is not a git repository. Pass --commit <hash> to archive outside git.`,
+    );
+  }
+  if (statusOutput && !force) {
+    throw new Error(
+      `Cannot archive because ${planRelative} or ${recordRelative} has uncommitted changes. Commit your changes first so the full document is preserved in git, or pass --commit <hash> / --force.`,
+    );
+  }
+  let commitHash = "";
+  try {
+    commitHash = execFileSync(
+      "git",
+      ["log", "-1", "--format=%h", "--", planRelative],
+      { cwd: root, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] },
+    ).trim();
+  } catch {
+    throw new Error(
+      `Failed to read git commit history for ${planRelative}. Pass --commit <hash>.`,
+    );
+  }
+  if (!commitHash) {
+    throw new Error(
+      `Cannot archive because ${planRelative} has never been committed to git. Commit the document first before archiving, or pass --commit <hash>.`,
+    );
+  }
+  return commitHash;
+}
+
+function updatePlanIndexStatus(source, planRef, newStatus = "archived") {
+  const lines = source.split(/\r?\n/);
+  const targetPattern = planRef.startsWith("/") ? planRef : `/${planRef}`;
+  const newLines = lines.map((line) => {
+    if (!line.trim().startsWith("|") || !line.includes(targetPattern)) {
+      return line;
+    }
+    const cells = splitCells(line);
+    if (cells.length >= 3) {
+      cells[1] = newStatus;
+      return `| ${cells.join(" | ")} |`;
+    }
+    return line;
+  });
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  return newLines.join(newline);
+}
+
+function extractOutcome(planText, recordText) {
+  const recordOutcomeMatch =
+    /## (?:Outcomes? and Evidence|Outcomes?|Summary|Decision summary)\s*\r?\n([\s\S]*?)(?=\r?\n## |<!-- tri:|$)/i.exec(
+      recordText,
+    );
+  if (recordOutcomeMatch && recordOutcomeMatch[1].trim()) {
+    const cleaned = recordOutcomeMatch[1]
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .trim();
+    if (cleaned.length > 0) return cleaned;
+  }
+  const planOutcomeMatch =
+    /## (?:Intended outcome|Outcomes?|Summary)\s*\r?\n([\s\S]*?)(?=\r?\n## |<!-- tri:|$)/i.exec(
+      planText,
+    );
+  if (planOutcomeMatch && planOutcomeMatch[1].trim()) {
+    const cleaned = planOutcomeMatch[1]
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .trim();
+    if (cleaned.length > 0) return cleaned;
+  }
+  return "Completed and archived.";
+}
+
+export async function archiveDocument({
+  root = DEFAULT_ROOT,
+  docPath,
+  commit,
+  outcome,
+  date = new Date().toISOString().slice(0, 10),
+  force = false,
+}) {
+  if (!docPath) throw new Error("A document path is required.");
+  if (!validDate(date)) throw new Error("Invalid archive date.");
+  const targetFile = projectPath(root, docPath.replace(/\\/g, "/"));
+  if (!(await exists(targetFile))) {
+    throw new Error(`Document not found: ${docPath}`);
+  }
+  const targetText = await readFile(targetFile, "utf8");
+  const targetFields = frontmatter(targetText, targetFile, []);
+
+  let planPath = "";
+  let recordPath = "";
+  let planText = "";
+  let recordText = "";
+
+  const recordsDirName = getRecordsDirName(root);
+
+  if (
+    targetFields.type === "Plan" ||
+    targetFile.replace(/\\/g, "/").includes("/docs/plans/")
+  ) {
+    planPath = targetFile;
+    planText = targetText;
+    const recordRef = targetFields.record || targetFields.runbook;
+    if (!recordRef) {
+      throw new Error(`${docPath}: Plan must specify a paired record.`);
+    }
+    recordPath = projectPath(root, recordRef);
+    if (!(await exists(recordPath))) {
+      throw new Error(`Paired Engineering Record not found: ${recordRef}`);
+    }
+    recordText = await readFile(recordPath, "utf8");
+  } else {
+    recordPath = targetFile;
+    recordText = targetText;
+    const plans = frontmatterList(recordText, "plans");
+    const planRef = plans[0];
+    if (!planRef) {
+      throw new Error(
+        `${docPath}: Engineering Record must list at least one paired plan under plans:.`,
+      );
+    }
+    planPath = projectPath(root, planRef);
+    if (!(await exists(planPath))) {
+      throw new Error(`Paired Plan not found: ${planRef}`);
+    }
+    planText = await readFile(planPath, "utf8");
+  }
+
+  const planFields = frontmatter(planText, planPath, []);
+  const recordFields = frontmatter(recordText, recordPath, []);
+
+  if (planFields.status === "archived" && recordFields.status === "archived") {
+    throw new Error(`${path.relative(root, planPath)} is already archived.`);
+  }
+
+  const planRelative = path.relative(root, planPath).split(path.sep).join("/");
+  const recordRelative = path
+    .relative(root, recordPath)
+    .split(path.sep)
+    .join("/");
+
+  const resolvedCommit = resolveGitCommit(
+    root,
+    planRelative,
+    recordRelative,
+    commit,
+    force,
+  );
+
+  const documentId =
+    planFields.document_id ||
+    `plan-${numericPrefix(path.basename(planPath))}`;
+  const recordId =
+    recordFields.record_id ||
+    `er-${numericPrefix(path.basename(recordPath))}`;
+  const title =
+    planFields.title || recordFields.title || path.basename(planPath, ".md");
+  const initiativeId = planFields.initiative_id || slugify(title);
+  const finalOutcome = outcome?.trim() || extractOutcome(planText, recordText);
+  const finalOutcomeSummary = finalOutcome
+    .split(/\r?\n\r?\n/)[0]
+    .replace(/\r?\n/g, " ")
+    .trim();
+
+  const planStub = `---
+map_schema: "1"
+document_id: ${documentId}
+record_id: ${recordId}
+type: Plan
+status: archived
+archived_commit: "${resolvedCommit}"
+archived_date: "${date}"
+title: "${yamlEscape(title)}"
+initiative_id: ${initiativeId}
+record: /${recordRelative}
+outcome: "${yamlEscape(finalOutcomeSummary)}"
+---
+# [Archived] ${title}
+
+> **This plan has been archived.** The full historical document is preserved in git at commit \`${resolvedCommit}\`.
+> To view the original document:
+> \`\`\`powershell
+> git show ${resolvedCommit}:${planRelative}
+> \`\`\`
+
+## Summary & Outcome
+${finalOutcome}
+`;
+
+  const recordStub = `---
+record_id: ${recordId}
+type: EngineeringRecord
+status: archived
+archived_commit: "${resolvedCommit}"
+archived_date: "${date}"
+title: "${yamlEscape(title)}"
+plans:
+  - /${planRelative}
+---
+# [Archived] ${title}
+
+> **This Engineering Record has been archived.** The full historical document is preserved in git at commit \`${resolvedCommit}\`.
+> To view the original document:
+> \`\`\`powershell
+> git show ${resolvedCommit}:${recordRelative}
+> \`\`\`
+
+## Summary & Outcome
+${finalOutcome}
+`;
+
+  const planIndexPath = path.join(root, "docs", "plans", "index.md");
+  let updatedPlanIndex = null;
+  if (await exists(planIndexPath)) {
+    const currentIndex = await readFile(planIndexPath, "utf8");
+    updatedPlanIndex = updatePlanIndexStatus(
+      currentIndex,
+      `/${planRelative}`,
+      "archived",
+    );
+  }
+
+  await withIndexLock(root, async () => {
+    await atomicWrite(planPath, planStub);
+    await atomicWrite(recordPath, recordStub);
+    if (
+      updatedPlanIndex &&
+      updatedPlanIndex !== (await readFile(planIndexPath, "utf8"))
+    ) {
+      await atomicWrite(planIndexPath, updatedPlanIndex);
+    }
+  });
+
+  return {
+    documentId,
+    recordId,
+    plan: `/${planRelative}`,
+    record: `/${recordRelative}`,
+    commit: resolvedCommit,
+    outcome: finalOutcome,
+    date,
+  };
+}
+
 export async function inspectDocuments(root = DEFAULT_ROOT) {
   const { documents, errors } = await readPlansAndValidate(root);
   return {
@@ -1553,7 +1817,7 @@ function parseFlags(args) {
 }
 
 function help() {
-  return `Engineering document helper\n\n  npm run docs:records:next\n  npm run docs:records:new -- --title "Water scattering" --slug water-scattering\n  npm run docs:records:review -- docs/plans/NNN_topic.md agent\n  npm run docs:records:baseline -- docs/plans/NNN_topic.md --developer-confirmed\n  npm run docs:records:check\n  npm run docs:records:manifest [--output path] [--export-docs dir]\n  npm run docs:records:map [--output path] [--export-docs dir]\n\nReview refreshes an agent assessment; it does not signify developer approval. Baseline confirmation requires explicit developer approval of the exact scope snapshot.`;
+  return `Engineering document helper\n\n  npm run docs:records:next\n  npm run docs:records:new -- --title "Water scattering" --slug water-scattering\n  npm run docs:records:review -- docs/plans/NNN_topic.md agent\n  npm run docs:records:baseline -- docs/plans/NNN_topic.md --developer-confirmed\n  npm run docs:records:archive -- docs/plans/NNN_topic.md [--commit <hash>] [--outcome "text"]\n  npm run docs:records:check\n  npm run docs:records:manifest [--output path] [--export-docs dir]\n  npm run docs:records:map [--output path] [--export-docs dir]\n\nReview refreshes an agent assessment; it does not signify developer approval. Baseline confirmation requires explicit developer approval of the exact scope snapshot. Archive preserves the commit hash and replaces full documents with clean stubs.`;
 }
 
 export async function main(
@@ -1607,6 +1871,21 @@ export async function main(
     });
     console.log(
       `Recorded developer-confirmed ${result.baselineId} in ${path.relative(projectRoot, result.recordPath)} (${result.scopeHash}).`,
+    );
+    return 0;
+  }
+  if (command === "archive") {
+    const docPath = flags._positionals[0];
+    const result = await archiveDocument({
+      root: projectRoot,
+      docPath,
+      commit: flags.commit,
+      outcome: flags.outcome,
+      date: flags.date,
+      force: flags.force === true,
+    });
+    console.log(
+      `Archived ${result.documentId} (${result.plan}) and ${result.recordId} (${result.record}) at commit ${result.commit}.`,
     );
     return 0;
   }

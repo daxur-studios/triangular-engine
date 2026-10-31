@@ -2,9 +2,9 @@ import type { AudioService, EngineService, OrbitControlsComponent } from 'triang
 import { createTestMediaRecorderCapture, type TestContext, type TestObservation, type TestRecordingCapture, type TestRunAdapter } from 'triangular-engine/testing';
 import type { AudioLabTestSettings } from './audio-lab-tests';
 
-const VIDEO_WIDTH = 640;
-const VIDEO_HEIGHT = 360;
-const CAPTURE_FPS = 12;
+const VIDEO_WIDTH = 960;
+const VIDEO_HEIGHT = 540;
+const CAPTURE_FPS = 20;
 
 interface AudioBusSnapshot { readonly volume: number; readonly muted: boolean }
 export interface AudioLabSnapshot {
@@ -67,8 +67,10 @@ function recordingCapture(ports: AudioLabTestPorts): TestRecordingCapture {
   scaled.width = VIDEO_WIDTH;
   scaled.height = VIDEO_HEIGHT;
   const paint = scaled.getContext('2d');
-  if (!paint) throw new Error('Could not create the low-resolution video canvas');
+  if (!paint) throw new Error('Could not create the 960x540 recording canvas');
   const destination = listener.context.createMediaStreamDestination();
+  const captureGain = listener.context.createGain();
+  captureGain.gain.value = 2.5;
   const stream = scaled.captureStream(CAPTURE_FPS);
   for (const track of destination.stream.getAudioTracks()) stream.addTrack(track);
 
@@ -78,20 +80,26 @@ function recordingCapture(ports: AudioLabTestPorts): TestRecordingCapture {
   const draw = (now: number) => {
     if (released) return;
     if (now - lastFrameAt >= 1000 / CAPTURE_FPS) {
-      paint.drawImage(source, 0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+      const scale = Math.min(VIDEO_WIDTH / source.width, VIDEO_HEIGHT / source.height);
+      const width = source.width * scale;
+      const height = source.height * scale;
+      paint.fillStyle = '#0a0c16';
+      paint.fillRect(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+      paint.drawImage(source, (VIDEO_WIDTH - width) / 2, (VIDEO_HEIGHT - height) / 2, width, height);
       lastFrameAt = now;
     }
     frame = requestAnimationFrame(draw);
   };
 
   try {
-    listener.gain.connect(destination);
+    listener.gain.connect(captureGain);
+    captureGain.connect(destination);
     frame = requestAnimationFrame(draw);
     const recorder = createTestMediaRecorderCapture(stream, {
       width: VIDEO_WIDTH,
       height: VIDEO_HEIGHT,
       videoBitsPerSecond: 450_000,
-      audioBitsPerSecond: 32_000,
+      audioBitsPerSecond: 48_000,
     });
     return {
       stop: () => recorder.stop(),
@@ -100,7 +108,8 @@ function recordingCapture(ports: AudioLabTestPorts): TestRecordingCapture {
         released = true;
         cancelAnimationFrame(frame);
         recorder.dispose();
-        try { listener.gain.disconnect(destination); } catch { /* destination may already be disconnected */ }
+        try { listener.gain.disconnect(captureGain); } catch { /* destination may already be disconnected */ }
+        captureGain.disconnect();
         destination.disconnect();
         scaled.width = 0;
         scaled.height = 0;
@@ -110,7 +119,8 @@ function recordingCapture(ports: AudioLabTestPorts): TestRecordingCapture {
     released = true;
     cancelAnimationFrame(frame);
     for (const track of stream.getTracks()) track.stop();
-    try { listener.gain.disconnect(destination); } catch { /* ignore partial setup */ }
+    try { listener.gain.disconnect(captureGain); } catch { /* ignore partial setup */ }
+    captureGain.disconnect();
     destination.disconnect();
     throw error;
   }
@@ -134,7 +144,8 @@ export function createAudioLabTestAdapter(ports: AudioLabTestPorts): TestRunAdap
       ports.audio.setBusMuted('ambient', false);
       ports.audio.setBusVolume('ambient', 1);
       ports.audio.setBusMuted('music', true);
-      ports.audio.setBusMuted('sfx', true);
+      ports.audio.setBusMuted('sfx', false);
+      ports.audio.setBusVolume('sfx', 1);
       positionCamera(ports, scenario.settings.farPosition, scenario.settings.target);
     },
     ready: async (context) => {
@@ -182,7 +193,7 @@ export function createAudioLabTestAdapter(ports: AudioLabTestPorts): TestRunAdap
     },
     environment: () => ({
       'recording.source': 'audio-lab canvas + Three.js AudioListener mix',
-      'recording.profile': `${VIDEO_WIDTH}x${VIDEO_HEIGHT}@${CAPTURE_FPS}fps, requested 450 kb/s video + 32 kb/s audio`,
+      'recording.profile': `up to ${VIDEO_WIDTH}x${VIDEO_HEIGHT}@${CAPTURE_FPS}fps with aspect preserved, requested 450 kb/s video + 48 kb/s audio and 2.5x capture gain`,
     }),
   };
 }

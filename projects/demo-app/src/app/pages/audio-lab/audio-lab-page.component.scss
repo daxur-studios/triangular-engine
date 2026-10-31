@@ -21,6 +21,18 @@ scene {
   height: 100%;
 }
 
+.test-input-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+
+  &.active {
+    pointer-events: auto;
+    cursor: progress;
+  }
+}
+
 .controls-panel {
   position: absolute;
   top: 16px;

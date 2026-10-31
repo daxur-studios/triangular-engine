@@ -102,13 +102,15 @@ export function buildDevelopmentMapExampleGraph(
       ? `${document.id.startsWith('plan-') ? 'Plan' : 'ER'} ${number}`
       : document.title;
     const status =
-      document.readiness === 'needs-resolution'
-        ? 'failed'
-        : document.readiness === 'open-items'
-          ? 'running'
-          : document.readiness === 'ready'
-            ? 'complete'
-            : 'undone';
+      document.status === 'archived'
+        ? 'complete'
+        : document.readiness === 'needs-resolution'
+          ? 'failed'
+          : document.readiness === 'open-items'
+            ? 'running'
+            : document.readiness === 'ready'
+              ? 'complete'
+              : 'undone';
     addNode({
       id: documentId,
       title: label,

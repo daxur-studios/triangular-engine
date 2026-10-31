@@ -35,6 +35,28 @@ The user requested a short video from `/audio-lab` while a test moves the camera
 
 **Current storage finding.** The local receiver currently accepts only still-image sidecars, and its read API exposes an image endpoint. Video support therefore needs bounded upload and an allowlisted playback route; the result JSON should retain file references and descriptive metadata rather than media bytes.
 
+## 2026-10-31 — Implementation and live POC
+
+Implemented an opt-in browser recording contract in `triangular-engine/testing`, with a host-supplied canvas stream and optional audio track. Recordings are limited to 15 seconds and 1 MiB per case, with a 5 MiB run cap. Only functional and visual suites can record; performance suites remain excluded. The recording checkbox defaults off. The local receiver validates bounded WebM/MP4 sidecars, stores metadata and file references in test results, serves byte ranges, and the results page uses a controls-enabled video element with `preload="none"`.
+
+Added the `audio-lab-proximity@v1` scenario. After the page's Enable Sound gesture, it moves the active camera/listener from 12 units away to 2.8 units from the positional sound source and back, capturing the 640×360 canvas at 12 fps with the engine audio mix. The test restores camera/audio state. A run with recording enabled completed with 1 valid case, 0 invalid cases and 0 failures; the nearest and return distances both passed. The saved clip is `camera-proximity-sweep-r1-0.webm`, 23,025 bytes, 7,818 ms, `video/webm;codecs=vp9,opus`, with audio. The saved result has no embedded media bytes. The browser result player points at its sidecar while `preload="none"` and `readyState=0`, so checking the result did not fetch or decode the video into the agent context.
+
+The successful browser run initially reached an older receiver process that stored upload bytes inline. The clip was moved into the current validated sidecar format and the inline field removed; the run ID and result metadata were preserved. The result summary and `/tests` player both show the saved artifact. One earlier exploratory run failed because deactivating the orbit-controls component recreated it before the adapter captured it; the implementation now keeps the controls mounted and shields scene pointer input during the test.
+
+The user's follow-on idea is a lightweight clip-curation workflow across engine consumers: agents and people could bookmark/highlight a recording with a short note and later select it for social posting. This is future work outside this POC's scope; no publishing or external sharing is included here.
+
+## Follow-up: playback quality and aspect ratio (2026-10-31)
+
+The user could see the first local video on a laptop but not on the same chat from a phone, and reported that the clip sounded silent, looked low quality and seemed squashed. An image extracted from the local clip displayed inline in chat; phone-side visibility remains for the user to confirm. Inspection showed that the first file did contain Opus audio, but its measured peak was only -21 dBFS and its mean was -41.6 dBFS. Its 640x360 dimensions were 16:9, while the capture code stretched the source canvas into that fixed ratio.
+
+Adjusted the audio-lab profile to capture up to 960x540 at 20 fps while fitting the source canvas into the output without changing its aspect ratio. The audio-lab capture path applies a 2.5x gain only to the recorded mix and requests 48 kb/s audio; playback through the page remains unchanged. A fresh opt-in run passed with 1 valid case, 0 invalid cases and 0 failures. The saved WebM was 369,884 bytes (about 361 KiB), 6,980 ms, 960x540, VP9 + Opus; measured audio level was -33.4 dBFS mean and -13.6 dBFS peak. This is visibly clearer, preserves aspect ratio, and has a materially stronger recorded mix while remaining below the 1 MiB per-case limit.
+
+The user heard the beacon but not the revolving motor buzz. The test setup had muted the SFX bus, which carries that motor, so the setup now leaves SFX enabled at full level while still muting music. A follow-up run passed and recorded the complete mix: 381,817 bytes (about 373 KiB), 6,973 ms, VP9 + Opus; measured mean/peak audio were -19.4/-5.8 dBFS. The user confirmed that images render on phone while embedded videos do not, although both render on laptop.
+
+Evaluated an optional sharing conversion. A Daxur-compressed MP4 sample was made from an H.264/AAC MP4 intermediate: it is 219,931 bytes (about 215 KiB), 960x540, HEVC + AAC, with a visually comparable sampled frame and the audio track intact. Daxur reported 38.09% smaller than the intermediate MP4, and the output is about 42.4% smaller than the original WebM. The installed CLI currently preserves the input extension while encoding HEVC + AAC, so direct WebM-to-MP4 output needs a format/codec option before it is a safe one-step workflow. Keep the raw test artifact; compression should remain a separate, optional share/export step.
+
+**Verification.** `npm run build:triangular-engine` passed. `npm run test:triangular-engine:sink` passed 57/57 after the receiver additions. `npm run test:triangular-engine:testing` passed 201/201 headless tests; this includes the recording lifecycle and the updated generic artifact-drop message assertion. The targeted session spec passed 44/44 after selecting its headless profile. `npx ng build demo-app` passed with existing CSS-budget and Mermaid CommonJS warnings. `node projects/triangular-engine/bin/triangular.mjs docs records check` passed for all 7 mapped and 23 legacy plans, and `git diff --check` found no whitespace errors. The visible-browser audio-lab POC saved and displayed its sidecar recording as described above.
+
 ## Scope history
 
 <!-- tri:scope-history -->

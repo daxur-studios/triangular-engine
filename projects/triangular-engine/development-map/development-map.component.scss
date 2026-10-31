@@ -246,6 +246,10 @@ h1 {
   border-color: color-mix(in srgb, var(--dev-map-good) 50%, transparent);
   color: var(--dev-map-good);
 }
+.status[data-state="archived"] {
+  border-color: color-mix(in srgb, var(--dev-map-muted) 50%, transparent);
+  color: var(--dev-map-muted);
+}
 .status[data-state="needs-resolution"] {
   border-color: color-mix(in srgb, var(--dev-map-danger) 55%, transparent);
   color: var(--dev-map-danger);
@@ -291,6 +295,15 @@ h1 {
 }
 .scope-summary strong {
   color: var(--dev-map-accent);
+}
+.archived-notice {
+  margin: 0.45rem 0 0;
+  font-size: 0.72rem;
+  color: var(--dev-map-muted);
+  code {
+    font-size: 0.72rem;
+    color: var(--dev-map-accent);
+  }
 }
 details {
   margin-top: 0.55rem;

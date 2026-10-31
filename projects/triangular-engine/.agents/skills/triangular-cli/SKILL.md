@@ -15,6 +15,8 @@ Angular or Three.js.
 - `triangular docs consensus ...` creates, prompts, updates and checks consensus review files.
 - `triangular docs records ...` creates or validates paired Plans and Engineering Records.
 - `triangular docs plan new` is an alias for creating a paired Plan and Engineering Record.
+- `triangular docs archive <path>` archives a paired Plan and Engineering Record, preserving git history in a compact stub.
+- `triangular docs map` exports the development map manifest.
 - `triangular testing ...` delegates to the existing test runner, summary, receiver and baseline tools.
 
 Read `docs/cli.md` in the installed package for arguments and examples. Preserve direct

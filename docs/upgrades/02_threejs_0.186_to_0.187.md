@@ -120,7 +120,8 @@ rely on GC to free storage buffers; use explicit disposal (below).
 | terrain `BatchedMesh` specs | pending (owner) |
 | demo WebGL and WebGPU smoke | pending (owner) |
 | consumer-app PMREM visual review | pending (owner) |
-| consumer `tsc` app + spec, test suites | pending (owner) |
+| consumer `tsc` app + spec | pending |
+| consumer tests | pass (owner report, 2026-10-31) |
 
 ## Open questions
 

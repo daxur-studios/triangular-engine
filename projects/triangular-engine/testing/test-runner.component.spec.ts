@@ -249,7 +249,7 @@ describe('TestRunnerComponent', () => {
       it('says which pictures the receiver dropped', async () => {
         spyOn(window, 'fetch').and.resolveTo(new Response(JSON.stringify({ ok: true, file: 'f.json', thumbnails: [], dropped: ['check: thumbnail dropped, over 64 KB'] })));
         const fixture = await runPictures(true);
-        expect(fixture.componentInstance.saveStatus()).toContain('1 thumbnail dropped (check: thumbnail dropped, over 64 KB)');
+        expect(fixture.componentInstance.saveStatus()).toContain('1 artifact dropped (check: thumbnail dropped, over 64 KB)');
         fixture.destroy();
       });
 

@@ -106,6 +106,9 @@ export interface DevelopmentMapDocument {
   readonly id: string;
   readonly number?: number;
   readonly title: string;
+  readonly status?: string;
+  readonly archivedCommit?: string | null;
+  readonly archivedDate?: string | null;
   readonly sourceHref?: string;
   readonly readiness: DevelopmentMapReadiness;
   readonly progress?: DevelopmentMapScopeProgress;

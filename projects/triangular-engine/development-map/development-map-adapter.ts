@@ -40,6 +40,9 @@ export interface EngineeringManifestDocument {
   readonly number?: number | null;
   readonly initiativeId?: string;
   readonly title: string;
+  readonly status?: string;
+  readonly archivedCommit?: string | null;
+  readonly archivedDate?: string | null;
   readonly outcome?: string;
   readonly plan: string;
   readonly record?: string | null;
@@ -246,6 +249,9 @@ function documentFor(
     id: source.id,
     ...(source.number ? { number: source.number } : {}),
     title: source.title,
+    ...(source.status ? { status: source.status } : {}),
+    ...(source.archivedCommit ? { archivedCommit: source.archivedCommit } : {}),
+    ...(source.archivedDate ? { archivedDate: source.archivedDate } : {}),
     sourceHref: mapAnchor(source.id, anchorBase),
     readiness,
     ...(source.progress ? { progress: { ...source.progress } } : {}),
@@ -397,7 +403,11 @@ export function buildDevelopmentMapProject(
     const branchMap = new Map<string, { id: string; title: string; examples: Map<string, MapExampleSource> }>();
 
     for (const doc of manifest.documents) {
-      const branchTitle = doc.branch?.trim() || (doc.initiativeId ? slugToTitle(doc.initiativeId) : 'General');
+      const branchTitle =
+        doc.status === 'archived'
+          ? doc.branch?.trim() || 'Archive'
+          : doc.branch?.trim() ||
+            (doc.initiativeId ? slugToTitle(doc.initiativeId) : 'General');
       const branchId = slugify(branchTitle);
 
       if (!branchMap.has(branchId)) {

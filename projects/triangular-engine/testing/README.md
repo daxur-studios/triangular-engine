@@ -273,6 +273,34 @@ const adapter: TestRunAdapter<Settings, Settings> = {
 - **Motion labs.** A fly-by or sweep has no single view, and a representative frame needs an extra pass that is not
   part of the timed window. Such adapters simply omit the hook.
 
+## Optional recordings
+
+Functional or visual diagnostic suites may record a short clip around a case's `measure` call. Recording is off by
+default and adds encoding work, so it is not valid performance evidence. A host adapter provides the stream and owns
+its source selection; for example, a page can downscale `engine.canvas.captureStream()` and mix the engine's
+`AudioListener` output into it without requesting microphone or desktop permissions.
+
+```ts
+const adapter: TestRunAdapter<Settings, Snapshot> = {
+  // capture/apply/ready/measure/restore as usual
+  recording: (scenario, context) => createPageRecording(scenario, context.signal),
+};
+```
+
+The returned `TestRecordingCapture` has `stop(): Promise<TestRecordingArtifact>` and `dispose()`. The session starts
+it immediately before `measure`, and stops/disposes it after success, failed checks, exceptions, timeout or
+cancellation. A capture failure becomes a case limitation; it does not change the functional verdict. `recordings: true`
+and `onRecordings` are required when calling `TestSession.run` directly; the runner exposes the **Record short video
+around each case** checkbox only for eligible suites with a development result sink. There is no launch-link option,
+so clips are never started implicitly by an agent link.
+
+`createTestMediaRecorderCapture(stream, { width, height, ... })` supplies a browser `MediaRecorder` helper with
+WebM/MP4 capability selection and bounded output handling. Current defaults cap a clip at 15 seconds and 1 MiB, and
+each run at 5 MiB. Keep capture resolution and bitrates modest (the audio-lab uses 640×360 at 12 fps); keep video
+diagnostic and functional-only. Artifacts use a separate bounded upload, receiver-side container-signature check and
+allowlisted `/video?file=` read route. The saved JSON and copied agent summary contain filenames and metadata, never
+the clip bytes. A failed/oversized upload is visible as a case limitation.
+
 ## Results page
 
 `TestResultsComponent` (`<tri-test-results>`, same entry, no engine or router dependency) browses the runs the receiver saved.
@@ -303,6 +331,9 @@ A host page only places it; the demo app has one at `/tests`.
 - **Thumbnails.** One image is a still. Several images (the first repetition's) loop on hover or focus, and a tap pins the
   loop on a phone. `[autoplay]` loops them without hover. With `prefers-reduced-motion` nothing moves by itself and a
   click steps to the next frame.
+- **Recordings.** Saved case clips use a native `<video controls preload="none">` player, so the browser fetches the
+  video only when the person chooses to play it. The case row shows duration, dimensions, size, MIME type and whether
+  audio was captured. The receiver serves byte ranges for seeking.
 - **Reading it from code.** `parseTestRunIndex`, `defaultBaseline`, `compareToBaseline`, `filterRuns` and the other pure
   helpers are exported for a host's own view.
 
@@ -365,7 +396,7 @@ environment: () => ({ ...describeRendererGpu(renderer), build: 'dev' }),
 ```
 
 This adds `gpu.backend` (`webgpu`, `webgl`, `unknown`), `gpu.vendor`, `gpu.architecture`, `gpu.device` and
-`gpu.description`; browsers may blank fields, which read `unknown`. Three.js 0.186 does not keep the `GPUAdapter`, so
+`gpu.description`; browsers may blank fields, which read `unknown`. Three.js does not keep the `GPUAdapter`, so
 `describeRendererGpu` reads `renderer.backend.device.adapterInfo` (WebGL fallback: the unmasked vendor and renderer
 strings). Never call `navigator.gpu.requestAdapter()` just to describe the GPU: on a machine with two GPUs it can
 return a different one than the renderer. **A performance run with no adapter info, or on an adapter other than the

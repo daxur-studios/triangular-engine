@@ -214,7 +214,7 @@
   <!-- 3D Scene -->
   <scene>
     <!-- Orbit Controls (creates & controls active PerspectiveCamera) -->
-    <orbitControls [cameraPosition]="[0, 5, 12]" [target]="[0, 1, 0]" [isActive]="!testRunning()" />
+    <orbitControls [cameraPosition]="[0, 5, 12]" [target]="[0, 1, 0]" />
     <audioListener [(masterVolume)]="masterVolume" />
 
     <!-- Central Beacon: Stationary 3D Sound Source -->
@@ -270,4 +270,5 @@
       />
     }
   </scene>
+  <div class="test-input-shield" [class.active]="testRunning()" aria-hidden="true"></div>
 </div>

@@ -1,5 +1,5 @@
 import { MAX_FOCUS_RETRIES, nearestRankPercentile, summarizeTestSamples, TestSession, waitForTest } from './test-session';
-import type { TestCaseThumbnails, TestObservation, TestRunAdapter, TestRunOptions, TestSuite } from './test-contracts';
+import type { TestCaseRecording, TestCaseThumbnails, TestObservation, TestRunAdapter, TestRunOptions, TestSuite } from './test-contracts';
 import { MAX_CASE_THUMBNAILS, MAX_RUN_THUMBNAIL_BYTES, MAX_THUMBNAIL_BYTES } from './test-thumbnails';
 import { MACHINE_PREPARE_TIMEOUT_MS } from './test-machine';
 
@@ -449,6 +449,56 @@ describe('TestSession', () => {
       adapter.thumbnail = async () => { await new Promise((resolve) => setTimeout(resolve, 20)); atThumbnail = [...urls]; return [image(10)]; };
       await run({ machineSink: '/sink' }, { ...suite, purpose: 'performance' });
       expect(atThumbnail).toEqual(['/sink/machine/prepare', '/sink/machine/start', '/sink/machine/stop']);
+    });
+  });
+
+  describe('recordings', () => {
+    const blob = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'video/webm' });
+    const artifact = { blob, mimeType: 'video/webm;codecs=vp8,opus', durationMs: 1000, width: 640, height: 360, audio: true };
+    let stopped: number;
+    let disposed: number;
+    let received: TestCaseRecording[];
+    beforeEach(() => {
+      stopped = 0;
+      disposed = 0;
+      received = [];
+      adapter.recording = () => ({ stop: async () => { stopped++; return artifact; }, dispose: () => { disposed++; } });
+    });
+
+    it('is opt-in and keeps media bytes out of the run result', async () => {
+      const disabled = await new TestSession<Settings, number>().run(suite, adapter, { repetitions: 1, profile: 'headless-hardware' });
+      expect(disabled.cases[0].recordings).toBeUndefined();
+      expect(stopped).toBe(0);
+
+      const result = await new TestSession<Settings, number>().run(suite, adapter,
+        { repetitions: 1, profile: 'headless-hardware', recordings: true, onRecordings: (entry) => received.push(entry) });
+      expect(result.status).toBe('completed');
+      expect(result.cases[0].recordings).toEqual([{ mimeType: artifact.mimeType, bytes: blob.size, durationMs: 1000, width: 640, height: 360, audio: true }]);
+      expect(received).toEqual([{ scenarioId: 'first', repetition: 1, recording: artifact }]);
+      expect(JSON.stringify(result)).not.toContain('data');
+      expect(stopped).toBe(1);
+      expect(disposed).toBe(1);
+    });
+
+    it('stops and disposes when measurement fails without turning recording into the failure', async () => {
+      adapter.measure = async () => { throw new Error('measurement failed'); };
+      const result = await new TestSession<Settings, number>().run(suite, adapter,
+        { repetitions: 1, profile: 'headless-hardware', recordings: true, onRecordings: (entry) => received.push(entry) });
+      expect(result.status).toBe('failed');
+      expect(result.cases[0].error).toContain('measurement failed');
+      expect(result.cases[0].recordings?.[0].bytes).toBe(blob.size);
+      expect(received.length).toBe(1);
+      expect(stopped).toBe(1);
+      expect(disposed).toBe(1);
+    });
+
+    it('rejects recording performance evidence and runs without a sink callback', async () => {
+      await expectAsync(new TestSession<Settings, number>().run({ ...suite, purpose: 'performance' }, adapter,
+        { repetitions: 1, profile: 'headless-hardware', recordings: true, onRecordings: () => {} }))
+        .toBeRejectedWithError(/unavailable for performance/);
+      await expectAsync(new TestSession<Settings, number>().run(suite, adapter,
+        { repetitions: 1, profile: 'headless-hardware', recordings: true })).toBeRejectedWithError(/result sink is required/);
+      expect(stopped).toBe(0);
     });
   });
 

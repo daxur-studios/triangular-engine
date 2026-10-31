@@ -180,6 +180,14 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   `/tests`) lists runs, shows a run's cases with thumbnails and the change from a baseline (same suite version and mode),
   and compares two runs; read routes are `GET <sink>/runs`, `/run?file=` and `/image?file=`. For numbers, still use
   `npm run test:summary`; the page is for a human to browse.
+- **Optional diagnostic recordings.** A functional/visual adapter may add `recording(scenario, context)` returning a
+  `TestRecordingCapture`; it supplies only the canvas/audio stream the page chooses to expose. Recording is off by
+  default, starts immediately before `measure`, stops on every exit path, and is unavailable for performance or CPU-only
+  suites. Use `createTestMediaRecorderCapture` where suitable; current caps are 15 s, 1 MiB per case and 5 MiB per run.
+  The receiver validates WebM/MP4 signatures and serves saved sidecars through `/video?file=` with byte ranges. Run JSON
+  and agent summaries contain metadata and filenames, never media bytes. `<tri-test-results>` uses a native player with
+  `preload="none"`. Do not send or read the video through an agent vision/audio path when the user's goal is only to
+  provide a clickable playback artifact; point the person to the saved path/URL instead.
 - The user can press **Copy for agent** on the result card: a few lines with the suite,
   mode, verdicts, saved file and problems. Read the run with `test:summary` from there.
 - **Run a hardware suite yourself, unattended:** `npx triangular-test-run --url <page url> --suite <id> --version <n>`

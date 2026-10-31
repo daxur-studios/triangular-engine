@@ -2,6 +2,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  archiveDocument as packageArchiveDocument,
   confirmScopeBaseline as packageConfirmScopeBaseline,
   createPair as packageCreatePair,
   inspectDocuments as packageInspectDocuments,
@@ -25,6 +26,8 @@ export const refreshReview = (options = {}) =>
   packageRefreshReview({ ...options, root: options.root ?? WORKSPACE_ROOT });
 export const confirmScopeBaseline = (options = {}) =>
   packageConfirmScopeBaseline({ ...options, root: options.root ?? WORKSPACE_ROOT });
+export const archiveDocument = (options = {}) =>
+  packageArchiveDocument({ ...options, root: options.root ?? WORKSPACE_ROOT });
 export const inspectDocuments = (root = WORKSPACE_ROOT) =>
   packageInspectDocuments(root);
 export const main = (args = process.argv.slice(2), root = WORKSPACE_ROOT) =>
