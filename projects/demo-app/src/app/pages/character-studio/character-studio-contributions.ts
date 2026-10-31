@@ -2,6 +2,7 @@ import {
   ALL_CAPSULE_CHARACTER_PRESETS,
   CAPSULE_ACCESSORY_IDS,
   CAPSULE_CAT_BODY_PATTERN_IDS,
+  CAPSULE_CAT_MOUTH_POSE_IDS,
   CAPSULE_CAT_PACK_IDS,
   CAPSULE_CAT_PRESETS,
   CAPSULE_CHARACTER_PRESETS,
@@ -14,6 +15,7 @@ import {
   type CapsuleCatBodyPatternId,
   type CapsuleCatGaitMode,
   type CapsuleCatPackId,
+  type CapsuleCatMouthPose,
   type CapsuleChestPatchId,
   type CapsuleFacialHairId,
   type CapsuleHairStyleId,
@@ -22,6 +24,13 @@ import {
 } from 'triangular-engine/characters';
 import { CapsuleCatActor, CapsuleCharacterActor } from 'triangular-engine/procedural';
 import { Group } from 'three';
+import {
+  fitCameraToFocusTarget,
+  resolveCharacterStudioFocusTarget,
+  type CameraFocusFitOptions,
+  type ResolvedFocusFraming,
+  type VisualFocusTargetId,
+} from './character-studio-focus';
 
 export type CharacterStudioFamilyId = 'human' | 'cat';
 
@@ -62,6 +71,7 @@ export interface CharacterStudioContribution {
   readonly presets: readonly CharacterStudioPreset[];
   readonly motions: readonly CharacterStudioChoice[];
   controlGroups(): readonly CharacterStudioControlGroup[];
+  resolveFocusFraming(targetId: VisualFocusTargetId, options?: CameraFocusFitOptions): ResolvedFocusFraming;
   selectPreset(presetId: string): void;
   setMotion(motionId: string): void;
   setExpression(expression: ExtendedEmotionName): void;
@@ -107,6 +117,8 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
   const humanPresets = presets(ALL_CAPSULE_CHARACTER_PRESETS);
   const humanDefault = 'wacky-helmet-waver';
   const humanMotions = choices(['idle', 'walk', 'run', 'float']);
+  let rightHandAction: 'none' | 'wave' | 'point' | 'hold_gadget' | 'salute' | 'reach' = 'none';
+  let leftHandAction: 'none' | 'wave' | 'point' | 'hold_gadget' | 'salute' | 'reach' = 'none';
 
   const human: CharacterStudioContribution = {
     id: 'human',
@@ -119,6 +131,10 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
     defaultPresetId: humanDefault,
     presets: humanPresets,
     motions: humanMotions,
+    resolveFocusFraming: (targetId, options) => fitCameraToFocusTarget(
+      resolveCharacterStudioFocusTarget(targetId, { humanActor }),
+      options,
+    ),
     controlGroups: () => [
       {
         id: 'appearance',
@@ -139,6 +155,14 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
           control('jetpack', 'Jetpack', humanActor.dna.jetpack, booleanChoices),
         ],
       },
+      {
+        id: 'pose',
+        label: 'Pose details',
+        controls: [
+          control('rightHandAction', 'Right hand', rightHandAction, choices(['none', 'wave', 'point', 'hold_gadget', 'salute', 'reach'])),
+          control('leftHandAction', 'Left hand', leftHandAction, choices(['none', 'wave', 'point', 'hold_gadget', 'salute', 'reach'])),
+        ],
+      },
     ],
     selectPreset: (presetId) => {
       const preset = ALL_CAPSULE_CHARACTER_PRESETS.find((candidate) => candidate.id === presetId);
@@ -155,6 +179,14 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
         case 'chestPatch': humanActor.setDna({ chestPatch: value as CapsuleChestPatchId }); break;
         case 'helmet': humanActor.setDna({ helmet: value === 'true' }); break;
         case 'jetpack': humanActor.setDna({ jetpack: value === 'true' }); break;
+        case 'rightHandAction':
+          rightHandAction = value as typeof rightHandAction;
+          humanActor.setHandAction('right', rightHandAction);
+          break;
+        case 'leftHandAction':
+          leftHandAction = value as typeof leftHandAction;
+          humanActor.setHandAction('left', leftHandAction);
+          break;
       }
     },
     randomize: (seed) => humanActor.setSeed(`character-studio-human-${seed}`),
@@ -178,6 +210,10 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
     defaultPresetId: catDefault,
     presets: catPresets,
     motions: catMotions,
+    resolveFocusFraming: (targetId, options) => fitCameraToFocusTarget(
+      resolveCharacterStudioFocusTarget(targetId, { catActor }),
+      options,
+    ),
     controlGroups: () => [
       {
         id: 'appearance',
@@ -198,6 +234,15 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
           control('booties', 'Booties', catActor.dna.suitBooties, booleanChoices),
         ],
       },
+      {
+        id: 'face',
+        label: 'Face details',
+        controls: [
+          control('restMouthPose', 'Resting mouth', catActor.dna.restMouthPose, choices(CAPSULE_CAT_MOUTH_POSE_IDS)),
+          control('tuft', 'Crown tuft', catActor.dna.tuft, booleanChoices),
+          control('panicked', 'Panicked eyes', catActor.dna.panicked, booleanChoices),
+        ],
+      },
     ],
     selectPreset: (presetId) => {
       const preset = CAPSULE_CAT_PRESETS.find((candidate) => candidate.id === presetId);
@@ -214,6 +259,9 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
         case 'helmet': catActor.setDna({ helmet: value === 'true' }); break;
         case 'harness': catActor.setDna({ harness: value === 'true' }); break;
         case 'booties': catActor.setDna({ suitBooties: value === 'true' }); break;
+        case 'restMouthPose': catActor.setDna({ restMouthPose: value as CapsuleCatMouthPose }); break;
+        case 'tuft': catActor.setDna({ tuft: value === 'true' }); break;
+        case 'panicked': catActor.setDna({ panicked: value === 'true' }); break;
       }
     },
     randomize: (seed) => catActor.setSeed(`character-studio-cat-${seed}`),

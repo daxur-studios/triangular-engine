@@ -314,7 +314,7 @@ describe('Plan 059 G5 planet-scene adapter', () => {
   });
 
   describe('measuring', () => {
-    it('reports the metrics, the clouds placeholder and the GPU adapter for a still case', async () => {
+    it('reports the metrics, the clouds shell and the GPU adapter for a still case', async () => {
       const made = makeHost();
       const observation = await createPlanetSceneTestAdapter(made.host).measure(orbit, made.context);
       const names = observation.metrics?.map((metric) => metric.name);
@@ -323,10 +323,10 @@ describe('Plan 059 G5 planet-scene adapter', () => {
         'gpuScenePass', 'gpuOutputPass', 'gpuFullscreenPasses', 'gpuPassTotal',
       ]));
       expect(observation.metrics?.find((metric) => metric.name === 'drawCalls')?.samples).toEqual([2]);
-      expect(observation.details?.['clouds']).toBe('placeholder');
+      expect(observation.details?.['clouds']).toBe('shell');
       expect(observation.details?.['gpuAdapter']).toBe('test adapter');
       expect(observation.checks?.every((check) => check.passed)).toBeTrue();
-      expect(observation.limitations?.some((line) => /placeholder/.test(line))).toBeTrue();
+      expect(observation.limitations?.some((line) => /far shell/.test(line))).toBeTrue();
       expect(observation.limitations?.some((line) => /bends the terrain into the map/.test(line))).toBeTrue();
       expect(observation.limitations?.some((line) => /sky is the globe/.test(line))).toBeTrue();
       expect(observation.limitations?.some((line) => /morph is 0/.test(line))).toBeFalse();

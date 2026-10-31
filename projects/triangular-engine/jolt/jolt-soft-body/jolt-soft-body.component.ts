@@ -1,14 +1,21 @@
 import { Component, effect, inject, input, output } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { BufferAttribute, BufferGeometry, DoubleSide, Mesh, MeshStandardMaterial } from 'three';
+import { BehaviorSubject } from 'rxjs';
 import { GroupComponent, provideObject3DComponent } from 'triangular-engine';
-import { LAYER_MOVING, wrapVec3 } from '../example';
+import { LAYER_MOVING, wrapQuat, wrapVec3 } from '../example';
 import { Jolt, JoltPhysicsService } from '../jolt-physics';
 
 export interface IJoltSoftBodyCreatedEvent { readonly body: Jolt.Body; readonly owner: JoltSoftBodyComponent; readonly vertexCount: number; }
 export type JoltSoftBodyBendType = 'none' | 'distance' | 'dihedral';
 
-/** Declaratively creates a mesh-backed Jolt soft body and keeps its vertices synchronized. */
+/**
+ * Declaratively creates a mesh-backed Jolt soft body and keeps its vertices synchronized.
+ *
+ * The inputs mirror `Jolt.SoftBodyCreationSettings` so a page can reproduce the official
+ * Jolt.js examples: pass `[updatePosition]="false"` and `[pressure]` for the cloth and
+ * pressure-sphere examples, and leave `linearDamping` at 0.
+ */
 @Component({
   selector: 'joltSoftBody',
   imports: [],
@@ -23,19 +30,35 @@ export class JoltSoftBodyComponent extends GroupComponent {
   /** Bend constraint model: `none`, `distance`, or `dihedral`. */
   readonly bendType = input<JoltSoftBodyBendType>('none');
   readonly solverIterations = input(5);
-  readonly linearDamping = input(0.1);
+  /** Jolt's `mLinearDamping`; the official examples leave it at 0. */
+  readonly linearDamping = input(0);
   readonly gravityFactor = input(1);
-  /** Internal pressure multiplier for closed membranes such as balloons. */
+  /** Internal pressure multiplier for closed membranes such as balloons (`mPressure`). */
   readonly pressure = input(0);
   readonly velocity = input<readonly [number, number, number]>([0, 0, 0]);
   readonly edgeCompliance = input(0.0001);
   readonly shearCompliance = input(0.0001);
   readonly bendCompliance = input(0.001);
+  /**
+   * Jolt's `mUpdatePosition`. The official examples set it to `false`, which keeps the body
+   * transform fixed and lets the vertices carry the motion in body space.
+   */
+  readonly updatePosition = input(true);
+  readonly friction = input(0.5);
+  readonly restitution = input(0);
+  /** Jolt's `mVertexRadius`: collision thickness of each simulated particle. */
+  readonly vertexRadius = input(0);
+  readonly maxLinearVelocity = input<number | undefined>(undefined);
   readonly color = input(0x4fd6a8);
   readonly created = output<IJoltSoftBodyCreatedEvent>();
 
+  /** The live body, once Jolt has created it. */
+  readonly body$ = new BehaviorSubject<Jolt.Body | undefined>(undefined);
+  readonly body = toSignal(this.body$);
+
   #body?: Jolt.Body;
   #mesh?: Mesh;
+  #material?: MeshStandardMaterial;
   #settings?: Jolt.SoftBodySharedSettings;
 
   constructor() {
@@ -91,6 +114,13 @@ export class JoltSoftBodyComponent extends GroupComponent {
     settings.mNumIterations = this.solverIterations();
     settings.mLinearDamping = this.linearDamping();
     settings.mGravityFactor = this.gravityFactor();
+    settings.mPressure = this.pressure();
+    settings.mUpdatePosition = this.updatePosition();
+    settings.mFriction = this.friction();
+    settings.mRestitution = this.restitution();
+    settings.mVertexRadius = this.vertexRadius();
+    const maxLinearVelocity = this.maxLinearVelocity();
+    if (maxLinearVelocity !== undefined) settings.mMaxLinearVelocity = maxLinearVelocity;
     const bodyId = metadata.bodyInterface.CreateAndAddSoftBody(settings, metadata.Jolt.EActivation_Activate);
     this.#body = metadata.physicsSystem.GetBodyLockInterface().TryGetBody(bodyId);
     if (!this.#body) return;
@@ -101,13 +131,18 @@ export class JoltSoftBodyComponent extends GroupComponent {
     const positionData = new Float32Array(vertices.length * 3);
     geometry.setAttribute('position', new BufferAttribute(positionData, 3));
     geometry.setIndex(faces.flatMap(([a, b, c]) => [a, b, c]));
-    const mesh = new Mesh(geometry, new MeshStandardMaterial({ color: this.color(), side: DoubleSide, roughness: 0.55 }));
+    const material = new MeshStandardMaterial({ color: this.color(), side: DoubleSide, roughness: 0.55 });
+    const mesh = new Mesh(geometry, material);
+    // The vertices move inside the body; a bounds computed once at creation would cull it away.
+    mesh.frustumCulled = false;
     this.#mesh = mesh;
+    this.#material = material;
     this.object3D().add(mesh);
     this.#setParticleVelocity(metadata.Jolt, this.velocity());
     const motion = metadata.Jolt.castObject(this.#body.GetMotionProperties(), metadata.Jolt.SoftBodyMotionProperties);
     motion.SetPressure(this.pressure());
     this.#syncVertices(metadata.Jolt);
+    this.body$.next(this.#body);
     this.service.physicsUpdated$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.#syncVertices(metadata.Jolt));
     this.created.emit({ body: this.#body, owner: this, vertexCount: vertices.length });
   }
@@ -126,6 +161,7 @@ export class JoltSoftBodyComponent extends GroupComponent {
   #syncVertices(jolt: typeof Jolt): void {
     if (!this.#body || !this.#mesh) return;
     this.object3D().position.copy(wrapVec3(this.#body.GetPosition()));
+    this.object3D().quaternion.copy(wrapQuat(this.#body.GetRotation()));
     const motion = jolt.castObject(this.#body.GetMotionProperties(), jolt.SoftBodyMotionProperties);
     const vertices = motion.GetVertices();
     const offset = jolt.SoftBodyVertexTraits.prototype.mPositionOffset;
@@ -152,6 +188,11 @@ export class JoltSoftBodyComponent extends GroupComponent {
       metadata.bodyInterface.DestroyBody(body.GetID());
     }
     if (this.#settings && metadata) metadata.Jolt.destroy(this.#settings);
+    this.#mesh?.geometry.dispose();
+    this.#material?.dispose();
     this.#body = undefined;
+    this.#mesh = undefined;
+    this.#material = undefined;
+    this.body$.next(undefined);
   }
 }

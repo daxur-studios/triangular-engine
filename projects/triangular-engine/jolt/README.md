@@ -86,6 +86,45 @@ For single-shape bodies, these inputs are ignored since the shape fills the enti
 </joltRigidBody>
 ```
 
+## Soft bodies
+
+`<joltSoftBody>` creates a Jolt soft body from a particle mesh and keeps a Three.js mesh in
+sync with it. The inputs mirror `SoftBodyCreationSettings`, so the official Jolt.js examples
+can be reproduced directly:
+
+```html
+<joltSoftBody
+  [vertices]="cloth.vertices"
+  [faces]="cloth.faces"
+  [pinnedVertices]="cloth.cornerVertexIndices"
+  [edgeCompliance]="0.00001"
+  [shearCompliance]="0.00001"
+  [linearDamping]="0"
+  [updatePosition]="false"
+  [position]="[0, 10, 0]" />
+```
+
+| Input | Default | Jolt field |
+|---|---|---|
+| `vertices`, `faces` | empty | particle mesh; faces are triangle vertex indices |
+| `pinnedVertices` | empty | vertices with `mInvMass = 0` |
+| `edgeCompliance`, `shearCompliance`, `bendCompliance` | `1e-4`, `1e-4`, `1e-3` | constraint compliance |
+| `bendType` | `'none'` | `'none' | 'distance' | 'dihedral'` |
+| `solverIterations` | `5` | `mNumIterations` |
+| `linearDamping` | `0` | `mLinearDamping` |
+| `gravityFactor` | `1` | `mGravityFactor` |
+| `pressure` | `0` | `mPressure` (`nRT`, see the pressure example) |
+| `updatePosition` | `true` | `mUpdatePosition` (the official examples use `false`) |
+| `friction`, `restitution` | `0.5`, `0` | `mFriction`, `mRestitution` |
+| `vertexRadius` | `0` | `mVertexRadius` |
+| `maxLinearVelocity` | Jolt default | `mMaxLinearVelocity` |
+| `color` | `0x4fd6a8` | mesh material color |
+
+`body$` / `body()` expose the live `Jolt.Body` after creation; `created` also carries it.
+The demo page `/soft-body-lab` rebuilds `soft/soft_body.html` (pinned cloth with heavy
+spheres) and `soft/soft_sphere_pressure.html` (eleven spheres, increasing pressure) with
+this component and measures shape strain, volume and floor penetration.
+
 ## Performance Notes
 
 - Compound shapes are more expensive than single shapes

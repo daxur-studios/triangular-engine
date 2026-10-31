@@ -3,7 +3,7 @@ import { createHeightSource } from './lod-height';
 import { createMorphMap } from './lod-morph-frame';
 import { StretchMetric } from './lod-morph-metric';
 import { sceneCameraAt } from './lod-morph.testing';
-import { LodSelector } from './lod-selector';
+import { LodSelector, type NodeGeometryHook } from './lod-selector';
 import { LodTerrainBody, type LodTerrainSettings } from './lod-terrain-body';
 
 /** Plan 059, step G6b: the terrain body's morph preview (the setter, frustum culling off above morph 0, the unbent selector camera). */
@@ -146,5 +146,107 @@ describe('LodTerrainBody morph preview', () => {
     body.update(camera, 1000);
     expect(body.object.children).not.toContain(fan);
     body.dispose();
+  });
+
+  describe('a consumer geometry hook and the stretch metric are exclusive', () => {
+    const hook: NodeGeometryHook = { measure: () => undefined };
+
+    it('setGeometryHook(hook) throws while setMorphMetric(true) is on, and installs nothing', () => {
+      const body = new LodTerrainBody(settings({ morph: true }));
+      body.setMorph(morphSettings);
+      body.setMorphMetric(true);
+      expect(() => body.setGeometryHook(hook)).toThrowError(/setMorphMetric\(true\) is on/);
+      expect(body.selector.hook).not.toBe(hook);
+      body.dispose();
+    });
+
+    it('setMorphMetric(true) throws while a geometry hook is installed, and the metric stays off', () => {
+      const body = new LodTerrainBody(settings({ morph: true }));
+      body.setMorph(morphSettings);
+      body.setGeometryHook(hook);
+      expect(() => body.setMorphMetric(true)).toThrowError(/setGeometryHook\(undefined\)/);
+      expect(body.selector.hook).toBe(hook);
+      body.setGeometryHook(undefined);
+      expect(() => body.setMorphMetric(true)).not.toThrow();
+      body.dispose();
+    });
+
+    it('setGeometryHook(undefined) with the metric on does not throw and keeps the stretch hook', () => {
+      const body = new LodTerrainBody(settings({ morph: true }));
+      body.setMorph(morphSettings);
+      body.setMorphMetric(true);
+      body.update(skyCamera(sceneCameraAt(createMorphMap(morphSettings, 10_000), 0.3, 0.4, 20)), 1000);
+      expect(body.selector.hook).toBeInstanceOf(StretchMetric);
+      expect(() => body.setGeometryHook(undefined)).not.toThrow();
+      expect(body.selector.hook).toBeInstanceOf(StretchMetric);
+      body.dispose();
+    });
+  });
+
+  describe('setMorphCulling is remembered across setMorphMetric', () => {
+    /** A camera above morph 0 that a frustum would cut down to a few leaves. */
+    const camera = (): PerspectiveCamera => skyCamera(sceneCameraAt(createMorphMap(morphSettings, 10_000), 0.3, 0.4, 20));
+
+    it("'bent-bounds' set before the metric is restored when the metric is turned off", () => {
+      const body = new LodTerrainBody(settings({ morph: true }));
+      body.setMorph(morphSettings);
+      body.setMorphCulling('bent-bounds');
+      body.setMorphMetric(true);
+      body.setMorphMetric(false);
+      body.update(camera(), 1000);
+      expect(body.stats.drawn).toBeLessThan(body.stats.leaves);
+      body.dispose();
+    });
+
+    it('a culling mode set while the metric is on is the one restored when it is turned off', () => {
+      const body = new LodTerrainBody(settings({ morph: true }));
+      body.setMorph(morphSettings);
+      body.setMorphCulling('bent-bounds');
+      body.setMorphMetric(true);
+      body.setMorphCulling('off');
+      body.setMorphMetric(false);
+      body.update(camera(), 1000);
+      expect(body.stats.drawn).toBe(body.stats.leaves);
+      body.dispose();
+    });
+
+    it('with nothing set before, turning the metric off gives culling off', () => {
+      const body = new LodTerrainBody(settings({ morph: true }));
+      body.setMorph(morphSettings);
+      body.setMorphMetric(true);
+      body.setMorphMetric(false);
+      body.update(camera(), 1000);
+      expect(body.stats.drawn).toBe(body.stats.leaves);
+      body.dispose();
+    });
+
+    it('configure keeps the metric, the remembered culling and the exclusion of a consumer hook', () => {
+      const hook: NodeGeometryHook = { measure: () => undefined };
+      const body = new LodTerrainBody(settings({ morph: true }));
+      body.setMorph(morphSettings);
+      body.setMorphCulling('bent-bounds');
+      body.setMorphMetric(true);
+      body.update(camera(), 1000);
+      const first = body.selector;
+      body.configure(settings({ morph: true, patchCells: 32 }));
+      expect(body.selector).not.toBe(first);
+      body.update(camera(), 1000);
+      expect(body.selector.hook).toBeInstanceOf(StretchMetric);
+      expect(() => body.setGeometryHook(hook)).toThrow();
+      body.setMorphMetric(false);
+      body.update(camera(), 1000);
+      expect(body.stats.drawn).toBeLessThan(body.stats.leaves);
+      body.dispose();
+    });
+
+    it('configure re-applies a consumer hook to the new selector, and the metric still refuses to start', () => {
+      const hook: NodeGeometryHook = { measure: () => undefined };
+      const body = new LodTerrainBody(settings({ morph: true }));
+      body.setGeometryHook(hook);
+      body.configure(settings({ morph: true, patchCells: 32 }));
+      expect(body.selector.hook).toBe(hook);
+      expect(() => body.setMorphMetric(true)).toThrow();
+      body.dispose();
+    });
   });
 });

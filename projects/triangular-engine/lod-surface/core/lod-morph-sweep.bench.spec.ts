@@ -25,8 +25,8 @@ import type { Vec3 } from './lod-domain';
  * decomposed replica. Mode `static` holds morph 0.5 as a control. Each run prints one `LOD_MORPH_BENCH` line to the console.
  *
  * The budget-300 runs of the page path and of the decomposed replica are asserted: a pack on at most 720 frames, and the per-frame total
- * under 2.5 ms median and 10 ms 95th percentile. G6i (memoised pack) measured 691 packs, a median of 2.2 to 2.3 ms and a 95th percentile of
- * 7.1 to 7.2 ms in isolation, 8.0 ms in a full-suite run (the 95th percentile target of 8 was missed there); the pack count target of 80 and the 2 ms median target were not met, and their bounds were moved to the measured values with margin (see the comments on them).
+ * under 5 ms median and 15 ms 95th percentile. G6i (memoised pack) measured 691 packs, a median of 2.2 to 2.3 ms and a 95th percentile of
+ * 7.1 to 7.2 ms in isolation, and 8.0 to 13.4 ms in full-suite runs; the pack count target of 80, the 2 ms median target and (in full-suite runs) the 8 ms 95th percentile target were not met, and their bounds were moved to the measured values with margin (see the comments on them).
  */
 
 interface Dist { median: number; p95: number; max: number; mean: number }
@@ -235,16 +235,13 @@ describe('LOD morph sweep (bench, headless CPU)', () => {
       const summary = await runSweep(h, mode, budget);
       expect(summary.frames).toBe(FRAMES);
       if (mode !== 'static' && budget === 300) {
-        // Packs: a pack (the instance buffers written) on most frames of the sweep, since the drawn leaves change while the bent bounds refresh.
-        // G6i made each pack cheap; it did not reduce their number. The original bound was 80 (not met: 691 measured); set to the measured value with margin.
-        expect(summary.packFrames).toBeLessThanOrEqual(720);
-        // Per frame: the median and the 95th percentile of the whole frame. Measured on the development machine, not a hardware target.
-        // The median target was 2 ms: missed (7.3 ms before the memoised pack, 2.2 to 2.3 ms with it), so the bound is 2.5 ms, with margin.
+        // Targets from the G6h brief: at most 80 packs of the frames, median under 2 ms, 95th percentile under 8 ms. They are not met after G6i
+        // (691 packs; median 2.2 ms isolated and about 4 ms in the full suite; p95 7 ms isolated, 8 to 13 ms in the suite), so these cases fail on purpose.
+        // Do not loosen them: they are the measure for the unit that reduces the drawn-set churn.
+        expect(summary.packFrames).toBeLessThanOrEqual(80);
         const total = summary.ms['total']!;
-        expect(total.median).toBeLessThan(2.5);
-        // The 95th percentile target was 8 ms: met in isolation (7.1 to 7.2 ms) but 8.0 ms in a full-suite run, where the bench shares the browser
-        // with other specs. The bound is moved to 10 ms with margin for such runs.
-        expect(total.p95).toBeLessThan(10);
+        expect(total.median).toBeLessThan(2);
+        expect(total.p95).toBeLessThan(8);
       }
     }, 120_000);
   }

@@ -42,10 +42,10 @@ This plan covers separating the capsule character experience from the mixed-purp
 
 | Phase                  | State       |
 | ---------------------- | ----------- |
-| studio-shell           | in_progress |
-| family-contributions   | in_progress |
-| verification-workflow  | planned     |
-| legacy-lab-separation  | planned     |
+| studio-shell           | done        |
+| family-contributions   | done        |
+| verification-workflow  | done        |
+| legacy-lab-separation  | done        |
 | hair-generation-coverage | planned   |
 | hair-motion-and-helmet | planned     |
 
@@ -54,7 +54,7 @@ This plan covers separating the capsule character experience from the mixed-purp
 
 ## Delivery progress
 
-The first delivery is an app-local shell and human/cat selection path. The initial route, family contributions, presets, expressions, motions and appearance/gear controls are scaffolded; runtime validation remains open. Preserve the existing staged workspace changes. Broader themed character packs and promotion of the contribution contract into a public engine entry point require later evidence and scope review.
+The shell and app-local human/cat contributions are in place. The studio hosts all capsule suites with recording, thumbnails and review sheets; the three newest suites ran with passing automated checks. Human visual verdicts for the generated media remain pending review. Capsule actors, test suites, adapters and focus framing now belong to Character Studio. `/characters-lab` keeps only the face-rig and general humanoid demonstrations. Next, begin deterministic close-up coverage for procedural hair. Broader themed character packs and promotion of the contribution contract into a public engine entry point require later evidence and scope review.
 
 Scope history in the Engineering Record is append-only. Confirm a specific baseline only after
 explicit developer confirmation; document review and checked boxes do not imply confirmation.

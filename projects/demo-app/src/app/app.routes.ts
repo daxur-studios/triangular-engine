@@ -432,16 +432,17 @@ export const routes: Routes = [
       ),
   },
   {
-    path: 'soft-bend-constraint',
+    path: 'soft-body-lab',
     canActivate: [
       () =>
         import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
           JoltPhysicsService.load().then(() => true),
         ),
     ],
-    loadComponent: () => import('./pages/soft-bend-constraint/soft-bend-constraint-page.component').then(
-      (m) => m.SoftBendConstraintPageComponent,
-    ),
+    loadComponent: () =>
+      import('./pages/soft-body-lab/soft-body-lab-page.component').then(
+        ({ SoftBodyLabPageComponent }) => SoftBodyLabPageComponent,
+      ),
   },
   {
     path: 'destruction-poc',
@@ -454,32 +455,6 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./pages/destruction-poc/destruction-poc-page.component').then(
         ({ DestructionPocPageComponent }) => DestructionPocPageComponent,
-      ),
-  },
-  {
-    path: 'soft-body-poc',
-    canActivate: [
-      () =>
-        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
-          JoltPhysicsService.load().then(() => true),
-        ),
-    ],
-    loadComponent: () =>
-      import('./pages/soft-body-poc/soft-body-poc-page.component').then(
-        ({ SoftBodyPocPageComponent }) => SoftBodyPocPageComponent,
-      ),
-  },
-  {
-    path: 'soft-body-tear-lab',
-    canActivate: [
-      () =>
-        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
-          JoltPhysicsService.load().then(() => true),
-        ),
-    ],
-    loadComponent: () =>
-      import('./pages/soft-body-tear-lab/soft-body-tear-lab-page.component').then(
-        ({ SoftBodyTearLabPageComponent }) => SoftBodyTearLabPageComponent,
       ),
   },
   {

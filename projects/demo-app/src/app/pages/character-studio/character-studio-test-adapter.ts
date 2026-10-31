@@ -10,18 +10,18 @@ import {
   type TestScenario,
   type TestSetting,
 } from 'triangular-engine/testing';
-import type { CharactersLabTestSettings } from './characters-lab-tests';
-import type { ResolvedFocusFraming } from './characters-lab-focus';
+import type { CharacterStudioTestSettings } from './character-studio-tests';
+import type { ResolvedFocusFraming } from './character-studio-focus';
 
 /**
  * Host interface providing the testing harness direct control and inspection
- * of the Characters Lab page.
+ * of the Character Studio page.
  */
-export interface CharactersLabTestHost {
-  snapshot(): CharactersLabTestSnapshot;
-  restore(snapshot: CharactersLabTestSnapshot): void;
-  read(): CharactersLabTestSettings;
-  apply(settings: CharactersLabTestSettings): void;
+export interface CharacterStudioTestHost {
+  snapshot(): CharacterStudioTestSnapshot;
+  restore(snapshot: CharacterStudioTestSnapshot): void;
+  read(): CharacterStudioTestSettings;
+  apply(settings: CharacterStudioTestSettings): void;
   renderedFrames(): number;
   errors(): string;
   resetErrors(): void;
@@ -32,19 +32,19 @@ export interface CharactersLabTestHost {
   setCameraOrbit(azimuthRadians: number, elevationRadians: number): void;
   recording(): TestRecordingCapture;
   environment(): Readonly<Record<string, TestSetting>>;
-  thumbnail?(settings: CharactersLabTestSettings): Promise<Blob | undefined>;
-  resolveFocusFraming?(settings: CharactersLabTestSettings): ResolvedFocusFraming | undefined;
+  thumbnail?(settings: CharacterStudioTestSettings): Promise<Blob | undefined>;
+  resolveFocusFraming?(settings: CharacterStudioTestSettings): ResolvedFocusFraming | undefined;
 }
 
-export interface CharactersLabTestSnapshot {
-  readonly settings: CharactersLabTestSettings;
-  readonly viewMode: 'capsule-doodle' | 'capsule-cats' | 'face-studio' | 'full-body';
-  readonly capsuleLayoutMode: 'hero' | 'lineup';
-  readonly capsuleCatLayoutMode: 'hero' | 'lineup';
+export interface CharacterStudioTestSnapshot {
+  readonly settings: CharacterStudioTestSettings;
   readonly cameraPosition: readonly [number, number, number];
   readonly cameraTarget: readonly [number, number, number];
   readonly humanActorYaw: number;
   readonly catActorYaw: number;
+  /** Optional studio-only presentation state captured by another host using this adapter. */
+  readonly studioView?: string;
+  readonly autoRotate?: boolean;
 }
 
 const RECORDING_WIDTH = 960;
@@ -62,8 +62,8 @@ const SETTLE_FRAMES = 3;
 const TIMER_STEP_MS = 0.1;
 
 export function settingsMismatches(
-  actual: CharactersLabTestSettings,
-  expected: CharactersLabTestSettings,
+  actual: CharacterStudioTestSettings,
+  expected: CharacterStudioTestSettings,
 ): string[] {
   const out: string[] = [];
   if (actual.characterType !== expected.characterType) {
@@ -88,13 +88,13 @@ export function settingsMismatches(
 }
 
 /**
- * Create an aspect-preserving, bounded recording of the Characters Lab canvas.
+ * Create an aspect-preserving, bounded recording of the Character Studio canvas.
  *
  * PURPOSE: Supplies the opt-in test runner with a stable-size recording stream for either capsule character.
  * VALUE: Saved diagnostic clips remain small and do not stretch the source canvas.
  */
-export function createCharactersLabRecordingCapture(source: HTMLCanvasElement): TestRecordingCapture {
-  if (!source.width || !source.height) throw new Error('The Characters Lab canvas has no rendered frames');
+export function createCharacterStudioRecordingCapture(source: HTMLCanvasElement): TestRecordingCapture {
+  if (!source.width || !source.height) throw new Error('The Character Studio canvas has no rendered frames');
   const scaled = document.createElement('canvas');
   scaled.width = RECORDING_WIDTH;
   scaled.height = RECORDING_HEIGHT;
@@ -153,14 +153,14 @@ export function createCharactersLabRecordingCapture(source: HTMLCanvasElement): 
 }
 
 /**
- * Creates the TestRunAdapter connecting triangular-engine/testing runner to Characters Lab.
+ * Creates the TestRunAdapter connecting triangular-engine/testing runner to Character Studio.
  */
-export function createCharactersLabTestAdapter(
-  host: CharactersLabTestHost,
-): TestRunAdapter<CharactersLabTestSettings, CharactersLabTestSnapshot> {
+export function createCharacterStudioTestAdapter(
+  host: CharacterStudioTestHost,
+): TestRunAdapter<CharacterStudioTestSettings, CharacterStudioTestSnapshot> {
   async function waitSettled(
     context: TestContext,
-    scenario: TestScenario<CharactersLabTestSettings>,
+    scenario: TestScenario<CharacterStudioTestSettings>,
   ): Promise<void> {
     const startFrames = host.renderedFrames();
     while (host.renderedFrames() - startFrames < SETTLE_FRAMES) {
@@ -170,7 +170,7 @@ export function createCharactersLabTestAdapter(
   }
 
   async function runTurntable(
-    scenario: TestScenario<CharactersLabTestSettings>,
+    scenario: TestScenario<CharacterStudioTestSettings>,
     context: TestContext,
   ): Promise<number> {
     const durationMs = modeActionMs(scenario, context.mode);
@@ -192,7 +192,7 @@ export function createCharactersLabTestAdapter(
   }
 
   async function runCameraOrbit(
-    scenario: TestScenario<CharactersLabTestSettings>,
+    scenario: TestScenario<CharacterStudioTestSettings>,
     context: TestContext,
   ): Promise<CameraOrbitResult> {
     const durationMs = modeActionMs(scenario, context.mode);

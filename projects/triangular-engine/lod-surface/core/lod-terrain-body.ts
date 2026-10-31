@@ -119,6 +119,8 @@ export class LodTerrainBody {
   private sun: Vec3 = [0.4, 0.8, 0.45];
   private morphSource: LodMorphSettings | MorphUniformsLike | undefined;
   private morphCulling: LodMorphCulling = 'off';
+  /** The culling mode the consumer last set with {@link setMorphCulling}; {@link setMorphMetric} `(false)` restores it. */
+  private savedMorphCulling: LodMorphCulling = 'off';
   private geometryHook: NodeGeometryHook | undefined;
   private readonly unbent: Vec3 = [0, 0, 0];
   private stretchOn = false;
@@ -257,16 +259,31 @@ export class LodTerrainBody {
     if (this.settings.morph && this.settings.domain.kind === 'sphere') this.surface.setMorph(source);
   }
 
-  /** How frustum culling is treated above morph 0 (see {@link LodMorphCulling}). Default `'off'`. */
+  /**
+   * How frustum culling is treated above morph 0 (see {@link LodMorphCulling}). Default `'off'`. While {@link setMorphMetric} is on it
+   * has no effect: the culling is `'bent-bounds'`. The requested mode is still remembered, and turning the metric off with
+   * `setMorphMetric(false)` restores it.
+   */
   setMorphCulling(mode: LodMorphCulling): void {
-    this.morphCulling = mode;
+    this.savedMorphCulling = mode;
+    if (!this.stretchOn) this.morphCulling = mode;
   }
 
   /**
    * Installs the selector's {@link NodeGeometryHook} (the bent bounds of G6c). Kept across {@link configure}, which remakes the selector.
    * Together with {@link setMorphCulling} `'bent-bounds'` the selector then works in the bent frame.
+   *
+   * The hook and the stretch metric are exclusive. While {@link setMorphMetric} is on the metric owns the selector's hook, so a
+   * defined hook throws an `Error`; `setGeometryHook(undefined)` is allowed then and does nothing. Remove a hook before turning the
+   * metric on.
+   *
+   * @throws if {@link setMorphMetric} is on and `hook` is defined.
    */
   setGeometryHook(hook: NodeGeometryHook | undefined): void {
+    if (this.stretchOn) {
+      if (hook) throw new Error('setGeometryHook cannot be used while setMorphMetric(true) is on: the metric owns the geometry hook');
+      return;
+    }
     this.geometryHook = hook;
     this.selector.setGeometryHook(hook);
   }
@@ -316,11 +333,21 @@ export class LodTerrainBody {
    * Preview (G6e, sphere only, needs the morph setting): selects above morph 0 in the bent frame, with a {@link StretchMetric} on each
    * selector this body makes. Above morph 0 the selector's camera is the metric's bent camera (`selectionPoint`) for the camera's unbent
    * direction and altitude, and the frustum is the camera's own. The morph is read from the source given to {@link setMorph} each frame.
-   * It sets the culling to `'bent-bounds'`, and while it is on {@link setMorphCulling} has no effect. Kept across {@link configure}. Off by default.
+   * It sets the culling to `'bent-bounds'`, and while it is on {@link setMorphCulling} has no effect (the mode is remembered). Turning it
+   * off (`setMorphMetric(false)`) restores the remembered mode, which is `'off'` unless {@link setMorphCulling} was called.
+   *
+   * While it is on the metric owns the selector's geometry hook. Turning it on throws an `Error` when a hook is installed: remove the
+   * hook first with `setGeometryHook(undefined)`. While it is on, {@link setGeometryHook} throws for a defined hook. Kept across
+   * {@link configure}. Off by default.
+   *
+   * @throws if `on` is true and a geometry hook is installed.
    */
   setMorphMetric(on: boolean): void {
+    if (on && this.geometryHook) {
+      throw new Error('setMorphMetric(true) cannot be used while a geometry hook is installed: remove it first with setGeometryHook(undefined)');
+    }
     this.stretchOn = on;
-    this.morphCulling = on ? 'bent-bounds' : 'off';
+    this.morphCulling = on ? 'bent-bounds' : this.savedMorphCulling;
     this.syncStretch();
   }
 

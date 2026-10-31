@@ -25,6 +25,9 @@ historical files. The format and visualization pilot is tracked in
 - Do not delete plans or Engineering Records when work is completed, abandoned, or superseded.
   Keep their numbered identity, content, reciprocal links and final outcome. Record a replacement
   explicitly and link it in both directions. Filtering history out of an active view must not delete it.
+  To reduce working-tree clutter while retaining history and links, archive completed or superseded pairs
+  with `triangular docs archive <path>` (replaces the pair with lightweight stubs preserving the git
+  commit and marks index status `archived`; restore at any time with `triangular docs unarchive <path>`).
 - Preserve completed/replaced plans as history. Update current plans as work proceeds, but record
   material changes to scope and decisions in the Engineering Record rather than silently rewriting
   what was previously intended or accepted.

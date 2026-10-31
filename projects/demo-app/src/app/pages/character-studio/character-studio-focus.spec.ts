@@ -1,11 +1,11 @@
 import { CapsuleCatActor, CapsuleCharacterActor } from 'triangular-engine/procedural';
 import {
   fitCameraToFocusTarget,
-  resolveCharactersLabFocusTarget,
+  resolveCharacterStudioFocusTarget,
   type VisualFocusTargetId,
-} from './characters-lab-focus';
+} from './character-studio-focus';
 
-describe('characters-lab-focus', () => {
+describe('character-studio-focus', () => {
   it('resolves composite human-face bounds including synthetic shader mouth and fits camera without clipping', () => {
     const human = new CapsuleCharacterActor({
       dna: {
@@ -18,7 +18,7 @@ describe('characters-lab-focus', () => {
     human.facialController.setExpression('surprised', 1, 0);
     human.update(0.25);
 
-    const target = resolveCharactersLabFocusTarget('human-face', { humanActor: human });
+    const target = resolveCharacterStudioFocusTarget('human-face', { humanActor: human });
     expect(target.boundsKind).toBe('composite');
     expect(target.subBounds.shaderMouth).toBeDefined();
     expect(target.subBounds.sceneGeometry).toBeDefined();
@@ -45,7 +45,7 @@ describe('characters-lab-focus', () => {
     cat.facialController.setExpression('happy', 1, 0);
     cat.update(0.25);
 
-    const target = resolveCharactersLabFocusTarget('cat-face', { catActor: cat });
+    const target = resolveCharacterStudioFocusTarget('cat-face', { catActor: cat });
     expect(target.forwardNormal.x).toBeLessThan(-0.15);
 
     const fit = fitCameraToFocusTarget(target, { fovDegrees: 42, aspect: 16 / 9 });
@@ -77,7 +77,7 @@ describe('characters-lab-focus', () => {
     ];
 
     for (const id of targetIds) {
-      const target = resolveCharactersLabFocusTarget(id, { humanActor: human, catActor: cat });
+      const target = resolveCharacterStudioFocusTarget(id, { humanActor: human, catActor: cat });
       const fit = fitCameraToFocusTarget(target, { fovDegrees: 42, aspect: 16 / 9 });
       expect(fit.inFrame).withContext(id).toBeTrue();
       expect(fit.projectedRect[2]).withContext(id).toBeGreaterThan(0.05);

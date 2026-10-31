@@ -80,6 +80,7 @@
 .top-actions { justify-self: end; gap: 0.55rem; }
 button, select { font: inherit; }
 button { color: inherit; cursor: pointer; }
+button:disabled, select:disabled { cursor: not-allowed; opacity: 0.55; }
 .quiet-button,
 .primary-button,
 .rotate-toggle {
@@ -219,7 +220,7 @@ button { color: inherit; cursor: pointer; }
   content: "";
   pointer-events: none;
 }
-scene { position: absolute; z-index: 0; inset: 0; display: block; width: 100%; height: 100%; }
+scene { position: absolute; z-index: 0; inset: 0; display: flex; width: 100%; height: 100%; }
 .viewport-topline,
 .viewport-bottomline,
 .viewport-side-label { position: absolute; z-index: 2; }
@@ -263,6 +264,14 @@ scene { position: absolute; z-index: 0; inset: 0; display: block; width: 100%; h
 .motion-button:hover { border-color: #626773; color: #fff; }
 .motion-button.active { border-color: #786044; background: rgba(164, 111, 71, 0.14); color: #e8bd94; }
 .motion-symbol { width: 15px; color: #c89970; text-align: center; }
+.verification-details { margin: 0.8rem 0; border: 1px solid #30343e; border-radius: 7px; background: #151820; }
+.verification-details > summary { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.7rem; color: #d8d5d0; font-size: 0.68rem; font-weight: 650; cursor: pointer; list-style: none; }
+.verification-details > summary::-webkit-details-marker { display: none; }
+.verification-details > summary::after { content: '+'; color: #c89970; font-size: 1rem; }
+.verification-details[open] > summary::after { content: '−'; }
+.verification-details > summary small { overflow: hidden; color: #858b97; font-size: 0.56rem; font-weight: 450; text-overflow: ellipsis; white-space: nowrap; }
+.verification-panel { max-width: 100%; padding: 0 0.6rem 0.65rem; overflow-x: auto; }
+.verification-panel tri-test-runner { display: block; min-width: 250px; }
 .inspector-footer { display: flex; gap: 0.55rem; margin-top: 0.35rem; padding: 0.68rem; border: 1px solid #30333d; border-radius: 7px; background: #171a22; color: #838894; font-size: 0.59rem; line-height: 1.5; }
 .inspector-footer span:last-child { flex: 1; }
 .footer-sparkle { color: #d4a070; font-size: 0.75rem; }

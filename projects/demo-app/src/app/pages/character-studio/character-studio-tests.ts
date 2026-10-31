@@ -6,14 +6,16 @@ import type {
   CapsuleLocomotionMode,
   ExtendedEmotionName,
 } from 'triangular-engine/characters';
-import type { CameraFramingPreset, CapsuleLayoutMode } from './characters-lab-page.component';
-import type { VisualFocusTargetId } from './characters-lab-focus';
+import type { VisualFocusTargetId } from './character-studio-focus';
+
+export type CameraFramingPreset = 'front' | 'face-close-up' | 'head-close-up' | 'three-quarter' | 'profile' | 'full-shot';
+export type CapsuleLayoutMode = 'hero' | 'lineup';
 
 /**
- * Settings configuration for a Characters Lab scenario.
+ * Settings configuration for a capsule character verification scenario.
  * Encapsulates character selection, facial emotion, locomotion gait, camera framing, and speech.
  */
-export interface CharactersLabTestSettings {
+export interface CharacterStudioTestSettings {
   readonly characterType: 'cat' | 'human';
   readonly presetId: string;
   readonly emotion: ExtendedEmotionName;
@@ -31,7 +33,7 @@ export interface CharactersLabTestSettings {
   readonly motion?: 'turntable' | 'camera-orbit' | 'still';
 }
 
-export const DEFAULT_CAT_TEST_SETTINGS: CharactersLabTestSettings = {
+export const DEFAULT_CAT_TEST_SETTINGS: CharacterStudioTestSettings = {
   characterType: 'cat',
   presetId: 'space-cat-goofy',
   emotion: 'happy',
@@ -44,7 +46,7 @@ export const DEFAULT_CAT_TEST_SETTINGS: CharactersLabTestSettings = {
   motion: 'still',
 };
 
-export const DEFAULT_HUMAN_TEST_SETTINGS: CharactersLabTestSettings = {
+export const DEFAULT_HUMAN_TEST_SETTINGS: CharacterStudioTestSettings = {
   characterType: 'human',
   presetId: 'wacky-helmet-waver',
   emotion: 'happy',
@@ -59,11 +61,11 @@ export const DEFAULT_HUMAN_TEST_SETTINGS: CharactersLabTestSettings = {
 function scenario(
   id: string,
   label: string,
-  change: Partial<CharactersLabTestSettings>,
-  base: CharactersLabTestSettings = DEFAULT_CAT_TEST_SETTINGS,
+  change: Partial<CharacterStudioTestSettings>,
+  base: CharacterStudioTestSettings = DEFAULT_CAT_TEST_SETTINGS,
   durationMs = 3500,
   quickMs = 1500,
-): TestScenario<CharactersLabTestSettings> {
+): TestScenario<CharacterStudioTestSettings> {
   return {
     id,
     label,
@@ -79,7 +81,7 @@ function scenario(
  * Exercises airplane ears, feline vampire fangs, pupil scaling, drooping sadness,
  * and asymmetric skepticism quirks.
  */
-export const CAT_EMOTIONS_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
+export const CAT_EMOTIONS_SUITE_V1: TestSuite<CharacterStudioTestSettings> = {
   id: 'cat-emotions',
   version: 1,
   title: 'Capsule Cat Emotional Expressions (8 Emotions)',
@@ -134,7 +136,7 @@ export const CAT_EMOTIONS_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
  * Suite 2: Cat Concept Sheet Presets & Locomotion Gaits
  * Validates all 7 concept sheet cats with their spacesuits, dorsal packs, and gaits.
  */
-export const CAT_LINEUP_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
+export const CAT_LINEUP_SUITE_V1: TestSuite<CharacterStudioTestSettings> = {
   id: 'cat-lineup',
   version: 1,
   title: 'Capsule Cat Concept Sheet Presets & Gaits',
@@ -199,7 +201,7 @@ export const CAT_LINEUP_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
  * Suite 3: Capsule Cat Speech Articulation
  * Tests cat jaw movement, viseme blendshapes, and audio synthesis.
  */
-export const CAT_SPEECH_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
+export const CAT_SPEECH_SUITE_V1: TestSuite<CharacterStudioTestSettings> = {
   id: 'cat-speech',
   version: 1,
   title: 'Capsule Cat Speech & Articulation',
@@ -242,7 +244,7 @@ export const CAT_SPEECH_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
  * Suite 4: Humanoid Reference Baselines
  * Side-by-side comparison with the humanoid Capsule Doodle characters.
  */
-export const HUMANOID_BASELINES_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
+export const HUMANOID_BASELINES_SUITE_V1: TestSuite<CharacterStudioTestSettings> = {
   id: 'human-baselines',
   version: 1,
   title: 'Humanoid Capsule Doodle Baselines',
@@ -280,7 +282,7 @@ export const HUMANOID_BASELINES_SUITE_V1: TestSuite<CharactersLabTestSettings> =
  * Suite 5: visual evidence for both procedural capsule character families.
  * Each case pairs a moving gait with a camera path that covers a horizontal orbit and a vertical sweep.
  */
-export const CAPSULE_VISUAL_VERIFICATION_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
+export const CAPSULE_VISUAL_VERIFICATION_SUITE_V1: TestSuite<CharacterStudioTestSettings> = {
   id: 'capsule-visual-verification',
   version: 1,
   title: 'Capsule Human and Cat Visual Verification',
@@ -326,7 +328,7 @@ export const CAPSULE_VISUAL_VERIFICATION_SUITE_V1: TestSuite<CharactersLabTestSe
  * High-detail still evidence for facial expressions on both procedural capsule families.
  * The close camera and supersampled case thumbnails make small expression features readable in review sheets.
  */
-export const CAPSULE_FACIAL_EMOTIONS_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
+export const CAPSULE_FACIAL_EMOTIONS_SUITE_V1: TestSuite<CharacterStudioTestSettings> = {
   id: 'capsule-facial-emotions',
   version: 1,
   title: 'Capsule Facial Expression Detail',
@@ -372,7 +374,7 @@ export const CAPSULE_FACIAL_EMOTIONS_SUITE_V1: TestSuite<CharactersLabTestSettin
  * Suite 7: Capsule Human A/B Variant Comparison (Baseline vs. Alt Space Variants & Wonky Eyes)
  * Evaluates new hairstyles, wonky eye/gaze asymmetry, button nose, headgear, and scene-owned focus framing.
  */
-export const CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
+export const CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1: TestSuite<CharacterStudioTestSettings> = {
   id: 'capsule-human-ab-variants',
   version: 1,
   title: 'Capsule Human A/B Comparison: Baseline vs. Alt Space Variants',
@@ -423,10 +425,10 @@ export const CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1: TestSuite<CharactersLabTestSett
 };
 
 /**
- * Full test history for Characters Lab, oldest first.
+ * Full test history for Character Studio, oldest first.
  * The final entry is the default latest test suite.
  */
-export const CHARACTERS_LAB_TEST_HISTORY: readonly TestSuite<CharactersLabTestSettings>[] = [
+export const CHARACTER_STUDIO_TEST_HISTORY: readonly TestSuite<CharacterStudioTestSettings>[] = [
   CAT_LINEUP_SUITE_V1,
   CAT_SPEECH_SUITE_V1,
   HUMANOID_BASELINES_SUITE_V1,

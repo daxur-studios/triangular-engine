@@ -1,23 +1,6 @@
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, inject, isDevMode, signal } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, inject, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { TestRunnerComponent, type TestProgress } from 'triangular-engine/testing';
-import {
-  CHARACTERS_LAB_TEST_HISTORY,
-  type CharactersLabTestSettings,
-} from './characters-lab-tests';
-import {
-  createCharactersLabRecordingCapture,
-  createCharactersLabTestAdapter,
-  type CharactersLabTestHost,
-  type CharactersLabTestSnapshot,
-} from './characters-lab-test-adapter';
-import {
-  fitCameraToFocusTarget,
-  resolveCharactersLabFocusTarget,
-  type ResolvedFocusFraming,
-  type VisualFocusTargetId,
-} from './characters-lab-focus';
 import {
   AnimationMixer,
   Bone,
@@ -27,7 +10,6 @@ import {
   Mesh,
   MeshStandardMaterial,
   Object3D,
-  PerspectiveCamera,
   PlaneGeometry,
   Skeleton,
   SkinnedMesh,
@@ -39,27 +21,11 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
-import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
+import { EngineModule, EngineService } from 'triangular-engine';
 import {
-  ALL_CAPSULE_CHARACTER_PRESETS,
   applyLookAt,
   blendPoses,
-  CAPSULE_ACCESSORY_IDS,
-  CAPSULE_ALT_CHARACTER_PRESETS,
-  CAPSULE_CAT_BODY_PATTERN_IDS,
-  CAPSULE_CAT_PACK_IDS,
-  CAPSULE_CAT_PRESETS,
-  CAPSULE_CHARACTER_PRESETS,
-  CAPSULE_CHEST_PATCH_IDS,
-  CAPSULE_FACIAL_HAIR_IDS,
-  CAPSULE_HAIR_STYLE_IDS,
   createHumanoidRig,
-  DEFAULT_CAPSULE_BOOT_COLORS,
-  DEFAULT_CAPSULE_CAT_ACCENT_COLORS,
-  DEFAULT_CAPSULE_CAT_FUR_COLORS,
-  DEFAULT_CAPSULE_HAIR_COLORS,
-  DEFAULT_CAPSULE_SKIN_TONES,
   EMOTION_NAMES,
   EXTENDED_EMOTION_NAMES,
   FacialAnimationController,
@@ -69,18 +35,6 @@ import {
   SIT_POSE,
   solveTwoBoneIk,
   wordsToVisemes,
-  type CapsuleAccessoryId,
-  type CapsuleCatBodyPatternId,
-  type CapsuleCatCharacterDNA,
-  type CapsuleCatGaitMode,
-  type CapsuleCatMouthPose,
-  type CapsuleCatPackId,
-  type CapsuleCharacterDNA,
-  type CapsuleChestPatchId,
-  type CapsuleFacialHairId,
-  type CapsuleHairStyleId,
-  type CapsuleHandActionMode,
-  type CapsuleLocomotionMode,
   type EmotionName,
   type ExtendedEmotionName,
   type FaceSemanticChannelName,
@@ -102,8 +56,6 @@ import {
   buildProceduralChair,
   buildProceduralDoor,
   buildReferenceFaceMesh,
-  CapsuleCatActor,
-  CapsuleCharacterActor,
   CHARACTER_BODY_STYLES,
   type CharacterBodyStyle,
   type IProceduralChairResult,
@@ -112,7 +64,7 @@ import {
 } from 'triangular-engine/procedural';
 
 export type TargetSourceMode = 'door-knob' | 'chair' | 'manual';
-export type CharactersLabViewMode = 'capsule-doodle' | 'capsule-cats' | 'face-studio' | 'full-body';
+export type CharactersLabViewMode = 'face-studio' | 'full-body';
 export type CameraFramingPreset =
   | 'front'
   | 'face-close-up'
@@ -120,15 +72,9 @@ export type CameraFramingPreset =
   | 'three-quarter'
   | 'profile'
   | 'full-shot';
-export type CapsuleLayoutMode = 'hero' | 'lineup';
-
 const WALK_RADIUS = 1.6;
 const TARGET_SWING_RADIUS = 2.5;
 const TARGET_SWING_HEIGHT = 1.5;
-const HUMAN_VISUAL_ORBIT_RADIUS = 2.7;
-const HUMAN_VISUAL_ORBIT_TARGET_Y = 1.2;
-const CAT_VISUAL_ORBIT_RADIUS = 2.0;
-const CAT_VISUAL_ORBIT_TARGET_Y = 0.36;
 
 function lerpAngle(from: number, to: number, t: number): number {
   let diff = (to - from) % (Math.PI * 2);
@@ -142,65 +88,19 @@ function lerpAngle(from: number, to: number, t: number): number {
 
 @Component({
   selector: 'app-characters-lab-page',
-  imports: [EngineModule, DecimalPipe, TestRunnerComponent],
+  imports: [EngineModule, DecimalPipe],
   templateUrl: './characters-lab-page.component.html',
   styleUrl: './characters-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [EngineService.provide({ showFPS: true }), provideBrowserImageCompression()],
+  providers: [EngineService.provide({ showFPS: true })],
   host: { class: 'flex-page' },
 })
 export class CharactersLabPageComponent {
-  private readonly screenshot = inject(ScreenshotService);
   // View mode
-  protected viewMode: CharactersLabViewMode = 'capsule-doodle';
+  protected viewMode: CharactersLabViewMode = 'face-studio';
   protected cameraFraming: CameraFramingPreset = 'full-shot';
   protected readonly cameraPosition = signal<[number, number, number]>([0.75, 1.38, 2.45]);
   protected readonly cameraTarget = signal<[number, number, number]>([0, 0.92, 0]);
-
-  // Capsule Doodle Studio state
-  protected capsuleLayoutMode: CapsuleLayoutMode = 'hero';
-  protected readonly capsulePresets = CAPSULE_CHARACTER_PRESETS;
-  protected readonly capsuleAltPresets = CAPSULE_ALT_CHARACTER_PRESETS;
-  protected readonly allCapsulePresets = ALL_CAPSULE_CHARACTER_PRESETS;
-  protected readonly capsuleHairStyles = CAPSULE_HAIR_STYLE_IDS;
-  protected readonly capsuleFacialHairStyles = CAPSULE_FACIAL_HAIR_IDS;
-  protected readonly capsuleAccessories = CAPSULE_ACCESSORY_IDS;
-  protected readonly capsuleChestPatches = CAPSULE_CHEST_PATCH_IDS;
-  protected readonly capsuleSkinTones = DEFAULT_CAPSULE_SKIN_TONES;
-  protected readonly capsuleHairColors = DEFAULT_CAPSULE_HAIR_COLORS;
-  protected readonly capsuleBootColors = DEFAULT_CAPSULE_BOOT_COLORS;
-  protected activeFocusTarget?: VisualFocusTargetId;
-  protected latestFocusFraming?: ResolvedFocusFraming;
-
-  protected selectedPresetId = CAPSULE_CHARACTER_PRESETS[5].id!; // Wacky Hair Cosmonaut
-  protected capsuleLocomotion: CapsuleLocomotionMode = 'idle';
-  protected capsuleRightHandAction: CapsuleHandActionMode = 'wave';
-  protected capsuleLeftHandAction: CapsuleHandActionMode = 'none';
-  protected capsuleWavyMouth = false;
-  protected seedCounter = 1;
-
-  private readonly capsuleStudioGroup = new Group();
-  private readonly capsuleHeroGroup = new Group();
-  private readonly capsuleLineupGroup = new Group();
-  protected readonly capsuleHeroActor: CapsuleCharacterActor;
-  private readonly capsuleLineupActors: CapsuleCharacterActor[] = [];
-
-  // Capsule Space Cats Studio state
-  protected capsuleCatLayoutMode: CapsuleLayoutMode = 'hero';
-  protected readonly capsuleCatPresets = CAPSULE_CAT_PRESETS;
-  protected readonly capsuleCatPatterns = CAPSULE_CAT_BODY_PATTERN_IDS;
-  protected readonly capsuleCatPacks = CAPSULE_CAT_PACK_IDS;
-  protected readonly capsuleCatFurColors = DEFAULT_CAPSULE_CAT_FUR_COLORS;
-  protected readonly capsuleCatAccentColors = DEFAULT_CAPSULE_CAT_ACCENT_COLORS;
-  protected selectedCatPresetId = CAPSULE_CAT_PRESETS[0].id!;
-  protected capsuleCatLocomotion: CapsuleCatGaitMode = 'goofy_walk';
-  protected catSeedCounter = 1;
-
-  private readonly capsuleCatStudioGroup = new Group();
-  private readonly capsuleCatHeroGroup = new Group();
-  private readonly capsuleCatLineupGroup = new Group();
-  protected readonly capsuleCatHeroActor: CapsuleCatActor;
-  private readonly capsuleCatLineupActors: CapsuleCatActor[] = [];
 
   // Face Studio model selection & binding
   protected faceModelSource: 'reference-model' | 'procedural' = 'reference-model';
@@ -254,193 +154,8 @@ export class CharactersLabPageComponent {
   protected doorOpen = false;
 
   protected emotion: EmotionName = 'happy';
-  protected speechText = 'Hello there, welcome to the Capsule Doodle space program!';
+  protected speechText = 'Hello there, good to see you!';
   protected readonly emotions = EMOTION_NAMES;
-
-  // triangular-engine/testing runner integration
-  protected readonly testHistory = CHARACTERS_LAB_TEST_HISTORY;
-  protected readonly allowTestAutoStart = isDevMode();
-  protected readonly runnerReady = signal(false);
-  protected readonly runnerBusy = signal(false);
-  protected readonly activeTestScenario = signal<string | null>(null);
-
-  private engineError = '';
-  private totalRenderedFrames = 0;
-  private readonly renderCompleteCallbacks = new Set<(renderedAt: number) => void>();
-
-  private readonly testHost: CharactersLabTestHost = {
-    snapshot: () => ({
-      settings: this.testHost.read(),
-      viewMode: this.viewMode,
-      capsuleLayoutMode: this.capsuleLayoutMode,
-      capsuleCatLayoutMode: this.capsuleCatLayoutMode,
-      cameraPosition: [...this.cameraPosition()] as [number, number, number],
-      cameraTarget: [...this.cameraTarget()] as [number, number, number],
-      humanActorYaw: this.capsuleHeroActor.root.rotation.y,
-      catActorYaw: this.capsuleCatHeroActor.root.rotation.y,
-    }),
-    restore: (snapshot: CharactersLabTestSnapshot) => {
-      this.testHost.apply(snapshot.settings);
-      this.setCapsuleLayoutMode(snapshot.capsuleLayoutMode);
-      this.setCapsuleCatLayoutMode(snapshot.capsuleCatLayoutMode);
-      this.setViewMode(snapshot.viewMode);
-      this.cameraPosition.set([...snapshot.cameraPosition] as [number, number, number]);
-      this.cameraTarget.set([...snapshot.cameraTarget] as [number, number, number]);
-      this.capsuleHeroActor.root.rotation.y = snapshot.humanActorYaw;
-      this.capsuleCatHeroActor.root.rotation.y = snapshot.catActorYaw;
-      this.cdr.markForCheck();
-    },
-    read: () => ({
-      characterType: this.viewMode === 'capsule-cats' ? 'cat' : 'human',
-      presetId: this.viewMode === 'capsule-cats' ? this.selectedCatPresetId : this.selectedPresetId,
-      emotion: this.activeEmotion,
-      gait: this.viewMode === 'capsule-cats' ? this.capsuleCatLocomotion : this.capsuleLocomotion,
-      cameraFraming: this.cameraFraming,
-      ...(this.activeFocusTarget ? { focusTarget: this.activeFocusTarget } : {}),
-      layout: this.viewMode === 'capsule-cats' ? this.capsuleCatLayoutMode : this.capsuleLayoutMode,
-      panicked: this.capsuleCatHeroActor.dna.panicked,
-      tuft: this.capsuleCatHeroActor.dna.tuft,
-      restMouthPose: this.capsuleCatHeroActor.dna.restMouthPose,
-      rightHandAction: this.capsuleRightHandAction,
-      leftHandAction: this.capsuleLeftHandAction,
-    }),
-    apply: (settings) => {
-      if (settings.characterType === 'cat') {
-        if (this.viewMode !== 'capsule-cats') {
-          this.setViewMode('capsule-cats');
-        }
-        this.setCapsuleCatLayoutMode(settings.layout);
-        if (settings.presetId && settings.presetId !== this.selectedCatPresetId) {
-          this.selectCapsuleCatPreset(settings.presetId);
-        }
-        if (settings.gait) {
-          this.setCapsuleCatLocomotion(settings.gait as CapsuleCatGaitMode);
-        }
-        if (settings.panicked !== undefined && settings.panicked !== this.capsuleCatHeroActor.dna.panicked) {
-          this.capsuleCatHeroActor.setDna({ panicked: settings.panicked });
-        }
-        if (settings.tuft !== undefined && settings.tuft !== this.capsuleCatHeroActor.dna.tuft) {
-          this.capsuleCatHeroActor.setDna({ tuft: settings.tuft });
-        }
-        if (settings.restMouthPose) {
-          this.capsuleCatHeroActor.setDna({ restMouthPose: settings.restMouthPose });
-        }
-      } else {
-        if (this.viewMode !== 'capsule-doodle') {
-          this.setViewMode('capsule-doodle');
-        }
-        this.setCapsuleLayoutMode(settings.layout);
-        if (settings.presetId && settings.presetId !== this.selectedPresetId) {
-          this.selectCapsulePreset(settings.presetId);
-        }
-        if (settings.gait) {
-          this.setCapsuleLocomotion(settings.gait as CapsuleLocomotionMode);
-        }
-        if (settings.rightHandAction) {
-          this.setCapsuleRightHand(settings.rightHandAction);
-        }
-        if (settings.leftHandAction) {
-          this.setCapsuleLeftHand(settings.leftHandAction);
-        }
-      }
-      if (settings.emotion) {
-        this.setFaceExpression(settings.emotion);
-      }
-      // Step the facial controller and active actor so expression-driven mouth/brow/ear bounds
-      // are settled before computing camera focus framing.
-      const settledFrame = this.facialController.update(0.35);
-      this.currentFrameState = settledFrame;
-      if (settings.characterType === 'cat') {
-        this.capsuleCatHeroActor.update(0, settledFrame);
-      } else {
-        this.capsuleHeroActor.update(0, settledFrame);
-      }
-
-      if (settings.cameraFraming) {
-        this.setCameraFraming(settings.cameraFraming);
-      }
-      if (settings.focusTarget) {
-        this.applyFocusTargetFraming(settings.focusTarget);
-      }
-      this.cdr.markForCheck();
-    },
-    renderedFrames: () => this.totalRenderedFrames,
-    errors: () => this.engineError,
-    resetErrors: () => {
-      this.engineError = '';
-    },
-    onRenderComplete: (cb) => {
-      this.renderCompleteCallbacks.add(cb);
-      return () => {
-        this.renderCompleteCallbacks.delete(cb);
-      };
-    },
-    speak: (text) => {
-      this.speechText = text;
-      this.speak();
-    },
-    isSpeaking: () => this.speaking,
-    setTurntableAngle: (radians) => {
-      if (this.viewMode === 'capsule-cats') {
-        this.capsuleCatHeroActor.root.rotation.y = radians !== undefined ? radians : -0.28;
-      } else if (this.viewMode === 'capsule-doodle') {
-        this.capsuleHeroActor.root.rotation.y = radians !== undefined ? radians : 0;
-      }
-    },
-    setCameraOrbit: (azimuthRadians, elevationRadians) => {
-      const isCat = this.viewMode === 'capsule-cats';
-      const radius = isCat ? CAT_VISUAL_ORBIT_RADIUS : HUMAN_VISUAL_ORBIT_RADIUS;
-      const targetY = isCat ? CAT_VISUAL_ORBIT_TARGET_Y : HUMAN_VISUAL_ORBIT_TARGET_Y;
-      const horizontalRadius = radius * Math.cos(elevationRadians);
-      const target = [0, targetY, 0] as [number, number, number];
-      this.cameraPosition.set([
-        Math.sin(azimuthRadians) * horizontalRadius,
-        targetY + Math.sin(elevationRadians) * radius,
-        Math.cos(azimuthRadians) * horizontalRadius,
-      ]);
-      this.cameraTarget.set(target);
-    },
-    recording: () => createCharactersLabRecordingCapture(this.engine.canvas),
-    environment: () => ({
-      browser: typeof navigator !== 'undefined' ? navigator.userAgent : 'node',
-      'visual-recording.profile': '960x540@20fps, aspect-preserving, silent, requested 450 kb/s video',
-    }),
-    thumbnail: async (settings) => {
-      const detail =
-        settings.focusTarget !== undefined ||
-        settings.cameraFraming === 'face-close-up' ||
-        settings.cameraFraming === 'head-close-up';
-      return this.screenshot.capture({
-        engine: this.engine,
-        format: 'image/webp',
-        quality: 0.9,
-        ...(detail ? { resolution: { width: 1280, height: 720 }, samples: 4 } : {}),
-        compress: {
-          maxSizeMB: 0.05,
-          maxWidthOrHeight: detail ? 640 : 240,
-          fileType: 'image/webp',
-          quality: detail ? 0.88 : 0.6,
-        },
-      });
-    },
-    resolveFocusFraming: (settings) => {
-      const targetId: VisualFocusTargetId =
-        settings.focusTarget ??
-        (settings.characterType === 'cat'
-          ? 'cat-face'
-          : settings.cameraFraming === 'head-close-up'
-            ? 'human-head-hair'
-            : 'human-face');
-      return this.computeFocusTargetFraming(targetId);
-    },
-  };
-  readonly testAdapter = createCharactersLabTestAdapter(this.testHost);
-
-  protected onTestProgress(progress: TestProgress | null): void {
-    this.runnerBusy.set(progress !== null);
-    this.activeTestScenario.set(progress?.label ?? null);
-    this.cdr.markForCheck();
-  }
 
   private readonly engine = inject(EngineService);
   private readonly rig = createHumanoidRig();
@@ -482,33 +197,6 @@ export class CharactersLabPageComponent {
       new MeshStandardMaterial({ color: '#ff4757', roughness: 0.3, emissive: 0x440000 }),
     );
 
-    // 1. Capsule Doodle Hero Actor & Concept Sheet Lineup
-    this.facialController.setExpression('happy', 1.0, 0);
-    this.capsuleHeroActor = new CapsuleCharacterActor({
-      dna: CAPSULE_CHARACTER_PRESETS[5],
-      facialController: this.facialController,
-    });
-    this.capsuleHeroActor.setHandAction('right', this.capsuleRightHandAction);
-
-    const heroPedestal = this.createPedestalMesh(0.65);
-    this.capsuleHeroGroup.add(this.capsuleHeroActor.root, heroPedestal);
-    this.buildCapsuleLineup();
-    this.capsuleStudioGroup.add(this.capsuleHeroGroup, this.capsuleLineupGroup);
-
-    // Capsule Space Cats Hero & 7-Cat Concept Sheet Lineup
-    this.capsuleCatHeroActor = new CapsuleCatActor({
-      dna: CAPSULE_CAT_PRESETS[0],
-      facialController: this.facialController,
-    });
-    this.capsuleCatHeroActor.setLocomotion('goofy_walk');
-    this.capsuleCatHeroActor.root.rotation.y = -0.28;
-    this.capsuleCatHeroGroup.add(
-      this.capsuleCatHeroActor.root,
-      this.createPedestalMesh(0.55),
-    );
-    this.buildCapsuleCatLineup();
-    this.capsuleCatStudioGroup.add(this.capsuleCatHeroGroup, this.capsuleCatLineupGroup);
-
     // 2. Procedural chair at X = 1.5, facing -X towards room center
     this.chair = buildProceduralChair({
       style: 'dining',
@@ -547,12 +235,11 @@ export class CharactersLabPageComponent {
     );
     this.gazeMarker.position.copy(this.gazeTargetPos);
 
+    this.facialController.setExpression('happy', 1, 0);
     this.rebuildBodyMesh();
 
     this.character.add(this.visualization.group);
     this.engine.scene.add(
-      this.capsuleStudioGroup,
-      this.capsuleCatStudioGroup,
       this.character,
       this.referenceFace.root,
       this.referenceModelGroup,
@@ -567,316 +254,11 @@ export class CharactersLabPageComponent {
     this.loadReferenceModel();
 
     const destroyRef = inject(DestroyRef);
-    this.engine.renderComplete$
-      .pipe(takeUntilDestroyed(destroyRef))
-      .subscribe(() => this.updateTestRunnerReadiness());
-    this.engine.error$
-      .pipe(takeUntilDestroyed(destroyRef))
-      .subscribe((event) => {
-        this.engineError ||= `${event.phase}: ${String(event.error)}`;
-      });
     this.engine.tick$
       .pipe(takeUntilDestroyed(destroyRef))
       .subscribe((deltaSeconds) => this.update(deltaSeconds));
     destroyRef.onDestroy(() => this.dispose());
   }
-
-  /** Autostart only after the scene has rendered at its measured viewport size. */
-  private updateTestRunnerReadiness(): void {
-    if (this.runnerReady()) return;
-    const canvas = this.engine.canvas;
-    if (!canvas.isConnected) return;
-
-    const bounds = canvas.getBoundingClientRect();
-    if (bounds.width <= 1 || bounds.height <= 1 ||
-        Math.abs(this.engine.width - bounds.width) > 1 || Math.abs(this.engine.height - bounds.height) > 1) return;
-
-    const camera = this.engine.camera;
-    if (camera instanceof PerspectiveCamera && Math.abs(camera.aspect - bounds.width / bounds.height) > 0.01) return;
-
-    this.runnerReady.set(true);
-    this.cdr.markForCheck();
-  }
-
-  private createPedestalMesh(radius = 0.58): Mesh {
-    const mat = new MeshStandardMaterial({ color: '#243442', roughness: 0.78, metalness: 0.15 });
-    const mesh = new Mesh(new CylinderGeometry(radius, radius * 1.06, 0.06, 32), mat);
-    mesh.position.y = -0.03;
-    mesh.receiveShadow = true;
-    return mesh;
-  }
-
-  private buildCapsuleLineup(): void {
-    const cols = 5;
-    const spacingX = 1.55;
-    const spacingZ = 1.75;
-
-    const lineupConfigs: ReadonlyArray<{
-      loco: CapsuleLocomotionMode;
-      emotion: ExtendedEmotionName;
-      rightHand: CapsuleHandActionMode;
-      wavy?: boolean;
-    }> = [
-      { loco: 'idle', emotion: 'happy', rightHand: 'none' },
-      { loco: 'idle', emotion: 'happy', rightHand: 'none' },
-      { loco: 'idle', emotion: 'happy', rightHand: 'none' },
-      { loco: 'idle', emotion: 'fearful', rightHand: 'none' },
-      { loco: 'idle', emotion: 'skeptical', rightHand: 'wave' },
-      { loco: 'idle', emotion: 'surprised', rightHand: 'wave' },
-      { loco: 'idle', emotion: 'fearful', rightHand: 'point' },
-      { loco: 'run', emotion: 'fearful', rightHand: 'none' },
-      { loco: 'walk', emotion: 'happy', rightHand: 'none' },
-      { loco: 'float', emotion: 'neutral', rightHand: 'none', wavy: true },
-    ];
-
-    CAPSULE_CHARACTER_PRESETS.forEach((preset, idx) => {
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      const x = (col - (cols - 1) * 0.5) * spacingX;
-      const z = (row === 0 ? -0.55 : 0.65) * spacingZ;
-
-      const cfg = lineupConfigs[idx] ?? { loco: 'idle', emotion: 'happy', rightHand: 'none' };
-      const actor = new CapsuleCharacterActor({ dna: preset, autoBlink: true });
-      actor.facialController.setExpression(cfg.emotion, 1.0, 0);
-      actor.setLocomotion(cfg.loco);
-      actor.setHandAction('right', cfg.rightHand);
-      if (cfg.wavy) {
-        actor.setWavyMouthOverride(0.8);
-      }
-
-      const slot = new Group();
-      slot.position.set(x, 0, z);
-      slot.add(actor.root, this.createPedestalMesh(0.52));
-      this.capsuleLineupGroup.add(slot);
-      this.capsuleLineupActors.push(actor);
-    });
-  }
-
-  private buildCapsuleCatLineup(): void {
-    const spacingX = 1.55;
-    const emotions: readonly ExtendedEmotionName[] = [
-      'happy',
-      'happy',
-      'happy',
-      'happy',
-      'happy',
-      'fearful',
-      'neutral',
-    ];
-
-    CAPSULE_CAT_PRESETS.forEach((preset, idx) => {
-      // 4 in the back row (idx 0..3), 3 centered in the front row (idx 4..6)
-      const isBackRow = idx < 4;
-      const col = isBackRow ? idx : idx - 4;
-      const x = isBackRow
-        ? (col - 1.5) * spacingX
-        : (col - 1.0) * spacingX;
-      const z = isBackRow ? -0.65 : 0.65;
-
-      const actor = new CapsuleCatActor({ dna: preset, autoBlink: true });
-      actor.root.rotation.y = -0.38;
-      actor.facialController.setExpression(emotions[idx] ?? 'happy', 1, 0);
-      actor.setLocomotion(preset.gait, 0.9 + idx * 0.02);
-      actor.update(idx * 0.19);
-
-      const slot = new Group();
-      slot.position.set(x, 0, z);
-      slot.add(actor.root, this.createPedestalMesh(0.52));
-      this.capsuleCatLineupGroup.add(slot);
-      this.capsuleCatLineupActors.push(actor);
-    });
-  }
-
-  // ===========================================================================
-  // CAPSULE DOODLE STUDIO CONTROLS
-  // ===========================================================================
-
-  protected setCapsuleLayoutMode(mode: CapsuleLayoutMode): void {
-    this.capsuleLayoutMode = mode;
-    this.applyCapsuleLayoutVisibility();
-    if (mode === 'lineup') {
-      this.cameraPosition.set([0, 2.55, 5.4]);
-      this.cameraTarget.set([0, 0.95, 0.1]);
-    } else {
-      this.setCameraFraming(this.cameraFraming);
-    }
-  }
-
-  private applyCapsuleLayoutVisibility(): void {
-    const isCapsule = this.viewMode === 'capsule-doodle';
-    this.capsuleStudioGroup.visible = isCapsule;
-    this.capsuleHeroGroup.visible = isCapsule && this.capsuleLayoutMode === 'hero';
-    this.capsuleLineupGroup.visible = isCapsule && this.capsuleLayoutMode === 'lineup';
-
-    const isCats = this.viewMode === 'capsule-cats';
-    this.capsuleCatStudioGroup.visible = isCats;
-    this.capsuleCatHeroGroup.visible = isCats && this.capsuleCatLayoutMode === 'hero';
-    this.capsuleCatLineupGroup.visible = isCats && this.capsuleCatLayoutMode === 'lineup';
-  }
-
-  protected selectCapsulePreset(presetId: string): void {
-    const found = ALL_CAPSULE_CHARACTER_PRESETS.find((p) => p.id === presetId);
-    if (!found) return;
-    this.selectedPresetId = presetId;
-    this.capsuleHeroActor.setDna(found);
-    if (this.activeFocusTarget) {
-      this.applyFocusTargetFraming(this.activeFocusTarget);
-    }
-  }
-
-  protected randomizeCapsuleDna(): void {
-    this.seedCounter += 1;
-    this.selectedPresetId = 'custom';
-    this.capsuleHeroActor.setSeed(`cosmonaut-${this.seedCounter}`);
-    if (this.activeFocusTarget) {
-      this.applyFocusTargetFraming(this.activeFocusTarget);
-    }
-  }
-
-  protected updateCapsuleDna(partial: Partial<CapsuleCharacterDNA>): void {
-    this.selectedPresetId = 'custom';
-    this.capsuleHeroActor.setDna(partial);
-    if (this.activeFocusTarget) {
-      this.applyFocusTargetFraming(this.activeFocusTarget);
-    }
-  }
-
-  protected onCapsuleNumericDnaChange(
-    field:
-      | 'eyeSizeAsymmetry'
-      | 'eyeHeightAsymmetry'
-      | 'gazeAsymmetryYaw'
-      | 'gazeAsymmetryPitch'
-      | 'noseScale'
-      | 'eyeScale'
-      | 'eyeSpacing',
-    rawValue: string | number,
-  ): void {
-    const val = typeof rawValue === 'string' ? parseFloat(rawValue) : rawValue;
-    if (Number.isNaN(val)) return;
-    this.updateCapsuleDna({ [field]: val });
-  }
-
-  protected setCapsuleHairStyle(hairStyleId: CapsuleHairStyleId): void {
-    this.updateCapsuleDna({ hairStyleId });
-  }
-
-  protected setCapsuleFacialHair(facialHairId: CapsuleFacialHairId): void {
-    this.updateCapsuleDna({ facialHairId });
-  }
-
-  protected setCapsuleAccessory(accessory: CapsuleAccessoryId): void {
-    this.updateCapsuleDna({ accessory });
-  }
-
-  protected setCapsuleChestPatch(chestPatch: CapsuleChestPatchId): void {
-    this.updateCapsuleDna({ chestPatch });
-  }
-
-  protected setCapsuleLocomotion(mode: CapsuleLocomotionMode): void {
-    this.capsuleLocomotion = mode;
-    this.capsuleHeroActor.setLocomotion(mode);
-  }
-
-  protected setCapsuleRightHand(mode: CapsuleHandActionMode): void {
-    this.capsuleRightHandAction = mode;
-    this.capsuleHeroActor.setHandAction('right', mode);
-  }
-
-  protected setCapsuleLeftHand(mode: CapsuleHandActionMode): void {
-    this.capsuleLeftHandAction = mode;
-    this.capsuleHeroActor.setHandAction('left', mode);
-  }
-
-  protected toggleCapsuleWavyMouth(): void {
-    this.capsuleWavyMouth = !this.capsuleWavyMouth;
-    this.capsuleHeroActor.setWavyMouthOverride(this.capsuleWavyMouth ? 0.85 : undefined);
-  }
-
-  // ===========================================================================
-  // CAPSULE SPACE CATS STUDIO CONTROLS
-  // ===========================================================================
-
-  protected setCapsuleCatLayoutMode(mode: CapsuleLayoutMode): void {
-    this.capsuleCatLayoutMode = mode;
-    this.applyCapsuleLayoutVisibility();
-    if (mode === 'lineup') {
-      this.cameraPosition.set([0, 2.35, 4.6]);
-      this.cameraTarget.set([0, 0.48, 0.0]);
-    } else {
-      this.setCameraFraming(this.cameraFraming);
-    }
-  }
-
-  protected selectCapsuleCatPreset(presetId: string): void {
-    const found = CAPSULE_CAT_PRESETS.find((preset) => preset.id === presetId);
-    if (!found) return;
-    this.selectedCatPresetId = presetId;
-    this.capsuleCatHeroActor.setDna(found);
-    this.capsuleCatLocomotion = this.capsuleCatHeroActor.locomotion;
-  }
-
-  protected randomizeCapsuleCatDna(): void {
-    this.catSeedCounter += 1;
-    this.selectedCatPresetId = 'custom';
-    this.capsuleCatHeroActor.setSeed(`space-cat-${this.catSeedCounter}`);
-    this.capsuleCatLocomotion = this.capsuleCatHeroActor.locomotion;
-  }
-
-  protected updateCapsuleCatDna(partial: Partial<CapsuleCatCharacterDNA>): void {
-    this.selectedCatPresetId = 'custom';
-    this.capsuleCatHeroActor.setDna(partial);
-    this.capsuleCatLocomotion = this.capsuleCatHeroActor.locomotion;
-  }
-
-  protected setCapsuleCatLocomotion(mode: CapsuleCatGaitMode): void {
-    this.capsuleCatLocomotion = mode;
-    this.capsuleCatHeroActor.setLocomotion(mode);
-  }
-
-  protected setCapsuleCatPattern(pattern: CapsuleCatBodyPatternId): void {
-    this.updateCapsuleCatDna({ bodyPattern: pattern });
-  }
-
-  protected setCapsuleCatPack(pack: CapsuleCatPackId): void {
-    this.updateCapsuleCatDna({ pack });
-  }
-
-  protected setCapsuleCatMouthPose(restMouthPose: CapsuleCatMouthPose): void {
-    this.updateCapsuleCatDna({ restMouthPose });
-  }
-
-  protected setCapsuleCatFurColor(furColor: string): void {
-    this.updateCapsuleCatDna({ furColor });
-  }
-
-  protected setCapsuleCatAccentColor(furAccentColor: string): void {
-    this.updateCapsuleCatDna({ furAccentColor });
-  }
-
-  protected toggleCapsuleCatHelmet(): void {
-    this.updateCapsuleCatDna({ helmet: !this.capsuleCatHeroActor.dna.helmet });
-  }
-
-  protected toggleCapsuleCatHarness(): void {
-    this.updateCapsuleCatDna({ harness: !this.capsuleCatHeroActor.dna.harness });
-  }
-
-  protected toggleCapsuleCatBooties(): void {
-    this.updateCapsuleCatDna({ suitBooties: !this.capsuleCatHeroActor.dna.suitBooties });
-  }
-
-  protected toggleCapsuleCatTuft(): void {
-    this.updateCapsuleCatDna({ tuft: !this.capsuleCatHeroActor.dna.tuft });
-  }
-
-  protected toggleCapsuleCatPanic(): void {
-    this.updateCapsuleCatDna({ panicked: !this.capsuleCatHeroActor.dna.panicked });
-  }
-
-  // ===========================================================================
-  // VIEW MODE & CAMERA FRAMING CONTROLS
-  // ===========================================================================
 
   protected setViewMode(mode: CharactersLabViewMode): void {
     this.viewMode = mode;
@@ -895,7 +277,7 @@ export class CharactersLabPageComponent {
 
     this.referenceModelGroup.visible = isRef;
     this.referenceFace.root.visible = isProc;
-    this.gazeMarker.visible = isStudio || (this.viewMode === 'capsule-doodle' && this.wanderGaze);
+    this.gazeMarker.visible = isStudio;
   }
 
   private loadReferenceModel(): void {
@@ -969,33 +351,16 @@ export class CharactersLabPageComponent {
   private applyViewMode(mode: CharactersLabViewMode): void {
     const isFaceStudio = mode === 'face-studio';
     const isFullBody = mode === 'full-body';
-    const isCapsule = mode === 'capsule-doodle';
-    const isCats = mode === 'capsule-cats';
 
     this.applyFaceModelVisibility();
-    this.applyCapsuleLayoutVisibility();
 
     this.character.visible = isFullBody;
-    this.ground.visible = isFullBody || isCapsule || isCats;
+    this.ground.visible = isFullBody;
     this.target.visible = isFullBody;
     this.chair.group.visible = isFullBody;
     this.door.group.visible = isFullBody;
 
-    if (isCapsule) {
-      if (this.capsuleLayoutMode === 'lineup') {
-        this.cameraPosition.set([0, 2.55, 5.4]);
-        this.cameraTarget.set([0, 0.95, 0.1]);
-      } else {
-        this.setCameraFraming(this.cameraFraming);
-      }
-    } else if (isCats) {
-      if (this.capsuleCatLayoutMode === 'lineup') {
-        this.cameraPosition.set([0, 2.35, 4.6]);
-        this.cameraTarget.set([0, 0.48, 0.0]);
-      } else {
-        this.setCameraFraming(this.cameraFraming);
-      }
-    } else if (isFaceStudio) {
+    if (isFaceStudio) {
       if (this.cameraFraming === 'full-shot') {
         this.cameraFraming = 'three-quarter';
       }
@@ -1006,73 +371,8 @@ export class CharactersLabPageComponent {
     }
   }
 
-  protected computeFocusTargetFraming(targetId: VisualFocusTargetId): ResolvedFocusFraming {
-    const target = resolveCharactersLabFocusTarget(targetId, {
-      humanActor: this.capsuleHeroActor,
-      catActor: this.capsuleCatHeroActor,
-    });
-    const camera = this.engine?.camera;
-    const fovDegrees = camera && 'fov' in camera && typeof camera.fov === 'number' ? camera.fov : 75;
-    return fitCameraToFocusTarget(target, {
-      fovDegrees,
-      aspect: 16 / 9,
-    });
-  }
-
-  protected applyFocusTargetFraming(targetId: VisualFocusTargetId): ResolvedFocusFraming {
-    this.activeFocusTarget = targetId;
-    const framing = this.computeFocusTargetFraming(targetId);
-    this.latestFocusFraming = framing;
-    this.cameraPosition.set([...framing.cameraPosition]);
-    this.cameraTarget.set([...framing.cameraTarget]);
-    return framing;
-  }
-
   protected setCameraFraming(framing: CameraFramingPreset): void {
     this.cameraFraming = framing;
-    this.activeFocusTarget = undefined;
-    if (this.viewMode === 'capsule-cats') {
-      if (this.capsuleCatLayoutMode === 'lineup') {
-        this.cameraPosition.set([0, 2.35, 4.6]);
-        this.cameraTarget.set([0, 0.48, 0.0]);
-      } else if (framing === 'full-shot') {
-        this.cameraPosition.set([1.25, 0.58, 1.45]);
-        this.cameraTarget.set([0, 0.28, 0.05]);
-      } else if (framing === 'face-close-up' || framing === 'head-close-up') {
-        this.applyFocusTargetFraming('cat-face');
-      } else if (framing === 'front') {
-        this.cameraPosition.set([0, 0.40, 0.92]);
-        this.cameraTarget.set([0, 0.35, 0.30]);
-      } else if (framing === 'three-quarter') {
-        this.cameraPosition.set([0.65, 0.44, 0.92]);
-        this.cameraTarget.set([0, 0.32, 0.18]);
-      } else {
-        this.cameraPosition.set([1.35, 0.48, 0.0]);
-        this.cameraTarget.set([0, 0.44, 0.0]);
-      }
-      return;
-    }
-    if (this.viewMode === 'capsule-doodle') {
-      if (framing === 'full-shot') {
-        this.cameraPosition.set([0.75, 1.38, 2.45]);
-        this.cameraTarget.set([0, 0.92, 0]);
-      } else if (framing === 'face-close-up') {
-        this.applyFocusTargetFraming('human-face');
-      } else if (framing === 'head-close-up') {
-        this.applyFocusTargetFraming('human-head-hair');
-      } else if (framing === 'front') {
-        this.cameraPosition.set([0, 1.42, 1.38]);
-        this.cameraTarget.set([0, 1.36, 0]);
-      } else if (framing === 'three-quarter') {
-        this.cameraPosition.set([0.62, 1.48, 1.32]);
-        this.cameraTarget.set([0, 1.36, 0]);
-      } else {
-        this.cameraPosition.set([1.45, 1.36, 0.15]);
-        this.cameraTarget.set([0, 1.30, 0]);
-      }
-      return;
-    }
-
     if (framing === 'front' || framing === 'face-close-up' || framing === 'head-close-up') {
       this.cameraPosition.set([0, 1.58, 0.46]);
     } else if (framing === 'three-quarter') {
@@ -1212,8 +512,6 @@ export class CharactersLabPageComponent {
 
   protected resetFaceToNeutral(): void {
     this.wanderGaze = false;
-    this.capsuleWavyMouth = false;
-    this.capsuleHeroActor.setWavyMouthOverride(undefined);
     this.applyFaceModelVisibility();
     this.gazeTargetPos.set(0, 1.58, 0.65);
     this.gazeMarker.position.copy(this.gazeTargetPos);
@@ -1375,11 +673,6 @@ export class CharactersLabPageComponent {
 
   private update(deltaSeconds: number): void {
     this.elapsed += deltaSeconds;
-    this.totalRenderedFrames++;
-    const renderedAt = performance.now();
-    for (const cb of this.renderCompleteCallbacks) {
-      cb(renderedAt);
-    }
 
     // 1. Update Facial Controller
     if (this.wanderGaze) {
@@ -1399,31 +692,7 @@ export class CharactersLabPageComponent {
     const frame = this.facialController.update(deltaSeconds);
     this.currentFrameState = frame;
 
-    // 2. Capsule Doodle Studio Update
-    if (this.viewMode === 'capsule-doodle') {
-      if (this.capsuleLayoutMode === 'hero') {
-        this.capsuleHeroActor.update(deltaSeconds, frame);
-      } else {
-        for (const actor of this.capsuleLineupActors) {
-          actor.update(deltaSeconds);
-        }
-      }
-      return;
-    }
-
-    // 2b. Capsule Space Cats Studio Update
-    if (this.viewMode === 'capsule-cats') {
-      if (this.capsuleCatLayoutMode === 'hero') {
-        this.capsuleCatHeroActor.update(deltaSeconds, frame);
-      } else {
-        for (const actor of this.capsuleCatLineupActors) {
-          actor.update(deltaSeconds);
-        }
-      }
-      return;
-    }
-
-    // 3. Apply to active Face model in Face Studio
+    // Apply the facial state to the active Face Studio model.
     if (this.viewMode === 'face-studio') {
       if (this.faceModelSource === 'reference-model' && this.referenceModelBinding) {
         this.referenceModelBinding.applyPose(
@@ -1436,7 +705,7 @@ export class CharactersLabPageComponent {
       return;
     }
 
-    // 4. Full-body scene update
+    // Update the full-body scene.
     if (this.viewMode === 'full-body') {
       const targetDoorAngle = this.doorOpen ? Math.PI / 2 : 0;
       const currentDoorAngle = this.door.getOpenAngle();
@@ -1563,16 +832,6 @@ export class CharactersLabPageComponent {
   private dispose(): void {
     window.speechSynthesis.cancel();
     this.danceMixer?.stopAllAction();
-    this.capsuleHeroActor.dispose();
-    for (const actor of this.capsuleLineupActors) {
-      actor.dispose();
-    }
-    this.capsuleCatHeroActor.dispose();
-    for (const actor of this.capsuleCatLineupActors) {
-      actor.dispose();
-    }
-    this.capsuleStudioGroup.removeFromParent();
-    this.capsuleCatStudioGroup.removeFromParent();
     this.character.removeFromParent();
     this.referenceModelBinding?.dispose();
     this.referenceModelGroup.removeFromParent();

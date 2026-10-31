@@ -4,6 +4,7 @@ import {
   DestroyRef,
   computed,
   inject,
+  isDevMode,
   signal,
 } from '@angular/core';
 import { UpperCasePipe } from '@angular/common';
@@ -15,16 +16,36 @@ import {
   Mesh,
   MeshStandardMaterial,
   PlaneGeometry,
+  PerspectiveCamera,
 } from 'three';
-import { EngineModule, EngineService } from 'triangular-engine';
-import type { ExtendedEmotionName } from 'triangular-engine/characters';
+import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
+import {
+  EXTENDED_EMOTION_NAMES,
+  type ExtendedEmotionName,
+} from 'triangular-engine/characters';
+import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
+import { TestRunnerComponent, type TestProgress } from 'triangular-engine/testing';
+import {
+  createCharacterStudioTestAdapter,
+  createCharacterStudioRecordingCapture,
+  type CharacterStudioTestHost,
+  type CharacterStudioTestSnapshot,
+} from './character-studio-test-adapter';
+import {
+  CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
+  CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1,
+  CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
+  type CharacterStudioTestSettings,
+  type CameraFramingPreset,
+} from './character-studio-tests';
+import type { VisualFocusTargetId } from './character-studio-focus';
 import {
   createCharacterStudioContributions,
   type CharacterStudioContribution,
   type CharacterStudioFamilyId,
 } from './character-studio-contributions';
 
-type CharacterStudioView = 'front' | 'three-quarter' | 'profile' | 'face';
+type CharacterStudioView = 'front' | 'three-quarter' | 'profile' | 'back' | 'face' | 'hair';
 
 interface CharacterStudioViewOption {
   readonly id: CharacterStudioView;
@@ -33,20 +54,26 @@ interface CharacterStudioViewOption {
 
 @Component({
   selector: 'app-character-studio-page',
-  imports: [EngineModule, RouterLink, UpperCasePipe],
+  imports: [EngineModule, RouterLink, UpperCasePipe, TestRunnerComponent],
   templateUrl: './character-studio-page.component.html',
   styleUrl: './character-studio-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [EngineService.provide({ showFPS: false })],
+  providers: [EngineService.provide({ showFPS: false }), provideBrowserImageCompression()],
   host: { class: 'flex-page' },
 })
 export class CharacterStudioPageComponent {
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly screenshot = inject(ScreenshotService);
   private readonly contributions = createCharacterStudioContributions();
   private readonly controlsRevision = signal(0);
   private elapsedSeconds = 0;
   private variantSeed = 1;
+  private cameraFraming: CameraFramingPreset = 'three-quarter';
+  private activeFocusTarget?: VisualFocusTargetId;
+  private engineError = '';
+  private totalRenderedFrames = 0;
+  private readonly renderCompleteCallbacks = new Set<(renderedAt: number) => void>();
 
   readonly familyOptions: readonly CharacterStudioContribution[] = [
     this.contributions.human,
@@ -58,6 +85,9 @@ export class CharacterStudioPageComponent {
   readonly selectedMotionId = signal('idle');
   readonly selectedExpression = signal<ExtendedEmotionName>('happy');
   readonly autoRotate = signal(false);
+  readonly runnerReady = signal(false);
+  readonly runnerBusy = signal(false);
+  readonly activeTestScenario = signal<string | null>(null);
   readonly activeView = signal<CharacterStudioView>('three-quarter');
   readonly cameraPosition = signal<[number, number, number]>([2.6, 1.7, 3.2]);
   readonly cameraTarget = signal<[number, number, number]>([0, 0.98, 0]);
@@ -65,14 +95,18 @@ export class CharacterStudioPageComponent {
     { id: 'front', label: 'Front' },
     { id: 'three-quarter', label: '3/4' },
     { id: 'profile', label: 'Profile' },
+    { id: 'back', label: 'Back' },
     { id: 'face', label: 'Face' },
+    { id: 'hair', label: 'Head' },
   ];
-  readonly expressionOptions: readonly { readonly id: ExtendedEmotionName; readonly label: string }[] = [
-    { id: 'happy', label: 'Happy' },
-    { id: 'angry', label: 'Angry' },
-    { id: 'sad', label: 'Sad' },
-    { id: 'surprised', label: 'Surprised' },
-  ];
+  readonly expressionOptions: readonly { readonly id: ExtendedEmotionName; readonly label: string }[] =
+    EXTENDED_EMOTION_NAMES.map((id) => ({ id, label: id.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) }));
+  readonly testHistory = [
+    CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
+    CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
+    CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1,
+  ] as const;
+  readonly allowTestAutoStart = isDevMode();
   readonly activeControls = computed(() => {
     this.controlsRevision();
     return this.activeFamily().controlGroups();
@@ -89,6 +123,133 @@ export class CharacterStudioPageComponent {
     const selected = this.selectedPresetId();
     return this.activeFamily().presets.find((preset) => preset.value === selected)?.label ?? 'Custom variation';
   });
+
+  private readonly testHost: CharacterStudioTestHost = {
+    snapshot: () => ({
+      settings: this.testHost.read(),
+      cameraPosition: [...this.cameraPosition()] as [number, number, number],
+      cameraTarget: [...this.cameraTarget()] as [number, number, number],
+      humanActorYaw: this.contributions.human.root.rotation.y,
+      catActorYaw: this.contributions.cat.root.rotation.y,
+      studioView: this.activeView(),
+      autoRotate: this.autoRotate(),
+    }),
+    restore: (snapshot) => {
+      this.testHost.apply(snapshot.settings);
+      this.cameraPosition.set([...snapshot.cameraPosition] as [number, number, number]);
+      this.cameraTarget.set([...snapshot.cameraTarget] as [number, number, number]);
+      this.contributions.human.root.rotation.y = snapshot.humanActorYaw;
+      this.contributions.cat.root.rotation.y = snapshot.catActorYaw;
+      this.autoRotate.set(snapshot.autoRotate ?? false);
+      if (snapshot.studioView && this.viewOptions.some((view) => view.id === snapshot.studioView)) {
+        this.activeView.set(snapshot.studioView as CharacterStudioView);
+      }
+    },
+    read: () => {
+      const family = this.activeFamily();
+      const controlValue = (id: string): string | undefined => family.controlGroups()
+        .flatMap((group) => group.controls)
+        .find((item) => item.id === id)?.value;
+      return {
+        characterType: family.id,
+        presetId: this.selectedPresetId(),
+        emotion: this.selectedExpression(),
+        gait: this.selectedMotionId() as CharacterStudioTestSettings['gait'],
+        cameraFraming: this.cameraFraming,
+        ...(this.activeFocusTarget ? { focusTarget: this.activeFocusTarget } : {}),
+        layout: 'hero',
+        ...(family.id === 'cat' ? {
+          panicked: controlValue('panicked') === 'true',
+          tuft: controlValue('tuft') === 'true',
+          restMouthPose: controlValue('restMouthPose') as CharacterStudioTestSettings['restMouthPose'],
+        } : {
+          rightHandAction: controlValue('rightHandAction') as CharacterStudioTestSettings['rightHandAction'],
+          leftHandAction: controlValue('leftHandAction') as CharacterStudioTestSettings['leftHandAction'],
+        }),
+      };
+    },
+    apply: (settings) => {
+      if (this.selectedFamilyId() !== settings.characterType) {
+        this.selectedFamilyId.set(settings.characterType);
+        this.syncFamilyVisibility();
+      }
+      const family = this.activeFamily();
+      family.selectPreset(settings.presetId);
+      this.selectedPresetId.set(settings.presetId);
+      family.setMotion(settings.gait);
+      this.selectedMotionId.set(settings.gait);
+      family.setExpression(settings.emotion);
+      this.selectedExpression.set(settings.emotion);
+      if (settings.rightHandAction) family.setControl('rightHandAction', settings.rightHandAction);
+      if (settings.leftHandAction) family.setControl('leftHandAction', settings.leftHandAction);
+      if (settings.panicked !== undefined) family.setControl('panicked', String(settings.panicked));
+      if (settings.tuft !== undefined) family.setControl('tuft', String(settings.tuft));
+      if (settings.restMouthPose) family.setControl('restMouthPose', settings.restMouthPose);
+      this.autoRotate.set(false);
+      this.setCameraFraming(settings.cameraFraming);
+      if (settings.focusTarget) this.applyFocusTargetFraming(settings.focusTarget);
+      this.refreshControls();
+    },
+    renderedFrames: () => this.totalRenderedFrames,
+    errors: () => this.engineError,
+    resetErrors: () => { this.engineError = ''; },
+    onRenderComplete: (callback) => {
+      this.renderCompleteCallbacks.add(callback);
+      return () => this.renderCompleteCallbacks.delete(callback);
+    },
+    speak: () => {},
+    isSpeaking: () => false,
+    setTurntableAngle: (radians) => {
+      this.activeFamily().root.rotation.y = radians ?? 0;
+    },
+    setCameraOrbit: (azimuthRadians, elevationRadians) => {
+      const family = this.activeFamily();
+      const radius = family.id === 'cat' ? 2 : 2.7;
+      const targetY = family.id === 'cat' ? 0.36 : 1.2;
+      const horizontalRadius = radius * Math.cos(elevationRadians);
+      this.cameraPosition.set([
+        Math.sin(azimuthRadians) * horizontalRadius,
+        targetY + Math.sin(elevationRadians) * radius,
+        Math.cos(azimuthRadians) * horizontalRadius,
+      ]);
+      this.cameraTarget.set([0, targetY, 0]);
+    },
+    recording: () => createCharacterStudioRecordingCapture(this.engine.canvas),
+    environment: () => ({
+      browser: typeof navigator !== 'undefined' ? navigator.userAgent : 'node',
+      'visual-recording.profile': '960x540@20fps, aspect-preserving, silent, requested 450 kb/s video',
+    }),
+    thumbnail: async (settings) => {
+      const detail = settings.focusTarget !== undefined ||
+        settings.cameraFraming === 'face-close-up' || settings.cameraFraming === 'head-close-up';
+      return this.screenshot.capture({
+        engine: this.engine,
+        format: 'image/webp',
+        quality: 0.9,
+        ...(detail ? { resolution: { width: 1280, height: 720 }, samples: 4 } : {}),
+        compress: {
+          maxSizeMB: 0.05,
+          maxWidthOrHeight: detail ? 640 : 240,
+          fileType: 'image/webp',
+          quality: detail ? 0.88 : 0.6,
+        },
+      });
+    },
+    resolveFocusFraming: (settings) => {
+      const family = this.activeFamily();
+      const targetId = settings.focusTarget ?? (family.id === 'cat'
+        ? 'cat-face'
+        : settings.cameraFraming === 'head-close-up' ? 'human-head-hair' : 'human-face');
+      const canvas = this.engine.canvas;
+      const bounds = canvas.getBoundingClientRect();
+      const camera = this.engine.camera;
+      return family.resolveFocusFraming(targetId, {
+        fovDegrees: camera instanceof PerspectiveCamera ? camera.fov : 42,
+        aspect: bounds.height > 0 ? bounds.width / bounds.height : 16 / 9,
+      });
+    },
+  };
+  readonly testAdapter = createCharacterStudioTestAdapter(this.testHost);
 
   private readonly floor = new Mesh(
     new PlaneGeometry(60, 60),
@@ -114,6 +275,18 @@ export class CharacterStudioPageComponent {
     this.engine.tick$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((deltaSeconds) => this.update(deltaSeconds));
+    this.engine.renderComplete$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(({ renderedAt }) => {
+        this.totalRenderedFrames++;
+        for (const callback of this.renderCompleteCallbacks) callback(renderedAt);
+        this.updateTestRunnerReadiness();
+      });
+    this.engine.error$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((event) => {
+        this.engineError ||= `${event.phase}: ${String(event.error)}`;
+      });
 
     this.destroyRef.onDestroy(() => {
       for (const family of this.familyOptions) {
@@ -125,6 +298,7 @@ export class CharacterStudioPageComponent {
       (this.floor.material as MeshStandardMaterial).dispose();
       this.pedestal.geometry.dispose();
       (this.pedestal.material as MeshStandardMaterial).dispose();
+      this.renderCompleteCallbacks.clear();
     });
   }
 
@@ -139,6 +313,7 @@ export class CharacterStudioPageComponent {
     family.selectPreset(family.defaultPresetId);
     family.setExpression(this.selectedExpression());
     this.syncFamilyVisibility();
+    this.activeFocusTarget = undefined;
     this.applyView('three-quarter');
     this.refreshControls();
   }
@@ -177,41 +352,86 @@ export class CharacterStudioPageComponent {
     family.selectPreset(family.defaultPresetId);
     family.setMotion(family.id === 'cat' ? 'goofy_walk' : 'idle');
     family.setExpression('happy');
+    if (family.id === 'human') {
+      family.setControl('rightHandAction', 'none');
+      family.setControl('leftHandAction', 'none');
+    }
     this.selectedPresetId.set(family.defaultPresetId);
     this.selectedMotionId.set(family.id === 'cat' ? 'goofy_walk' : 'idle');
     this.selectedExpression.set('happy');
+    this.activeFocusTarget = undefined;
     this.refreshControls();
+    this.applyView('three-quarter');
   }
 
   setAutoRotate(): void {
+    if (this.runnerBusy()) return;
     this.autoRotate.update((value) => !value);
   }
 
   applyView(view: CharacterStudioView): void {
     const family = this.activeFamily();
     const centerY = family.cameraTargetY;
-    const faceY = family.faceTargetY;
     this.activeView.set(view);
+    this.activeFocusTarget = undefined;
 
     switch (view) {
       case 'front':
+        this.cameraFraming = 'front';
         this.cameraTarget.set([0, centerY, 0]);
         this.cameraPosition.set([0, centerY + 0.7, this.cameraDistance(3.7)]);
         break;
       case 'profile':
+        this.cameraFraming = 'profile';
         this.cameraTarget.set([0, centerY, 0]);
         this.cameraPosition.set([this.cameraDistance(3.8), centerY + 0.62, 0.12]);
         break;
+      case 'back':
+        this.cameraFraming = 'profile';
+        this.cameraTarget.set([0, centerY, 0]);
+        this.cameraPosition.set([0, centerY + 0.7, -this.cameraDistance(3.7)]);
+        break;
       case 'face':
-        this.cameraTarget.set([0, faceY, 0]);
-        this.cameraPosition.set([0.3, faceY + 0.2, this.cameraDistance(1.7)]);
+        this.cameraFraming = 'face-close-up';
+        this.applyFocusTargetFraming(family.id === 'cat' ? 'cat-face' : 'human-face');
+        break;
+      case 'hair':
+        this.cameraFraming = 'head-close-up';
+        this.applyFocusTargetFraming(family.id === 'cat' ? 'cat-face' : 'human-head-hair');
         break;
       case 'three-quarter':
       default:
+        this.cameraFraming = 'three-quarter';
         this.cameraTarget.set([0, centerY, 0]);
         this.cameraPosition.set([this.cameraDistance(2.5), centerY + 0.68, this.cameraDistance(3.1)]);
         break;
     }
+  }
+
+  private setCameraFraming(framing: CameraFramingPreset): void {
+    this.cameraFraming = framing;
+    switch (framing) {
+      case 'front': this.applyView('front'); break;
+      case 'profile': this.applyView('profile'); break;
+      case 'face-close-up': this.applyView('face'); break;
+      case 'head-close-up': this.applyView('hair'); break;
+      case 'full-shot':
+      case 'three-quarter': this.applyView('three-quarter'); break;
+    }
+    this.cameraFraming = framing;
+  }
+
+  private applyFocusTargetFraming(targetId: VisualFocusTargetId): void {
+    this.activeFocusTarget = targetId;
+    const canvas = this.engine.canvas;
+    const bounds = canvas.getBoundingClientRect();
+    const camera = this.engine.camera;
+    const framing = this.activeFamily().resolveFocusFraming(targetId, {
+      fovDegrees: camera instanceof PerspectiveCamera ? camera.fov : 42,
+      aspect: bounds.height > 0 ? bounds.width / bounds.height : 16 / 9,
+    });
+    this.cameraPosition.set([...framing.cameraPosition]);
+    this.cameraTarget.set([...framing.cameraTarget]);
   }
 
   private cameraDistance(humanDistance: number): number {
@@ -234,5 +454,22 @@ export class CharacterStudioPageComponent {
     if (!this.autoRotate()) return;
     this.elapsedSeconds += deltaSeconds;
     this.activeFamily().root.rotation.y = Math.sin(this.elapsedSeconds * 0.32) * 0.48;
+  }
+
+  onTestProgress(progress: TestProgress | null): void {
+    this.runnerBusy.set(progress !== null);
+    this.activeTestScenario.set(progress?.label ?? null);
+  }
+
+  private updateTestRunnerReadiness(): void {
+    if (this.runnerReady()) return;
+    const canvas = this.engine.canvas;
+    if (!canvas.isConnected) return;
+    const bounds = canvas.getBoundingClientRect();
+    if (bounds.width <= 1 || bounds.height <= 1 ||
+        Math.abs(this.engine.width - bounds.width) > 1 || Math.abs(this.engine.height - bounds.height) > 1) return;
+    const camera = this.engine.camera;
+    if (camera instanceof PerspectiveCamera && Math.abs(camera.aspect - bounds.width / bounds.height) > 0.01) return;
+    this.runnerReady.set(true);
   }
 }

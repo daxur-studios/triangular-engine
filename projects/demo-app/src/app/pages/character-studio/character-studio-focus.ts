@@ -2,7 +2,7 @@ import { Box3, Object3D, PerspectiveCamera, Quaternion, Vector3 } from 'three';
 import type { CapsuleCatActor, CapsuleCharacterActor } from 'triangular-engine/procedural';
 
 /**
- * Reusable scene-owned visual focus target identifiers for Characters Lab.
+ * Scene-owned visual focus targets used by capsule character review and framing.
  */
 export type VisualFocusTargetId =
   | 'human-face'
@@ -67,7 +67,7 @@ export interface ResolvedFocusFraming {
   readonly limitations: readonly string[];
 }
 
-export interface CharactersLabFocusSceneActors {
+export interface CharacterStudioFocusSceneActors {
   readonly humanActor?: CapsuleCharacterActor;
   readonly catActor?: CapsuleCatActor;
 }
@@ -100,9 +100,9 @@ function getActorWorldForward(root: Object3D): Vector3 {
  * Combines measurable Three.js scene-object bounds with deterministic synthetic
  * bounds for 2D SDF shader-created mouths derived directly from shader uniforms.
  */
-export function resolveCharactersLabFocusTarget(
+export function resolveCharacterStudioFocusTarget(
   targetId: VisualFocusTargetId,
-  actors: CharactersLabFocusSceneActors,
+  actors: CharacterStudioFocusSceneActors,
 ): VisualFocusTargetDescription {
   switch (targetId) {
     case 'human-mouth': {

@@ -2,9 +2,13 @@ import { Component, DestroyRef, computed, inject, isDevMode, signal, viewChild }
 import { RouterLink } from '@angular/router';
 import { AmbientLight, DirectionalLight, Matrix4, PerspectiveCamera, Vector3 } from 'three';
 import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
+import { PlanetCloudsComponent } from 'triangular-engine/cloud-volumes';
 import { PlanetAtmosphereComponent, type IAtmosphereSurface } from 'triangular-engine/atmosphere';
 import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
-import { PlanetComponent, PlanetTerrainComponent, TerrainPlanetMaterial } from 'triangular-engine/lod-surface';
+import { checkerDebugLayer, PlanetSurfaceMaterial } from 'triangular-engine/planet-material';
+import {
+  PlanetComponent, PlanetSurfaceDetailComponent, PlanetTerrainComponent, TerrainPlanetMaterial, type PlanetSurfaceDetailLayer,
+} from 'triangular-engine/lod-surface';
 import { cellPlanetFor, createGroundSample, type Vec3 } from 'triangular-engine/lod-surface/core';
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import { bakeInWorker } from '../lod-surface-lab/lod-height-bake-client';
@@ -18,8 +22,8 @@ import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_TEST_HISTORY, type PlanetSc
 /**
  * Plan 059 step G5: the planet scene. `<planet>` with `<planetTerrain>` and `<planetAtmosphere>` inside it, written the way
  * a game writes it: the radius, the sun and the baked cell-planet world are given to the planet once, and the layers read them.
- * WebGPU only. Clouds are a placeholder (`<planetClouds>` has its own plan). The morph slider is bound to `<planet [morph]>`:
- * the terrain bends into the flat map; the sky and the clouds do not morph yet.
+ * WebGPU only. The clouds are a v1 far shell (`<planetClouds>`) that fades out with the morph rather than bending. The morph
+ * slider is bound to `<planet [morph]>`: the terrain bends into the flat map; the sky and the clouds fade out, they do not bend yet.
  *
  * The camera stands in the scene frame (the planet's centre is the origin) and is placed every tick from a pose or a scripted
  * move; the terrain's `groundAt` keeps the eye above the drawn ground. Reversed float depth, so a 2 cm near plane and an orbit
@@ -52,7 +56,10 @@ interface RendererLike {
 @Component({
   standalone: true,
   selector: 'app-planet-scene-page',
-  imports: [EngineModule, RouterLink, TestRunnerComponent, PlanetComponent, PlanetTerrainComponent, PlanetAtmosphereComponent],
+  imports: [
+    EngineModule, RouterLink, TestRunnerComponent, PlanetComponent, PlanetTerrainComponent, PlanetSurfaceDetailComponent, PlanetAtmosphereComponent,
+    PlanetCloudsComponent,
+  ],
   providers: [
     EngineService.provide({
       showFPS: true,
@@ -70,7 +77,8 @@ interface RendererLike {
           <planetTerrain />
         }
         <planetAtmosphere preset="earth" [surfaces]="surfaces()" [enabled]="atmosphereOn()" />
-        <!-- Clouds: placeholder. <planetClouds> gets its own plan. -->
+        <planetClouds [coverage]="0.45" />
+        <planetSurfaceDetail [surface]="detailSurface()" [layers]="detailLayers" />
       </planet>
     </scene>
 
@@ -128,7 +136,7 @@ interface RendererLike {
           Atmosphere (sky, and lighting and haze on the terrain)
         </label>
         <p class="note">Atmosphere on the terrain: {{ surfaceLine() }}</p>
-        <p class="note" data-testid="clouds">Clouds: placeholder; <code>&lt;planetClouds&gt;</code> gets its own plan.</p>
+        <p class="note" data-testid="clouds">Clouds: a v1 shell (<code>&lt;planetClouds&gt;</code>) that fades with the morph; not bent into the map yet.</p>
 
         <p class="row">morph {{ morph().toFixed(2) }}
           <input type="range" min="0" max="1" step="0.05" aria-label="Globe to map morph" [value]="morph()" (input)="setMorph(+$any($event.target).value)" />
@@ -192,6 +200,15 @@ export class PlanetScenePageComponent {
     const material = this.terrainLayer()?.surface();
     return material instanceof TerrainPlanetMaterial ? material : undefined;
   });
+  /** The terrain's material as a planet surface, for `<planetSurfaceDetail>`; undefined while the terrain is off. */
+  readonly detailSurface = computed<PlanetSurfaceMaterial | undefined>(() => {
+    const material = this.terrainLayer()?.surface();
+    return material instanceof PlanetSurfaceMaterial ? material : undefined;
+  });
+  /** Demo detail only: a faint grid over the ground, added to the terrain's material by `<planetSurfaceDetail>`. */
+  readonly detailLayers: readonly PlanetSurfaceDetailLayer[] = [
+    { id: 'demoGrid', layer: checkerDebugLayer({ space: 'latLon', lines: true, strength: 0.25, lineColor: '#ffd23f', lineWidthPx: 1 }).layer },
+  ];
   /** `<planetAtmosphere [surfaces]>`: the terrain's own material when there is one, else sky only. */
   readonly surfaces = computed<readonly IAtmosphereSurface[]>(() => {
     const surface = this.terrainSurface();
@@ -468,7 +485,7 @@ export class PlanetScenePageComponent {
       'planet.radiusM': this.radius,
       'planet.world': `cell planet seed ${this.world.seed}, ${this.world.cellCount} cells, ${this.world.heightScaleM} m per unit`,
       'surface.material': 'terrain-planet',
-      clouds: 'placeholder',
+      clouds: 'shell',
     };
   }
 

@@ -162,8 +162,8 @@ export interface LodSurfaceMesh {
   upload(selector: LodSelector, camera: Vec3): number;
   /**
    * The packs made so far: the number of uploads that wrote the drawn leaves into the instance buffers. A selection that leaves the drawn
-   * leaves, their masks and the morph map's basis and projection as they were writes nothing (it is not a pack), so this counts the work
-   * of the tree, not of the frames.
+   * leaves (as a set, in any order), their masks and the morph map's basis and projection as they were writes nothing (it is not a pack), so
+   * this counts the work of the tree, not of the frames.
    */
   readonly packCount: number;
   /** Debug colouring of the built-in material. */
@@ -250,6 +250,60 @@ function gridGeometry(cells: number, capacity: number): InstancedBufferGeometry 
 
 /** Bit e of a 0..15 mask held in a float, as 0 or 1. */
 const bit = (mask: any, e: number) => mod(floor(mask.div(2 ** e)), 2);
+
+// The tree signature (Plan 059, G6m): per drawn leaf, the identity the pack reads (node, mask, level, cell i, cell j, root) hashed twice with
+// two independent 32-bit mixes (their seeds and multipliers differ). The signature is the leaf count and the two sums, mod 2^32, of those hashes.
+const SIG_SEED_A = 0x9e3779b9 | 0;
+const SIG_SEED_B = 0x243f6a88;
+const SIG_MUL_A = 0x85ebca6b;
+const SIG_MUL_B = 0xc2b2ae35;
+const SIG_FIELDS = new Int32Array(6);
+
+/** One fold of a value into a 32-bit hash. */
+const sigFold = (h: number, v: number, mul: number): number => {
+  const x = Math.imul(h ^ v, mul);
+  return x ^ (x >>> 13);
+};
+
+/** Finishes a fold chain, so that both halves of the result depend on every folded value. */
+const sigFinish = (h: number, mul: number): number => {
+  const x = Math.imul(h ^ (h >>> 16), mul);
+  return x ^ (x >>> 15);
+};
+
+/**
+ * Writes the tree signature of the first `count` drawn leaves into `out` (two 32-bit sums) and returns `count`. One pass over the leaves,
+ * allocation-free, no sorting. Addition is commutative, so the signature does not depend on the leaves' order: a selection that draws the
+ * same leaves in another order has the same signature and does not pack again. Its instances then hold the same records in other slots, and
+ * nothing reads a leaf's slot by index. (The pole fan's descriptions keep the order of their last build; that build draws the same surface.)
+ * The two sums are 64 bits together with the count. A different set with the same count and sums would skip a needed pack; with a few thousand
+ * leaves that is a chance of about 2^-64 per changed selection, which is negligible.
+ */
+function hashTree(selector: LodSelector, count: number, out: Int32Array): number {
+  const { leaves, masks, level, i, j, root } = selector;
+  let sumA = 0;
+  let sumB = 0;
+  for (let k = 0; k < count; k++) {
+    const node = leaves[k];
+    SIG_FIELDS[0] = node;
+    SIG_FIELDS[1] = masks[k];
+    SIG_FIELDS[2] = level[node];
+    SIG_FIELDS[3] = i[node];
+    SIG_FIELDS[4] = j[node];
+    SIG_FIELDS[5] = root[node];
+    let a = SIG_SEED_A;
+    let b = SIG_SEED_B;
+    for (let f = 0; f < 6; f++) {
+      a = sigFold(a, SIG_FIELDS[f], SIG_MUL_A);
+      b = sigFold(b, SIG_FIELDS[f], SIG_MUL_B);
+    }
+    sumA = (sumA + sigFinish(a, 0x7feb352d)) | 0;
+    sumB = (sumB + sigFinish(b, 0x846ca68b)) | 0;
+  }
+  out[0] = sumA;
+  out[1] = sumB;
+  return count;
+}
 
 /**
  * Builds the surface mesh: one shared grid drawn instanced, one instance per drawn leaf. Call {@link LodSurfaceMesh.upload}
@@ -486,9 +540,10 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const packKey = new Float64Array(8);
   const packedKey = new Float64Array(8);
   let packedKind = -1;
-  // What the last pack read from the tree, per drawn leaf: node, mask, level, cell i, cell j and root. Compared with the tree on each
-  // selection that changed, so a selection that drew the same leaves does not pack again.
-  const treeSig = new Int32Array(6 * instances);
+  // The tree signature (`hashTree`) of the drawn leaves the last pack read: their count and two sums. Order-insensitive (G6m), so a selection
+  // that drew the same leaves in another order does not pack again. `treeNow` holds the current selection's signature while it is compared.
+  const treeSig = new Int32Array(2);
+  const treeNow = new Int32Array(2);
   let treeSigCount = -1;
   let packs = 0;
   // The per-leaf facts of the pack, kept across packs (G6i): a leaf that stays drawn on the same cell is not analysed again.
@@ -524,36 +579,21 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   };
   /** The number of leaves a pack reads from `selector`: its drawn leaves, up to the instance capacity. */
   const packedLeafCount = (selector: LodSelector): number => Math.min(selector.stats.drawn, instances);
-  /** Writes the pack's inputs of the tree into `treeSig`: what `packMorphLeaves` and `packLeaves` read per drawn leaf. */
+  /** Writes the tree signature of the drawn leaves the pack reads into `treeSig` (see `hashTree`). */
   const signTree = (selector: LodSelector): void => {
     const count = packedLeafCount(selector);
-    const { leaves, masks, level, i, j, root } = selector;
-    for (let k = 0; k < count; k++) {
-      const node = leaves[k];
-      const o = k * 6;
-      treeSig[o] = node;
-      treeSig[o + 1] = masks[k];
-      treeSig[o + 2] = level[node];
-      treeSig[o + 3] = i[node];
-      treeSig[o + 4] = j[node];
-      treeSig[o + 5] = root[node];
-    }
+    hashTree(selector, count, treeSig);
     treeSigCount = count;
   };
-  /** Whether the tree's pack inputs are the ones `treeSig` holds (so the instances already written are right for it). */
+  /**
+   * Whether the drawn leaves the tree holds are the set `treeSig` holds, in any order, so the instances already written are right for it.
+   * A different count settles it without hashing.
+   */
   const treeMatchesSignature = (selector: LodSelector): boolean => {
     const count = packedLeafCount(selector);
     if (count !== treeSigCount) return false;
-    const { leaves, masks, level, i, j, root } = selector;
-    for (let k = 0; k < count; k++) {
-      const node = leaves[k];
-      const o = k * 6;
-      if (
-        treeSig[o] !== node || treeSig[o + 1] !== masks[k] || treeSig[o + 2] !== level[node] ||
-        treeSig[o + 3] !== i[node] || treeSig[o + 4] !== j[node] || treeSig[o + 5] !== root[node]
-      ) return false;
-    }
-    return true;
+    hashTree(selector, count, treeNow);
+    return treeNow[0] === treeSig[0] && treeNow[1] === treeSig[1];
   };
 
   return {
@@ -611,8 +651,9 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     upload(selector, camera) {
       const map = resolveMap();
       // Above morph 0 the instances are packed by `packMorphLeavesMemo` (sides, cut duplicates); the key says when that pack is stale. A
-      // selection re-packs when the selector is new, the key changed, or the drawn leaves changed (the selector's version moves on
-      // every rebuild, which a refresh of the morph geometry can make without changing the leaves: then nothing is written).
+      // selection re-packs when the selector is new, the key changed, or the drawn leaves changed as a set; the order they are drawn in does
+      // not count (G6m), so a reorder writes nothing. The selector's version moves on every rebuild, which a refresh of the morph geometry can
+      // make without changing the leaves: then nothing is written either.
       const kind = map ? 1 : 0;
       if (map) fillPackKey(map, packKey);
       const keyUnchanged = kind === packedKind && (kind === 0 || sameKey(packKey, packedKey));

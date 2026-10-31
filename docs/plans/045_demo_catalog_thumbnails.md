@@ -1,18 +1,21 @@
 ---
+map_schema: "1"
+document_id: plan-045
+record_id: er-045
 type: Plan
-title: Demo Catalog Thumbnails
-description: Add persisted scene previews to demo and spike catalogs with capture controls in the engine portal.
-timestamp: 2026-10-13T00:00:00Z
-status: done
+status: archived
+archived_commit: "b555d959"
+archived_date: "2026-10-31"
+title: "Demo Catalog Thumbnails"
+initiative_id: demo-catalog-thumbnails
 record: /docs/engineering-records/045_demo_catalog_thumbnails.md
-tags: [demo, thumbnails, portal]
+outcome: "Completed and archived."
 ---
+# [Archived] Demo Catalog Thumbnails
 
-# Demo Catalog Thumbnails
+> **This plan has been archived.** The full historical document is preserved in git at commit `b555d959`.
+> - View original: `git show b555d959:docs/plans/045_demo_catalog_thumbnails.md`
+> - Restore pair: `triangular docs unarchive docs/plans/045_demo_catalog_thumbnails.md`
 
-- [x] Share route-keyed browser thumbnail storage between both catalogs.
-- [x] Capture the rendered engine scene and expose recapture through its overlay portal.
-- [x] Add thumbnail cards while preserving demo search/sorting and hide unsuccessful spikes by default.
-- [x] Check compilation and the rendered portal/capture/catalog flow.
-
-Thumbnails stay in browser storage, with a static fallback before capture. No engine component changes or added packages are needed.
+## Summary & Outcome
+Completed and archived.

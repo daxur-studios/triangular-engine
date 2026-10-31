@@ -47,6 +47,32 @@ Plan: [PLAN-074](/docs/plans/074_procedural-character-studio.md).
 
 **Checks.** Documentation changes only; mapped-plan review freshness and pair validation remain to be refreshed. No runtime implementation or visual verdict is implied.
 
+## 2026-10-31 — Studio verification surface
+
+**Change.** Mounted the existing capsule orbit, facial-detail and human A/B variant suites on `/character-studio`. The studio host applies test settings through the family contribution boundary, waits for rendered frames, captures the same optional WebM recordings and review thumbnails, and restores the selected character, camera and motion afterward. Added focused front, profile, rear, face and head views, and exposed hand-action and cat face-detail controls used by the imported scenarios. The focused framing is resolved by each family contribution using the existing measured geometry and shader-mouth bounds helper.
+
+**Verification.** `npx ng build demo-app` completed successfully. No browser suite or visual review was run in this change, so recording generation, result-sink retention and human review remain unverified on the studio route. The build reports the existing Angular component-style budget warning for the studio stylesheet, in addition to other workspace warnings.
+
+**Next.** Run the capsule suites from the studio, inspect the generated result summaries and selected media, then move suite ownership out of the legacy page and remove duplicate capsule controls only after that workflow is established.
+
+## 2026-10-31 — Studio visual suites and review media
+
+**Change.** Raised the Angular `anyComponentStyle` warning budget from 10 kB to 14 kB; kept the 16 kB error budget. Made the studio scene host a flex container after the first headless readiness check found a 1-pixel canvas, allowing the renderer and test runner to become ready at the intended viewport size.
+
+**Verification.** `npx ng build demo-app` succeeded and no longer reports the Character Studio component-style budget warning. The build still reports existing CommonJS optimization warnings from Mermaid dependencies. On `/character-studio`, all three suites passed in `headless-hardware` mode: `capsule-visual-verification` (2/2 cases, 20 s), `capsule-facial-emotions` (8/8, 33 s), and `capsule-human-ab-variants` (10/10, 41 s). The result summaries are saved under their respective `artifacts/test-runs/<suite>@v1/` directories. The tests did not collect performance measurements.
+
+**Review artifacts.** Orbit recordings are 185,193 bytes (human) and 196,246 bytes (cat). Their generated GIF previews are 802,006 bytes and 699,347 bytes respectively, so these GIFs are about 4.3x and 3.6x larger than the source WebM recordings. The facial expression contact sheet is 70,981 bytes; the front-detail hair preset contact sheet is 67,074 bytes. All review verdicts remain pending human visual inspection; this entry records artifact generation and automated results only.
+
+**Next.** Human review can use the generated orbit GIFs and face/hair contact sheets. Continue with legacy-lab separation after the studio evidence workflow is reviewed.
+
+## 2026-10-31 — Legacy lab separation
+
+**Change.** Removed capsule character modes, customization panels, actors and the test runner from `/characters-lab`. The remaining page opens on Face Studio and keeps the authored/procedural face demonstrations plus the general humanoid rig scene. Moved capsule suite definitions, test adapter, camera-focus helper and their specs into the Character Studio folder, preserving the existing suite IDs and history there. Renamed the demo selector entry to “Face Rig & Humanoid Lab.”
+
+**Verification.** `npx ng build demo-app` completed successfully. Existing CommonJS optimization warnings from Mermaid dependencies remain. No browser review or automated suite tests were run for this separation.
+
+**Next.** Start `hair-generation-coverage` with deterministic close-up views of selected hairstyles from front, side and rear. The generated Character Studio media still needs a human visual verdict; this migration does not record one.
+
 ## History
 
 Append dated findings, decisions, scope changes and verification. Do not erase earlier outcomes when a plan is superseded.

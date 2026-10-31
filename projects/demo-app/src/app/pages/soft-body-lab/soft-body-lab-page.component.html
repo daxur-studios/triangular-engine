@@ -1,0 +1,110 @@
+<scene [showFps]="true" [logarithmicDepthBuffer]="true">
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel">
+      <a routerLink="/">← Examples</a>
+      <h1>Soft-body lab — official Jolt examples</h1>
+      <p>
+        The two official pages rebuilt with <code>&lt;joltSoftBody&gt;</code>: a 40 × 40 pinned
+        cloth with ten 100 kg spheres, and eleven 2 m spheres at pressure 0 – 10 000. Compare
+        with
+        <a href="https://jrouwe.github.io/JoltPhysics.js/soft/soft_body.html" target="_blank" rel="noreferrer">soft_body.html</a>
+        and
+        <a href="https://jrouwe.github.io/JoltPhysics.js/soft/soft_sphere_pressure.html" target="_blank" rel="noreferrer">soft_sphere_pressure.html</a>.
+      </p>
+
+      <tri-test-runner
+        [suites]="testHistory"
+        [adapter]="testAdapter"
+        [available]="testAvailable()"
+        [allowAutoStart]="allowTestAutoStart"
+        [resultSink]="true"
+        (progressChange)="onTestProgress($event)"
+      />
+      @if (testBusy()) {
+        <p class="note" role="status">Test {{ testStatus() }}. Controls are locked until it finishes or is cancelled.</p>
+      }
+
+      <fieldset class="controls" [disabled]="testBusy()">
+        <label>Example
+          <select [value]="example()" (change)="setExample($any($event.target).value)">
+            <option value="cloth">Cloth + spheres</option>
+            <option value="pressure">Pressure spheres</option>
+          </select>
+        </label>
+        @if (example() === 'cloth') {
+          <label>Drop seed
+            <input type="number" [value]="seed()" (change)="setSeed($event)" />
+          </label>
+        }
+        <button type="button" (click)="reset()">Reset</button>
+      </fieldset>
+
+      @if (liveSample(); as sample) {
+        <dl class="live">
+          <dt>Soft bodies</dt><dd>{{ sample.softBodies }}</dd>
+          <dt>Particles</dt><dd>{{ sample.vertices }}</dd>
+          <dt>Shape RMS / P95</dt>
+          <dd>{{ sample.shapeErrorRms * 100 | number: '1.1-2' }}% / {{ sample.shapeErrorP95 * 100 | number: '1.1-2' }}%</dd>
+          @if (example() === 'pressure') {
+            <dt>Max volume ratio</dt><dd>{{ sample.maxVolumeRatio | number: '1.2-3' }}</dd>
+          }
+          <dt>Deepest particle</dt><dd>{{ sample.minWorldY | number: '1.3-3' }} m</dd>
+        </dl>
+      }
+    </section>
+  </ng-template>
+
+  <orbitControls [cameraPosition]="cameraPosition()" [target]="cameraTarget" />
+  <ambientLight [intensity]="0.45" />
+  <directionalLight [position]="[10, 10, 5]" [intensity]="1.6" />
+
+  <joltPhysics [gravity]="[0, -9.81, 0]" [debug]="false">
+    <joltRigidBody [motionType]="0" [position]="[0, -0.5, 0]">
+      <joltBoxShape [params]="[100, 1, 100]" />
+      <mesh>
+        <boxGeometry [params]="[100, 1, 100]" />
+        <meshStandardMaterial [params]="{ color: '#c7c7c7', roughness: 0.9 }" />
+      </mesh>
+    </joltRigidBody>
+
+    @if (bodyVisible()) {
+      @if (example() === 'cloth') {
+        <joltSoftBody
+          [vertices]="cloth.vertices"
+          [faces]="cloth.faces"
+          [pinnedVertices]="cloth.cornerVertexIndices"
+          [edgeCompliance]="clothCompliance"
+          [shearCompliance]="clothCompliance"
+          [linearDamping]="0"
+          [updatePosition]="false"
+          [position]="[0, 10, 0]"
+          [color]="clothColor"
+        />
+        @for (sphere of clothSpheres(); track $index) {
+          <joltRigidBody [motionType]="2" [massKg]="sphere.massKg" [position]="sphere.position">
+            <joltSphereShape [radius]="sphere.radius" />
+            <mesh>
+              <sphereGeometry [params]="{ radius: sphere.radius, widthSegments: 24, heightSegments: 16 }" />
+              <meshStandardMaterial [params]="{ color: '#d9b1a3', roughness: 0.5 }" />
+            </mesh>
+          </joltRigidBody>
+        }
+      } @else {
+        @for (pressure of pressureValues; track $index) {
+          <joltSoftBody
+            [vertices]="sphere.vertices"
+            [faces]="sphere.faces"
+            [edgeCompliance]="sphereEdgeCompliance"
+            [shearCompliance]="sphereShearCompliance"
+            [bendCompliance]="sphereBendCompliance"
+            [linearDamping]="0"
+            [updatePosition]="false"
+            [pressure]="pressure"
+            [position]="pressurePositions[$index]"
+            [color]="pressureColor($index)"
+          />
+        }
+      }
+    }
+  </joltPhysics>
+</scene>

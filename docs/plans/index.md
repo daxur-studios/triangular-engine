@@ -12,7 +12,7 @@ tags: [plans, index]
 | --- | --- | --- |
 | [Optional Scene Tree and Game Install](/docs/plans/043_optional_scene_tree_and_game_install.md) | done | [Evidence](/docs/engineering-records/043_optional_scene_tree_and_game_install.md) |
 | [Reusable Scene Page Schematic](/docs/plans/044_scene_page_generator.md) | done | [Evidence](/docs/engineering-records/044_scene_page_generator.md) |
-| [Demo Catalog Thumbnails](/docs/plans/045_demo_catalog_thumbnails.md) | done | [Evidence](/docs/engineering-records/045_demo_catalog_thumbnails.md) |
+| [Demo Catalog Thumbnails](/docs/plans/045_demo_catalog_thumbnails.md) | archived | [Evidence](/docs/engineering-records/045_demo_catalog_thumbnails.md) |
 | [Shared Cell-Planet Worker Pipeline](/docs/plans/046_cell_planet_shared_worker_pipeline.md) | in_progress | [Evidence](/docs/engineering-records/046_cell_planet_shared_worker_pipeline.md) |
 | [Terrain View Culling and Rotation Churn](/docs/plans/047_terrain_view_culling_and_rotation_churn.md) | done | [Evidence](/docs/engineering-records/047_terrain_view_culling_and_rotation_churn.md) |
 | [Agent Telemetry Sections](/docs/plans/048_agent_telemetry_sections.md) | done | [Evidence](/docs/engineering-records/048_agent_telemetry_sections.md) |
@@ -42,5 +42,6 @@ tags: [plans, index]
 | [Visual verification evidence and retention](/docs/plans/073_visual-verification-evidence-retention.md) | planned | [ER 073](/docs/engineering-records/073_visual-verification-evidence-retention.md) |
 | [Procedural character studio](/docs/plans/074_procedural-character-studio.md) | planned | [ER 074](/docs/engineering-records/074_procedural-character-studio.md) |
 | [Claude-specific coding approach: Haiku builds, Opus decides](/docs/plans/075_claude-coding-approach.md) | planned | [ER 075](/docs/engineering-records/075_claude-coding-approach.md) |
+| [Soft-body parity lab (official Jolt examples)](/docs/plans/076_soft-body-parity-lab.md) | planned | [ER 076](/docs/engineering-records/076_soft-body-parity-lab.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

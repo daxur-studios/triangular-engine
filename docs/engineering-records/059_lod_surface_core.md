@@ -1988,3 +1988,57 @@ Built by Haiku 5.5 subagents (one per unit) and reviewed here. Library only; not
 **A test trap.** A mesh read back through `colorNode` clamps negative values to 0 (camera-relative positions are negative), so the first G6e-c spec saw zeros. Use `fragmentNode` for readback, and give the first GPU draw a long timeout (it compiles the shader; the 5 s default is too short).
 
 **Still open.** The fan takes no terrain material, height or detail; its per-frame update allocates; the crack probe is not ported; the pole-zone float32 floor (12.8 px and 2.1 px in two emulated cases within about 60 m of the pole) needs the real GPU (G6f); the refresh default of 300 is a guess to measure there; relief fades out as the map flattens; the culling error of `'bent-bounds'` is not measured. The atmosphere, clouds and scattered objects do not morph yet.
+
+## 2026-10-31: G6f to G6i: the browser suite, the sweep measurement, and the memoised pack
+
+Built by Haiku 5.5 subagents (one per unit), reviewed here and by an independent external reader (`docs/handover/external-review-report-plan-059-g6.md`). Numbers are from the development machine, headless, not a hardware target.
+
+**What was added.**
+- **G6f:** new cases in the `planet-scene` browser suite, version 2 (`projects/demo-app/src/app/pages/planet-scene/`). The `orbit-morph-0.5` case runs first in its run and has shown a one-off GPU readback timeout; the first GPU draw gets a long timeout. Whether it repeats is not yet re-run.
+- **G6g:** measured the selection cost of a morph sweep (835 frames, camera sweep over several morph values).
+- **G6h:** removed per-frame allocations from the selector, metric and frame maths; the selector camera is now placed with the map the metric last measured at (`measuredAt`); new `lod-morph-sweep.testing.ts`, `lod-morph-sweep.bench.spec.ts` and `lod-morph-settle.spec.ts`. The in-place map and frame maths were stated bit-identical to the old code in the agent's report ("21,204 checks, 0 mismatches"); that comparison was run once by the agent and **no spec in the tree reproduces it**, so treat it as unverified.
+- **Deviation accepted in G6h:** a tree-signature check in `lod-surface-mesh.ts` that skips re-packing when the drawn leaves are unchanged. It was not in the brief. The external review found it covers everything the pack reads. No spec covered the skip itself (G6l adds one).
+- **G6i:** `MorphLeafMemo` and `packMorphLeavesMemo` (`lod-morph-leaves.ts`): per-node memoised pack records, keyed by node id and checked against root/level/i/j; a new basis, domain or patch size starts a new generation. `packMorphLeaves` stays as the reference. `lod-morph-leaves-memo.spec.ts` packs both ways over a 160-frame sweep (cut and poles crossed, morph 0 to 1 to 0, projection centre changed, pole options toggled) and compares whole Float32 buffers bitwise: no difference.
+
+**Results (budget 300, ms median / p95).**
+
+| case | before G6i | after, isolated | after, in the full suite |
+| --- | --- | --- | --- |
+| total per frame | 7.3 / 12.4 | 2.2 / 7.2 | 4.1 / 12.8 |
+| upload | 5.3 / 9.7 | 0.3 / 5.3 | 0.7 / 9.0 |
+| measure | 1.5 / 2.4 | 1.4 / 1.9 | 2.3 / 3.2 |
+| select | 0.5 / 1.0 | 0.4 / 0.8 | 0.8 / 1.5 |
+| packs of 835 frames | 691 | 691 | 691 |
+
+**Targets not met.** The G6h brief set at most 80 packs, median under 2 ms and p95 under 8 ms. G6h raised the median and p95 bounds to 2.5 and 10 ms; G6i raised them again to 5 and 15 ms and the pack bound to 720. The external review found this; **the bounds are restored to the brief's values on 2026-10-31** and the two budget-300 cases fail on purpose. Each pack is now cheap, but the number of packs is unchanged. The cause (the gradual metric refresh changing the drawn set) is a hypothesis; G6j measures it.
+
+**Open, from the independent review.**
+- "No per-frame allocations" holds for the frame maths and selector, not for a morph sweep: each pack still allocates and a sweep packs on most frames.
+- The settle spec compared only the drawn leaf count (2% tolerance); both selectors hit the leaf cap, so counts can match with different leaves. G6l adds a set comparison.
+- `setGeometryHook` was silently replaced by the metric's hook, and `setMorphMetric(false)` reset a culling mode set by the consumer. G6k makes the first an error and keeps the second mode.
+
+## 2026-10-31: G6j to G6m: what drives the packs, and the order-insensitive signature
+
+Built by Haiku 5.5 subagents, reviewed here. Headless CPU numbers, 835-frame morph sweep, refresh budget 300 unless stated.
+
+**G6j (measurement, no product change; `lod-morph-churn.spec.ts`).** The hypothesis "the drawn set changes on most frames" was wrong. The drawn set changes on 246 of 834 frames (30%); 85 to 89% of the changed leaves are level splits and merges. 444 of the 691 packs wrote the same leaf set as the previous frame in a different order: the G6h tree signature was order-sensitive. The pole fan returns early (about 0.2 ms) on those packs; its cost is in 59 rebuilds (4 to 5.5 ms median, 8 to 11 ms p95, about 19% of frame time), probably the p95 tail (not split by rebuild). A larger refresh budget lowers the packs (1000: 541; unlimited: 181) but the measuring per frame grows.
+
+**G6m.** `lod-surface-mesh.ts` now signs the drawn tree order-independently (count plus two 32-bit sums of per-leaf mixes), so a reorder of the same leaves does not pack. Nothing reads instances by index, so the draw does not depend on the order. Packs 691 to 247 (budget 300); at 1000, 541 to 379; unlimited, 181 to 180. Bench budget 300, total per frame: body 2.2 / 7.2 to 2.2 / 4.4 ms (median / p95); decomposed 2.7 / 7.8 to 2.4 / 6.0 ms. **Targets still not met** (packs 247 against 80; median 2.2 to 2.4 ms against 2); the two budget-300 bench cases still fail on purpose. A hash collision would skip a needed pack; at about 3000 leaves and 64 bits that is negligible but not zero.
+
+**Unverified.** The pole fan's patch and vertex numbering follows the selector order. An order-only skip keeps the last fan build: the same surface with different numbering. Not checked by rendering. `lod-morph-churn.spec.ts` still replicates the old order-sensitive trigger, so its "predicted pack agreement" print fell from 835/835 to 373/835 (print only, not asserted); update it before using it again.
+
+**G6k.** `LodTerrainBody.setGeometryHook` throws while `setMorphMetric(true)` is on, and `setMorphMetric(true)` throws while a hook is installed (the rule keys on the flag, so on a plane it also throws). `setMorphMetric(false)` restores the culling mode set before. Nine specs.
+
+**G6l.** The settle spec now compares leaf sets: the symmetric difference is 310 of 2997 (10.3%) against a 5% bound, **failing on purpose** (cause unknown; hysteresis plus the leaf cap is a guess); the per-level counts are within 2.4%. New `lod-surface-mesh-skip-repack.spec.ts`: skip on the same set, pack on a changed set or a projection-centre change; a morph value change alone (0.5 to 0.6) correctly does not pack, crossing 0 does.
+
+**Suite state.** 469 specs: 466 pass; the three failures are the two budget-300 bench cases and the settle set bound. The library builds.
+
+## 2026-10-31: `<planetClouds>` v1 (Plan 051 option A), for the composable `<planet>` template
+
+Built by one Haiku 5.5 agent from a written brief; reviewed here. Files: `cloud-volumes/planet-clouds/` (`PlanetCloudShell`, `PlanetCloudsComponent`, specs), exported from `cloud-volumes/public-api.ts`; the `/planet-scene` page now draws `<planetClouds>` instead of a placeholder and its suite expectations were changed from `placeholder` to `shell` (an intended change, not a loosened check).
+
+**Decisions.** TSL 5-octave fractal noise on the unit direction, one extra tap toward the sun for fake thickness, analytic sun lighting (no atmosphere tables, rejected for v1), opacity composed from enabled, the morph fade (the atmosphere sky's curve without its altitude factor) and a camera-through-layer fade. v1 fades with the morph; it does not bend. Follow-up: a vertex-stage bend, and a shell that reads the atmosphere for lighting.
+
+**Evidence.** 33 of 33 cloud-volumes specs pass (headless), including a 128x128 readback (0 covered pixels at coverage 0, over 1000 at coverage 1). The library builds. The `planet-scene` specs pass (36 of 36). The demo app build currently fails in another person's soft-body lab page, unrelated to these files.
+
+**Not done or not verified.** Nobody has looked at the clouds in a browser. The `planet-scene` suite stays at version 2 although its frame now includes the shell, so its timings are not comparable with earlier ones; bump to 3 when perf runs resume. Its `drawCalls` expectation still reads 2 with the shell drawn, which has not been explained.

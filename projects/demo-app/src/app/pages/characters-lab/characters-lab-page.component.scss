@@ -12,43 +12,6 @@
   background: #111e27;
 }
 
-.test-runner-details {
-  background: #0e171f;
-  border-bottom: 1px solid #263944;
-
-  summary {
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    padding: 0.5rem 1.2rem;
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: #8fb8cc;
-    cursor: pointer;
-    user-select: none;
-
-    &:hover {
-      background: #14222d;
-    }
-
-    .active-pill {
-      font-size: 0.72rem;
-      font-weight: 500;
-      padding: 0.15rem 0.5rem;
-      border-radius: 999px;
-      background: #1e3a8a;
-      color: #93c5fd;
-      border: 1px solid #3b82f6;
-    }
-  }
-
-  .test-runner-panel {
-    padding: 0.6rem 1.2rem;
-    background: #0a1117;
-    border-top: 1px solid #1f2d37;
-  }
-}
-
 .scope-note-details {
   background: #090e12;
   border-top: 1px solid #1a2730;
@@ -76,10 +39,6 @@
   border: none;
   min-width: 0;
 
-  &:disabled {
-    opacity: 0.65;
-    pointer-events: none;
-  }
 }
 
 .eyebrow {

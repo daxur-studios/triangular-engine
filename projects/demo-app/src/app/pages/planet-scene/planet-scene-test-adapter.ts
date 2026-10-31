@@ -260,7 +260,7 @@ export function createPlanetSceneTestAdapter(host: PlanetSceneTestHost): TestRun
         metrics,
         checks,
         details: {
-          clouds: 'placeholder',
+          clouds: 'shell',
           gpuAdapter: String(environment['gpu.description'] ?? 'unknown'),
           gpuVendor: String(environment['gpu.vendor'] ?? 'unknown'),
           planetRadiusM: environment['planet.radiusM'] ?? null,
@@ -280,11 +280,11 @@ export function createPlanetSceneTestAdapter(host: PlanetSceneTestHost): TestRun
           ...(software ? ['Software renderer: functional evidence only, not hardware performance'] : []),
         ],
         limitations: [
-          'Clouds are a placeholder: <planetClouds> has its own plan, so no cloud pass is drawn or timed.',
+          'Clouds are a v1 far shell (<planetClouds>): drawn inside the main scene pass, not timed on their own, and faded out with the morph rather than bent into the map.',
           'The GPU timer splits by render pass, not by layer. The terrain and the sky backdrop share the main scene pass; read the sky\'s cost from the `-atmosphere-off` partner of a case (same view, sky, lighting and haze off).',
           'Compute passes are not split by the timer. The atmosphere\'s table updates that run as compute are inside the whole-frame figure only.',
           'The terrain is selected every frame from the active camera; draw calls and renderer triangles are the last frame\'s counters.',
-          'The morph bends the terrain into the map (`<planet [morph]>`). The pole fan draws a flat colour only. The atmosphere and the clouds do not morph yet, so above morph 0 the sky is the globe\'s sky. No case stands near a pole, so the pole-zone float32 floor is not measured here.',
+          'The morph bends the terrain into the map (`<planet [morph]>`). The pole fan draws a flat colour only. The atmosphere does not bend yet and the clouds only fade with the morph, so above morph 0 the sky is the globe\'s sky. No case stands near a pole, so the pole-zone float32 floor is not measured here.',
         ],
       };
     },

@@ -3,23 +3,23 @@ import {
   CAT_LINEUP_SUITE_V1,
   CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
   CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
-  CHARACTERS_LAB_TEST_HISTORY,
+  CHARACTER_STUDIO_TEST_HISTORY,
   DEFAULT_CAT_TEST_SETTINGS,
-  type CharactersLabTestSettings,
-} from './characters-lab-tests';
+  type CharacterStudioTestSettings,
+} from './character-studio-tests';
 import {
-  createCharactersLabTestAdapter,
+  createCharacterStudioTestAdapter,
   settingsMismatches,
-  type CharactersLabTestHost,
-} from './characters-lab-test-adapter';
+  type CharacterStudioTestHost,
+} from './character-studio-test-adapter';
 import type { TestContext, TestObservation } from 'triangular-engine/testing';
 
-describe('CharactersLabTestAdapter & Suites', () => {
+describe('CharacterStudioTestAdapter & Suites', () => {
   it('defines valid non-empty test history suites', () => {
-    expect(CHARACTERS_LAB_TEST_HISTORY.length).toBeGreaterThan(0);
+    expect(CHARACTER_STUDIO_TEST_HISTORY.length).toBeGreaterThan(0);
 
     const suiteIds = new Set<string>();
-    for (const suite of CHARACTERS_LAB_TEST_HISTORY) {
+    for (const suite of CHARACTER_STUDIO_TEST_HISTORY) {
       expect(suite.id).toBeTruthy();
       expect(suiteIds.has(suite.id)).toBeFalse();
       suiteIds.add(suite.id);
@@ -101,18 +101,15 @@ describe('CharactersLabTestAdapter & Suites', () => {
   });
 
   it('captures, applies, measures and restores settings via the test adapter', async () => {
-    let currentSettings: CharactersLabTestSettings = { ...DEFAULT_CAT_TEST_SETTINGS };
+    let currentSettings: CharacterStudioTestSettings = { ...DEFAULT_CAT_TEST_SETTINGS };
     let renderListener: ((t: number) => void) | undefined;
     let frames = 0;
     let spokenText = '';
     const cameraPath: Array<readonly [number, number]> = [];
 
-    const mockHost: CharactersLabTestHost = {
+    const mockHost: CharacterStudioTestHost = {
       snapshot: () => ({
         settings: { ...currentSettings },
-        viewMode: 'capsule-cats',
-        capsuleLayoutMode: 'hero',
-        capsuleCatLayoutMode: 'hero',
         cameraPosition: [0, 0, 2],
         cameraTarget: [0, 0.4, 0],
         humanActorYaw: 0,
@@ -148,7 +145,7 @@ describe('CharactersLabTestAdapter & Suites', () => {
       environment: () => ({}),
     };
 
-    const adapter = createCharactersLabTestAdapter(mockHost);
+    const adapter = createCharacterStudioTestAdapter(mockHost);
     const mockContext: TestContext = {
       mode: 'quick',
       profile: 'headless-hardware',
@@ -187,12 +184,9 @@ describe('CharactersLabTestAdapter & Suites', () => {
     let renderListener: ((t: number) => void) | undefined;
     const path: Array<readonly [number, number]> = [];
     const currentSettings = { ...DEFAULT_CAT_TEST_SETTINGS };
-    const mockHost: CharactersLabTestHost = {
+    const mockHost: CharacterStudioTestHost = {
       snapshot: () => ({
         settings: currentSettings,
-        viewMode: 'capsule-cats',
-        capsuleLayoutMode: 'hero',
-        capsuleCatLayoutMode: 'hero',
         cameraPosition: [0, 0, 2],
         cameraTarget: [0, 0.4, 0],
         humanActorYaw: 0,
@@ -218,7 +212,7 @@ describe('CharactersLabTestAdapter & Suites', () => {
       recording: () => ({ stop: async () => { throw new Error('recording is not used by this test'); }, dispose: () => {} }),
       environment: () => ({}),
     };
-    const adapter = createCharactersLabTestAdapter(mockHost);
+    const adapter = createCharacterStudioTestAdapter(mockHost);
     const scenario = {
       ...CAPSULE_VISUAL_VERIFICATION_SUITE_V1.scenarios[1],
       durationMs: 200,
@@ -243,8 +237,8 @@ describe('CharactersLabTestAdapter & Suites', () => {
   });
 
   it('detects setting mismatches correctly', () => {
-    const s1: CharactersLabTestSettings = { ...DEFAULT_CAT_TEST_SETTINGS, emotion: 'happy' };
-    const s2: CharactersLabTestSettings = { ...DEFAULT_CAT_TEST_SETTINGS, emotion: 'angry' };
+    const s1: CharacterStudioTestSettings = { ...DEFAULT_CAT_TEST_SETTINGS, emotion: 'happy' };
+    const s2: CharacterStudioTestSettings = { ...DEFAULT_CAT_TEST_SETTINGS, emotion: 'angry' };
     const diffs = settingsMismatches(s1, s2);
     expect(diffs.length).toBe(1);
     expect(diffs[0]).toContain('emotion');
@@ -252,13 +246,10 @@ describe('CharactersLabTestAdapter & Suites', () => {
 
   it('forwards one close-up still per first-repetition case and omits later repetitions', async () => {
     const still = new Blob(['saved still'], { type: 'image/webp' });
-    const capturedSettings: CharactersLabTestSettings[] = [];
+    const capturedSettings: CharacterStudioTestSettings[] = [];
     const host = {
       snapshot: () => ({
         settings: { ...DEFAULT_CAT_TEST_SETTINGS },
-        viewMode: 'capsule-cats' as const,
-        capsuleLayoutMode: 'hero' as const,
-        capsuleCatLayoutMode: 'hero' as const,
         cameraPosition: [0, 0, 2] as const,
         cameraTarget: [0, 0.4, 0] as const,
         humanActorYaw: 0,
@@ -277,12 +268,12 @@ describe('CharactersLabTestAdapter & Suites', () => {
       setCameraOrbit: () => {},
       recording: () => ({ stop: async () => { throw new Error('recording is not used by this test'); }, dispose: () => {} }),
       environment: () => ({}),
-      thumbnail: async (settings: CharactersLabTestSettings) => {
+      thumbnail: async (settings: CharacterStudioTestSettings) => {
         capturedSettings.push(settings);
         return still;
       },
-    } satisfies CharactersLabTestHost;
-    const adapter = createCharactersLabTestAdapter(host);
+    } satisfies CharacterStudioTestHost;
+    const adapter = createCharacterStudioTestAdapter(host);
     const scenario = CAPSULE_FACIAL_EMOTIONS_SUITE_V1.scenarios[0];
     const nonDetailScenario = CAT_EMOTIONS_SUITE_V1.scenarios[0];
     const context = (repetition: number): TestContext => ({
@@ -307,12 +298,9 @@ describe('CharactersLabTestAdapter & Suites', () => {
   it('records resolved focus-target framing check and details in observation', async () => {
     const scenario = CAPSULE_FACIAL_EMOTIONS_SUITE_V1.scenarios[0];
     let currentSettings = { ...scenario.settings };
-    const host: CharactersLabTestHost = {
+    const host: CharacterStudioTestHost = {
       snapshot: () => ({
         settings: { ...currentSettings },
-        viewMode: 'capsule-doodle',
-        capsuleLayoutMode: 'hero',
-        capsuleCatLayoutMode: 'hero',
         cameraPosition: [0, 1.5, 0.9],
         cameraTarget: [0, 1.5, 0.2],
         humanActorYaw: 0,
@@ -353,7 +341,7 @@ describe('CharactersLabTestAdapter & Suites', () => {
       }),
     };
 
-    const adapter = createCharactersLabTestAdapter(host);
+    const adapter = createCharacterStudioTestAdapter(host);
     const context: TestContext = {
       mode: 'quick',
       profile: 'headless-hardware',

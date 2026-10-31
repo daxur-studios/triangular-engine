@@ -1722,10 +1722,8 @@ outcome: "${yamlEscape(finalOutcomeSummary)}"
 # [Archived] ${title}
 
 > **This plan has been archived.** The full historical document is preserved in git at commit \`${resolvedCommit}\`.
-> To view the original document:
-> \`\`\`powershell
-> git show ${resolvedCommit}:${planRelative}
-> \`\`\`
+> - View original: \`git show ${resolvedCommit}:${planRelative}\`
+> - Restore pair: \`triangular docs unarchive ${planRelative}\`
 
 ## Summary & Outcome
 ${finalOutcome}
@@ -1744,10 +1742,8 @@ plans:
 # [Archived] ${title}
 
 > **This Engineering Record has been archived.** The full historical document is preserved in git at commit \`${resolvedCommit}\`.
-> To view the original document:
-> \`\`\`powershell
-> git show ${resolvedCommit}:${recordRelative}
-> \`\`\`
+> - View original: \`git show ${resolvedCommit}:${recordRelative}\`
+> - Restore pair: \`triangular docs unarchive ${planRelative}\`
 
 ## Summary & Outcome
 ${finalOutcome}
