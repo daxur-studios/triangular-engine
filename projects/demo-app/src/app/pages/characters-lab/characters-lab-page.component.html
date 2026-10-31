@@ -60,7 +60,8 @@
       <div class="control-group">
         <span>Camera</span>
         <button type="button" [class.active]="cameraFraming === 'full-shot'" (click)="setCameraFraming('full-shot')">Full Body</button>
-        <button type="button" [class.active]="cameraFraming === 'front'" (click)="setCameraFraming('front')">Face Close-Up</button>
+        <button type="button" [class.active]="cameraFraming === 'front'" (click)="setCameraFraming('front')">Front</button>
+        <button type="button" [class.active]="cameraFraming === 'face-close-up'" (click)="setCameraFraming('face-close-up')">Face Detail</button>
         <button type="button" [class.active]="cameraFraming === 'three-quarter'" (click)="setCameraFraming('three-quarter')">3/4 Portrait</button>
         <button type="button" [class.active]="cameraFraming === 'profile'" (click)="setCameraFraming('profile')">Profile</button>
       </div>
@@ -85,7 +86,8 @@
       <div class="control-group">
         <span>Camera</span>
         <button type="button" [class.active]="cameraFraming === 'full-shot'" (click)="setCameraFraming('full-shot')">Full Body</button>
-        <button type="button" [class.active]="cameraFraming === 'front'" (click)="setCameraFraming('front')">Face Close-Up</button>
+        <button type="button" [class.active]="cameraFraming === 'front'" (click)="setCameraFraming('front')">Front</button>
+        <button type="button" [class.active]="cameraFraming === 'face-close-up'" (click)="setCameraFraming('face-close-up')">Face Detail</button>
         <button type="button" [class.active]="cameraFraming === 'three-quarter'" (click)="setCameraFraming('three-quarter')">3/4 Portrait</button>
         <button type="button" [class.active]="cameraFraming === 'profile'" (click)="setCameraFraming('profile')">Profile</button>
       </div>

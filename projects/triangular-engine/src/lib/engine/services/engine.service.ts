@@ -330,7 +330,10 @@ export class EngineService implements IEngine {
       this.renderer
         .init()
         .then(() => this.startLoop())
-        .catch(() => this.startLoop());
+        .catch((error) => {
+          this.error$.next({ phase: 'renderer-init', error });
+          console.error('[TriangularEngine] WebGPU renderer initialization failed.', error);
+        });
       return;
     }
     this.startLoop();
@@ -350,8 +353,8 @@ export class EngineService implements IEngine {
   private initRenderer(options?: IEngineOptions) {
     const preferred = options?.preferredRenderer ?? 'webgl';
 
-    // Try WebGPU if preferred or auto
-    if (preferred === 'webgpu' && this.isWebGPUSupported()) {
+    // Let WebGPURenderer select its own backend, including its WebGL2 fallback.
+    if (preferred === 'webgpu') {
       const webGpuParams: any = {
         ...(options?.webGpuRendererParameters || {}),
       } as any;
@@ -359,15 +362,8 @@ export class EngineService implements IEngine {
         // Align behavior with WebGL when transparent scenes are requested
         (webGpuParams as any).alpha = true;
       }
-      try {
-        this.renderer = this.createWebGpuRenderer(webGpuParams);
-        return this.renderer;
-      } catch (err) {
-        console.warn(
-          'WebGPU renderer initialization failed, falling back to WebGL.',
-          err,
-        );
-      }
+      this.renderer = this.createWebGpuRenderer(webGpuParams);
+      return this.renderer;
     }
 
     // Fallback to WebGL
@@ -469,14 +465,6 @@ export class EngineService implements IEngine {
 
     // Composer currently targets WebGL. Skip for WebGPU.
     return (this.renderer = renderer);
-  }
-
-  private isWebGPUSupported(): boolean {
-    return (
-      typeof navigator !== 'undefined' &&
-      'gpu' in navigator &&
-      !!(navigator as any).gpu
-    );
   }
 
   private onResize(width: number, height: number) {

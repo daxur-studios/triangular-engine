@@ -1,6 +1,12 @@
 # Changelog
 
+- Renderer selection: `preferredRenderer: 'webgpu'` now always selects `WebGPURenderer`, allowing its TSL-capable WebGL2 fallback when native WebGPU is unavailable. Initialization failures emit `error$` with phase `renderer-init` instead of starting a blank loop. The default remains classic WebGL.
+
 - `triangular-engine/testing`: optional diagnostic video recordings for functional/visual cases. `TestRunAdapter.recording` supplies a page-owned capture, `TestSession` bounds its lifecycle and emits metadata-only result references, and the dev receiver stores validated video sidecars for deferred playback. Recordings are off by default and disabled for performance suites. The demo audio lab includes a camera proximity test with scene audio.
+
+- `triangular testing media`: on-demand, manifest-linked GIF previews and labeled SVG contact sheets from saved WebM recordings or still thumbnails. Metadata listing reports paths and sizes without opening media contents; source media remains unchanged.
+
+- `triangular testing review`: append and list attributed human or agent visual assessments separately from automated results; add normalized, toggleable SVG box/arrow annotations and generate a local viewer. Green reviewed-pass overlays require a passing review claim; amber dashed targets remain inspection-only. The CLI does not load media or call AI providers.
 
 - Peer dependency: Three.js `^0.187.0` (from `^0.186.0`). Consumers on 0.186 must upgrade `three` to `^0.187.0` together with this release. The workspace, the engine archive and the local consumer apps now use `three@0.187.0` and `@types/three@^0.187.0`.
 

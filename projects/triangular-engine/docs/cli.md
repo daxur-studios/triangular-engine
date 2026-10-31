@@ -94,10 +94,65 @@ triangular testing run --url http://localhost:4200/lab --suite my-suite --versio
 triangular testing summary --suite my-suite --last 3
 triangular testing receiver
 triangular testing baseline saved-result.json > baseline.json
+triangular testing media gif --source artifacts/test-runs/my-suite@v1/run-1/walk.webm
+triangular testing media contact-sheet --source artifacts/test-runs/my-suite@v1/run-1/walk.webm \
+  --title "Walk cycle views" \
+  --capture "0.2=Front view · walk cycle" \
+  --capture "2.0=Rear view · walk cycle" \
+  --capture "6.0=High angle · walk cycle"
+triangular testing media contact-sheet --title "Capsule facial expressions" --cell-width 640 --image "artifacts/test-runs/my-suite@v1/run-1/human-happy.webp=Human happy" --image "artifacts/test-runs/my-suite@v1/run-1/cat-skeptical.webp=Cat skeptical"
+triangular testing media list --suite my-suite --json
+triangular testing review add --run artifacts/test-runs/my-suite@v1/run-1.json \
+  --artifact artifacts/test-runs/my-suite@v1/run-1/walk.contact.svg \
+  --reviewer-kind human --reviewer owner --verdict pass \
+  --claim "The walk cycle remains readable through the camera sweep"
+triangular testing review list --run artifacts/test-runs/my-suite@v1/run-1.json --json
+triangular testing review overlay --run artifacts/test-runs/my-suite@v1/run-1.json --review-id REVIEW_ID --frame 2 --role target --shape box --coords "0.2,0.1,0.5,0.7" --label "Head silhouette"
+triangular testing review view --run artifacts/test-runs/my-suite@v1/run-1.json --review-id REVIEW_ID
 ```
 
+`testing media gif` uses FFmpeg from `PATH` to write an optional, silent GIF preview beside a
+saved WebM recording. It leaves the video intact and writes `media-manifest.json` in that run's
+folder, linking the derivative to the source and recording both file sizes and the GIF settings.
+The source must be inside the project's configured test artifact directory. Use `--force` to
+replace a preview; the default is 8 fps, 480 pixels wide and a 96-color palette. `--json` prints
+machine-readable paths and sizes. `testing media list` reads the result index and media manifests
+only, reporting derivative paths and byte counts without reading their image or video contents.
+Creating a GIF can use more storage than its WebM source.
+
+`testing media contact-sheet` accepts either video timestamps or saved case stills. For a video,
+FFmpeg samples the requested timestamps and writes one self-contained SVG next to the WebM. Repeat
+`--capture "<seconds>=<label>"` at least twice; labels can describe the camera view and animation
+phase. For expression or other detail reviews, repeat `--image "<path>=<label>"` with two to sixteen
+saved JPEG, PNG or WebP test stills. Image inputs must be in the same run sidecar directory under the
+configured artifact root. The output embeds the original stills (up to 640 pixels wide per cell)
+without re-encoding them. Video sheets default to 320-pixel cells and three columns; still sheets
+default to 480-pixel cells and two columns. Set `--cell-width` or `--columns` to adjust either
+layout. The run's `media-manifest.json` stores the output size and source paths/sizes. Use `--force`
+to replace an existing sheet. The manifest update is locked so parallel derivative generation for
+one run retains all entries.
+
+`testing review add` appends a visual assessment to a `.reviews.json` file beside the saved test
+result. The claim, reviewer kind and ID, verdict, artifact path, MIME type, size and modification
+time are stored separately from automated test results. Agent reviews may include `--model`; no
+AI provider is called. Supported verdicts are `pass`, `fail`, `needs-work` and `inconclusive`.
+Review artifacts must be files inside the matching run's artifact folder. The command reads only
+the test result path and artifact file metadata, never the media contents. The review record stays
+beside the run JSON if its media folder is later pruned. Use `testing review list --run <path>` to
+read the records without opening media.
+
+`testing review overlay` adds a vector box or arrow to one contact-sheet frame. Coordinates are
+normalized from 0 to 1 within that frame; boxes use `x,y,width,height` and arrows use
+`startX,startY,endX,endY`. Amber dashed `target` overlays mean “inspect this area.” Green `passed`
+overlays are accepted only for a review whose verdict is `pass`. `testing review view` writes a
+small HTML viewer beside the media, with independent checkboxes for inspection targets and passed
+markers. It references the unchanged contact sheet and records the viewer size in the media
+manifest. Changing or replacing a reviewed sheet invalidates the old review for new overlays.
+Neither marking a target nor drawing an overlay changes the verdict.
+
 The existing `triangular-test-run`, `triangular-test-summary`, `triangular-test-receiver`, and
-`triangular-test-baseline` binaries remain available.
+`triangular-test-baseline` binaries remain available. `triangular-test-media` and
+`triangular-test-review` provide the media derivative and review commands directly.
 
 ## Current command coverage
 

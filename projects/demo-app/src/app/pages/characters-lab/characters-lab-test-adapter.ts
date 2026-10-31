@@ -31,7 +31,7 @@ export interface CharactersLabTestHost {
   setCameraOrbit(azimuthRadians: number, elevationRadians: number): void;
   recording(): TestRecordingCapture;
   environment(): Readonly<Record<string, TestSetting>>;
-  thumbnail?(): Promise<Blob | undefined>;
+  thumbnail?(settings: CharactersLabTestSettings): Promise<Blob | undefined>;
 }
 
 export interface CharactersLabTestSnapshot {
@@ -325,6 +325,13 @@ export function createCharactersLabTestAdapter(
     recording: (_scenario, context) => {
       context.signal.throwIfAborted();
       return host.recording();
+    },
+    thumbnail: async (scenario, context) => {
+      if (context.repetition > 1 || !host.thumbnail || scenario.settings.cameraFraming !== 'face-close-up') return undefined;
+      context.signal.throwIfAborted();
+      const image = await host.thumbnail(scenario.settings);
+      context.signal.throwIfAborted();
+      return image ? [image] : undefined;
     },
   };
 }

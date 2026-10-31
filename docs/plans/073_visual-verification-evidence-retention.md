@@ -42,8 +42,8 @@ The triangular CLI operates on each app's configured artifact directory, so the 
 | Phase               | State   |
 | ------------------- | ------- |
 | reproducible-evidence | in_progress |
-| review-derivatives  | planned |
-| visual-review       | planned |
+| review-derivatives  | in_progress |
+| visual-review       | in_progress |
 | artifact-retention  | planned |
 
 <!-- tri:review version="1" scope-hash="e43cba33d9f508b56927436b2657d1e7dd87ee8cd30defcb9366cb9c00d5cf33" reviewed="2026-10-31" reviewer="agent" -->
@@ -57,7 +57,7 @@ The triangular CLI operates on each app's configured artifact directory, so the 
 
 ## Delivery progress
 
-The first demo proof of concept is on the capsule character lab. See the dated run and evidence in [ER 073](../engineering-records/073_visual-verification-evidence-retention.md). Visual acceptance remains pending; GIF/contact-sheet derivatives and retention tooling are later phases.
+The first demo proof of concept is on the capsule character lab. See the dated run and evidence in [ER 073](../engineering-records/073_visual-verification-evidence-retention.md). On-demand GIF previews, labeled video/still contact sheets, attributed review records and toggleable vector overlays are implemented. The lab has motion and close-up expression suites; full-cycle sprite sheets and retention tooling remain later work. The owner confirmed the original sheets render in chat; facial-expression quality still needs review against a claim.
 
 Scope history in the Engineering Record is append-only. Confirm a specific baseline only after
 explicit developer confirmation; document review and checked boxes do not imply confirmation.

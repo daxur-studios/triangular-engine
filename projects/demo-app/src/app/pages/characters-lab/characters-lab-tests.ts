@@ -321,6 +321,52 @@ export const CAPSULE_VISUAL_VERIFICATION_SUITE_V1: TestSuite<CharactersLabTestSe
 };
 
 /**
+ * High-detail still evidence for facial expressions on both procedural capsule families.
+ * The close camera and supersampled case thumbnails make small expression features readable in review sheets.
+ */
+export const CAPSULE_FACIAL_EMOTIONS_SUITE_V1: TestSuite<CharactersLabTestSettings> = {
+  id: 'capsule-facial-emotions',
+  version: 1,
+  title: 'Capsule Facial Expression Detail',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: [
+    scenario('human-happy-detail', 'Capsule Human: Happy eyes and smile', {
+      characterType: 'human', presetId: 'wacky-helmet-waver', emotion: 'happy', gait: 'idle',
+      cameraFraming: 'face-close-up', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('human-angry-detail', 'Capsule Human: Angry brows and narrowed eyes', {
+      characterType: 'human', presetId: 'wacky-helmet-waver', emotion: 'angry', gait: 'idle',
+      cameraFraming: 'face-close-up', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('human-sad-detail', 'Capsule Human: Sad brows and mouth', {
+      characterType: 'human', presetId: 'wacky-helmet-waver', emotion: 'sad', gait: 'idle',
+      cameraFraming: 'face-close-up', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('human-skeptical-detail', 'Capsule Human: Skeptical brow and smirk', {
+      characterType: 'human', presetId: 'wacky-helmet-waver', emotion: 'skeptical', gait: 'idle',
+      cameraFraming: 'face-close-up', rightHandAction: 'none', leftHandAction: 'none',
+    }, DEFAULT_HUMAN_TEST_SETTINGS),
+    scenario('cat-happy-detail', 'Capsule Cat: Happy eyes and muzzle', {
+      characterType: 'cat', presetId: 'space-cat-goofy', emotion: 'happy', gait: 'idle',
+      cameraFraming: 'face-close-up', restMouthPose: 'cat_smile',
+    }, DEFAULT_CAT_TEST_SETTINGS),
+    scenario('cat-angry-detail', 'Capsule Cat: Angry eyes, ears and fangs', {
+      characterType: 'cat', presetId: 'space-cat-goofy', emotion: 'angry', gait: 'idle',
+      cameraFraming: 'face-close-up',
+    }, DEFAULT_CAT_TEST_SETTINGS),
+    scenario('cat-fearful-detail', 'Capsule Cat: Fearful eyes and pinned ears', {
+      characterType: 'cat', presetId: 'space-cat-goofy', emotion: 'fearful', gait: 'idle',
+      cameraFraming: 'face-close-up', panicked: true,
+    }, DEFAULT_CAT_TEST_SETTINGS),
+    scenario('cat-skeptical-detail', 'Capsule Cat: Asymmetric skeptical expression', {
+      characterType: 'cat', presetId: 'space-cat-goofy', emotion: 'skeptical', gait: 'idle',
+      cameraFraming: 'face-close-up',
+    }, DEFAULT_CAT_TEST_SETTINGS),
+  ],
+};
+
+/**
  * Full test history for Characters Lab, oldest first.
  * The final entry is the default latest test suite.
  */
@@ -330,4 +376,5 @@ export const CHARACTERS_LAB_TEST_HISTORY: readonly TestSuite<CharactersLabTestSe
   HUMANOID_BASELINES_SUITE_V1,
   CAT_EMOTIONS_SUITE_V1,
   CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
+  CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
 ];

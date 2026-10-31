@@ -78,6 +78,8 @@
     "triangular-test-receiver": "./bin/triangular-test-receiver.mjs",
     "triangular-test-summary": "./bin/triangular-test-summary.mjs",
     "triangular-test-baseline": "./bin/triangular-test-baseline.mjs",
-    "triangular-test-run": "./bin/triangular-test-run.mjs"
+    "triangular-test-run": "./bin/triangular-test-run.mjs",
+    "triangular-test-media": "./bin/triangular-test-media.mjs",
+    "triangular-test-review": "./bin/triangular-test-review.mjs"
   }
 }

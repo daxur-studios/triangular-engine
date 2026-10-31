@@ -32,7 +32,8 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { EngineModule, EngineService } from 'triangular-engine';
+import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
+import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import {
   applyLookAt,
   blendPoses,
@@ -103,7 +104,7 @@ import {
 
 export type TargetSourceMode = 'door-knob' | 'chair' | 'manual';
 export type CharactersLabViewMode = 'capsule-doodle' | 'capsule-cats' | 'face-studio' | 'full-body';
-export type CameraFramingPreset = 'front' | 'three-quarter' | 'profile' | 'full-shot';
+export type CameraFramingPreset = 'front' | 'face-close-up' | 'three-quarter' | 'profile' | 'full-shot';
 export type CapsuleLayoutMode = 'hero' | 'lineup';
 
 const WALK_RADIUS = 1.6;
@@ -130,10 +131,11 @@ function lerpAngle(from: number, to: number, t: number): number {
   templateUrl: './characters-lab-page.component.html',
   styleUrl: './characters-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [EngineService.provide({ showFPS: true })],
+  providers: [EngineService.provide({ showFPS: true }), provideBrowserImageCompression()],
   host: { class: 'flex-page' },
 })
 export class CharactersLabPageComponent {
+  private readonly screenshot = inject(ScreenshotService);
   // View mode
   protected viewMode: CharactersLabViewMode = 'capsule-doodle';
   protected cameraFraming: CameraFramingPreset = 'full-shot';
@@ -370,11 +372,19 @@ export class CharactersLabPageComponent {
       browser: typeof navigator !== 'undefined' ? navigator.userAgent : 'node',
       'visual-recording.profile': '960x540@20fps, aspect-preserving, silent, requested 450 kb/s video',
     }),
-    thumbnail: async () => {
-      const canvas = this.engine.renderer?.domElement;
-      if (!canvas) return undefined;
-      return new Promise<Blob | undefined>((resolve) => {
-        canvas.toBlob((blob) => resolve(blob ?? undefined), 'image/jpeg', 0.85);
+    thumbnail: async (settings) => {
+      const detail = settings.cameraFraming === 'face-close-up';
+      return this.screenshot.capture({
+        engine: this.engine,
+        format: 'image/webp',
+        quality: 0.9,
+        ...(detail ? { resolution: { width: 1280, height: 720 }, samples: 4 } : {}),
+        compress: {
+          maxSizeMB: 0.05,
+          maxWidthOrHeight: detail ? 640 : 240,
+          fileType: 'image/webp',
+          quality: detail ? 0.88 : 0.6,
+        },
       });
     },
   };
@@ -914,6 +924,9 @@ export class CharactersLabPageComponent {
       } else if (framing === 'full-shot') {
         this.cameraPosition.set([1.25, 0.58, 1.45]);
         this.cameraTarget.set([0, 0.28, 0.05]);
+      } else if (framing === 'face-close-up') {
+        this.cameraPosition.set([0, 0.48, 0.76]);
+        this.cameraTarget.set([0, 0.45, 0.30]);
       } else if (framing === 'front') {
         this.cameraPosition.set([0, 0.40, 0.92]);
         this.cameraTarget.set([0, 0.35, 0.30]);
@@ -930,6 +943,9 @@ export class CharactersLabPageComponent {
       if (framing === 'full-shot') {
         this.cameraPosition.set([0.75, 1.38, 2.45]);
         this.cameraTarget.set([0, 0.92, 0]);
+      } else if (framing === 'face-close-up') {
+        this.cameraPosition.set([0, 1.62, 0.72]);
+        this.cameraTarget.set([0, 1.60, 0]);
       } else if (framing === 'front') {
         this.cameraPosition.set([0, 1.42, 1.38]);
         this.cameraTarget.set([0, 1.36, 0]);
@@ -943,7 +959,7 @@ export class CharactersLabPageComponent {
       return;
     }
 
-    if (framing === 'front') {
+    if (framing === 'front' || framing === 'face-close-up') {
       this.cameraPosition.set([0, 1.58, 0.46]);
     } else if (framing === 'three-quarter') {
       this.cameraPosition.set([0.26, 1.62, 0.38]);

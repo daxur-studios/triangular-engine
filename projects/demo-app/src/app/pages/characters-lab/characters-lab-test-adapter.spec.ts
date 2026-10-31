@@ -1,6 +1,7 @@
 import {
   CAT_EMOTIONS_SUITE_V1,
   CAT_LINEUP_SUITE_V1,
+  CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
   CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
   CHARACTERS_LAB_TEST_HISTORY,
   DEFAULT_CAT_TEST_SETTINGS,
@@ -83,6 +84,19 @@ describe('CharactersLabTestAdapter & Suites', () => {
       expect(scenario.settings.layout).toBe('hero');
       expect(scenario.settings.gait).not.toBe('idle');
       expect(scenario.durationMs).toBeGreaterThanOrEqual(8_000);
+    }
+  });
+
+  it('defines high-detail facial cases for both capsule families with still, close-up framing', () => {
+    expect(CAPSULE_FACIAL_EMOTIONS_SUITE_V1.requiresVisualReview).toBeTrue();
+    expect(CAPSULE_FACIAL_EMOTIONS_SUITE_V1.scenarios.length).toBe(8);
+    expect(new Set(CAPSULE_FACIAL_EMOTIONS_SUITE_V1.scenarios.map((scenario) => scenario.settings.characterType))).toEqual(
+      new Set(['human', 'cat']),
+    );
+    for (const scenario of CAPSULE_FACIAL_EMOTIONS_SUITE_V1.scenarios) {
+      expect(scenario.settings.cameraFraming).toBe('face-close-up');
+      expect(scenario.settings.gait).toBe('idle');
+      expect(scenario.settings.motion).toBe('still');
     }
   });
 
@@ -234,5 +248,59 @@ describe('CharactersLabTestAdapter & Suites', () => {
     const diffs = settingsMismatches(s1, s2);
     expect(diffs.length).toBe(1);
     expect(diffs[0]).toContain('emotion');
+  });
+
+  it('forwards one close-up still per first-repetition case and omits later repetitions', async () => {
+    const still = new Blob(['saved still'], { type: 'image/webp' });
+    const capturedSettings: CharactersLabTestSettings[] = [];
+    const host = {
+      snapshot: () => ({
+        settings: { ...DEFAULT_CAT_TEST_SETTINGS },
+        viewMode: 'capsule-cats' as const,
+        capsuleLayoutMode: 'hero' as const,
+        capsuleCatLayoutMode: 'hero' as const,
+        cameraPosition: [0, 0, 2] as const,
+        cameraTarget: [0, 0.4, 0] as const,
+        humanActorYaw: 0,
+        catActorYaw: 0,
+      }),
+      restore: () => {},
+      read: () => ({ ...DEFAULT_CAT_TEST_SETTINGS }),
+      apply: () => {},
+      renderedFrames: () => 0,
+      errors: () => '',
+      resetErrors: () => {},
+      onRenderComplete: () => () => {},
+      speak: () => {},
+      isSpeaking: () => false,
+      setTurntableAngle: () => {},
+      setCameraOrbit: () => {},
+      recording: () => ({ stop: async () => { throw new Error('recording is not used by this test'); }, dispose: () => {} }),
+      environment: () => ({}),
+      thumbnail: async (settings: CharactersLabTestSettings) => {
+        capturedSettings.push(settings);
+        return still;
+      },
+    } satisfies CharactersLabTestHost;
+    const adapter = createCharactersLabTestAdapter(host);
+    const scenario = CAPSULE_FACIAL_EMOTIONS_SUITE_V1.scenarios[0];
+    const nonDetailScenario = CAT_EMOTIONS_SUITE_V1.scenarios[0];
+    const context = (repetition: number): TestContext => ({
+      mode: 'quick',
+      profile: 'headless-hardware',
+      repetition,
+      signal: new AbortController().signal,
+      wait: async () => {},
+      measureWindow: async () => ({ mode: 'quick', elapsedMs: 0, stoppedBy: 'fixed' }),
+    });
+
+    const other = await adapter.thumbnail?.(nonDetailScenario, context(1));
+    const first = await adapter.thumbnail?.(scenario, context(1));
+    const later = await adapter.thumbnail?.(scenario, context(2));
+
+    expect(other).toBeUndefined();
+    expect(first).toEqual([still]);
+    expect(later).toBeUndefined();
+    expect(capturedSettings).toEqual([scenario.settings]);
   });
 });

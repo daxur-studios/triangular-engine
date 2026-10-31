@@ -14,6 +14,8 @@ const TESTING_COMMANDS = new Map([
   ["summary", "triangular-test-summary.mjs"],
   ["receiver", "triangular-test-receiver.mjs"],
   ["baseline", "triangular-test-baseline.mjs"],
+  ["media", "triangular-test-media.mjs"],
+  ["review", "triangular-test-review.mjs"],
 ]);
 
 function rootAndArgs(args) {
@@ -47,7 +49,7 @@ function sourceRecordsHelper() {
 }
 
 function help() {
-  return `Triangular CLI\n\n  triangular docs consensus new ...\n  triangular docs consensus prompt <id> ...\n  triangular docs consensus add-response <id> ...\n  triangular docs consensus check <id>\n  triangular docs records <new|next|review|baseline|archive|check|manifest|map> ...\n  triangular docs plan new ...       Create a paired Plan and Engineering Record\n  triangular docs record new ...     Create a paired Plan and Engineering Record\n  triangular docs archive <path>     Archive a paired Plan and Engineering Record preserving git history\n  triangular docs map                Export manifest and documents for the development map\n  triangular testing <run|summary|receiver|baseline> ...\n\nAll commands use the current directory by default. Pass --root <directory> to target another project.`;
+  return `Triangular CLI\n\n  triangular docs consensus new ...\n  triangular docs consensus prompt <id> ...\n  triangular docs consensus add-response <id> ...\n  triangular docs consensus check <id>\n  triangular docs records <new|next|review|baseline|archive|check|manifest|map> ...\n  triangular docs plan new ...       Create a paired Plan and Engineering Record\n  triangular docs record new ...     Create a paired Plan and Engineering Record\n  triangular docs archive <path>     Archive a paired Plan and Engineering Record preserving git history\n  triangular docs map                Export manifest and documents for the development map\n  triangular testing <run|summary|receiver|baseline|media|review> ...\n  triangular testing media <gif|contact-sheet|list> ...\n  triangular testing review <add|list|overlay|view> ...\n\nAll commands use the current directory by default. Pass --root <directory> to target another project.`;
 }
 
 export async function main(args = process.argv.slice(2)) {

@@ -22,6 +22,8 @@
     "test:receiver": "node projects/triangular-engine/bin/triangular-test-receiver.mjs",
     "test:run": "node projects/triangular-engine/bin/triangular-test-run.mjs",
     "test:triangular-engine:sink": "node --test projects/triangular-engine/bin/triangular-test-sink.spec.mjs projects/triangular-engine/bin/triangular-test-run.spec.mjs",
+    "test:triangular-engine:media": "node --test projects/triangular-engine/bin/triangular-test-media.spec.mjs",
+    "test:triangular-engine:review": "node --test projects/triangular-engine/bin/triangular-test-review.spec.mjs",
     "test:triangular-engine:testing": "ng run triangular-engine:test-testing --watch=false --browsers=ChromeHeadless",
     "test:watch": "ng test --watch --browsers=Chrome",
     "build:triangular-engine": "ng build triangular-engine",

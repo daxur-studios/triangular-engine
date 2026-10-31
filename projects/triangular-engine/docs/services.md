@@ -4,6 +4,12 @@
 
 Core rendering/control service.
 
+The default renderer remains classic WebGL. When `preferredRenderer: 'webgpu'` is
+requested, the engine creates Three.js `WebGPURenderer`, which chooses native WebGPU
+or its WebGL2 backend; it does not silently switch to classic WebGL. An asynchronous
+initialization failure emits `error$` with phase `renderer-init` and does not start
+the render loop. Consumers should surface that error to the user.
+
 Key properties:
 
 - `scene`, `renderer`, optional `composer`/`renderPass`

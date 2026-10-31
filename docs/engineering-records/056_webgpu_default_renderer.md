@@ -12,6 +12,10 @@ performance: []
 
 Plan: [Plan 056](/docs/plans/056_webgpu_default_renderer.md).
 
+## 2026-10-31 — Explicit WebGPU selection and startup errors
+
+An explicit `preferredRenderer: 'webgpu'` now constructs `WebGPURenderer` without the `navigator.gpu` shortcut to classic WebGL. Three's renderer chooses its own backend. An initialization rejection emits `error$` with phase `renderer-init` and does not start a blank loop. Focused headless startup specs passed (6 tests), and the package built. The default is still classic WebGL. A native WebGPU consumer ran on an NVIDIA adapter; the WebGL2 fallback, device loss, renderer recreation and full migration remain unverified.
+
 ## 2026-10-19 — Plan written (code reading only)
 
 Nothing was built, run or measured. Line numbers are from the working tree on this date, with three.js 0.186.1.

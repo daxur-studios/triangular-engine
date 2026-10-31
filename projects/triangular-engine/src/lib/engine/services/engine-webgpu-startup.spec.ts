@@ -26,6 +26,30 @@ describe('EngineService WebGPU startup rendering', () => {
     return renderer;
   }
 
+  it('keeps WebGPURenderer when requested even without a native GPU check', () => {
+    const gpu = {} as WebGPURenderer;
+    const createGpu = spyOn(service, 'createWebGpuRenderer').and.returnValue(gpu);
+    const createGl = spyOn(service, 'createWebGlRenderer');
+    expect((service as any).initRenderer({ preferredRenderer: 'webgpu' })).toBe(gpu);
+    expect(createGpu).toHaveBeenCalled();
+    expect(createGl).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed initialization and does not start a blank render loop', async () => {
+    const renderer = useRenderer(false);
+    const error = new Error('adapter unavailable');
+    renderer.init = jasmine.createSpy('init').and.rejectWith(error);
+    const startLoop = spyOn(service, 'startLoop');
+    spyOn(console, 'error');
+    const errors: unknown[] = [];
+    service.error$.subscribe((event) => errors.push(event));
+    service.onComponentInit();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(startLoop).not.toHaveBeenCalled();
+    expect(errors).toEqual([{ phase: 'renderer-init', error }]);
+  });
+
   it('defers even forced resize/camera frames until the backend is initialized', () => {
     const renderer = useRenderer(false);
     service.render(1, true);
