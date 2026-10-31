@@ -1,9 +1,8 @@
 # 02 — Three.js 0.186.1 → 0.187.0
 
-Assessment and checklist for the next upgrade. Status: **not applied**; the
-workspace is still on 0.186.1. Written from a source and migration-guide
-review on 2026-10-30; replace each "pending" line with the observed result when
-the bump is done, then move this file's status to "applied".
+Assessment and checklist for the next upgrade. Status: **applied** on
+2026-10-31; the workspace, the engine archive and the two consumer apps are on
+0.187.0. Written from a source and migration-guide review on 2026-10-30.
 Companion checklist: `instructions/triangular-engine-threejs-upgrade.md`.
 
 ## Target versions
@@ -13,7 +12,7 @@ Companion checklist: `instructions/triangular-engine-threejs-upgrade.md`.
 | `three` | 0.186.1 | **0.187.0** (exact pin) |
 | `@types/three` | ^0.186.0 | **^0.187.0** |
 | `three-mesh-bvh` | ^0.9.16 | unchanged (`peer three >= 0.159.0`) |
-| `postprocessing` | 6.39.5 | check its `three` peer before installing |
+| `postprocessing` | 6.39.5 | unchanged; peer still `< 0.187.0`, install with `--legacy-peer-deps` |
 | `@webgpu/types` | ^0.1.74 | unchanged |
 | `triangular-engine` peers | `three ^0.186.0` | `three ^0.187.0` |
 
@@ -96,10 +95,10 @@ rely on GC to free storage buffers; use explicit disposal (below).
 ## Steps
 
 1. Workspace: bump `three` to `0.187.0`, `@types/three` to `^0.187.0`, and
-   `projects/triangular-engine/package.json` peers to `three ^0.187.0`; plain
-   `npm install` (no `--force`).
-2. Check `postprocessing@6.39.5`'s `three` peer; bump it if it excludes
-   `>=0.187.0`.
+   `projects/triangular-engine/package.json` peers to `three ^0.187.0`.
+2. Check `postprocessing@6.39.5`'s `three` peer; it excludes `>=0.187.0` and no
+   published release accepts r187 yet, so install with `--legacy-peer-deps`
+   until a compatible release is available.
 3. Replace version strings (`grep -rn "0\.186"`): package READMEs,
    `docs/getting-started.md`, the engine skill file, and the baseline line in
    `instructions/triangular-engine-threejs-upgrade.md`.
@@ -115,17 +114,18 @@ rely on GC to free storage buffers; use explicit disposal (below).
 
 | Check | Result |
 | --- | --- |
-| `npm run build:triangular-engine` | pending |
-| engine `npm test` | pending |
-| impostor atlas / multi-viewport specs | pending |
-| terrain `BatchedMesh` specs | pending |
-| demo WebGL and WebGPU smoke | pending |
-| consumer-app PMREM visual review | pending |
-| consumer `tsc` app + spec, test suites | pending |
+| `npm run build:triangular-engine` | pass (2026-10-31) |
+| engine `npm test` | pending (owner) |
+| impostor atlas / multi-viewport specs | pending (owner) |
+| terrain `BatchedMesh` specs | pending (owner) |
+| demo WebGL and WebGPU smoke | pending (owner) |
+| consumer-app PMREM visual review | pending (owner) |
+| consumer `tsc` app + spec, test suites | pending (owner) |
 
 ## Open questions
 
-- Whether `postprocessing@6.39.5` accepts r187 as-is.
+- `postprocessing@6.39.5` does not accept r187 as a declared peer; the apps
+  install with `--legacy-peer-deps` until an updated release lands.
 - Whether the PMREM look change is acceptable for the consumer app that uses
   it, or needs a parameter tweak.
 - Whether the multi-viewport path should adopt `FrustumArray` in this bump or

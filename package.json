@@ -81,7 +81,7 @@
     "dexie": "^4.2.1",
     "mermaid": "^11.17.2",
     "rxjs": "~7.8.0",
-    "three": "0.186.1",
+    "three": "0.187.0",
     "three-mesh-bvh": "^0.9.16",
     "tslib": "^2.3.0"
   },
@@ -93,7 +93,7 @@
     "@playwright/test": "^1.55.0",
     "@pmndrs/vanilla": "^1.24.1",
     "@types/jasmine": "~5.1.0",
-    "@types/three": "^0.186.0",
+    "@types/three": "^0.187.0",
     "@webgpu/types": "^0.1.74",
     "jasmine-core": "~5.2.0",
     "jolt-physics": "1.0.1",

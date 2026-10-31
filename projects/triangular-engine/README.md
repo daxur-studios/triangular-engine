@@ -79,4 +79,4 @@ The full matrix, including sub-entries such as `triangular-engine/water/jolt`, `
 
 ## Compatibility
 
-Angular ^20.3.3, Three.js ^0.186.0, Dexie ^4.2.1, RxJS ^7.8.0, three-mesh-bvh ^0.9.9, `@daxur-studios/portal-layout` ^0.0.1. Optional: Rapier `@dimforge/rapier3d-compat` ^0.18.0 or Jolt `jolt-physics` ^1.0.1, `@pmndrs/vanilla` ^1.24.0, and `@angular/material` ^20.2.14 for the Scene Tree. The full peer list is in [getting started](docs/getting-started.md).
+Angular ^20.3.3, Three.js ^0.187.0, Dexie ^4.2.1, RxJS ^7.8.0, three-mesh-bvh ^0.9.9, `@daxur-studios/portal-layout` ^0.0.1. Optional: Rapier `@dimforge/rapier3d-compat` ^0.18.0 or Jolt `jolt-physics` ^1.0.1, `@pmndrs/vanilla` ^1.24.0, and `@angular/material` ^20.2.14 for the Scene Tree. The full peer list is in [getting started](docs/getting-started.md).
