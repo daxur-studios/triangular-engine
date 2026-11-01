@@ -7,9 +7,9 @@ session. Write one when a session ends with work open.
 
 `<NNN>_<topic>.md`
 
-- `NNN_topic` is the stem of the [runbook](../runbook/index.md) entry the work belongs to, e.g.
-  `055_planet_shape_system.md`. A shorter topic is fine when the session covered one part of it.
-- A second handover on the same topic adds a date: `055_planet_shape_system_2026-10-25.md`.
+- `NNN` is the number of the [engineering record](../engineering-records/index.md) the work belongs to. It is never a
+  counter, so the handover for ER 055 is `055_planet_shape_system_2026-10-25.md`.
+- Every handover carries the date it was written. The newest date is the latest handover for that record.
 
 ## Not committed
 
@@ -31,5 +31,27 @@ the handover.
 Facts only; link to code, docs, plans and runbooks rather than repeating them. This is a public repo: the
 [AGENTS.md](../../AGENTS.md) rules apply, so no private or consumer app names or paths (write "a consumer app") and no
 process names from result files.
+
+## Session transcript export
+
+A session id is useless to another account, so the handover can carry the session's own transcript as readable text:
+
+```bash
+node scripts/export-session-handover.mjs --name <NNN_topic>
+```
+
+This writes one gitignored file next to the handover, `<NNN_topic>.transcript.md`. It keeps the person's messages,
+assistant text, compaction summaries, subagent briefs (the prompt each subagent was given, cut at 1,200 characters) and
+subagent hand-back reports. It drops tool results, thinking, routine tool calls and harness reminders. No raw JSONL is
+written, and subagent transcripts are not copied; their reports arrive as hand-backs.
+
+Options:
+
+- `--session <id>`: export that session. Without it, the most recently modified transcript for this workspace is used.
+- `--transcript <path>`: read a `.jsonl` file directly, for a session started in another folder.
+- `--include-sidechains`: include subagent messages in the file.
+
+`--session` and `--transcript` cannot be used together. The file contains local paths and may contain pasted secrets,
+so review it and send it only by a private channel. Never commit it.
 
 When the work is picked up and finished, delete the handover or fold what still matters into the runbook.

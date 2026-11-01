@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Compact table over artifacts/test-runs/index.jsonl plus run-adjacent visual-review metadata.
-// Usage: triangular-test-summary [--suite id] [--last N] [--metric text] [--dir artifacts/test-runs]
+// Usage: triangular-test-summary [--suite id] [--last N] [--metric text] [--json] [--dir artifacts/test-runs]
+// --json prints the same runs as machine-readable JSON (see summaryJson).
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -97,15 +98,35 @@ export function breakdownLines(metrics, filter) {
 }
 
 /**
+ * Groups index rows by suite and version, keeping the last `last` runs of each group (all of them when fewer exist).
+ * `suite` keeps only that suite id.
+ */
+export function selectRuns(rows, { suite, last = 5 } = {}) {
+  const bySuite = Map.groupBy(rows.filter((r) => !suite || r.suite === suite), (r) => `${r.suite}@v${r.version}`);
+  return [...bySuite].map(([key, list]) => ({ key, rows: list.slice(-last) }));
+}
+
+/** The suite ids in the index, sorted. */
+export function knownSuites(rows) {
+  return [...new Set(rows.map((r) => r.suite))].sort();
+}
+
+/** Error text when `suite` names no run in the index; null when it does, or when no suite was asked for. */
+export function unknownSuiteMessage(rows, suite) {
+  if (!suite || rows.some((r) => r.suite === suite)) return null;
+  const known = knownSuites(rows);
+  return `No runs for suite "${suite}" in the index. ${known.length ? `Known suites: ${known.join(', ')}.` : 'The index has no runs yet.'}`;
+}
+
+/**
  * Index lines written since summaries were added carry `cases`, so no result file is opened. Older lines fall back
  * to reading their file. `metric` keeps only metrics whose name contains that text.
  */
 export function summarize(rows, readRun, currentHash, { suite, last = 5, metric, readLoad = () => null, readReviews = () => [] } = {}) {
   const lines = [];
-  const bySuite = Map.groupBy(rows.filter((r) => !suite || r.suite === suite), (r) => `${r.suite}@v${r.version}`);
-  for (const [key, list] of bySuite) {
+  for (const { key, rows: list } of selectRuns(rows, { suite, last })) {
     lines.push(`## ${key}`);
-    for (const row of list.slice(-last)) {
+    for (const row of list) {
       const stale = currentHash && row.fingerprint !== currentHash ? 'STALE' : 'current';
       lines.push(`${row.startedAt?.slice(0, 16) ?? row.savedAt.slice(0, 16)}  ${row.profile} ${row.mode ?? 'standard'}  ${row.fingerprint} ${stale}  auto=${row.automatedVerdict} perf=${row.performanceVerdict} visual=${row.visualReview}`);
       const claimReviews = readReviews(row.file) ?? [];
@@ -142,6 +163,52 @@ export function summarize(rows, readRun, currentHash, { suite, last = 5, metric,
   return lines.join('\n');
 }
 
+/**
+ * The same runs `summarize` prints, as data for other tools. Each run carries its verdicts, its case summaries (`metric`
+ * keeps matching metrics only), ablations, performance notes, errors, visual-review claims and load condition.
+ * `stale` is true when the run's fingerprint differs from `currentHash`. `fileMissing` is true when neither the index
+ * line nor the result file has the case data.
+ */
+export function summaryJson(rows, readRun, currentHash, { suite, last = 5, metric, readLoad = () => null, readReviews = () => [] } = {}) {
+  const runs = [];
+  for (const { rows: list } of selectRuns(rows, { suite, last })) {
+    for (const row of list) {
+      let cases = row.cases;
+      let errors = row.errors;
+      let ablations = row.ablations;
+      if (!cases) {
+        const run = readRun(row.file);
+        cases = run ? caseSummaries(run) : null;
+        errors = run?.errors;
+        ablations = run ? ablationSummaries(run) : undefined;
+      }
+      const keepMetric = (metrics) => Object.fromEntries(Object.entries(metrics).filter(([name]) => !metric || name.includes(metric)));
+      runs.push({
+        suite: row.suite,
+        version: row.version,
+        profile: row.profile,
+        mode: row.mode ?? 'standard',
+        startedAt: row.startedAt ?? row.savedAt,
+        fingerprint: row.fingerprint,
+        stale: Boolean(currentHash && row.fingerprint !== currentHash),
+        automatedVerdict: row.automatedVerdict,
+        performanceVerdict: row.performanceVerdict,
+        visualReview: row.visualReview,
+        file: row.file,
+        fileMissing: cases === null,
+        cases: Object.fromEntries(Object.entries(cases ?? {}).map(([id, s]) => [id, { ...s, metrics: keepMetric(s.metrics) }])),
+        ablations: ablations ?? [],
+        performanceNotes: row.performanceNotes ?? [],
+        errors: errors ?? [],
+        claimReviews: readReviews(row.file) ?? [],
+        load: readLoad(row.file) ?? null,
+        machine: row.machine ?? null,
+      });
+    }
+  }
+  return runs;
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   const args = process.argv.slice(2);
   const opt = (name, d) => (args.includes(name) ? args[args.indexOf(name) + 1] : d);
@@ -149,7 +216,12 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
   const config = loadConfig(root);
   const dir = join(root, opt('--dir', config.outputDir));
   const indexFile = join(dir, 'index.jsonl');
-  if (!existsSync(indexFile)) { console.log(`No results yet (${indexFile}). Run a suite in a visible tab with the sink enabled.`); process.exit(0); }
+  const json = args.includes('--json');
+  if (!existsSync(indexFile)) {
+    if (json) console.log(JSON.stringify({ fingerprint: null, runs: [] }, null, 2));
+    else console.log(`No results yet (${indexFile}). Run a suite in a visible tab with the sink enabled.`);
+    process.exit(0);
+  }
   const rows = readFileSync(indexFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const readRun = (file) => { try { return JSON.parse(readFileSync(join(dir, file), 'utf8')); } catch { return null; } };
   const readReviews = (file) => {
@@ -163,7 +235,17 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     } catch { return []; }
   };
   const current = computeFingerprint(root, config.fingerprintPaths).hash;
-  console.log(`current fingerprint ${current}\n`);
-  const readLoad = (file) => readRun(loadFile(file));
-  console.log(summarize(rows, readRun, current, { suite: opt('--suite'), last: Number(opt('--last', 5)), metric: opt('--metric'), readLoad, readReviews }));
+  const suite = opt('--suite');
+  const options = { suite, last: Number(opt('--last', 5)), metric: opt('--metric'), readLoad: (file) => readRun(loadFile(file)), readReviews };
+  const missing = unknownSuiteMessage(rows, suite);
+  if (missing) {
+    console.error(missing);
+    process.exitCode = 1;
+  } else if (json) {
+    console.log(JSON.stringify({ fingerprint: current, runs: summaryJson(rows, readRun, current, options) }, null, 2));
+  } else {
+    console.log(`current fingerprint ${current}
+`);
+    console.log(summarize(rows, readRun, current, options));
+  }
 }

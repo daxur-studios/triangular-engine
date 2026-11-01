@@ -55,3 +55,4 @@ ignore/
 
 # Numbered handovers contain local file paths and session ids; docs/handover/README.md stays tracked
 /docs/handover/[0-9]*.md
+/docs/handover/[0-9]*.jsonl

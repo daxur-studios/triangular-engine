@@ -1,5 +1,7 @@
 # Changelog
 
+- `triangular-test-summary` (testing CLI): new `--json` flag prints the selected runs as JSON (verdicts, case summaries, ablations, claim reviews, load, `stale`), for tools. An unknown `--suite` id now exits 1 with the known suite ids on stderr instead of printing nothing.
+
 - `triangular-engine/jolt`: new floating-origin helper for single-precision Jolt bodies far from zero (Plan 077, `rebase-helper`). New exports `float32UlpAt(valueM)` (the float32 spacing at a magnitude), `JoltFloatingOrigin` (rebases a core `FloatingOrigin` and shifts every body in `JoltPhysicsService.bodies$`, plus bodies passed to `track`, by the same delta, without changing velocities or waking bodies) and `IJoltOriginOptions` (`thresholdM`). Scene objects and cameras are not moved; consumers move them from `origin.origin.onRebase`.
 
 - `triangular-engine/cloud-volumes`: `<planetClouds>` inside a `<planet>` now bends into the flat map with the planet's morph instead of fading out (vertex stage, the same bend as the terrain material, with the planet's projection and centre). New optional `PlanetCloudShellOptions.morphUniforms`. A standalone shell, or one given its own `[morph]`, still fades. Limits: lit as on the globe at every morph; the sky backdrop still dissolves when the camera is high; the headless GPU position floor is about 118 m at R = 600 km (backend `asin` precision).

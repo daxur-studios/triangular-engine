@@ -225,7 +225,7 @@ with an `Origin` that is not a loopback host gets a 403, and loopback origins ge
 diff and untracked files under `fingerprintPaths`. It is deliberately coarse: any edit
 there changes it. Older runs are flagged `STALE` in summaries, not removed.
 
-**Reading cheaply.** Run the summary first (`npx triangular-test-summary [--suite id] [--last N]` in a consumer app, where the bin is installed; inside this repository use `npm run test:summary -- [--suite id] [--last N]`, since `npx` cannot resolve the bin here): date,
+**Reading cheaply.** Run the summary first (`npx triangular-test-summary [--suite id] [--last N]` in a consumer app, where the bin is installed; inside this repository use `npm run test:summary -- [--suite id] [--last N] [--json]`, since `npx` cannot resolve the bin here): date,
 profile, fingerprint and stale flag, the three run verdicts, any claim-scoped visual reviews,
 median/p95/max per scenario metric (a constant metric such as a draw count prints once
 as `= value`) and failed checks only. `--metric text` keeps only metrics whose name
