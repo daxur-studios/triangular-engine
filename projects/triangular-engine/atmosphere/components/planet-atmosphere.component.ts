@@ -132,7 +132,7 @@ export class PlanetAtmosphereComponent implements OnInit {
       radiusM,
       radiusUnits: this.radiusUnits(),
       thickness: this.thickness(),
-      planet: this.planet() ?? this.engine.scene,
+      planet: this.planet() ?? this.context?.planetObject?.() ?? this.engine.scene,
       aerialPerspective: this.aerialPerspective(),
       morph: typeof morph === 'number' ? undefined : morph,
     });
@@ -150,7 +150,7 @@ export class PlanetAtmosphereComponent implements OnInit {
   private update(atmosphere: PlanetAtmosphere): void {
     const renderer = this.engine.renderer as WebGPURenderer;
     if (!renderer?.isWebGPURenderer) return;
-    atmosphere.planet = this.planet() ?? this.engine.scene;
+    atmosphere.planet = this.planet() ?? this.context?.planetObject?.() ?? this.engine.scene;
     atmosphere.enabled = this.enabled();
     atmosphere.sky = this.sky();
     atmosphere.stars = this.stars();

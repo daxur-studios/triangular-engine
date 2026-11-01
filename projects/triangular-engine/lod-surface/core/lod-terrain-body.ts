@@ -95,6 +95,8 @@ const AXES: { right: Vec3; up: Vec3; forward: Vec3 } = { right: [1, 0, 0], up: [
 export class LodTerrainBody {
   /** Add this to the scene. Holds the surface mesh, which is replaced when a setting changes its shader. */
   readonly object = new Group();
+  /** Center of the planet in scene space in metres. Default [0, 0, 0]. */
+  center: Vec3 = [0, 0, 0];
   /** The current selector; replaced by {@link configure}. Its `stats` are the telemetry of the last frame. */
   selector!: LodSelector;
   /** The current surface mesh; replaced by {@link configure} when a setting changes its shader. */
@@ -217,7 +219,15 @@ export class LodTerrainBody {
    * {@link groundAt} for the details and limits.
    */
   groundAt(position: Vec3, out: GroundSample = createGroundSample()): GroundSample {
-    return groundAt(this.source, this.settings.domain, position, out, this.groundStepM);
+    const hasCenter = this.center[0] !== 0 || this.center[1] !== 0 || this.center[2] !== 0;
+    const local: Vec3 = hasCenter ? [position[0] - this.center[0], position[1] - this.center[1], position[2] - this.center[2]] : position;
+    const result = groundAt(this.source, this.settings.domain, local, out, this.groundStepM);
+    if (hasCenter) {
+      result.point[0] += this.center[0];
+      result.point[1] += this.center[1];
+      result.point[2] += this.center[2];
+    }
+    return result;
   }
 
   /** Debug colouring of the built-in material (one colour per level, or grey). Kept across mesh rebuilds. */
@@ -245,6 +255,13 @@ export class LodTerrainBody {
   }
 
   /** Direction to the sun in the scene frame, for the built-in material's lighting. Kept across mesh rebuilds. */
+  /** Center of the planet in scene space. Kept across mesh rebuilds. */
+  setCenter(center: Vec3 | readonly [number, number, number]): void {
+    this.center[0] = center[0];
+    this.center[1] = center[1];
+    this.center[2] = center[2];
+  }
+
   setSun(direction: Vec3): void {
     this.sun = direction;
     this.surface.setSun(direction);
@@ -300,9 +317,9 @@ export class LodTerrainBody {
     camera.updateWorldMatrix(true, false);
     const e = camera.matrixWorld.elements;
     const position = this.selectorView.camera as Vec3;
-    position[0] = e[12];
-    position[1] = e[13];
-    position[2] = e[14];
+    position[0] = e[12] - this.center[0];
+    position[1] = e[13] - this.center[1];
+    position[2] = e[14] - this.center[2];
     setAxis(AXES.right, e[0], e[1], e[2], 1);
     setAxis(AXES.up, e[4], e[5], e[6], 1);
     setAxis(AXES.forward, e[8], e[9], e[10], -1);
@@ -325,7 +342,7 @@ export class LodTerrainBody {
     this.surface.setDetailFade(Math.max(this.settings.cellPixels, PIXEL_FLOOR) * view.pixelAngle);
     this.surface.upload(this.selector, position);
     this.syncPoleFan();
-    this.object.position.set(position[0], position[1], position[2]);
+    this.object.position.set(e[12], e[13], e[14]);
     this.selectionMs = performance.now() - began;
   }
 

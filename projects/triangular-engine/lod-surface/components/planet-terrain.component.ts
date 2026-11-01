@@ -1,5 +1,6 @@
 import { Component, DestroyRef, computed, effect, inject, input, untracked, type Signal } from '@angular/core';
 import type { NodeMaterial } from 'three/webgpu';
+import type { Vector3Tuple } from 'three';
 import { EngineService, PLANET_CONTEXT } from 'triangular-engine';
 import {
   TERRAIN_DEFAULTS, createHeightSource, type GroundSample, type CubeWarp, type HeightSource, type LodView, type PatchCells, type Vec3,
@@ -98,6 +99,10 @@ export class PlanetTerrainComponent {
    * Direction to the sun in the scene frame, for the default material, and passed to a `TerrainPlanetMaterial` as its
    * `setSunDirection` (the scene's own light is still yours to place). Default: the enclosing `<planet>`'s, else `[0.4, 0.8, 0.45]`.
    */
+  /**
+   * Position of the planet in scene space in metres. Default: the enclosing `<planet>`'s position, else `[0, 0, 0]`.
+   */
+  readonly position = input<Vector3Tuple | Vec3 | readonly [number, number, number] | undefined>(undefined);
   readonly sunDirection = input<Vec3 | readonly [number, number, number] | undefined>(undefined);
   /** Default material colouring: one colour per level, or grey. */
   readonly view = input<LodView>('lod');
@@ -190,6 +195,7 @@ export class PlanetTerrainComponent {
         bounds: this.bounds(),
         wireframe: this.wireframe(),
         morph: this.morphUniforms,
+        center: this.position() ?? this.context?.position?.() ?? [0, 0, 0],
       };
     }),
   );

@@ -1,6 +1,7 @@
 import {
   Component, DestroyRef, EnvironmentInjector, afterNextRender, computed, effect, forwardRef, inject, input, signal, untracked, type Signal,
 } from '@angular/core';
+import { Group, type Object3D, type QuaternionTuple, type Vector3Tuple } from 'three';
 import { EngineService, PLANET_CONTEXT, type PlanetContext } from 'triangular-engine';
 import {
   cellPlanetHeights, resolveCellPlanetWorld, runBake, seaAlignedGlobeRadius,
@@ -44,7 +45,8 @@ function sameWorld(a: PlanetWorld | undefined, b: PlanetWorld | undefined): bool
   if (a === b) return true;
   if (!a || !b) return false;
   return a.seed === b.seed && a.cellCount === b.cellCount && a.relaxationIterations === b.relaxationIterations
-    && a.heightScaleM === b.heightScaleM && a.bakeK === b.bakeK;
+    && a.heightScaleM === b.heightScaleM && a.bakeK === b.bakeK
+    && a.worldProfileKind === b.worldProfileKind && a.plateCount === b.plateCount && a.jitter === b.jitter;
 }
 
 /** The default `bake`: runs the bake on the calling thread, after yielding once so the page can paint first. */
@@ -92,6 +94,14 @@ export class PlanetComponent implements PlanetContext {
   /** The planet's radius in metres (sea level). */
   readonly radius = input.required<number>();
   /**
+   * Position of the planet in scene space in metres. Optional; when unset, the planet sits at the scene origin [0, 0, 0].
+   */
+  readonly position = input<Vector3Tuple | Vec3 | readonly [number, number, number] | undefined>(undefined);
+  /**
+   * Orientation quaternion of the planet in scene space. Optional; default identity [0, 0, 0, 1].
+   */
+  readonly quaternion = input<QuaternionTuple | readonly [number, number, number, number] | undefined>(undefined);
+  /**
    * Direction to the sun in the scene frame (the planet's centre is the scene origin). Any length: the value read from
    * {@link sunDirection} is normalised. Default `[0.4, 0.8, 0.45]`, the terrain's own default.
    */
@@ -125,6 +135,9 @@ export class PlanetComponent implements PlanetContext {
   /** The shared morph uniform, `morphUniforms.uMorph`: the same object for the planet's life. */
   readonly morphUniform: { value: number } = this.morphUniforms.uMorph;
 
+  readonly planetGroup = new Group();
+  readonly planetObject = signal<Object3D>(this.planetGroup).asReadonly();
+
   private readonly worldDescription = computed(() => this.world(), { equal: sameWorld });
   private readonly bakedHeights = signal<TextureHeightSource | undefined>(undefined);
   private bakeSerial = 0;
@@ -151,6 +164,9 @@ export class PlanetComponent implements PlanetContext {
       seed: world.seed,
       cellCount: world.cellCount,
       ...(world.relaxationIterations === undefined ? {} : { relaxationIterations: world.relaxationIterations }),
+      ...(world.worldProfileKind === undefined ? {} : { worldProfileKind: world.worldProfileKind }),
+      ...(world.plateCount === undefined ? {} : { plateCount: world.plateCount }),
+      ...(world.jitter === undefined ? {} : { jitter: world.jitter }),
     };
   });
 
@@ -167,6 +183,23 @@ export class PlanetComponent implements PlanetContext {
   });
 
   constructor() {
+    this.engine.scene.add(this.planetGroup);
+
+    effect(() => {
+      const pos = this.position();
+      if (pos) {
+        this.planetGroup.position.set(pos[0], pos[1], pos[2]);
+      } else {
+        this.planetGroup.position.set(0, 0, 0);
+      }
+      const quat = this.quaternion();
+      if (quat) {
+        this.planetGroup.quaternion.set(quat[0], quat[1], quat[2], quat[3]);
+      } else {
+        this.planetGroup.quaternion.set(0, 0, 0, 1);
+      }
+    });
+
     effect(() => {
       this.morphUniforms.uMorph.value = this.morph();
     });
@@ -194,6 +227,7 @@ export class PlanetComponent implements PlanetContext {
       for (const source of this.retiring) source.dispose();
       this.retiring.clear();
       this.current = undefined;
+      this.planetGroup.removeFromParent();
     });
   }
 

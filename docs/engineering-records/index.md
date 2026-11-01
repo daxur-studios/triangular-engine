@@ -42,5 +42,6 @@ tags: [runbook, index]
 | [Procedural character studio](/docs/engineering-records/074_procedural-character-studio.md) | [PLAN-074](/docs/plans/074_procedural-character-studio.md) |
 | [Claude-specific coding approach: Haiku builds, Opus decides](/docs/engineering-records/075_claude-coding-approach.md) | [PLAN-075](/docs/plans/075_claude-coding-approach.md) |
 | [Soft-body parity lab (official Jolt examples)](/docs/engineering-records/076_soft-body-parity-lab.md) | [PLAN-076](/docs/plans/076_soft-body-parity-lab.md) |
+| [Jolt physics for flat, sphere and cylinder worlds](/docs/engineering-records/077_jolt-world-shapes.md) | [PLAN-077](/docs/plans/077_jolt-world-shapes.md) |
 
 Existing records retain their `docs/runbook/` paths. Legacy runbooks `001`–`042` retain their historical formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

@@ -118,7 +118,15 @@ function dotCentres(world: ICellPlanetWorld, a: number, b: number): number {
  * What identifies a cell planet for the terrain's colours: a built world, or the description used for `cellPlanetHeights`
  * (`seed`, `cellCount`, optional `relaxationIterations`), from which the world is built on the calling thread.
  */
-export type CellPlanetSource = ICellPlanetWorld | Pick<CellPlanetDescription, 'seed' | 'cellCount'> & Partial<Pick<CellPlanetDescription, 'relaxationIterations'>>;
+export type CellPlanetSource =
+  | ICellPlanetWorld
+  | (Pick<CellPlanetDescription, 'seed' | 'cellCount'> &
+      Partial<
+        Pick<
+          CellPlanetDescription,
+          'relaxationIterations' | 'worldProfileKind' | 'plateCount' | 'jitter'
+        >
+      >);
 
 /** The world of a {@link CellPlanetSource}: itself when already built, else built by `cellPlanetWorld` (once per description, then kept). */
 export function resolveCellPlanetWorld(source: CellPlanetSource): ICellPlanetWorld {

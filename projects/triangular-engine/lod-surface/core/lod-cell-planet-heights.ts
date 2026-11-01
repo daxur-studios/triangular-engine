@@ -1,3 +1,4 @@
+import type { WorldProfileKind } from 'triangular-engine/worldgen';
 import type { CubeWarp } from './lod-domain';
 import { DEFAULT_BAKE_K } from './lod-height-bake';
 import type { BakeClient } from './lod-height-bake-client';
@@ -26,6 +27,12 @@ export interface CellPlanetHeightsOptions {
   readonly warp?: CubeWarp;
   /** Texture size exponent: `2^bakeK` texel cells per cube-face side. Default 10 (1,025 x 1,025 texels per face, 24 MB). */
   readonly bakeK?: number;
+  /** Archetype/profile kind: 'terran', 'moon', 'mars', 'venus', etc. Default 'terran'. */
+  readonly worldProfileKind?: WorldProfileKind;
+  /** Plate count for tectonic simulation. Default 10. */
+  readonly plateCount?: number;
+  /** Voronoi jitter. Default 0.15. */
+  readonly jitter?: number;
 }
 
 /**
@@ -40,9 +47,8 @@ export interface CellPlanetHeightsOptions {
  * // template: <planetTerrain [radius]="600_000" [heights]="heights()" />
  * ```
  *
- * **The parameters must match the ones the game used for `buildCellPlanetWorld`**: a different `seed`, `cellCount` or
- * `relaxationIterations` is a different planet. Only those three are described; a world built with a non-default
- * `jitter`, `plateCount`, `worldProfileKind` or `terrain` config is not reproduced.
+ * **The parameters must match the ones the game used for `buildCellPlanetWorld`**: a different `seed`, `cellCount`,
+ * `relaxationIterations` or `worldProfileKind` is a different planet.
  *
  * Sphere only: a cell planet has no plane form, so passing the result to `<flatTerrain>` throws. Dispose the source
  * when you replace it (`heights.dispose()`).
@@ -56,6 +62,9 @@ export async function cellPlanetHeights(bake: BakeClient, options: CellPlanetHei
     cellCount: options.cellCount,
     relaxationIterations: options.relaxationIterations ?? 2,
     heightScaleM: options.heightScaleM,
+    ...(options.worldProfileKind ? { worldProfileKind: options.worldProfileKind } : {}),
+    ...(options.plateCount !== undefined ? { plateCount: options.plateCount } : {}),
+    ...(options.jitter !== undefined ? { jitter: options.jitter } : {}),
   });
   if (!Number.isFinite(options.radius) || options.radius <= 0) throw new Error(`Cell planet radius must be positive: ${options.radius}`);
   const { baked } = await bake(

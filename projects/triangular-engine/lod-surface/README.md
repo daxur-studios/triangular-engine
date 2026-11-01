@@ -147,11 +147,13 @@ readonly bake = createBakeClient(() => new Worker(new URL('./height-bake.worker'
 | Input | Default | Meaning |
 |---|---|---|
 | `radius` | required | Sea-level radius, metres. |
+| `position` | `[0, 0, 0]` | Position of the planet centre in scene coordinates, metres. |
+| `quaternion` | `[0, 0, 0, 1]` | Orientation of the planet in scene coordinates. |
 | `sunDirection` | `[0.4, 0.8, 0.45]` | Direction to the sun in the scene frame; any length, read back normalised. |
 | `morph` | 0 | Globe (0) to flat map (1); clamped. |
 | `projection` | `'equal-earth'` | Map projection: `'equal-earth'` or `'equirectangular'`. |
 | `projectionCentre` | `null` | `{ lonDeg, latDeg }` to centre the map on, or `null` for the baked centre. |
-| `world` | none | A cell planet `{ seed, cellCount, relaxationIterations?, heightScaleM, bakeK? }`: the `cellPlanetHeights` options without `radius` and `warp`. |
+| `world` | none | A cell planet `{ seed, cellCount, relaxationIterations?, heightScaleM, bakeK?, worldProfileKind?, plateCount?, jitter? }`: the `cellPlanetHeights` options without `radius` and `warp`. |
 | `bake` | inline | The `BakeClient` that bakes the world's heights. The default runs on the calling thread and blocks the page for the bake (seconds at large `cellCount`); pass `createBakeClient(() => new Worker(...))` in a real game. |
 
 - **Terrain inside it.** `<planetTerrain>` takes `radius` and `sunDirection` from the planet unless it has its own. With a `world` it also takes the planet's baked `heights` (flat until the bake lands, then the mesh is rebuilt) and, unless it has its own `material`, makes and owns a `TerrainPlanetMaterial` for that world (disposed when the world changes and on destroy). Leave `<planetTerrain [warp]>` at its default: the planet bakes with `'equal-angle'`. With no radius from either, the terrain shows nothing and reports once on `engine.error$` (phase `config`).

@@ -125,6 +125,73 @@ The demo page `/soft-body-lab` rebuilds `soft/soft_body.html` (pinned cloth with
 spheres) and `soft/soft_sphere_pressure.html` (eleven spheres, increasing pressure) with
 this component and measures shape strain, volume and floor penetration.
 
+## Floating origin and far worlds
+
+Jolt in this package is the single-precision build (jolt-physics 1.0.1). A float32 position can
+only hold values on a fixed grid, and the grid gets coarser with distance from zero. The spacing
+is 1 m at 1e7 m and 0.5 m at Earth radius (6.371e6 m), so a body at 1e7 m cannot hold a 0.125 m
+offset. Keep bodies near the physics origin instead: `JoltFloatingOrigin` moves the origin with a
+rebase and shifts the bodies by the opposite amount, so the physics frame stays small.
+
+### `float32UlpAt(valueM)`
+
+Returns the float32 spacing in metres at a magnitude. Use it to judge whether a value far from the
+origin is precise enough for the physics you need. The sign does not matter.
+
+```ts
+import { float32UlpAt } from 'triangular-engine/jolt';
+
+float32UlpAt(1e7);      // 1
+float32UlpAt(6.371e6);  // 0.5
+```
+
+### `JoltFloatingOrigin`
+
+Create one per physics world from the `JoltPhysicsService` of that world:
+
+```ts
+import { inject } from '@angular/core';
+import { FloatingOrigin } from 'triangular-engine';
+import { JoltFloatingOrigin, JoltPhysicsService } from 'triangular-engine/jolt';
+import type { Vector3Tuple } from 'three';
+
+const physics = inject(JoltPhysicsService); // inside a component under <joltPhysics>
+const origin = new JoltFloatingOrigin(physics, { thresholdM: 10_000 });
+
+// Static colliders outside bodies$ (for example terrain) must be tracked by the caller.
+origin.track(terrainBody); // consumer-owned Jolt.Body
+
+// Once per frame, with the authoritative world position in metres.
+const cameraWorldM: Vector3Tuple = [x, y, z]; // consumer-owned
+const event = origin.update(cameraWorldM);
+if (event) {
+  // The helper does not move scene objects or cameras; shift them with the same event.
+  for (const object of worldObjects) FloatingOrigin.shiftObject(object, event); // consumer-owned
+}
+```
+
+- `new JoltFloatingOrigin(service, { thresholdM })`: `thresholdM` is the distance in metres from
+  the physics origin at which `update` rebases. It defaults to the core `FloatingOrigin` default,
+  10 000 m.
+- `origin.origin`: the core `FloatingOrigin` that holds the current physics origin in world metres.
+  Subscribe with `origin.origin.onRebase(listener)` to react to each rebase.
+- `update(anchorWorldM)`: rebases when the anchor is further than the threshold, and returns the
+  rebase event, or `undefined` when no rebase happened.
+- `rebaseTo(anchorWorldM)`: rebases unconditionally and returns the rebase event.
+- `track(body)` / `untrack(body)`: add or remove a body that is not in `JoltPhysicsService.bodies$`.
+  `untrack` does not affect bodies in `bodies$`.
+- `dispose()`: forgets every tracked body. The origin itself is kept.
+
+What a rebase does:
+
+- Every body in `JoltPhysicsService.bodies$` shifts automatically. Bodies outside `bodies$` shift
+  only while they are tracked.
+- Velocities are not changed, and bodies are not activated. A sleeping body stays asleep.
+- Scene objects and cameras are not moved by the helper. Move them yourself, for example with
+  `FloatingOrigin.shiftObject(object, event)`, or from an `origin.origin.onRebase` listener.
+- `update` and `rebaseTo` throw an `Error` when Jolt is not initialised. The origin is unchanged in
+  that case.
+
 ## Performance Notes
 
 - Compound shapes are more expensive than single shapes

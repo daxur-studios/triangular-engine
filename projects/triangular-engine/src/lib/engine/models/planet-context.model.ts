@@ -1,4 +1,5 @@
 import { InjectionToken, type Signal } from '@angular/core';
+import type { Object3D } from 'three';
 
 /**
  * What a planet shares with the layers drawn on it: its size, the sun and the globe-to-map morph. Layers such as
@@ -6,8 +7,8 @@ import { InjectionToken, type Signal } from '@angular/core';
  * {@link PLANET_CONTEXT} optionally and use these values for any input the layer does not set itself; `<planet>` in
  * `triangular-engine/lod-surface` is the provider.
  *
- * The planet's centre is the scene origin. Every field is a signal or a fixed object, so a layer follows the planet
- * without being told about changes.
+ * The planet's centre defaults to the scene origin, or its {@link position} when given. Every field is a signal or
+ * a fixed object, so a layer follows the planet without being told about changes.
  */
 export interface PlanetContext {
   /** The planet's radius in metres (sea level). */
@@ -22,6 +23,14 @@ export interface PlanetContext {
    * this instead of the signal.
    */
   readonly morphUniform: { value: number };
+  /**
+   * The planet's position in scene world space in metres, or `undefined` when at the scene origin [0, 0, 0].
+   */
+  readonly position?: Signal<readonly [number, number, number] | undefined>;
+  /**
+   * The planet's Object3D container in the scene graph.
+   */
+  readonly planetObject?: Signal<Object3D | undefined>;
 }
 
 /**

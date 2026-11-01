@@ -31,6 +31,7 @@
             "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"],
             "browsers": "ChromeHeadless",
+            "externalDependencies": ["module", "node:module"],
             "include": [
               "**/*.spec.ts",
               "life/**/*.spec.ts",

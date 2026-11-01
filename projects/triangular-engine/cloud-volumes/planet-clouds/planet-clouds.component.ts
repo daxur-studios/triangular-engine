@@ -107,13 +107,13 @@ export class PlanetCloudsComponent implements OnInit {
       morphUniforms,
     });
     shell.object.visible = false;
-    this.engine.scene.add(shell.object);
+    (this.context?.planetObject?.() ?? this.engine.scene).add(shell.object);
     this.shell.set(shell);
 
     const frame = this.engine.beforeRender$.subscribe(() => this.update(shell));
     this.destroyRef.onDestroy(() => {
       frame.unsubscribe();
-      this.engine.scene.remove(shell.object);
+      shell.object.removeFromParent();
       shell.dispose();
     });
   }

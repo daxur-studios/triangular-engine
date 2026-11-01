@@ -17,6 +17,7 @@ export interface LodTerrainInputs {
   readonly bounds: boolean;
   readonly wireframe: boolean;
   readonly morph?: MorphUniformsLike;
+  readonly center?: Vec3 | readonly [number, number, number];
 }
 
 /** The terrain is shown after this long even if `compileAsync` has not answered; its first frame then pays the compile. */
@@ -65,6 +66,7 @@ export function attachLodTerrain(engine: EngineService, destroyRef: DestroyRef, 
       body.setBounds(inputs.bounds);
       body.setWireframe(inputs.wireframe);
       body.setSun([inputs.sunDirection[0], inputs.sunDirection[1], inputs.sunDirection[2]]);
+      if (inputs.center) body.setCenter(inputs.center);
       if (inputs.morph) {
         body.setMorph(inputs.morph);
         body.setMorphMetric(true);

@@ -12,4 +12,5 @@ export * from './jolt.provider';
 export * from './models';
 export * from './terrain';
 export * from './scatter';
+export * from './origin';
 // export { loadJolt } from './jolt-loader';

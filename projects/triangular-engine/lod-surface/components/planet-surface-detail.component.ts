@@ -147,8 +147,12 @@ export class PlanetSurfaceDetailComponent implements OnInit {
     const flat = this.flatState();
     if (!flat) return;
     const { x, y, z } = this.engine.camera.position;
-    const distance = Math.hypot(x, y, z);
+    const center = this.context?.position?.() ?? [0, 0, 0];
+    const dx = x - center[0];
+    const dy = y - center[1];
+    const dz = z - center[2];
+    const distance = Math.hypot(dx, dy, dz);
     if (distance === 0) return;
-    flat.window.update([x / distance, y / distance, z / distance], distance - flat.radiusM);
+    flat.window.update([dx / distance, dy / distance, dz / distance], distance - flat.radiusM);
   }
 }

@@ -1,4 +1,4 @@
-import { buildCellPlanetWorld, findCellNear, type ICellPlanetWorld, type IVec3 } from 'triangular-engine/worldgen';
+import { buildCellPlanetWorld, findCellNear, type ICellPlanetWorld, type IVec3, type WorldProfileKind } from 'triangular-engine/worldgen';
 import type { HeightSampler } from './lod-height-bake';
 import { groundFrame, type DomainKind, type Vec3 } from './lod-domain';
 
@@ -19,6 +19,12 @@ export interface CellPlanetDescription {
   readonly relaxationIterations: number;
   /** Metres per unit of canonical elevation (the sampler's heights are unitless, sea level at its `seaLevel`). */
   readonly heightScaleM: number;
+  /** Archetype/profile kind: 'terran', 'moon', 'mars', 'venus', etc. Default 'terran'. */
+  readonly worldProfileKind?: WorldProfileKind;
+  /** Plate count for tectonic simulation. Default 10. */
+  readonly plateCount?: number;
+  /** Voronoi jitter. Default 0.15. */
+  readonly jitter?: number;
 }
 
 /**
@@ -55,11 +61,20 @@ export function parseCellPlanet(value: unknown): CellPlanetDescription {
     || typeof d.heightScaleM !== 'number' || !Number.isFinite(d.heightScaleM) || d.heightScaleM <= 0) {
     throw new Error(`Not a cell planet description: ${JSON.stringify(value)}`);
   }
-  return { seed: d.seed, cellCount: d.cellCount, relaxationIterations: d.relaxationIterations, heightScaleM: d.heightScaleM };
+  return {
+    seed: d.seed,
+    cellCount: d.cellCount,
+    relaxationIterations: d.relaxationIterations,
+    heightScaleM: d.heightScaleM,
+    ...(typeof d.worldProfileKind === 'string' ? { worldProfileKind: d.worldProfileKind as WorldProfileKind } : {}),
+    ...(typeof d.plateCount === 'number' && Number.isInteger(d.plateCount) ? { plateCount: d.plateCount } : {}),
+    ...(typeof d.jitter === 'number' && Number.isFinite(d.jitter) ? { jitter: d.jitter } : {}),
+  };
 }
 
 /** What identifies the world itself (the height scale only multiplies its heights, so two scales share one world). */
-export const cellPlanetWorldKey = (d: CellPlanetDescription): string => `${d.seed}|${d.cellCount}|${d.relaxationIterations}`;
+export const cellPlanetWorldKey = (d: CellPlanetDescription): string =>
+  `${d.seed}|${d.cellCount}|${d.relaxationIterations}|${d.jitter ?? 0.15}|${d.plateCount ?? 10}|${d.worldProfileKind ?? 'terran'}`;
 
 /** A built cell planet world and what its build cost. */
 export interface BuiltCellPlanet {
@@ -78,7 +93,14 @@ export function cellPlanetWorld(description: CellPlanetDescription, now: () => n
   const hit = worlds.get(key);
   if (hit) return hit;
   const began = now();
-  const world = buildCellPlanetWorld({ cellCount: description.cellCount, seed: description.seed, relaxationIterations: description.relaxationIterations });
+  const world = buildCellPlanetWorld({
+    cellCount: description.cellCount,
+    seed: description.seed,
+    relaxationIterations: description.relaxationIterations,
+    ...(description.worldProfileKind ? { worldProfileKind: description.worldProfileKind } : {}),
+    ...(description.plateCount !== undefined ? { plateCount: description.plateCount } : {}),
+    ...(description.jitter !== undefined ? { jitter: description.jitter } : {}),
+  });
   const built = { world, buildMs: now() - began };
   worlds.set(key, built);
   while (worlds.size > WORLD_CACHE) worlds.delete(worlds.keys().next().value as string);

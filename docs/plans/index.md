@@ -43,5 +43,6 @@ tags: [plans, index]
 | [Procedural character studio](/docs/plans/074_procedural-character-studio.md) | planned | [ER 074](/docs/engineering-records/074_procedural-character-studio.md) |
 | [Claude-specific coding approach: Haiku builds, Opus decides](/docs/plans/075_claude-coding-approach.md) | planned | [ER 075](/docs/engineering-records/075_claude-coding-approach.md) |
 | [Soft-body parity lab (official Jolt examples)](/docs/plans/076_soft-body-parity-lab.md) | planned | [ER 076](/docs/engineering-records/076_soft-body-parity-lab.md) |
+| [Jolt physics for flat, sphere and cylinder worlds](/docs/plans/077_jolt-world-shapes.md) | planned | [ER 077](/docs/engineering-records/077_jolt-world-shapes.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).
