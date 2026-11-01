@@ -1,0 +1,32 @@
+.panel {
+  max-width: 360px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: rgba(12, 16, 22, 0.78);
+  color: #e8edf2;
+  font-size: 13px;
+  line-height: 1.4;
+
+  h1 {
+    margin: 4px 0 6px;
+    font-size: 17px;
+  }
+
+  p {
+    margin: 6px 0;
+  }
+
+  a {
+    color: #9ccfff;
+  }
+}
+
+.hud p {
+  margin: 2px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  opacity: 0.75;
+  font-size: 12px;
+}

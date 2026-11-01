@@ -582,6 +582,19 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'jolt-perf',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
+    loadComponent: () =>
+      import('./pages/jolt-perf/jolt-perf-page.component').then(
+        ({ JoltPerfPageComponent }) => JoltPerfPageComponent,
+      ),
+  },
+  {
     path: 'collider-blocks-bench',
     loadComponent: () =>
       import('./pages/planet-shape-lab/collider-blocks/collider-blocks-bench-page.component').then(
