@@ -68,6 +68,11 @@ function screenDisc(camera: PerspectiveCamera, centre: Vector3, radiusUnits: num
   return { cx: ((ndc.x + 1) / 2) * width, cy: ((1 - ndc.y) / 2) * height, r: focal * Math.tan(angular) };
 }
 
+/** Radians to degrees for a detail field; null when unknown (JSON has no NaN). */
+function finiteDegrees(radians: number): number | null {
+  return Number.isFinite(radians) ? Math.round(((radians * 180) / Math.PI) * 1000) / 1000 : null;
+}
+
 function luma(data: Uint8ClampedArray, i: number): number {
   return 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
 }
@@ -132,6 +137,7 @@ function finiteSamples(value: number): number[] {
           <h2>Two atmospheres · Plan 078 spike</h2>
           <p class="note">
             Planet A (Earth air) at the origin, moon B (1737 km, Earth-like air) six planet radii away.
+            The nearer atmosphere owns the sky; the other draws only its bounded air.
             Showing: {{ shown() }}
           </p>
           <tri-test-runner
@@ -203,6 +209,7 @@ export class AtmosphereMultiLabPageComponent {
     this.applySettings(DEFAULT_SETTINGS);
 
     const tick = this.engine.beforeRender$.subscribe(() => {
+      this.assignSkyOwner();
       const renderer = this.engine.renderer as unknown as WebGPURenderer;
       this.atmosphereA.update(renderer, this.engine.camera);
       this.atmosphereB.update(renderer, this.engine.camera);
@@ -222,6 +229,19 @@ export class AtmosphereMultiLabPageComponent {
       this.bodyA.geometry.dispose();
       this.bodyB.geometry.dispose();
     });
+  }
+
+  /**
+   * Plan 078: the enabled atmosphere nearest the camera (surface distance) owns the full sky; the other draws only its own
+   * bounded air from space. A consumer would decide this its own way (gravity primary, influence sphere).
+   */
+  private assignSkyOwner(): void {
+    const position = this.engine.camera.position;
+    const gapA = position.distanceTo(this.bodyA.position) - RADIUS_A_UNITS;
+    const gapB = position.distanceTo(this.bodyB.position) - MOON_RADIUS_UNITS;
+    const aOwns = this.atmosphereA.enabled && (!this.atmosphereB.enabled || gapA <= gapB);
+    this.atmosphereA.backdrop.ownsSky = aOwns;
+    this.atmosphereB.backdrop.ownsSky = !aOwns;
   }
 
   onTestProgress(progress: TestProgress | null): void {
@@ -380,7 +400,15 @@ export class AtmosphereMultiLabPageComponent {
         'Wall time is the interval between completed renders: a vsync-capped run reads about 16.7 ms.',
         'Halo and black-fraction values are one probe frame after the window; no wipe verdict is made here, compare arms of one view.',
       ],
-      details: { view: settings.view, arm: settings.arm, fullMarch: settings.fullMarch },
+      details: {
+        view: settings.view,
+        arm: settings.arm,
+        fullMarch: settings.fullMarch,
+        coverageA: this.atmosphereA.backdrop.coverage,
+        coverageB: this.atmosphereB.backdrop.coverage,
+        angularRadiusADeg: finiteDegrees(this.atmosphereA.backdrop.apparentAngularRadius),
+        angularRadiusBDeg: finiteDegrees(this.atmosphereB.backdrop.apparentAngularRadius),
+      },
     };
   }
 

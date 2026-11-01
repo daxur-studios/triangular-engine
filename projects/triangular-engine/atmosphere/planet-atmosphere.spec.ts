@@ -203,4 +203,49 @@ describe('PlanetAtmosphere', () => {
     expect(atmosphere.backdrop.mesh.visible).toBeFalse();
     atmosphere.dispose();
   });
+
+  it('gives the backdrop its shell, so a non-owner in space draws only its bounds and a far one not at all', async () => {
+    const renderer = await getEvalRenderer();
+    const planet = new Object3D();
+    const atmosphere = smallAtmosphere({ planet, backdrop: { steps: 4, spaceScale: 0, ownsSky: false } });
+    const camera = new PerspectiveCamera(50, 1, 0.1, 100_000);
+    const top = atmosphere.model.uTopAltitude.value as number;
+    const shellRadius = 1 + top / RADIUS_M;
+
+    camera.position.set(0, 0, 20);
+    camera.lookAt(0, 0, 0);
+    atmosphere.update(renderer, camera);
+    expect(atmosphere.backdrop.coverage).toBe('bounded');
+    expect(atmosphere.backdrop.apparentAngularRadius).toBeCloseTo(Math.asin(shellRadius / 20), 6);
+    expect(atmosphere.backdrop.mesh.visible).toBeTrue();
+    expect(atmosphere.backdrop.objectAir.value).toBe(1);
+
+    camera.position.set(0, 0, 5000);
+    camera.lookAt(0, 0, 0);
+    atmosphere.update(renderer, camera);
+    expect(atmosphere.backdrop.coverage).toBe('culled');
+    expect(atmosphere.backdrop.mesh.visible).toBeFalse();
+    expect(atmosphere.backdrop.objectAir.value).toBe(0);
+
+    // The next frame brings it back from the planet's own scale and position.
+    planet.position.set(0, 0, 4900);
+    planet.scale.setScalar(50);
+    atmosphere.update(renderer, camera);
+    expect(atmosphere.backdrop.coverage).toBe('bounded');
+    expect(atmosphere.backdrop.mesh.visible).toBeTrue();
+    atmosphere.dispose();
+  });
+
+  it('keeps a default atmosphere the full-screen sky owner', async () => {
+    const renderer = await getEvalRenderer();
+    const atmosphere = smallAtmosphere();
+    const camera = new PerspectiveCamera(50, 1, 0.1, 100_000);
+    camera.position.set(0, 0, 5000);
+    camera.lookAt(0, 0, 0);
+    atmosphere.update(renderer, camera);
+    expect(atmosphere.backdrop.ownsSky).toBeTrue();
+    expect(atmosphere.backdrop.coverage).toBe('full');
+    expect(atmosphere.backdrop.mesh.visible).toBeTrue();
+    atmosphere.dispose();
+  });
 });

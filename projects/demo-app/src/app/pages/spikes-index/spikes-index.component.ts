@@ -89,6 +89,19 @@ export const SPIKES: readonly ISpikeItem[] = [
     runbookPath: 'docs/runbook/059_lod_surface_core.md',
     dateISO: '2026-10-29',
   },
+  {
+    id: 'water-lod-spike',
+    number: '6',
+    title: 'LOD water: near and far water match on a flat plane (Plan 080, W0b)',
+    route: '/water-lod-spike',
+    status: 'pending',
+    hypothesis:
+      'Analytic wave water on a flat 100 km plane keeps its near and far forms matched: no colour step at handover and no shimmer, and the surface fits the Plan 080 W0 gates (cost on the RTX 3080, selection budget, and the regional look).',
+    description:
+      'Spike-local wave source and material through lod-surface\'s public API (16 sines, per-wave fade, roughness transfer, sky Fresnel, wind-driven calm, slick and foam). The mechanism is not built yet: the core factory is a TODO.',
+    runbookPath: 'docs/plans/080_lod-water.md',
+    dateISO: '2026-11-01',
+  },
 ];
 
 const STATUS_LABEL: Record<SpikeStatus, string> = {

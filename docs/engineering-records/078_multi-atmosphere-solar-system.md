@@ -81,6 +81,93 @@ Near versus far: A costs 0.08 ms close and 0.05 ms far; B costs 0.07 ms close an
 
 **Caveats.** Wall frame time is 6.10 ms in every case, a pacing artifact, so only GPU times are used. GPU frame times of 0.1–0.2 ms look low for full-screen passes and should be checked with a probe that covers the whole pass. The halo and rim probes read one frame after the window and gave zeros where the picture shows a planet, so they need a fix before any wipe verdict counts. No scope baseline was marked.
 
+### 2026-11-01 — Developer answers to the open questions
+
+Recorded from the developer's chat reply; this is not a scope baseline.
+
+- **Q1 (rim quality).** The developer could not judge it from the wording. It stays an investigation: the
+  spike run above answers cost (about 2.9x for full resolution) but not the visual difference, so a
+  full-resolution rim crop is needed before `bounded-backdrop` decides.
+- **Q2 (tint hook).** A narrow, cheap beyond-air tint is fine for now. It must stay extensible, because
+  large structures around a planet (for example O'Neill cylinders) are wanted later.
+- **Q3 (renderer flip).** The default-renderer flip ([Plan 056](/docs/plans/056_webgpu_default_renderer.md)
+  Phase 6) lands separately and does not gate this plan. Consumers keep opting in with
+  `preferredRenderer: 'webgpu'`.
+
+### 2026-11-01 — Developer direction: proceed with engine phases; limb parked
+
+Recorded from the developer's chat reply; this is not a scope baseline.
+
+- **Q1 (limb) is parked.** Do not fix the rim probe now. `bounded-backdrop` proceeds on the cost evidence
+  alone and keeps the half-resolution space march; revisit the rim only if the bounded quad shows a visible
+  edge artefact.
+- **Proceed with** `bounded-backdrop`, then `body-tint`, then `docs-demo`.
+- **"Nearby" needs a number.** Two bodies with air at once is the case to get right. The engine should
+  expose the test as apparent size (angular radius of the atmosphere shell seen from the camera), not as a
+  distance, so it works for any body size. The threshold is a documented default that a consumer can
+  override; it is chosen from the lab, not guessed.
+- **Far bodies become star-like points.** Beyond the threshold a consumer drops the atmosphere and shows
+  the body as a lit point or star, which doubles as its level of detail. That is consumer-side; the engine
+  only has to make "no atmosphere for a far body" cheap and glitch-free.
+
+### 2026-11-01 — bounded-backdrop implemented (agent; not yet reviewed by the developer)
+
+**What changed.** `AtmosphereBackdrop` keeps its full-screen opaque quad for the sky owner and for a camera inside the
+air. A backdrop with `ownsSky = false` and the camera outside its air now draws a quad over the screen bounds of its
+shell only, with premultiplied alpha (custom blend One / OneMinusSrcAlpha in the opaque pass, render order -998, so after
+the owner's sky at -1000 and its sky bodies at -999, before the scene). Alpha is `1 - mean(transmittance)`; it draws no stars
+and no sun disc of its own. The reduced-resolution space march is scissored to the same bounds (plus 2 texels), so a far
+atmosphere shades fewer pixels. Culled backdrops (shell off screen, or below the minimum apparent size) are hidden, run no
+march and no sky-view update; the minimum fades in over one doubling (smoothstep), so crossing it does not pop.
+`PlanetAtmosphere.update` passes the shell (planet world position, `(radiusUnits x (R + top) / R) x world scale`).
+
+**Apparent size and the default.** `apparentAngularRadius` (asin(shellRadius / distance), a quarter turn inside) and
+`minAngularRadius`, default `DEFAULT_MIN_ANGULAR_RADIUS` = 0.25 degrees. Chosen from the lab geometry and not measured
+visually: at the lab's 50 degree field of view on a 1080 pixel frame that is about 4.6 pixels of radius, and the Earth-like
+air is about 1% of that, under a pixel; the lab's farthest views are 2-6 degrees, a moon-sized shell reaches 0.25 degrees
+at about 63 planet radii. A visual check of the threshold is not done (see below).
+
+**Design decisions.**
+- *Owner is explicit.* `ownsSky` (default true) is set by the consumer; the engine does not guess which atmosphere owns the
+  sky. The default keeps single-atmosphere scenes unchanged. The lab picks the enabled atmosphere nearest the camera.
+- *Inside a non-owner's air the draw is full-screen opaque.* The space march does not serve a camera in the air and the
+  sky-view table is the only inside path, so overlapping shells with the camera inside both are unsupported (documented).
+- *Mean transmittance as alpha.* Per-channel dimming of what is behind needs dual-source blending; one mean value was
+  chosen. It slightly mis-colours the owner's sky behind a thick non-owner limb.
+- *Limb stays half-resolution* (Q1 parked): no change to the rim.
+
+**Files.** `atmosphere/atmosphere-backdrop.ts`, new `atmosphere/atmosphere-backdrop-bounds.ts` (pure maths) and its spec,
+`atmosphere/planet-atmosphere.ts`, `atmosphere/public-api.ts`, specs for the backdrop and `PlanetAtmosphere`, the
+atmosphere README ("Several atmospheres in one scene"), `CHANGELOG.md`, and the lab page (owner assignment per frame, and
+`coverage` / apparent angle in each case's details). Suite `atmosphere-multi-lab` v1 is unchanged.
+
+**Run.** `npm run test:triangular-engine:atmosphere` (headless): 240 of 240 passed, including the new bounds maths
+(including a 400-point containment check against the projected sphere), the alpha / blend configuration, owner default,
+bounded / culled / full transitions, the scissored space march shrinking with distance, and `PlanetAtmosphere` supplying
+the shell. `npm run build:triangular-engine`: built; demo-app `tsc --noEmit` clean. Lab, against the owner's server,
+`--profile headless-hardware --noisy`, one launcher per case (fingerprint `a9e4490d-a49e0d49`, dirty tree), all
+`auto=pass perf=inconclusive`, every case marked INVALID "headless profile not independently verified" and the machine
+log warns `gpu-busy-before-start`, so the timings are indicative only. Files are under
+`artifacts/test-runs/atmosphere-multi-lab@v1/` stamped 2026-11-01T21-48 to 21-49.
+
+| Case | Before (spike) | Now |
+|---|---|---|
+| `insideA-both` upper-third black | 0.54 | 0.00 |
+| `spaceBoth-both` halo A | 104.48 (108.40 with A alone) | 108.40 |
+| `nearA-both` GPU frame median | 0.20 ms | 0.16 ms (floor, no atmosphere: 0.09) |
+| `farA-both` GPU frame median | 0.20 ms | 0.13 ms |
+
+So the wipe from inside A is gone and A's halo with both on equals A alone. A far atmosphere is cheaper than a near one in
+the same suite (0.13 ms vs 0.16 ms), but the gap is a few hundredths of a millisecond, close to the timer step. The
+`farA-both` case no longer has the moon as a non-owner (it owns the sky there), so it does not isolate the bounded draw.
+
+**Not verified.** Only five of the 25 lab cases were run (`insideA-both`, `spaceBoth-both`, `nearA-both`, `farA-both`,
+`nearA-none`); `insideB-both`, the single-arm and `farB` cases and the full-resolution comparison were not. No screenshot
+was inspected, so there is no visual confirmation of the bounded edge, the fade-in at the threshold, or the limb; the halo
+and black-fraction probes remain the parked-Q1 probes. The 0.25 degree default is reasoned, not seen. Culled bodies were
+not exercised in the lab (no lab pose reaches 0.25 degrees); culling is covered by unit specs only. The WebGL2 fallback
+backend's handling of the scissored render target and custom blend was not run. `body-tint` is not started.
+
 ## Scope history
 
 <!-- tri:scope-history -->

@@ -47,3 +47,4 @@ tags: [engineering-records, index]
 | [Playable Capsule Human Sandbox](/docs/engineering-records/079_playable-capsule-human-sandbox.md) | [PLAN-079](/docs/plans/079_playable-capsule-human-sandbox.md) |
 
 Records `001`–`042` keep their historical formats; new work uses reciprocal plan and Engineering Record pairs. [Convention](/docs/plans-and-runbooks.md).
+| [LOD Water](/docs/engineering-records/080_lod-water.md) | [PLAN-080](/docs/plans/080_lod-water.md) |

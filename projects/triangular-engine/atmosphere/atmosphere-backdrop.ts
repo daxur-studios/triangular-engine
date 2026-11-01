@@ -1,15 +1,19 @@
 import {
   ClampToEdgeWrapping,
+  CustomBlending,
   HalfFloatType,
   LinearFilter,
   Matrix3,
   Matrix4,
   Mesh,
+  OneFactor,
+  OneMinusSrcAlphaFactor,
   PlaneGeometry,
   RGBAFormat,
   RenderTarget,
   Vector2,
   Vector3,
+  Vector4,
   type Camera,
   type PerspectiveCamera,
 } from 'three';
@@ -46,6 +50,14 @@ import {
 } from 'three/tsl';
 import { AtmosphereGpuModel } from './atmosphere-gpu-model';
 import { AtmosphereSkyViewLut } from './atmosphere-sky-view';
+import {
+  angularRadiusFade,
+  apparentAngularRadius,
+  DEFAULT_MIN_ANGULAR_RADIUS,
+  screenRectToPixels,
+  shellScreenBounds,
+  type ScreenRect,
+} from './atmosphere-backdrop-bounds';
 import { starField } from './atmosphere-stars';
 
 /**
@@ -54,6 +66,10 @@ import { starField } from './atmosphere-stars';
  */
 export const STAR_FADE_LUMA_START = 0.003;
 export const STAR_FADE_LUMA_END = 0.04;
+
+/** Full-screen (sky owner) backdrops draw first; bounded ones after them and after the owner's sky bodies (-999). */
+const FULL_RENDER_ORDER = -1000;
+const BOUNDED_RENDER_ORDER = -998;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -68,10 +84,32 @@ export interface AtmosphereBackdropOptions {
    * upsampled. Needs the camera passed to {@link AtmosphereBackdrop.update}. Default 0.5; 0 turns the pass off.
    */
   spaceScale?: number;
+  /**
+   * Smallest apparent size, as the angular radius of the atmosphere shell seen from the camera in radians, at which a
+   * backdrop that does not own the sky ({@link AtmosphereBackdrop.ownsSky} false) is still drawn. Smaller than this it is
+   * skipped entirely (no draw, no space march), and it fades in over the next doubling so it never pops. Default
+   * {@link DEFAULT_MIN_ANGULAR_RADIUS} (0.25 degrees); 0 draws it at any size. Needs {@link AtmosphereBackdrop.setShell}.
+   */
+  minAngularRadius?: number;
+  /** Initial value of {@link AtmosphereBackdrop.ownsSky}. Default true. */
+  ownsSky?: boolean;
 }
 
 /**
- * A full-screen sky plus an analytic ground sphere, drawn from the atmosphere model (Plan 049, Phase 2a).
+ * How a backdrop covered the screen at its last {@link AtmosphereBackdrop.update}: `'full'` the whole screen, opaque
+ * (the sky owner, or any backdrop with the camera inside its air); `'bounded'` only the atmosphere's screen bounds,
+ * blended over what is already drawn; `'culled'` not drawn (off screen, or below the minimum apparent size).
+ */
+export type AtmosphereBackdropCoverage = 'full' | 'bounded' | 'culled';
+
+/**
+ * A sky plus an analytic ground sphere, drawn from the atmosphere model (Plan 049, Phase 2a).
+ *
+ * By default it is a full-screen opaque quad. With several atmospheres in one scene (Plan 078) only one may be: set
+ * {@link ownsSky} false on the others and give each its shell with {@link setShell}. While the camera is outside such a
+ * backdrop's air it then draws a quad around the atmosphere's screen bounds only, with premultiplied alpha (rays that miss
+ * the planet stay transparent), and nothing at all when the atmosphere is off screen or smaller than
+ * {@link minAngularRadius}. A camera inside the air always gets the full-screen opaque sky.
  *
  * It does not use scene depth or any planet geometry: every pixel casts a ray from a camera that sits
  * `altitude` metres above the ground at the origin (the scene camera supplies only orientation and field
@@ -106,6 +144,19 @@ export class AtmosphereBackdrop {
    * what lies below its plane is not a sphere's ground; 0 leaves the sky as the table gives it.
    */
   readonly voidFade = uniform(0);
+  /**
+   * True (default) for the one atmosphere that owns the whole sky: it draws full-screen and opaque, with the stars and the
+   * sun disc, whatever the camera's distance. Set it false on every other atmosphere in the scene (the consumer decides
+   * which one is the owner, for example the gravity primary or the one the camera is nearest to). A non-owner draws only
+   * its own bounded air from space, without stars or a sun disc of its own (it still dims the owner's by its transmittance),
+   * and falls back to the full-screen opaque quad when the camera is inside its air, since the camera's sky is then its own.
+   */
+  ownsSky = true;
+  /**
+   * Angular radius (radians) of the atmosphere shell below which a non-owner is not drawn. See
+   * {@link AtmosphereBackdropOptions.minAngularRadius}. Writable.
+   */
+  minAngularRadius: number;
   /** Multiplies the sun disc brightness; 0 hides it. */
   readonly sunDiscStrength = uniform(1);
 
@@ -139,6 +190,19 @@ export class AtmosphereBackdrop {
    */
   readonly frame = uniform(new Matrix3());
 
+  /** 1 while drawn bounded: alpha output, no stars or sun disc of its own. */
+  private readonly alphaMode = uniform(0);
+  /** 0..1 fade-in near {@link minAngularRadius}; 1 when not bounded. */
+  private readonly boundedFade = uniform(1);
+  /** Clip-space rectangle the quad covers: minX, minY, maxX, maxY. The whole screen unless bounded. */
+  private readonly boundsRect = uniform(new Vector4(-1, -1, 1, 1));
+  private shellRadius = 0;
+  private readonly shellCentre = new Vector3();
+  private readonly shellView = new Vector3();
+  private coverageState: AtmosphereBackdropCoverage = 'full';
+  private apparentRadius = Number.NaN;
+  private readonly boundsNdc: ScreenRect = { minX: -1, minY: -1, maxX: 1, maxY: 1 };
+  private culledHidden = false;
   private readonly spaceScale: number;
   private readonly stepsOption?: number;
   private readonly spaceReady = uniform(0);
@@ -159,18 +223,30 @@ export class AtmosphereBackdrop {
     const skyView = options.skyView;
     this.skyView = skyView;
     this.spaceScale = options.spaceScale ?? 0.5;
+    this.minAngularRadius = options.minAngularRadius ?? DEFAULT_MIN_ANGULAR_RADIUS;
+    this.ownsSky = options.ownsSky ?? true;
     this.stepsOption = options.steps;
     const material = new NodeMaterial();
     material.depthTest = false;
     material.depthWrite = false;
     material.transparent = false;
+    // Premultiplied alpha, still drawn in the opaque pass (before the scene, by render order): a full-screen draw outputs
+    // alpha 1 and so replaces what is behind it; a bounded draw outputs 1 - transmittance and blends over it.
+    material.blending = CustomBlending;
+    material.blendSrc = OneFactor;
+    material.blendDst = OneMinusSrcAlphaFactor;
+    material.blendSrcAlpha = OneFactor;
+    material.blendDstAlpha = OneMinusSrcAlphaFactor;
 
-    // Clip-space quad; each corner's view-space ray is interpolated (linear in screen space, so exact).
-    material.vertexNode = vec4(positionLocal.xy, 0, 1);
-    const farPoint = cameraProjectionMatrixInverse.mul(vec4(positionLocal.xy, 1, 1));
+    // Clip-space quad over `boundsRect` (the whole screen unless bounded); each corner's view-space ray is interpolated
+    // (linear in screen space, so exact).
+    const corner = positionLocal.xy.mul(0.5).add(0.5);
+    const ndc: any = mix(this.boundsRect.xy, this.boundsRect.zw, corner);
+    material.vertexNode = vec4(ndc, 0, 1);
+    const farPoint = cameraProjectionMatrixInverse.mul(vec4(ndc, 1, 1));
     const rayWorld = cameraWorldMatrix.mul(vec4(farPoint.xyz.div(farPoint.w), 0)).xyz;
     const rayVarying = varying(rayWorld, 'vAtmosphereRay');
-    const screenVarying = varying(positionLocal.xy.mul(0.5).add(0.5), 'vAtmosphereUv');
+    const screenVarying = varying(ndc.mul(0.5).add(0.5), 'vAtmosphereUv');
 
     material.fragmentNode = Fn(() => {
       const dir = normalize(this.frame.mul(rayVarying));
@@ -197,27 +273,36 @@ export class AtmosphereBackdrop {
         const cosInner = cos(angle.mul(0.97));
         const mask = smoothstep(cosEdge, cosInner, dot(dir, sunDir));
         const radiance = model.uSunIrradiance.div(angle.mul(angle).mul(Math.PI));
-        colour.addAssign(march.transmittance.mul(radiance).mul(mask).mul(this.sunDiscStrength));
+        colour.addAssign(
+          march.transmittance.mul(radiance).mul(mask).mul(this.sunDiscStrength).mul(float(1).sub(this.alphaMode)),
+        );
       });
 
       const exposed: any = max(colour.mul(this.exposure).mul(this.sunVisibility), 0);
       const voidFactor = this.voidFactor(dir);
-      const sky = exposed.mul(this.opacity).mul(voidFactor).toVar();
+      const sky = exposed.mul(this.opacity).mul(voidFactor).mul(this.boundedFade).toVar();
       // Stars (display-referred, after exposure) through the air in front of them, fading out as the sky behind them
       // brightens. Not on rays that end on the ground: there the planet is in front of them.
-      If(this.stars.greaterThan(0).and(trace.hitsGround.not()), () => {
+      If(this.stars.greaterThan(0).and(trace.hitsGround.not()).and(this.alphaMode.lessThan(0.5)), () => {
         const starDir = normalize(this.starFrame.mul(rayVarying));
         const through = mix(vec3(1), transmittance, this.opacity);
         const fade = float(1).sub(smoothstep(STAR_FADE_LUMA_START, STAR_FADE_LUMA_END, luminance(sky)));
         sky.addAssign(starField(starDir, this.pixelAngle).mul(through).mul(fade).mul(this.stars));
       });
-      return vec4(sky, 1);
+      // Bounded: the air dims what is behind it (mean transmittance) and adds its in-scatter, premultiplied. A ray that ends on
+      // the ground is opaque. Full-screen: alpha 1.
+      const dimming = float(1)
+        .sub(transmittance.x.add(transmittance.y).add(transmittance.z).div(3))
+        .mul(this.opacity)
+        .mul(this.boundedFade);
+      const alpha = select(this.alphaMode.greaterThan(0.5), select(hitGround, float(1), dimming), float(1));
+      return vec4(sky, alpha);
     })();
 
     this.material = material;
     const mesh = new Mesh(new PlaneGeometry(2, 2), material);
     mesh.frustumCulled = false;
-    mesh.renderOrder = -1000;
+    mesh.renderOrder = FULL_RENDER_ORDER;
     mesh.name = 'AtmosphereBackdrop';
     this.mesh = mesh;
   }
@@ -396,9 +481,94 @@ export class AtmosphereBackdrop {
       const height = (2 * Math.tan((fov * Math.PI) / 360)) / zoom;
       this.pixelAngle.value = height / Math.max(1, this.drawingSize.y);
     }
+    this.updateCoverage(camera);
+    if (this.coverageState === 'culled') {
+      // Nothing is drawn, so nothing reads the space pass; forget it so a later frame renders it afresh.
+      this.spaceReady.value = 0;
+      return false;
+    }
     this.updateSpacePass(renderer, camera);
-    if (!this.skyView || this.skyViewEnabled.value < 0.5) return false;
+    // A bounded backdrop is outside its air and never reads the table.
+    if (!this.skyView || this.skyViewEnabled.value < 0.5 || this.coverageState === 'bounded') return false;
     return this.skyView.update(renderer, this.altitude.value);
+  }
+
+  /**
+   * Gives the backdrop the atmosphere's outer shell: a sphere around `centre` (world space) of `radius` world units
+   * (the planet's radius plus the air's height, scaled like the planet's mesh). It is what {@link update} projects to find
+   * the screen bounds and the {@link apparentAngularRadius}. Without a shell the backdrop always covers the full screen.
+   */
+  setShell(centre: Vector3, radius: number): void {
+    this.shellCentre.copy(centre);
+    this.shellRadius = Math.max(0, radius);
+  }
+
+  /** How the backdrop covered the screen at the last {@link update}. */
+  get coverage(): AtmosphereBackdropCoverage {
+    return this.coverageState;
+  }
+
+  /**
+   * Angular radius, in radians, of the atmosphere shell as the camera saw it at the last {@link update}: the half-angle
+   * of the cone from the camera that just contains the shell, a quarter turn when the camera is inside it. NaN until a
+   * shell ({@link setShell}) and a perspective camera have been given. Compare it with {@link minAngularRadius}.
+   */
+  get apparentAngularRadius(): number {
+    return this.apparentRadius;
+  }
+
+  /** The clip-space rectangle (-1..1, y up) the quad covered at the last {@link update}; the whole screen unless bounded. */
+  get screenBounds(): Readonly<ScreenRect> {
+    return this.boundsNdc;
+  }
+
+  /**
+   * Decides how this frame is drawn. Full screen and opaque for the sky owner and whenever the camera is inside the air (or
+   * no shell is known); otherwise bounded to the shell's screen rectangle with alpha, or culled if the shell is off screen or
+   * below {@link minAngularRadius}. Hides the mesh when culled and shows it again when it was hidden by culling.
+   */
+  private updateCoverage(camera?: Camera): void {
+    const rect = this.boundsRect.value;
+    const bounds = this.boundsNdc;
+    let next: AtmosphereBackdropCoverage = 'full';
+    let fade = 1;
+    bounds.minX = bounds.minY = -1;
+    bounds.maxX = bounds.maxY = 1;
+    this.apparentRadius = Number.NaN;
+
+    if (camera && (camera as PerspectiveCamera).isPerspectiveCamera && this.shellRadius > 0) {
+      camera.updateMatrixWorld();
+      const view = this.shellView.copy(this.shellCentre).applyMatrix4(camera.matrixWorldInverse);
+      this.apparentRadius = apparentAngularRadius(view.length(), this.shellRadius);
+      const insideAir = this.altitude.value < this.model.uTopAltitude.value;
+      if (!this.ownsSky && !insideAir) {
+        const e = camera.projectionMatrix.elements;
+        const found =
+          this.apparentRadius < this.minAngularRadius
+            ? null
+            : shellScreenBounds([view.x, view.y, view.z], this.shellRadius, e[0], e[5]);
+        if (found) {
+          next = 'bounded';
+          fade = angularRadiusFade(this.apparentRadius, this.minAngularRadius);
+          Object.assign(bounds, found);
+        } else {
+          next = 'culled';
+        }
+      }
+    }
+
+    rect.set(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY);
+    this.alphaMode.value = next === 'bounded' ? 1 : 0;
+    this.boundedFade.value = fade;
+    this.mesh.renderOrder = next === 'bounded' ? BOUNDED_RENDER_ORDER : FULL_RENDER_ORDER;
+    this.coverageState = next;
+    if (next === 'culled') {
+      this.mesh.visible = false;
+      this.culledHidden = true;
+    } else if (this.culledHidden) {
+      this.mesh.visible = true;
+      this.culledHidden = false;
+    }
   }
 
   private updateSpacePass(renderer: WebGPURenderer, camera?: Camera): void {
@@ -420,8 +590,10 @@ export class AtmosphereBackdrop {
     camera.updateMatrixWorld();
     // Idle in orbit: the same altitude, size, profile, sun, frame and camera give the same picture.
     const sun = this.model.sunDirection.value;
+    const bounded = this.coverageState === 'bounded';
     const next = [
-      this.altitude.value, w, h, sun.x, sun.y, sun.z,
+      this.altitude.value, w, h, sun.x, sun.y, sun.z, bounded ? 1 : 0, this.boundedFade.value as number,
+      this.boundsNdc.minX, this.boundsNdc.minY, this.boundsNdc.maxX, this.boundsNdc.maxY,
       ...camera.projectionMatrixInverse.elements, ...camera.matrixWorld.elements, ...this.frame.value.elements,
     ];
     const unchanged =
@@ -436,6 +608,14 @@ export class AtmosphereBackdrop {
     this.spaceInvProjection.value.copy(camera.projectionMatrixInverse);
     this.spaceCameraWorld.value.copy(camera.matrixWorld);
 
+    // A bounded backdrop only reads the table inside its rectangle (plus a bilinear texel), so march only there.
+    if (bounded) {
+      const [x, y, width, height] = screenRectToPixels(this.boundsNdc, w, h, 2);
+      target.scissor.set(x, y, width, height);
+      target.scissorTest = true;
+    } else {
+      target.scissorTest = false;
+    }
     const previous = renderer.getRenderTarget();
     renderer.setRenderTarget(target);
     this.spaceQuad?.render(renderer);

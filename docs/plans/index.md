@@ -46,5 +46,6 @@ tags: [plans, index]
 | [Jolt physics for flat, sphere and cylinder worlds](/docs/plans/077_jolt-world-shapes.md) | planned | [ER 077](/docs/engineering-records/077_jolt-world-shapes.md) |
 | [Multi-atmosphere solar-system support](/docs/plans/078_multi-atmosphere-solar-system.md) | planned | [ER 078](/docs/engineering-records/078_multi-atmosphere-solar-system.md) |
 | [Playable Capsule Human Sandbox](/docs/plans/079_playable-capsule-human-sandbox.md) | planned | [ER 079](/docs/engineering-records/079_playable-capsule-human-sandbox.md) |
+| [LOD Water](/docs/plans/080_lod-water.md) | planned | [ER 080](/docs/engineering-records/080_lod-water.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

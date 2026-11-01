@@ -14,6 +14,7 @@ Status: **design only, nothing built, nothing measured.** Written 2026-10-20 fro
 
 **Parked 2026-10-24 (owner, Plan 059 D10):** the contender race waits until Plan 059's M3 (water v0 on the new LOD
 surface core). W1-W17 stay the long-term target list.
+**Dated note (2026-11-01, Plan 080 LOD Water):** the first water v0 is contender A (analytic shell, sines first), built on Plan 059's shell as [Plan 080](/docs/plans/080_lod-water.md). Contenders B (FFT) and C (hybrid) stay parked and must beat A on Plan 080's suites before they replace it. D (traced) is the future quality reference, not built. W1-W17 are unchanged; Plan 080 delivers W2, W3 (v0), W6, W8, W9 (depth part), W10 (sphere), W11 and the W17 wind hook. Nothing here is deleted or renumbered.
 No decision below has been made by the owner except those inherited from Plans 055 and 056 (marked as such).
 Phase 0 is **blocked on Plan 055 Phase 0** (§Dependencies on Plan 055).
 Evidence: [Runbook 057](/docs/runbook/057_planet_water_system.md).

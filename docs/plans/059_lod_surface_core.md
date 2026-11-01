@@ -71,7 +71,11 @@ lower-detail track that neither blocks nor depends on Plan 055.
   texture (terrain bakes and edits, water ripples and wakes).
 - **Instruments from day one:** LOD-level colours, wireframe, patch bounds, counters, GPU pass timers, a crack probe.
 
-**In (D14, decided 2026-10-25):** cliff detail. Steep slopes refine through a slope criterion (M2); vertical and
+**Dated note (2026-11-01): the slope criterion is dropped.** The owner tested it and judged it worse than without; it did not achieve what was needed. The slope criterion is no longer part of M2 or the milestone order, and it no longer blocks or conflicts with any other work. Details in the Engineering Record, 2026-11-01 entry.
+
+**Dated note (2026-11-01): water moves to Plan 080.** M3 (water v0) is delivered by [Plan 080 LOD Water](/docs/plans/080_lod-water.md). The cylinder domain and the anchor-relative source hook are dated scope changes to lod-surface core; the water record is [ER 080](/docs/engineering-records/080_lod-water.md).
+
+**In (D14, decided 2026-10-25):** cliff detail. Steep slopes refine through a slope criterion (M2, dropped 2026-11-01); vertical and
 overhanging cliff faces come from vector displacement of the same sheet (M6, §Cliff detail).
 
 **Out for now:** caves, arches and tunnels (Plan 055 owns them; one displaced sheet cannot make them); overhangs
@@ -158,7 +162,7 @@ Each milestone ends with a gate measured on the reference machine and recorded i
 |---|---|---|
 | M1 | **Lab, harness and quadtree LOD** (M0 merged in). `/lod-surface-lab`, suite `lod-surface-baseline` v1 (§Suite). Bounded 100 km plane, spheres 10 km and 600 km; flat and static-bump sources; distance criterion with pixel floor, leaf cap, fixed-level toggle as the uniform baseline; equal-angle warp and `patchCells` 16/32/64 toggles; static edge folding; LOD colours, wireframe, bounds, counters, GPU pass timers; validated crack probe; one scripted zoom. Pops allowed and labelled | Zero crack pixels (probe validated by an injected gap); L5 cost; ground-to-orbit zoom with no rebuild storm; runs on both adapters |
 | S1 | **Precision spike, alongside M1** (disposable): three-face cube corner with a 2:1 seam, all 16 masks, 10 km and 6,371 km, 2 m eye, 1 mm per frame, float64 reference | No crack pixels; jitter <= 0.05 px; decides the Earth-scale formula and informs D9 |
-| M2 | **Blending and the other criteria** (feature regions, horizon, priority budget, slope: a node's height range counts in its error, so steep slopes refine), each a toggle measured ABAB. Transition fixture first (diagonal ridge, live edit, unequal neighbours, reversed toggle) | Popping score; 3D boundary equality during morphs; each criterion shows its effect and its cost |
+| M2 | **Blending and the other criteria** (feature regions, horizon, priority budget; the slope criterion was dropped 2026-11-01), each a toggle measured ABAB. Transition fixture first (diagonal ridge, live edit, unequal neighbours, reversed toggle) | Popping score; 3D boundary equality during morphs; each criterion shows its effect and its cost |
 | M3 | **Water v0:** live analytic waves on plane and sphere, CPU twin, amplitude-aware selection, the simple lit look | L5 cost; parity spec; owner visual review |
 | M4 | **Writable height texture source,** shared by water ripples (decaying stamps) and terrain stamps; CPU-authoritative first | Next-frame visibility; cost of an update |
 | M5 | **Low-detail terrain v0:** baked noise height texture, edits, collider patch | L5 cost (with its own working number), parity, crack probe |
@@ -187,7 +191,7 @@ measured on the RTX 3080 before the next starts:
    **3c. Terrain for games** (added 2026-10-29 by the owner, ahead of the slope criterion; proposal, D16). Make the
    terrain usable by other games, for example a game on a cell planet that needs 3D ground, and measure it together
    with the planet material, atmosphere and clouds. Details below the list.
-4. **Slope criterion** (from M2), measured ABAB in the terrain suite, on the biome-mix source among others.
+4. ~~**Slope criterion** (from M2)~~ Dropped 2026-11-01 (owner test; see the Engineering Record).
 5. **M5:** edits and the collider patch.
 6. **M6:** cliffs.
 7. **Later:** blending and the remaining M2 criteria, then water (M3), which can borrow lessons from the public
@@ -233,8 +237,7 @@ measured on the RTX 3080 before the next starts:
   pixels as an upper bound where the surface fills the view). Today the plane sweep draws about 1.57M triangles on
   2560×1308, about 2 px per triangle, set by the pixel floor of about 2 px per cell.
 - **One ABAB: the pixel floor at 2 px against 4 px** (about 2 and 8 px per triangle if the floor is a cell's edge), on the biome source:
-  triangles, GPU pass, crack px and how the sharp crests look. The slope criterion (step 4) then refines where the
-  height range asks for it, so a higher floor costs less detail where it matters.
+  triangles, GPU pass, crack px and how the sharp crests look. (The slope criterion this sentence relied on, step 4, was dropped 2026-11-01.)
 - **Terrain budget (proposal, for owner review):** at 60 fps on the RTX 3080, terrain at most 1.5 ms GPU and 0.5 ms
   main-thread CPU per frame, at most 1M drawn triangles, at most 8 draw calls, at least 8 px per triangle, height
   textures at most 64 MB. Recorded next to each run; not a gate until reviewed.
@@ -308,8 +311,7 @@ After M6 the owner decides how water and terrain grow from here, and whether Pla
 A height along the base normal cannot draw a cliff: the grid is spaced over the ground, so a 200 m face over a few
 metres of ground is a few stretched triangles, and a vertical step puts every vertex at its top or its bottom.
 
-1. **Slope criterion (M2, no decision needed).** The height source gives a node's height range (or a slope bound);
-   the error measure counts it, so steep slopes (to about 70°) subdivide and LOD like the rest. Vertical faces stay
+1. ~~**Slope criterion (M2, no decision needed).**~~ Dropped 2026-11-01 (owner test: worse than without it; the need was not met). The height-range approach it described is not in the plan. Vertical faces stay
    unsolved.
 2. **Vector displacement (M6).** Each vertex moves by a 3D offset in the base tangent frame (`dU`, `dV`, height),
    so the sheet stretches up the face and its vertices spread over it. Noise along the face's own normal gives
@@ -550,6 +552,7 @@ fine reference during a slow scripted zoom. Both are open to the review.
 | D11 | Globe-to-map morph | Agreed in review: out of v1. **Reopened** 2026-10-29 by the owner at the G3 check: proposal in §Globe-to-map morph. **Decided** 2026-10-29 (owner): option B, the morph state on `<planet>` in G5, then a spike, then G6; zoom, projection and tiling open |
 | D12 | Cube warp | Agreed in review: equal-angle default, toggle kept; value checked by measurement |
 | D13 | Water v0 look and motion bar (sines or Gerstner; acceptable transition motion) | **Decided** 2026-10-24 (owner): sines (Q = 0) first; the owner judges Gerstner and transition motion by eye at the M3 review; pops are fine until then |
-| D14 | Cliff detail by vector displacement of the sheet (M6, §Cliff detail), which brings sheet overhangs into scope while arches, caves and tunnels stay with Plan 055 | **Decided** 2026-10-25 (owner): accepted as M6; the slope criterion goes into M2 |
+| D14 | Cliff detail by vector displacement of the sheet (M6, §Cliff detail), which brings sheet overhangs into scope while arches, caves and tunnels stay with Plan 055 | **Decided** 2026-10-25 (owner): accepted as M6; the slope criterion goes into M2. **Part superseded** 2026-11-01 (owner): the slope criterion is dropped; M6 is unchanged |
 | D15 | Milestone order | **Decided** 2026-10-25 (owner): terrain first (§Milestones, Order); water after M6 |
 | D16 | Terrain for games (step 3c): promote now, ahead of M2, which changes D8's "after M2"; components `<planet>`, `<planetTerrain>`, `<flatTerrain>`, with `<planetAtmosphere>` and clouds as siblings; entry `triangular-engine/lod-surface` | **Decided** 2026-10-29 (owner): names and the write-up approved; the parent's inputs, the suite name `planet-scene` and a separate `<planetClouds>` plan approved 2026-10-29 |
+| D17 | Water before cliffs: the owner moves water (M3, then the water work) ahead of M6 cliff detail. This supersedes D15's "water after M6" **for water only**; D15's terrain-first order otherwise stands. Recorded in dated form; D15 is not edited | **Decided** 2026-11-01 (owner). Record: [Plan 059 water decision](/docs/engineering-records/059_lod_surface_core.md) (entry dated 2026-11-01); the new water plan's record is pending the architect step |

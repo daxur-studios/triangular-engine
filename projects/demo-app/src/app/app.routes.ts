@@ -99,6 +99,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'water-lod-spike',
+    loadComponent: () =>
+      import('./water-lod-spike/water-lod-spike.component').then(
+        ({ WaterLodSpikeComponent }) => WaterLodSpikeComponent,
+      ),
+  },
+  {
     path: 'spikes',
     loadComponent: () =>
       import('./pages/spikes-index/spikes-index.component').then(

@@ -2062,3 +2062,16 @@ Built by Haiku 5.5 agents from briefs; reviewed here. Nothing seen on a GPU.
 - **Open.** The `[morph]` input is read once at init (bend or fade mode is fixed then). `PlanetContext` has no typed `morphUniforms` field; the component reads it through a local type. The camera fade uses the distance from the centre, which may be wrong on the flat map. The sky backdrop is still a faded full-screen quad; bending it would use the table path measured in record 049, not a per-pixel march.
 - **Mouse orbit.** `/planet-scene` has an optional "Mouse orbit" box (drag spins, shift or right-drag looks, wheel zooms) built on the page's own camera view; the planet-scene suite is unchanged (v2). Pure maths in `planet-camera.ts` (`freeDrag`, `freeLook`, `freeZoom`), 13 specs; 49 of 49 planet-scene specs pass.
 - **Evidence.** cloud-volumes specs 41 of 41; library build OK.
+
+## 2026-11-01: Owner decision: water ahead of cliffs (D17)
+
+- **Decided by the owner (2026-11-01):** water moves ahead of cliff detail (M6). Plan 059 D15 ("water after M6") is superseded for water only; the terrain-first order otherwise stands. Recorded as D17 in the plan's decision table. D15 and earlier entries are unchanged.
+- **Next:** a new water plan and its Engineering Record (number allocated by `triangular docs plan new`) will hold the water v0 scope, which starts from M3 of this plan (live analytic waves, CPU twin, amplitude-aware selection, simple lit look; gate: L5 cost, parity spec, owner visual review). The architect step has not started; it waits for the owner's go.
+- **Open items carried forward, unchanged:** G6i bench targets not met (packs 247 against 80); the settle spec failing on purpose; G6 and G3 not yet checked on a GPU; selection about 0.7 to 1.1 ms against a 0.2 ms target; no ray-hit query (M6); no colliders (M5).
+
+## 2026-11-01: Slope criterion dropped (M2, step 4)
+
+- **Decided by the owner (2026-11-01):** the slope criterion (a node's height range in its error, so steep slopes refine) is dropped. The owner tested it and found it worse than without it; it did not achieve what was needed. No measured numbers from that test are recorded in this document.
+- **Plan changes (dated notes, earlier text kept):** the plan's D14 "Part superseded" note; the M2 row; milestone step 4 is struck through; the cliff-detail item 1 and the step 4 mention in the 1-ABAB section are marked dropped.
+- **Consequence:** the file conflict this criterion was to cause (its change to `lod-selector.ts` against the water core work) no longer exists. Water core packets do not wait for it. M6 cliff detail is unchanged in scope; it now has no slope criterion to rely on, and its own design still needs checking when it starts.
+- **Earlier entries unchanged.** The slope mentions in the 2026-10 entries (for example the canyon's "slope term" note) stand as history.

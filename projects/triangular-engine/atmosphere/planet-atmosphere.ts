@@ -71,8 +71,11 @@ export interface PlanetAtmosphereOptions extends PlanetAtmosphereShape {
   tables?: AtmosphereLutOptions;
   /** Sky-view table size. */
   skyView?: AtmosphereSkyViewOptions;
-  /** Sky march steps and the from-space pass resolution. */
-  backdrop?: Pick<AtmosphereBackdropOptions, 'steps' | 'spaceScale'>;
+  /**
+   * Sky march steps, the from-space pass resolution, and the multi-atmosphere rules: `ownsSky` and `minAngularRadius` (see
+   * {@link AtmosphereBackdrop.ownsSky}).
+   */
+  backdrop?: Pick<AtmosphereBackdropOptions, 'steps' | 'spaceScale' | 'minAngularRadius' | 'ownsSky'>;
 }
 
 interface SurfaceEntry {
@@ -145,6 +148,8 @@ export class PlanetAtmosphere {
   private readonly starMatrix = new Matrix4();
   private readonly bodyWorld = new Vector3();
   private readonly sunWorld = new Vector3();
+  private readonly shellCentre = new Vector3();
+  private readonly planetScale = new Vector3();
   private readonly amount = uniform(1);
   private readonly lightingStage: AtmosphereLightingStage;
   private readonly hazeStage: AtmosphereHazeStage;
@@ -324,9 +329,8 @@ export class PlanetAtmosphere {
     const unrolled = Math.min(1, Math.max(0, (this.morph - 0.2) / 0.6));
     const fade = unrolled * unrolled * (3 - 2 * unrolled) * high * high * (3 - 2 * high);
     backdrop.opacity.value = 1 - fade;
-    backdrop.mesh.visible = on && this.sky && fade < 1;
-    // Bodies stay in the sky without it; then nothing in front of them is air.
-    backdrop.objectAir.value = backdrop.mesh.visible ? 1 : 0;
+    const wantSky = on && this.sky && fade < 1;
+    backdrop.mesh.visible = wantSky;
     backdrop.stars.value = Math.max(0, this.stars);
     this.planet.getWorldQuaternion(this.planetQuaternion);
     // World directions to the star frame: undo the planet's rotation, then the stars' own.
@@ -338,7 +342,20 @@ export class PlanetAtmosphere {
       body.setDirections(this.bodyWorld, this.sunWorld);
     }
     if (on && this.anyHaze()) binding.update(renderer);
-    if (backdrop.mesh.visible) backdrop.update(renderer, camera);
+    if (wantSky) {
+      // The air's outer shell, for the backdrop's screen bounds (a non-owner outside its air) and its apparent size.
+      const { planetRadiusM } = this.model.profile;
+      const top = this.model.uTopAltitude.value as number;
+      this.planet.getWorldScale(this.planetScale);
+      const worldScale = Math.max(this.planetScale.x, this.planetScale.y, this.planetScale.z);
+      backdrop.setShell(
+        this.planet.getWorldPosition(this.shellCentre),
+        (this.radiusUnits * (planetRadiusM + top) * worldScale) / planetRadiusM,
+      );
+      backdrop.update(renderer, camera);
+    }
+    // Bodies stay in the sky without it, and when the backdrop is culled; then nothing in front of them is air.
+    backdrop.objectAir.value = backdrop.mesh.visible ? 1 : 0;
   }
 
   /** Takes the stages off every surface, removes the sky and its bodies from the scene and frees the GPU resources. */
