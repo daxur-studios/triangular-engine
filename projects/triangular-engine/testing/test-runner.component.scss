@@ -45,3 +45,6 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .case-results li { margin-block: 0.4rem; }
 a { color: var(--ui-accent, #8ac9ff); }
 .ablation { font-size: 0.85rem; }
+.finder .found-tests { list-style: none; margin: 0.25rem 0 0.5rem; padding: 0; max-height: 16rem; overflow: auto; display: grid; gap: 0.25rem; }
+.finder .found-tests li { display: flex; gap: 0.3rem; align-items: stretch; }
+.finder .found-name { flex: 1; text-align: left; min-width: 0; overflow-wrap: anywhere; }

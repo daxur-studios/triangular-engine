@@ -123,6 +123,40 @@ export function testBatchAgentText(entries: readonly TestBatchEntry[]): string {
   return entries.map(({ run, savedFile }) => `${testRunStopReason(run)}\n${testRunAgentText(run, savedFile)}`).join('\n\n');
 }
 
+/** One scenario found by the runner's search: where it lives and the text it matched on. */
+export interface FoundTestScenario {
+  readonly test: TestBatchTest;
+  readonly suiteTitle: string;
+  readonly label: string;
+  readonly purpose: 'functional' | 'performance';
+}
+
+/**
+ * Finds scenarios across every suite the page supplies, so a test can be reached by name without knowing which suite
+ * holds it. Every whitespace-separated word must appear (case-insensitive) in the scenario label or id, or in the suite
+ * title or id. An empty query returns every scenario. Where a suite id has several versions only the newest is searched,
+ * because older versions are kept for history, not for picking.
+ */
+export function findTestScenarios(suites: readonly TestSuite<object>[], query: string): readonly FoundTestScenario[] {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const newest = new Map<string, number>();
+  for (const suite of suites) newest.set(suite.id, Math.max(newest.get(suite.id) ?? 0, suite.version));
+  const found: FoundTestScenario[] = [];
+  for (const suite of suites) {
+    if (newest.get(suite.id) !== suite.version) continue;
+    for (const scenario of suite.scenarios) {
+      const text = `${scenario.label} ${scenario.id} ${suite.title} ${suite.id}`.toLowerCase();
+      if (words.every((word) => text.includes(word))) {
+        found.push({ test: { suiteId: suite.id, suiteVersion: suite.version, scenarioId: scenario.id }, suiteTitle: suite.title, label: scenario.label, purpose: suite.purpose });
+      }
+    }
+  }
+  return found;
+}
+
+/** Most search results drawn at once; the rest are reached by typing more. */
+const MAX_FOUND_TESTS = 40;
+
 /** Portable test UI: the host supplies data and actions; this entry imports no renderer or automation client. */
 @Component({
   selector: 'tri-test-runner',
@@ -189,6 +223,13 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   readonly batchTests = signal<readonly TestBatchTest[]>([]);
   /** Scenario picked for "Add to batch" (from the selected suite). */
   readonly batchScenario = new FormControl('', { nonNullable: true });
+  /** Text typed in "Find a test". */
+  readonly testQuery = signal('');
+  /** Scenarios in any suite matching `testQuery`. */
+  readonly foundTests = computed(() => findTestScenarios(this.suites(), this.testQuery()));
+  readonly shownFoundTests = computed(() => this.foundTests().slice(0, MAX_FOUND_TESTS));
+  /** How many scenarios the page offers in total, shown beside the search box. */
+  readonly totalTests = computed(() => findTestScenarios(this.suites(), '').length);
   /** Tests finished so far in the current or last batch. */
   readonly batchEntries = signal<readonly TestBatchEntry[]>([]);
   readonly batchText = computed(() => testBatchAgentText(this.batchEntries()));
@@ -313,6 +354,19 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   selectedScenarios(): readonly { id: string; label: string }[] {
     const suite = this.suites().find((item) => testSuiteKey(item) === this.form.controls.suite.value);
     return suite?.scenarios ?? [];
+  }
+
+  onTestQueryInput(event: Event): void { this.testQuery.set((event.target as HTMLInputElement).value); }
+
+  /** Runs one found scenario with the form's current mode, profile and repetitions. */
+  runFound(test: TestBatchTest): Promise<void> { return this.runBatch([test]); }
+
+  addFoundToBatch(test: TestBatchTest): void { this.batchTests.update((tests) => [...tests, test]); }
+
+  /** Points the suite picker at a found scenario's suite, so Run suite and the launch link use it. */
+  selectFoundSuite(test: TestBatchTest): void {
+    const suite = this.suites().find((item) => item.id === test.suiteId && item.version === test.suiteVersion);
+    if (suite) this.form.controls.suite.setValue(testSuiteKey(suite));
   }
 
   addToBatch(): void {

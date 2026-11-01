@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { digestTestRun, TestRunnerComponent, testRunAgentText } from './test-runner.component';
+import { digestTestRun, findTestScenarios, TestRunnerComponent, testRunAgentText } from './test-runner.component';
 import type { TestRunAdapter, TestRunResult, TestSuite } from './test-contracts';
 
 interface Settings { value: number }
@@ -494,5 +494,27 @@ describe('TestRunnerComponent testCases launch links', () => {
     fixture.detectChanges();
     expect(button().disabled).toBeTrue();
     fixture.destroy();
+  });
+});
+
+describe('findTestScenarios', () => {
+  const suite = (id: string, version: number, title: string, labels: string[]): TestSuite<Settings> => ({
+    id, version, title, purpose: 'functional',
+    scenarios: labels.map((label) => ({ id: label.toLowerCase().replace(/\W+/g, '-'), label, settings: { value: 1 }, durationMs: 1 })),
+  });
+  const suites = [
+    suite('landing', 1, 'Landing', ['Old pad']),
+    suite('landing', 2, 'Landing', ['Static pad', 'Heaving pad 1 m 8 s']),
+    suite('ascent', 1, 'Ascent', ['Pad drift']),
+  ];
+
+  it('returns every scenario of the newest versions for an empty query', () => {
+    expect(findTestScenarios(suites, '').map((found) => found.label)).toEqual(['Static pad', 'Heaving pad 1 m 8 s', 'Pad drift']);
+  });
+
+  it('needs every word to match across scenario and suite text', () => {
+    expect(findTestScenarios(suites, 'heav pad').map((found) => found.label)).toEqual(['Heaving pad 1 m 8 s']);
+    expect(findTestScenarios(suites, 'ascent pad').map((found) => found.label)).toEqual(['Pad drift']);
+    expect(findTestScenarios(suites, 'nothing like this')).toEqual([]);
   });
 });

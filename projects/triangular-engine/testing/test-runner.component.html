@@ -1,6 +1,29 @@
 <section aria-label="Test runner" class="test-runner">
   <h3>Repeatable tests</h3>
   <form [formGroup]="form" (ngSubmit)="runSelected()">
+    <div class="finder">
+      <label>Find a test
+        <input type="search" [value]="testQuery()" (input)="onTestQueryInput($event)" (keydown.enter)="$event.preventDefault()"
+          [placeholder]="'Search all ' + totalTests() + ' tests by name'" autocomplete="off" />
+      </label>
+      @if (testQuery().trim()) {
+        <p class="muted" role="status">{{ foundTests().length }} of {{ totalTests() }} tests match</p>
+        <ul class="found-tests">
+          @for (found of shownFoundTests(); track found.test.suiteId + '/' + found.test.scenarioId) {
+            <li>
+              <button type="button" class="found-name" (click)="selectFoundSuite(found.test)" title="Select this test's suite">
+                {{ found.label }}<span class="muted"> · {{ found.suiteTitle }}</span>
+              </button>
+              <button type="button" (click)="runFound(found.test)" [disabled]="running() || externalBusy() || !available() || form.invalid">Run</button>
+              <button type="button" (click)="addFoundToBatch(found.test)" [disabled]="running()" title="Add to batch">+</button>
+            </li>
+          }
+        </ul>
+        @if (foundTests().length > shownFoundTests().length) {
+          <p class="muted">Showing the first {{ shownFoundTests().length }}. Type more to narrow.</p>
+        }
+      }
+    </div>
     <label>Test
       <select formControlName="suite">
         @for (suite of suites(); track suiteKey(suite)) {
