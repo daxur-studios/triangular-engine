@@ -13,4 +13,5 @@ export * from './models';
 export * from './terrain';
 export * from './scatter';
 export * from './origin';
+export * from './gravity';
 // export { loadJolt } from './jolt-loader';

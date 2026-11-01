@@ -9,7 +9,7 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/scene-tree` | Opt-in Material Scene Tree inspection UI; provides its panel to core engine UI. | `@angular/material` |
 | `triangular-engine/testing` | Standalone repeatable-test panel, versioned launch/result DTOs and application-neutral adapter executor. See [testing](../testing/README.md). | Angular Core/Common/Forms |
 | `triangular-engine/rapier` | Rapier rigid bodies, colliders, joints, and physics components. | `@dimforge/rapier3d-compat` |
-| `triangular-engine/jolt` | Jolt physics, rigid bodies, constraints, debug rendering, terrain/scatter adapters, and high-precision workflows. | `jolt-physics` |
+| `triangular-engine/jolt` | Jolt physics, rigid bodies, constraints, debug rendering, terrain/scatter adapters, and single-precision positions with a floating-origin helper. | `jolt-physics` |
 | `triangular-engine/pmndrs` | Angular components for PMNDRS billboard and sparkles helpers. | `@pmndrs/vanilla` |
 | `triangular-engine/postprocessing` | Declarative effect composer and post-processing effects. | `postprocessing` |
 | `triangular-engine/water` | Plane, sphere, and cylinder water surfaces, LOD, quality/motion presets, underwater effects, and surface sampling. | `three` |

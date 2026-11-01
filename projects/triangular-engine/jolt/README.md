@@ -1,7 +1,7 @@
 # triangular-engine/jolt
 
 Declarative Jolt Physics integration, including rigid bodies, shapes,
-constraints, debug rendering, and high-precision coordinate support.
+constraints, debug rendering, and single-precision positions; far worlds need the floating origin.
 
 ```ts
 import {

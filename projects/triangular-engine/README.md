@@ -50,7 +50,7 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/scene-tree` | [scene-tree/README.md](scene-tree/README.md) | Material Scene Tree inspection panel | `@angular/material` |
 | `triangular-engine/testing` | [testing/README.md](testing/README.md) | Browser test runner, launch and result contracts, adapter executor | — |
 | `triangular-engine/rapier` | [rapier/README.md](rapier/README.md) | Rapier rigid bodies, colliders, joints, physics components | `@dimforge/rapier3d-compat` |
-| `triangular-engine/jolt` | [jolt/README.md](jolt/README.md) | Jolt physics, constraints, debug rendering, high-precision workflows | `jolt-physics` |
+| `triangular-engine/jolt` | [jolt/README.md](jolt/README.md) | Jolt physics, constraints, debug rendering, single-precision positions with a floating-origin helper | `jolt-physics` |
 | `triangular-engine/pmndrs` | [pmndrs/README.md](pmndrs/README.md) | Billboard and sparkles wrappers | `@pmndrs/vanilla` |
 | `triangular-engine/postprocessing` | [postprocessing/README.md](postprocessing/README.md) | Declarative effect composer and passes | `postprocessing` |
 | `triangular-engine/atmosphere` | [atmosphere/README.md](atmosphere/README.md) | Planet atmosphere profiles, lookup tables, WebGPU sky renderer | — |

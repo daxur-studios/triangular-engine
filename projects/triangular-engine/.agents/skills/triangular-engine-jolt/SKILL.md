@@ -1,6 +1,6 @@
 ---
 name: triangular-engine-jolt
-description: Guidance for using Jolt Physics in the triangular-engine library 'triangular-engine/jolt', including rigid bodies, colliders, constraints, contact listeners, double-precision coordinates, custom force controllers, and troubleshooting.
+description: Guidance for using Jolt Physics in the triangular-engine library 'triangular-engine/jolt', including rigid bodies, colliders, constraints, contact listeners, single-precision positions and the floating origin, custom force controllers, and troubleshooting.
 ---
 
 # Jolt Physics in Triangular Engine
@@ -99,18 +99,25 @@ Convex shapes (box, sphere, capsule, cylinder, hull) take an optional `[density]
 
 ---
 
-## 4. Double Precision (Large Coordinates)
+## 4. Precision (Large Coordinates)
 
-For space simulations or large-scale environments, check if double-precision coordinates are enabled on Jolt's web assembly:
+The Jolt build in this package is single precision (jolt-physics 1.0.1), so body positions are float32. Check what a body actually stores by writing a value float32 cannot hold exactly and reading it back:
 
 ```typescript
-const meta = await this.physicsComponent()?.metaDataPromise;
-if (meta) {
-  // RVec3 represents double precision vectors in Jolt Double Precision WASM builds
-  const largePosition = new meta.Jolt.RVec3(1000000.0, 0.0, 0.0);
-  console.log("Position type:", typeof largePosition.GetX()); // 'number' (double precision float)
+const meta = this.physicsService.metaData$.value;
+const body = this.body$.value; // Jolt.Body of this JoltRigidBodyComponent
+if (meta && body) {
+  const written = 1e7 + 0.125;
+  const pos = new Jolt.RVec3(written, 0, 0);
+  meta.bodyInterface.SetPosition(body.GetID(), pos, Jolt.EActivation_Activate);
+  Jolt.destroy(pos);
+  const read = body.GetPosition().GetX();
+  // Single precision reads back Math.fround(written); double precision reads back written.
+  console.log(read === Math.fround(written) ? 'single precision' : 'double precision');
 }
 ```
+
+At 1e7 m the float32 spacing is 1 m, so `float32UlpAt(1e7)` returns `1`. Far worlds need the floating origin helper (`JoltFloatingOrigin`). See `float32UlpAt` and the "Floating origin and far worlds" section of `jolt/README.md`.
 
 ---
 
@@ -179,23 +186,24 @@ Restricts movement to a single rotational axis. Perfect for doors, wheels, or ro
 
 ## 7. Contact Listeners & Event Handling
 
-Listen to contact events by subscribing to the `JoltEventEmitter` triggers or hooking into the physics service tick loop.
+Listen to contact events with the outputs on `JoltRigidBodyComponent`:
 
-Contact hooks available on `JoltPhysicsService`:
+- `onContactValidate` (`IContactValidateEvent`)
+- `onContactAdded` (`IContactAddedEvent`)
+- `onContactPersisted` (`IContactPersistedEvent`)
+- `onContactRemoved` (`IContactRemovedEvent`)
 
-- `contactAdded$`
-- `contactPersisted$`
-- `contactRemoved$`
-
-Example of detecting landing or impacts:
+Each is a `JoltEventEmitter`, which only does the contact work while something subscribes. Example of detecting landing or impacts, inside a `JoltRigidBodyComponent` subclass:
 
 ```typescript
-this.joltPhysicsService.contactAdded$.subscribe((event) => {
-  const body1Id = event.body1.GetID();
-  const body2Id = event.body2.GetID();
-  console.log(`Collision detected between body ${body1Id} and ${body2Id}`);
+this.onContactAdded.subscribe((event) => {
+  const ownId = this.body$.value?.GetID();
+  const otherId = event.otherBody.GetID();
+  console.log(`Collision detected between body ${ownId} and ${otherId}`);
 });
 ```
+
+Or bind it in a template: `<joltRigidBody (onContactAdded)="onHit($event)">`.
 
 ### Identifying which compound child was struck
 
