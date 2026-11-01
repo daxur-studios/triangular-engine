@@ -711,7 +711,7 @@ Lighting adds no measurable GPU cost (differences are within noise, as expected:
 ### Phase 3b step 1: sky backdrop in the lab
 The lab has a `sky backdrop` toggle (off by default, built on first use so the cost tests are unchanged). It draws the Earth sky and limb glow behind the planet with `AtmosphereBackdrop`, synced to the lab camera and sun like the atmosphere-planet page. Purpose: judge the dusk look of the lit clouds by eye. Not yet measured. Next: aerial perspective haze on far clouds (froxel lookup in the composite), measured as its own step.
 
-### Phase 3b step 2: aerial perspective haze on clouds (built, not yet run)
+### Phase 3b step 2: aerial perspective haze on clouds (built; measured, see the results below)
 `CloudVolumeScreenPass.setHaze(haze)` (structural `CloudVolumeHaze`: the froxel table's `lookup`, `metersPerUnit`, `scale`) sets `CloudVolume.haze`. At the end of each march the premultiplied colour becomes `rgb x T + L x scale x alpha`, with T and L read from the table at the middle of the ray's stretch inside the volume, one lookup per cloud pixel. Works in `proxy` and `pass` modes; the pass reserves 3 extra textures per shader for the table. The lab has a `cloud haze` toggle (builds the sky model on first use; needs the table updated once per frame, which the lab does). Known limit: one distance per ray, so a cloud is hazed as a whole, not by depth through it.
 Cost test queued on the green button: 12 volumes, haze off vs on. The look (blue-hazed far clouds) is judged by eye; `scale` (exposure times strength) may need tuning because cloud colour and atmosphere radiance are different units.
 

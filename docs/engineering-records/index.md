@@ -43,5 +43,6 @@ tags: [runbook, index]
 | [Claude-specific coding approach: Haiku builds, Opus decides](/docs/engineering-records/075_claude-coding-approach.md) | [PLAN-075](/docs/plans/075_claude-coding-approach.md) |
 | [Soft-body parity lab (official Jolt examples)](/docs/engineering-records/076_soft-body-parity-lab.md) | [PLAN-076](/docs/plans/076_soft-body-parity-lab.md) |
 | [Jolt physics for flat, sphere and cylinder worlds](/docs/engineering-records/077_jolt-world-shapes.md) | [PLAN-077](/docs/plans/077_jolt-world-shapes.md) |
+| [Multi-atmosphere solar-system support](/docs/engineering-records/078_multi-atmosphere-solar-system.md) | [PLAN-078](/docs/plans/078_multi-atmosphere-solar-system.md) |
 
 Existing records retain their `docs/runbook/` paths. Legacy runbooks `001`–`042` retain their historical formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

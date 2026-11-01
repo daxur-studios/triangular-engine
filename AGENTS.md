@@ -17,8 +17,9 @@
 2. Read `projects/triangular-engine/.agents/skills/triangular-engine/SKILL.md` for implementation conventions; it lists the entry-point guides to read before changing an entry.
 3. Inspect the relevant secondary entry point before changing it.
 4. Check `git status --short` and preserve unrelated working-tree changes.
-   If `docs/handover/` has a handover for the work you are picking up, read it first. When your session ends with work
-   open, write one ([convention](docs/handover/README.md)).
+   If `docs/handover/` has a handover for the work you are picking up, read it first. Write a handover only when the owner
+   asks for one; when a session ends with work open, offer one in your closing message and wait for a yes
+   ([convention](docs/handover/README.md)).
 5. **DO NOT COMMIT**: Never create git commits (`git commit`). Multiple agents and developers work concurrently in the workspace; creating commits interferes with concurrent branches, worktrees, and tasks. Leave all changes uncommitted in the working tree.
 
 ## Common commands

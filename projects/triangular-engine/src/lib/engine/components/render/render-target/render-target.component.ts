@@ -93,7 +93,7 @@ export class RenderTargetComponent implements OnDestroy {
       });
       this.currentRenderTarget = rt;
 
-      // 2) Build a fullscreen quad scene that runs your procedural shader once
+      // 2) Use the engine scene and the supplied camera (no fullscreen quad scene is built here)
       const camera = this.camera();
 
       const scene = this.engineService.scene;

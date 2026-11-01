@@ -44,5 +44,6 @@ tags: [plans, index]
 | [Claude-specific coding approach: Haiku builds, Opus decides](/docs/plans/075_claude-coding-approach.md) | planned | [ER 075](/docs/engineering-records/075_claude-coding-approach.md) |
 | [Soft-body parity lab (official Jolt examples)](/docs/plans/076_soft-body-parity-lab.md) | planned | [ER 076](/docs/engineering-records/076_soft-body-parity-lab.md) |
 | [Jolt physics for flat, sphere and cylinder worlds](/docs/plans/077_jolt-world-shapes.md) | planned | [ER 077](/docs/engineering-records/077_jolt-world-shapes.md) |
+| [Multi-atmosphere solar-system support](/docs/plans/078_multi-atmosphere-solar-system.md) | planned | [ER 078](/docs/engineering-records/078_multi-atmosphere-solar-system.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

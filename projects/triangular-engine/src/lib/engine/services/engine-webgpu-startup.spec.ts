@@ -44,10 +44,45 @@ describe('EngineService WebGPU startup rendering', () => {
     const errors: unknown[] = [];
     service.error$.subscribe((event) => errors.push(event));
     service.onComponentInit();
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve));
     expect(startLoop).not.toHaveBeenCalled();
     expect(errors).toEqual([{ phase: 'renderer-init', error }]);
+  });
+
+  describe('createWebGpuRenderer', () => {
+    it('initializes the recreated renderer and reuses the init for onComponentInit', async () => {
+      const init = spyOn(WebGPURenderer.prototype, 'init').and.resolveTo(undefined as any);
+      const first = service.createWebGpuRenderer();
+      const second = service.createWebGpuRenderer();
+      expect(init).toHaveBeenCalledTimes(2);
+      expect(init.calls.mostRecent().object).toBe(second);
+      expect(init.calls.first().object).toBe(first);
+      const startLoop = spyOn(service, 'startLoop');
+      service.onComponentInit();
+      await new Promise((resolve) => setTimeout(resolve));
+      expect(init).toHaveBeenCalledTimes(2);
+      expect(startLoop).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a rejected init on error$ with phase renderer-init', async () => {
+      const error = new Error('adapter unavailable');
+      spyOn(WebGPURenderer.prototype, 'init').and.rejectWith(error);
+      spyOn(console, 'error');
+      const errors: unknown[] = [];
+      service.error$.subscribe((event) => errors.push(event));
+      service.createWebGpuRenderer();
+      await new Promise((resolve) => setTimeout(resolve));
+      expect(errors).toEqual([{ phase: 'renderer-init', error }]);
+    });
+
+    it('keeps a single resolution$ subscription across recreations', () => {
+      spyOn(WebGPURenderer.prototype, 'init').and.resolveTo(undefined as any);
+      const before = service.resolution$.observers.length;
+      service.createWebGpuRenderer();
+      service.createWebGpuRenderer();
+      service.createWebGpuRenderer();
+      expect(service.resolution$.observers.length).toBe(before + 1);
+    });
   });
 
   it('defers even forced resize/camera frames until the backend is initialized', () => {

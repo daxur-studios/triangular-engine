@@ -11,6 +11,7 @@ import {
   BehaviorSubject,
   ReplaySubject,
   Subject,
+  Subscription,
   filter,
   firstValueFrom,
 } from 'rxjs';
@@ -207,6 +208,11 @@ export class EngineService implements IEngine {
   /** Triggered when the SceneComponent is destroyed */
   readonly onDestroy$ = new ReplaySubject<void>();
 
+  /** Single live `resolution$` subscription for the WebGPU renderer. */
+  private webGpuResolutionSub?: Subscription;
+  /** Init started for a WebGPU renderer; resolves true on success, false after reporting a failure. */
+  private webGpuInit?: { renderer: WebGPURenderer; ready: Promise<boolean> };
+
   readonly onBeginPlay$ = new ReplaySubject<void>();
   readonly onEndPlay$ = new ReplaySubject<void>();
   readonly onBeginPlaySignal: WritableSignal<boolean> = signal(false);
@@ -318,6 +324,9 @@ export class EngineService implements IEngine {
     this.onDestroy$.next();
     this.onDestroy$.complete();
 
+    this.webGpuResolutionSub?.unsubscribe();
+    this.webGpuResolutionSub = undefined;
+
     this.renderer?.dispose();
     if (EngineService.activeInstance === this)
       EngineService.activeInstance = undefined;
@@ -327,16 +336,31 @@ export class EngineService implements IEngine {
     // WebGPU needs explicit initialization before the first render.
     if (this.renderer instanceof WebGPURenderer) {
       // Do not await to keep the signature synchronous; start loop after init completes.
-      this.renderer
-        .init()
-        .then(() => this.startLoop())
-        .catch((error) => {
-          this.error$.next({ phase: 'renderer-init', error });
-          console.error('[TriangularEngine] WebGPU renderer initialization failed.', error);
-        });
+      this.ensureWebGpuInit(this.renderer).then((ok) => {
+        if (ok) this.startLoop();
+      });
       return;
     }
     this.startLoop();
+  }
+
+  /**
+   * Starts `init()` once per renderer. three's `init()` returns the same promise when called
+   * again, so reuse is safe; failures are reported on `error$` and resolve to `false`.
+   */
+  private ensureWebGpuInit(renderer: WebGPURenderer): Promise<boolean> {
+    if (this.webGpuInit?.renderer === renderer) return this.webGpuInit.ready;
+    const ready = new Promise<unknown>((resolve) => resolve(renderer.init()))
+      .then(
+        () => true,
+        (error) => {
+          this.error$.next({ phase: 'renderer-init', error });
+          console.error('[TriangularEngine] WebGPU renderer initialization failed.', error);
+          return false;
+        },
+      );
+    this.webGpuInit = { renderer, ready };
+    return ready;
   }
 
   beginPlay() {
@@ -459,12 +483,18 @@ export class EngineService implements IEngine {
     renderer.setSize(this.width, this.height);
     renderer.setPixelRatio(this.pixelRatio);
 
-    this.resolution$.subscribe(({ width, height }) =>
+    this.webGpuResolutionSub?.unsubscribe();
+    this.webGpuResolutionSub = this.resolution$.subscribe(({ width, height }) =>
       this.onResize(width, height),
     );
 
+    this.renderer = renderer;
+    // Recreated renderers (e.g. logarithmic depth buffer toggle) must be initialized too,
+    // otherwise the render loop skips every frame.
+    void this.ensureWebGpuInit(renderer);
+
     // Composer currently targets WebGL. Skip for WebGPU.
-    return (this.renderer = renderer);
+    return renderer;
   }
 
   private onResize(width: number, height: number) {

@@ -1,7 +1,8 @@
 # Handovers
 
 A handover lets the next agent (or the owner, after a break) pick up unfinished work without re-reading the whole
-session. Write one when a session ends with work open.
+session. Write one only when the owner asks for it. When a session ends with work open, offer a handover in your
+closing message and wait for a yes; do not create the file on your own initiative.
 
 ## File name
 

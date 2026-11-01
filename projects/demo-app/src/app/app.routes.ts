@@ -623,6 +623,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'atmosphere-multi-lab',
+    loadComponent: () =>
+      import('./pages/atmosphere-multi-lab/atmosphere-multi-lab-page.component').then(
+        ({ AtmosphereMultiLabPageComponent }) => AtmosphereMultiLabPageComponent,
+      ),
+  },
+  {
     path: 'cell-planet-tsl',
     loadComponent: () =>
       import('./pages/cell-planet-tsl/cell-planet-tsl-page.component').then(
