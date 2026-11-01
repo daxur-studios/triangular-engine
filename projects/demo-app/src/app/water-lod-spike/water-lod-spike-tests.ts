@@ -12,6 +12,10 @@ export interface WaterLodSpikeTestHost {
   wireframe(): boolean;
   setWireframe(enabled: boolean): void;
   counts(): { readonly drawCalls: number; readonly triangles: number };
+  /** Starts collecting frame intervals from the engine tick. */
+  beginFrameSampling(): void;
+  /** Stops collecting and returns the frame intervals (ms) since `beginFrameSampling`. */
+  endFrameSampling(): readonly number[];
   environment(): Readonly<Record<string, TestSetting>>;
 }
 
@@ -39,8 +43,38 @@ const WATER_LOD_SPIKE_V1: TestSuite<WaterLodSpikeTestSettings> = {
   ],
 };
 
-/** Every version of the W0b suite, oldest first. Add a new entry when a case changes; keep old ones. */
-export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestSettings>[] = [WATER_LOD_SPIKE_V1];
+/**
+ * Performance experiment for the same two cases: frame intervals over the
+ * measured window plus draw calls and triangles. Not a baseline; no budgets yet.
+ */
+const WATER_LOD_SPIKE_PERFORMANCE_V1: TestSuite<WaterLodSpikeTestSettings> = {
+  id: 'water-lod-spike-performance',
+  version: 1,
+  title: 'Water LOD spike W0b: frame interval, solid and wireframe water',
+  purpose: 'performance',
+  scenarios: [
+    {
+      id: 'solid',
+      label: 'Solid water',
+      settings: { wireframe: false },
+      durationMs: 6000,
+      warmupMs: 1500,
+    },
+    {
+      id: 'wireframe',
+      label: 'Wireframe water',
+      settings: { wireframe: true },
+      durationMs: 6000,
+      warmupMs: 1500,
+    },
+  ],
+};
+
+/** Every version of the W0b suites, oldest first. Add a new entry when a case changes; keep old ones. */
+export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestSettings>[] = [
+  WATER_LOD_SPIKE_V1,
+  WATER_LOD_SPIKE_PERFORMANCE_V1,
+];
 
 /**
  * Testing adapter for the W0b page. Applies the wireframe setting to the spike's
@@ -60,10 +94,13 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
     },
     environment: () => host.environment(),
     measure: async (scenario, context): Promise<TestObservation> => {
+      host.beginFrameSampling();
       await context.wait(scenario.durationMs);
+      const frameMs = host.endFrameSampling();
       const { drawCalls, triangles } = host.counts();
       return {
         metrics: [
+          { name: 'frame interval', unit: 'ms', source: 'engine.tick$ intervals', samples: [...frameMs] },
           { name: 'draw calls', unit: 'calls', source: 'renderer.info.render.calls', samples: [drawCalls] },
           { name: 'triangles', unit: 'triangles', source: 'renderer.info.render.triangles', samples: [triangles] },
         ],

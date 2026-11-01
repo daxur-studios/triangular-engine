@@ -69,6 +69,9 @@ export class WaterLodSpikeComponent {
   readonly sceneReady = computed(() => this.drawCalls() > 0);
   /** True while a test case is measuring or warming up; drives the red outline on the scene. */
   readonly testing = signal(false);
+  /** Frame intervals (ms) collected while a performance case measures; null when not sampling. */
+  private frameTimes: number[] | null = null;
+  private lastFrameMs = 0;
 
   /** GPU vendor from the WebGPU adapter, filled in once the adapter resolves. */
   private gpuVendor = 'unknown';
@@ -80,6 +83,14 @@ export class WaterLodSpikeComponent {
       this.triangles.set(diagnostics.triangles);
     });
     this.destroyRef.onDestroy(() => this.water.dispose());
+    const frameSubscription = this.engine.tick$.subscribe(() => {
+      const nowMs = performance.now();
+      if (this.frameTimes && this.lastFrameMs > 0) {
+        this.frameTimes.push(nowMs - this.lastFrameMs);
+      }
+      this.lastFrameMs = nowMs;
+    });
+    this.destroyRef.onDestroy(() => frameSubscription.unsubscribe());
     this.testAdapter = createWaterLodSpikeTestAdapter({
       ready: () => this.sceneReady(),
       wireframe: () => this.water.material.wireframe,
@@ -88,6 +99,15 @@ export class WaterLodSpikeComponent {
         this.water.setWireframe(enabled);
       },
       counts: () => ({ drawCalls: this.drawCalls(), triangles: this.triangles() }),
+      beginFrameSampling: () => {
+        this.frameTimes = [];
+        this.lastFrameMs = 0;
+      },
+      endFrameSampling: () => {
+        const frames = this.frameTimes ?? [];
+        this.frameTimes = null;
+        return frames;
+      },
       environment: () => this.environment(),
     });
     void navigator.gpu?.requestAdapter().then((adapter) => {

@@ -20,7 +20,11 @@ interface IWaterWave {
 }
 
 const BAND_WAVELENGTHS_M = [400, 120, 40, 12] as const;
-const BAND_AMPLITUDES_M = [1.2, 0.35, 0.1, 0.03] as const;
+/*
+ * Raised from [1.2, 0.35, 0.1, 0.03] so each band has a slope near 0.03 to 0.05 (amplitude x wavenumber). The earlier
+ * slopes were around 0.016 to 0.019, too flat to read as 3D water from the orbit camera.
+ */
+const BAND_AMPLITUDES_M = [2, 0.9, 0.3, 0.08] as const;
 const WAVES_PER_BAND = 4;
 /** Golden angle in radians: spreads the directions of the 16 waves without clustering them. */
 const GOLDEN_ANGLE = 2.39996322972865332;

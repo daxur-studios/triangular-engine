@@ -45,6 +45,8 @@ Plan: [PLAN-080](/docs/plans/080_lod-water.md).
 
 **Open items (carried from the architect).** Could not verify: the planet-material sky and reflection API, Plan 059's runbook, and whether `<flatTerrain>` takes a custom source and material (the spike answers that). The demo build was failing on another page (soft-body lab) when the architect read the record. The plan number is now reserved as 080.
 
+**Shoreline and land under water (noted 2026-11-01, not in W0b).** W0b draws a flat plane with no ground under it, so its numbers do not include land. The land case is covered by plan w2 (terrain-aware culling and depth from `groundAt`), not by the W0b spike. Its cost (full-density water under land) stays unmeasured until w2.
+
 ## History
 
 Append dated findings, decisions, scope changes and verification. Do not erase earlier outcomes when a plan is superseded.

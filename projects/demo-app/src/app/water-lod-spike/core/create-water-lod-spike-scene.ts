@@ -41,7 +41,7 @@ export function createWaterLodSpikeScene(
   engine.scene.add(new DirectionalLight('#ffffff', 1.2));
 
   const heights = createWaterLodSpikeWaves();
-  const material = createWaterLodSpikeMaterial();
+  const material = createWaterLodSpikeMaterial(heights);
 
   let lastSampleMs = 0;
   const tickSubscription = engine.tick$.subscribe(() => {

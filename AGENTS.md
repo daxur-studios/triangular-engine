@@ -101,3 +101,5 @@ The package README, `projects/triangular-engine/docs/` and each entry's `<entry>
 
 All local `.tgz` files go under `/ignore/packages/`, and `/ignore/` must be gitignored.
 Follow [Local package archives](docs/local-packages.md) for packing, dependency paths and clone setup.
+
+<!-- daxur-app:triangular-demo -->Served by daxur at http://triangular-demo.localhost:4200 — don't start your own `ng serve`; run `daxur app guide triangular-demo` for how to check builds.<!-- /daxur-app -->

@@ -8,7 +8,10 @@ record: /docs/engineering-records/080_lod-water.md
 map_schema: 1
 document_id: plan-080
 initiative_id: "lod-water"
-performance: []
+performance:
+  - id: water-lod-spike-performance-v1
+    url: http://triangular-demo.localhost:4200/water-lod-spike?testSuite=water-lod-spike-performance&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
+    status: runnable-diagnostic-hardware-unmeasured
 ---
 
 # Plan 080: LOD Water

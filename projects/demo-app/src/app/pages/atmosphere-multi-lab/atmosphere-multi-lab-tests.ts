@@ -103,3 +103,28 @@ export const MULTI_ATMOSPHERE_TEST_HISTORY: readonly TestSuite<MultiAtmosphereSe
     scenarios: SCENARIOS,
   },
 ];
+
+/** Plan 081 bt-spike: the body-tint spike page (`?spike=body-tint`). The spike sets its own scene, so no settings apply. */
+export interface BodyTintSpikeSettings {
+  readonly spike: 'body-tint';
+}
+
+/** Functional check that the spike installed and its readout shows. Needs a visual review of the blend band (P1 acceptance). */
+export const BODY_TINT_SPIKE_HISTORY: readonly TestSuite<BodyTintSpikeSettings>[] = [
+  {
+    id: 'body-tint-spike',
+    version: 1,
+    title: 'Plan 081 bt-spike P1: froxel haze (left) vs sky (right) at the range limit',
+    purpose: 'functional',
+    requiresVisualReview: true,
+    scenarios: [
+      {
+        id: 'readout',
+        label: 'spike installed, readout and plane shown',
+        durationMs: 1000,
+        warmupMs: 600,
+        settings: { spike: 'body-tint' },
+      },
+    ],
+  },
+];

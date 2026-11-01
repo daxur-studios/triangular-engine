@@ -45,6 +45,14 @@ Plan: [PLAN-081](/docs/plans/081_body-tint.md).
 
 Append dated findings, decisions, scope changes and verification. Do not erase earlier outcomes when a plan is superseded.
 
+### 2026-11-01 — bt-spike P1 (worker: claude-haiku-5-5; supervisor: SUPERVISOR: body-tint, Sonnet 5.5)
+
+- **Code.** Demo-only spike `atmosphere-body-tint-spike.ts` in the lab folder, opened by `?spike=body-tint`. A test plane in space at 300 km altitude, depth running across the froxel range limit. Left half: `binding.perspective()`. Right half: `backdrop.skyObject()`. A red line marks where camera distance meets the range limit. No library file changed.
+- **Range limit.** Read from the public `binding.aerialPerspective.rangeFor(altitudeM).max` (metres); the froxel table sets its `rangeMax` uniform from the same function each frame.
+- **Checks run.** `tsc --noEmit` on `projects/demo-app/tsconfig.app.json` passes.
+- **Not yet verified.** The owner's served page did not show the spike readout when the worker loaded it (it showed the Plan 078 text), so the served bundle may be stale or a rebuild may have failed. The owner's dev-server output should show which. Pipeline errors (`renderPipeline_NodeMaterial_22`, `MeshStandardNodeMaterial_20`) also appear on the plain page without the flag, so they are not from the spike.
+- **Open.** The saved spike run and the owner's screenshot review (blend-band width) are pending. P1 is not signed off.
+
 ## Scope history
 
 <!-- tri:scope-history -->

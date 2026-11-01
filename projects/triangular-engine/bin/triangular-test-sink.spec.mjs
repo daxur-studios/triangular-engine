@@ -252,7 +252,8 @@ test('gpu-busy-before-start keys on a non-browser GPU process, not on the page\'
   assert.equal(busy([{ pid: 1, name: 'chrome.exe' }, { pid: 4, name: '[Insufficient Permissions]' }, { pid: 5, name: 'dwm.exe' }]), false);
   // No process list: fall back to the idle load threshold, above the page's own load (45 % here).
   assert.equal(busy([]), false);
-  assert.equal(machineWarnings({ gpuApps: [], idle: { gpu: { util: { med: 75 } } } }, {}).includes('gpu-busy-before-start'), true);
+  assert.equal(machineWarnings({ gpuApps: [], idle: { gpu: { util: { med: 90 } } } }, {}).includes('gpu-busy-before-start'), true);
+  assert.equal(machineWarnings({ gpuApps: [], idle: { gpu: { util: { med: 75 } } } }, {}).includes('gpu-busy-before-start'), false);
   assert.equal(machineWarnings({ gpuApps: [], idle: { gpu: { util: { med: 5 } } } }, {}).includes('gpu-busy-before-start'), false);
 });
 

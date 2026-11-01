@@ -569,6 +569,12 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   /** The card shows at most this many problem lines; Details and the agent text have them all. */
   readonly maxProblemLines = 8;
 
+  /** Title of the suite being run, shown alone while a run is active so the viewer still sees what is running. */
+  runningTitle(): string {
+    const suite = this.activeSuite();
+    return suite ? `${suite.title} · v${suite.version}` : 'Running test';
+  }
+
   caseText(state: TestProgress): string {
     const current = state.phase === 'preparing' || state.phase === 'restoring' ? state.completed : Math.min(state.total, state.completed + 1);
     return `${current} of ${state.total}${state.label ? ` · ${state.label}` : ''}`;

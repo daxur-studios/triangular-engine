@@ -1,4 +1,17 @@
-<section aria-label="Test runner" class="test-runner">
+<section aria-label="Test runner" class="test-runner" [class.is-running]="running()">
+  @if (running()) {
+    <div class="running" role="status" aria-live="polite">
+      <p class="headline">{{ runningTitle() }}</p>
+      @if (progress(); as state) {
+        <p class="case">{{ caseText(state) }}</p>
+        <div class="bar"><div [style.width.%]="progressFraction() * 100"></div></div>
+        <p class="muted" [class.paused]="state.phase === 'paused'">{{ phaseText(state) }}</p>
+      }
+      <div class="actions">
+        <button type="button" class="primary wide" (click)="cancel()">Cancel</button>
+      </div>
+    </div>
+  } @else {
   <h3>Repeatable tests</h3>
   <form [formGroup]="form" (ngSubmit)="runSelected()">
     <div class="finder">
@@ -70,11 +83,7 @@
       <button type="button" (click)="runLatest()" [disabled]="running() || externalBusy() || !available() || !latest() || form.invalid">Run latest test</button>
     </details>
     <div class="actions">
-      @if (running()) {
-        <button type="button" class="primary wide" (click)="cancel()">Cancel</button>
-      } @else {
-        <button type="submit" class="primary wide" [disabled]="externalBusy() || !available() || form.invalid">Run suite</button>
-      }
+      <button type="submit" class="primary wide" [disabled]="externalBusy() || !available() || form.invalid">Run suite</button>
       <button type="button" (click)="copyLaunchLink()" [disabled]="form.invalid" title="Copy launch link" aria-label="Copy launch link">Link</button>
       <details #runMenu class="run-menu">
         <summary aria-label="More run options" title="More run options"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg></summary>
@@ -86,16 +95,10 @@
       </details>
     </div>
   </form>
-  @if (!available()) { <p class="muted">Waiting for the page to be ready.</p> }
-  @if (progress(); as state) {
-    <div class="progress" role="status" aria-live="polite">
-      <p class="headline">{{ caseText(state) }}</p>
-      <div class="bar"><div [style.width.%]="progressFraction() * 100"></div></div>
-      <p class="muted" [class.paused]="state.phase === 'paused'">{{ phaseText(state) }}</p>
-    </div>
   }
+  @if (!available()) { <p class="muted">Waiting for the page to be ready.</p> }
   @if (message()) { <p role="status" class="message">{{ message() }}</p> }
-  @if (batchEntries().length) {
+  @if (batchEntries().length && !running()) {
     <div class="result-card" role="status">
       <p class="headline">Batch · {{ batchEntries().length }} test{{ batchEntries().length > 1 ? 's' : '' }} finished</p>
       <div class="actions"><button type="button" class="primary wide" (click)="copyAll()">Copy all</button></div>

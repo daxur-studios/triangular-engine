@@ -17,8 +17,9 @@ export const MACHINE_THRESHOLDS = {
    * Median GPU utilisation (%) in the preflight window above which the GPU counts as busy before the run. Used only when
    * nvidia-smi listed no GPU processes. The machine with nothing open reads 0 %; the page under test, already rendering
    * an empty frame full screen at 165 Hz during the preflight, reads 40-48 % on its own (p95 up to 48 over 11 runs).
+   * Raised from 60 to 85: a laptop with a busy GPU still gives usable numbers, so the warning should flag only heavy load.
    */
-  gpuBusyPct: 60,
+  gpuBusyPct: 85,
   /**
    * GPU temperature (C) at or above which the GPU counts as hot before the run. Only near-throttle heat matters: the
    * reference machine holds its clocks (preflights 38-52 C, timed cases peak at 48 C, no throttle bits), and real

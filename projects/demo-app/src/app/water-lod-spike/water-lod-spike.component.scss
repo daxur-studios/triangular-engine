@@ -32,6 +32,7 @@
 
 /* Right sidebar: the runner scrolls inside its own panel so long results stay reachable beside the scene. */
 .runner-panel {
+  align-self: flex-start;
   box-sizing: border-box;
   max-height: calc(100vh - 2rem);
   overflow-y: auto;

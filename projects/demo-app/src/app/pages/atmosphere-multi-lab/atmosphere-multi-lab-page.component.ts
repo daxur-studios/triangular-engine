@@ -18,6 +18,7 @@ import {
 import { adapterLabel, describeGpuAdapter, type GpuAdapterRendererLike } from '../planet-shape-lab/gpu-adapter-info';
 import { installBodyTintSpike, type BodyTintSpike } from './atmosphere-body-tint-spike';
 import {
+  BODY_TINT_SPIKE_HISTORY,
   EARTH_RADIUS_M,
   MOON_CENTRE,
   MOON_RADIUS_M,
@@ -25,6 +26,7 @@ import {
   MULTI_ATMOSPHERE_TEST_HISTORY,
   SUN_DIRECTION,
   VIEW_POSES,
+  type BodyTintSpikeSettings,
   type MultiAtmosphereSettings,
 } from './atmosphere-multi-lab-tests';
 
@@ -180,7 +182,9 @@ function finiteSamples(value: number): number[] {
 export class AtmosphereMultiLabPageComponent {
   private readonly engine = inject(EngineService);
 
-  readonly testHistory = MULTI_ATMOSPHERE_TEST_HISTORY;
+  /** `?spike=body-tint`: the Plan 081 spike page, with its own suite and adapter. */
+  readonly spikeMode = new URLSearchParams(location.search).get('spike') === 'body-tint';
+  readonly testHistory = this.spikeMode ? BODY_TINT_SPIKE_HISTORY : MULTI_ATMOSPHERE_TEST_HISTORY;
   readonly allowTestAutoStart = isDevMode();
   readonly shown = signal('');
   readonly testBusy = signal(false);
@@ -210,7 +214,7 @@ export class AtmosphereMultiLabPageComponent {
     this.engine.scene.add(this.bodyA, this.bodyB);
     this.applySettings(DEFAULT_SETTINGS);
     // Plan 081 bt-spike P1 (demo-only): the body-tint spike replaces the Plan 078 scene when asked for by URL.
-    if (new URLSearchParams(location.search).get('spike') === 'body-tint') {
+    if (this.spikeMode) {
       this.atmosphereB.enabled = false;
       this.bodyB.visible = false;
       this.bodyTintSpike = installBodyTintSpike({
@@ -303,7 +307,7 @@ export class AtmosphereMultiLabPageComponent {
     while (this.renderedFrames < start + count) await context.wait(16);
   }
 
-  readonly testAdapter: TestRunAdapter<MultiAtmosphereSettings, undefined> = {
+  private readonly labAdapter: TestRunAdapter<MultiAtmosphereSettings, undefined> = {
     windowModes: false,
     capture: () => undefined,
     apply: (scenario) => this.applySettings(scenario.settings),
@@ -316,6 +320,32 @@ export class AtmosphereMultiLabPageComponent {
       return [await this.captureThumbnail(context.signal)];
     },
   };
+
+  /** The spike sets its own scene, so nothing is applied or restored; the run checks that the spike is installed. */
+  private readonly spikeAdapter: TestRunAdapter<BodyTintSpikeSettings, undefined> = {
+    windowModes: false,
+    capture: () => undefined,
+    apply: () => undefined,
+    ready: (context) => this.waitForFrames(3, context),
+    measure: () => this.measureSpike(),
+    restore: () => undefined,
+    environment: () => this.environment(),
+  };
+
+  readonly testAdapter = this.spikeMode ? this.spikeAdapter : this.labAdapter;
+
+  private async measureSpike(): Promise<TestObservation> {
+    const spike = this.bodyTintSpike;
+    const readout = this.shown();
+    return {
+      metrics: [],
+      checks: [
+        { name: 'spike installed', passed: spike !== undefined, detail: spike ? `range limit ${Math.round(spike.rangeMaxM)} m` : 'no spike installed' },
+        { name: 'readout shown', passed: readout.startsWith('body-tint spike'), detail: readout },
+      ],
+      limitations: ['Functional only. The blend band needs the owner\'s screenshot review.'],
+    };
+  }
 
   /** Timing over the window, then one probe frame read back after it (outside the window) for the picture checks. */
   private async measure(scenario: TestScenario<MultiAtmosphereSettings>, context: TestContext): Promise<TestObservation> {

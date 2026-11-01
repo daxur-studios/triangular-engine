@@ -1,6 +1,6 @@
 import { DoubleSide, Mesh, PerspectiveCamera, PlaneGeometry, Scene } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { abs, cameraPosition, float, length, normalize, positionWorld, screenUV, select, vec3 } from 'three/tsl';
+import { abs, cameraPosition, float, Fn, length, normalize, positionWorld, screenUV, select, vec3 } from 'three/tsl';
 import type { PlanetAtmosphere } from 'triangular-engine/atmosphere';
 
 /**
@@ -60,17 +60,21 @@ export function installBodyTintSpike(options: BodyTintSpikeOptions): BodyTintSpi
   plane.position.set(0, cameraY + 0.15, -distanceUnits);
   scene.add(plane);
 
-  const toFragment = positionWorld.sub(cameraPosition);
-  const distance = length(toFragment);
-  const direction = normalize(toFragment);
-  const froxel = binding.perspective()(
-    { sphereNormal: vec3(0, 1, 0), radialDirection: vec3(0, 1, 0), cameraDistance: distance },
-    SURFACE,
-  );
-  const sky = atmosphere.backdrop.skyObject(SURFACE, direction);
-  const side = select(screenUV.x.lessThan(0.5), froxel, sky);
-  const onLimit = abs(distance.mul(metersPerUnit).sub(float(rangeMaxM))).lessThan(float(rangeMaxM * MARKER_BAND));
-  material.outputNode = select(onLimit, vec3(1, 0, 0), side) as any;
+  // The sky and froxel terms use TSL `If` branches, which need a shader build context: build them inside an `Fn`.
+  const shade = Fn(() => {
+    const toFragment = positionWorld.sub(cameraPosition);
+    const distance = length(toFragment);
+    const direction = normalize(toFragment);
+    const froxel = binding.perspective()(
+      { sphereNormal: vec3(0, 1, 0), radialDirection: vec3(0, 1, 0), cameraDistance: distance },
+      SURFACE,
+    );
+    const sky = atmosphere.backdrop.skyObject(SURFACE, direction);
+    const side = select(screenUV.x.lessThan(0.5), froxel, sky);
+    const onLimit = abs(distance.mul(metersPerUnit).sub(float(rangeMaxM))).lessThan(float(rangeMaxM * MARKER_BAND));
+    return select(onLimit, vec3(1, 0, 0), side);
+  });
+  material.outputNode = shade() as any;
 
   return {
     rangeMaxM,

@@ -29,6 +29,12 @@ button.wide { flex: 1; }
 button:disabled { opacity: 0.5; cursor: default; }
 button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--ui-accent, #8ac9ff); outline-offset: 2px; }
 .headline { font-weight: 600; }
+/* Active run: a compact strip with the test name, case, progress and Cancel; the form and result cards are hidden. */
+.test-runner.is-running { padding: 0.5rem 0.6rem; }
+.running p { margin: 0.15rem 0; }
+.running .case { font-size: 0.9rem; }
+.running .bar { margin-block: 0.25rem; }
+.running .actions { margin-block: 0.4rem 0; }
 .bar { height: 4px; border-radius: 2px; background: var(--ui-border, #627080); overflow: hidden; margin-block: 0.35rem; }
 .bar div { height: 100%; background: var(--ui-accent, #8ac9ff); transition: width 0.2s; }
 .paused { color: var(--ui-warning, #ffd479); }
