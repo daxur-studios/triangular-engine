@@ -48,3 +48,4 @@ tags: [engineering-records, index]
 
 Records `001`–`042` keep their historical formats; new work uses reciprocal plan and Engineering Record pairs. [Convention](/docs/plans-and-runbooks.md).
 | [LOD Water](/docs/engineering-records/080_lod-water.md) | [PLAN-080](/docs/plans/080_lod-water.md) |
+| [Body tint for meshes in atmosphere](/docs/engineering-records/081_body-tint.md) | [PLAN-081](/docs/plans/081_body-tint.md) |

@@ -14,6 +14,31 @@
   z-index: 10;
 }
 
+/*
+ * Red frame drawn over the whole scene while a test case runs. An absolutely placed inset shadow on top of the scene
+ * (not a border or outline on it), so the scene's size and the layout around it never change. Its z-index clears the
+ * engine's own overlay layers, which would otherwise cover an outline on the scene element.
+ */
+.test-running {
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1000;
+    pointer-events: none;
+    box-shadow: inset 0 0 0 4px #e53935;
+  }
+}
+
+/* Right sidebar: the runner scrolls inside its own panel so long results stay reachable beside the scene. */
+.runner-panel {
+  box-sizing: border-box;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  padding: 0.5rem;
+  width: min(26rem, 90vw);
+}
+
 strong {
   color: white;
 }

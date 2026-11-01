@@ -33,6 +33,11 @@ const history: readonly TestSuite<Settings>[] = [{
   (completed)="retainResult($event)" />
 ```
 
+Place the runner in a side portal, not the page flow. Inside `<scene>`, use
+`<ng-template portalTarget="rightSidebar" lane="content">` (or `leftSidebar`) and give the
+runner a scrolling wrapper. Rendered below the scene, it takes height from the scene and
+shrinks it as results grow.
+
 Keep history oldest-first. Append suites or new versions; the runner selects the final
 entry, and **Run** starts the selected test (earlier ones stay in the selector; **More
 options** has the profile, repetitions and **Run latest test**).

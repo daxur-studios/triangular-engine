@@ -40,6 +40,12 @@ router, shared UI or automation-client dependency.
   (completed)="retainTestResult($event)" />
 ```
 
+Place the runner in an engine portal lane, not in the page flow. Inside `<scene>`, wrap it
+in `<ng-template portalTarget="rightSidebar" lane="content">` (or `leftSidebar`) and let its
+own wrapper scroll (`max-height` with `overflow-y: auto`). A runner rendered below `<scene>`
+takes height from the scene, so the scene shrinks as results grow. Keep the runner out of
+the overlay lanes too: they are for HUD and viewport controls, not long result lists.
+
 These host members are integration points to implement in the game. Autostart
 requires explicit application opt-in; a query parameter alone does not enable it.
 Bind `available` to real scene readiness. If the runner is rendered before the canvas,

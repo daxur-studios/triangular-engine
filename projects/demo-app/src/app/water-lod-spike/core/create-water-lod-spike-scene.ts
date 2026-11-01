@@ -1,5 +1,9 @@
 import { DirectionalLight } from 'three';
-import { EngineService } from 'triangular-engine';
+import { MeshBasicNodeMaterial } from 'three/webgpu';
+import type { EngineService } from 'triangular-engine';
+import type { HeightSource } from 'triangular-engine/lod-surface/core';
+import { createWaterLodSpikeMaterial } from './water-lod-spike-material';
+import { createWaterLodSpikeWaves } from './water-lod-spike-waves';
 
 export interface IWaterLodSpikeDiagnostics {
   readonly drawCalls: number;
@@ -7,30 +11,37 @@ export interface IWaterLodSpikeDiagnostics {
 }
 
 export interface IWaterLodSpikeSceneHandle {
+  /** Height source for `<flatTerrain [heights]>`: the spike's 16 waves. */
+  readonly heights: HeightSource;
+  /** Material for `<flatTerrain [material]>`. */
+  readonly material: MeshBasicNodeMaterial;
   setWireframe(enabled: boolean): void;
   dispose(): void;
 }
 
 /**
  * Factory for the water LOD spike scene (Plan 080, packet W0b). Takes the
- * `EngineService` that the sibling `<scene>` already created and adds objects
- * to it. It does not create its own renderer, camera, controls, or
- * requestAnimationFrame loop.
+ * `EngineService` that the sibling `<scene>` already created and adds a light
+ * and a diagnostics tick to it. It does not create its own renderer, camera,
+ * controls, or requestAnimationFrame loop.
  *
- * TODO: build the mechanism under test (plan 080, spike S-W1). Use a flat
- * 100 km plane through lod-surface's public API with a spike-local wave
- * source and material, 16 sines with per-wave fade, sigma-squared transfer to
- * roughness, sky Fresnel, and the wind-driven calm, slick and foam far form.
- * Gates Q1 to Q6 are in plan 080, Spike questions. Use a spike-local wave
- * source and material; do not edit the library. The wireframe toggle must flip
- * `material.wireframe` on the spike's own material, never `<scene>`'s
- * `[wireframe]` input.
+ * The water body itself is a `<flatTerrain>` in the component template, fed by
+ * `heights` and `material` from this handle, so the plane goes through
+ * lod-surface's public API. Wireframe flips `material.wireframe` on the spike's
+ * own material, never `<scene>`'s `[wireframe]` input.
+ *
+ * Not built yet (plan 080, spike S-W1 follow-up): per-wave distance fade, the
+ * sigma-squared roughness transfer, wind-driven calm, slick and foam, and any
+ * animation. The heights are static.
  */
 export function createWaterLodSpikeScene(
   engine: EngineService,
   onDiagnostics: (diagnostics: IWaterLodSpikeDiagnostics) => void,
 ): IWaterLodSpikeSceneHandle {
   engine.scene.add(new DirectionalLight('#ffffff', 1.2));
+
+  const heights = createWaterLodSpikeWaves();
+  const material = createWaterLodSpikeMaterial();
 
   let lastSampleMs = 0;
   const tickSubscription = engine.tick$.subscribe(() => {
@@ -45,11 +56,15 @@ export function createWaterLodSpikeScene(
   });
 
   return {
-    setWireframe(): void {
-      // TODO: flip material.wireframe on the water material once it exists.
+    heights,
+    material,
+    setWireframe(enabled: boolean): void {
+      material.wireframe = enabled;
+      material.needsUpdate = true;
     },
     dispose(): void {
       tickSubscription.unsubscribe();
+      material.dispose();
     },
   };
 }

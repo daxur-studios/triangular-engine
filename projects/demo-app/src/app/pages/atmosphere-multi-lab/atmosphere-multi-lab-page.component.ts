@@ -16,6 +16,7 @@ import {
   type TestSetting,
 } from 'triangular-engine/testing';
 import { adapterLabel, describeGpuAdapter, type GpuAdapterRendererLike } from '../planet-shape-lab/gpu-adapter-info';
+import { installBodyTintSpike, type BodyTintSpike } from './atmosphere-body-tint-spike';
 import {
   EARTH_RADIUS_M,
   MOON_CENTRE,
@@ -188,6 +189,7 @@ export class AtmosphereMultiLabPageComponent {
   private renderedFrames = 0;
   /** Planet A's rim luma from the half-resolution run, read by the full-resolution run of the same view (Q1). */
   private halfRim?: Float32Array;
+  private bodyTintSpike?: BodyTintSpike;
 
   private readonly materialA = new PlanetSurfaceMaterial();
   private readonly materialB = new PlanetSurfaceMaterial();
@@ -207,6 +209,18 @@ export class AtmosphereMultiLabPageComponent {
     }
     this.engine.scene.add(this.bodyA, this.bodyB);
     this.applySettings(DEFAULT_SETTINGS);
+    // Plan 081 bt-spike P1 (demo-only): the body-tint spike replaces the Plan 078 scene when asked for by URL.
+    if (new URLSearchParams(location.search).get('spike') === 'body-tint') {
+      this.atmosphereB.enabled = false;
+      this.bodyB.visible = false;
+      this.bodyTintSpike = installBodyTintSpike({
+        atmosphere: this.atmosphereA,
+        scene: this.engine.scene,
+        camera: this.engine.camera as PerspectiveCamera,
+        radiusUnits: RADIUS_A_UNITS,
+      });
+      this.shown.set(`body-tint spike · left froxel · right sky · red line at range limit ${Math.round(this.bodyTintSpike.rangeMaxM / 1000)} km`);
+    }
 
     const tick = this.engine.beforeRender$.subscribe(() => {
       this.assignSkyOwner();
@@ -221,6 +235,7 @@ export class AtmosphereMultiLabPageComponent {
     inject(DestroyRef).onDestroy(() => {
       tick.unsubscribe();
       frames.unsubscribe();
+      this.bodyTintSpike?.dispose();
       this.atmosphereA.dispose();
       this.atmosphereB.dispose();
       this.engine.scene.remove(this.bodyA, this.bodyB);

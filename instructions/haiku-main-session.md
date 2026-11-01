@@ -4,6 +4,15 @@ Start a Haiku session and point it here: "Follow `instructions/haiku-main-sessio
 
 This file is the whole protocol. Read it once at the start, then follow it. Keep messages to sub sessions short and specific.
 
+## Permission mode
+
+Every session in this protocol runs in `bypassPermissions` mode. Not `auto`: `auto` spends more usage on classifier checks, and the owner does not want that.
+
+- Start every sub session with `permission_mode` `bypassPermissions`, or switch it with `mcp__ccd_session_mgmt__set_session_permission_mode` straight after it starts.
+- Raising a session to bypass may show the owner an approval card. That is expected: send the switch and let the card show, do not work around it.
+- If the main session itself is not in bypass mode, tell the owner to set it in the app. The main session cannot raise its own mode.
+- Check the mode with `mcp__ccd_session_mgmt__get_session` after switching.
+
 ## Session names
 
 Name every sub session so the owner can tell them apart in the sidebar. Use the role, then the feature slug:
@@ -32,6 +41,7 @@ Every sub session that has already had a message from the main session must be c
 - The main session sends nothing to that session until the owner confirms the compact is done.
 - The reviewer gets one compact per task cycle. That is intended: after compacting, the reviewer starts from a short context and the messages stay minimal.
 - Compacting is the owner's action. The main session cannot compact another session itself.
+- The main session never offers "compact" as a choice, button or option. It only asks the owner to compact and waits for the owner to confirm. Do not offer to do it.
 
 ## Recommendations from the architect
 
@@ -155,8 +165,20 @@ Give the reviewer and the architect only the brief and the files it names. Do no
 
 ## Records
 
+- Every plan and Engineering Record pair carries a roles block near the top, in both files, naming three things:
+  - **Architect:** the model name and version (for example `claude-opus-5-5`), or the external model or tool if it is not an Anthropic model, plus the session name and date.
+  - **Supervisor (reviewer):** the model and session name, and the date it was started.
+  - **Worker (main session):** the model and session name, and the date.
+  Fill in the architect when the Opus plan is recorded. Fill in the supervisor when it is started. Name the same roles in each decision entry in the Engineering Record. Do not rely on a single shared note: each pair records its own roles.
 - When a phase is done, set its state in the plan's phase table.
 - Append dated entries to the Engineering Record: reviewer verdicts, the architect's decisions, the number of escalations, and the acceptance results. Do not rewrite earlier entries.
+
+## Browser tests and launch links
+
+- Read `projects/triangular-engine/.agents/skills/triangular-engine-testing/SKILL.md` before adding or changing a browser test suite. The skill is the source for launch links (`buildTestLaunchUrl`, the `testAutoStart=1` parameter) and for result handoff.
+- When a packet produces something the owner should run in a browser, give the owner a launch URL that starts the test on its own (`testSuite`, `testVersion`, `testProfile`, `testRepetitions=1`, `testAutoStart=1`), on the demo app at `http://triangular-demo.localhost:4200`. Do not give dropdown instructions.
+- The owner's own Chrome is the GPU run: its WebGPU adapter is the one for performance numbers. The built-in browser pane may pick a different adapter, and it stalls when hidden (no animation frames), so its runs are functional checks only.
+- Record each runnable link in the plan or Engineering Record's `performance` array, and keep earlier links as history.
 
 ## Limits
 

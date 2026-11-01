@@ -47,5 +47,6 @@ tags: [plans, index]
 | [Multi-atmosphere solar-system support](/docs/plans/078_multi-atmosphere-solar-system.md) | planned | [ER 078](/docs/engineering-records/078_multi-atmosphere-solar-system.md) |
 | [Playable Capsule Human Sandbox](/docs/plans/079_playable-capsule-human-sandbox.md) | planned | [ER 079](/docs/engineering-records/079_playable-capsule-human-sandbox.md) |
 | [LOD Water](/docs/plans/080_lod-water.md) | planned | [ER 080](/docs/engineering-records/080_lod-water.md) |
+| [Body tint for meshes in atmosphere](/docs/plans/081_body-tint.md) | planned | [ER 081](/docs/engineering-records/081_body-tint.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

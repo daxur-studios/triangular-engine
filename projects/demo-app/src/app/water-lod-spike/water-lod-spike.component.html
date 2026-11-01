@@ -1,9 +1,24 @@
-<scene>
+<scene [class.test-running]="testing()">
   <orbitControls
-    [cameraPosition]="[3, 2, 3]"
+    [cameraPosition]="[0, 30, 45]"
     [target]="[0, 0, 0]"
     [isActive]="true"
   />
+  <flatTerrain
+    [size]="planeSizeM"
+    [heights]="water.heights"
+    [material]="water.material"
+    [lighting]="false"
+    [bounds]="false"
+  />
+
+  <ng-template portalTarget="rightSidebar" lane="content">
+    <div class="runner-panel">
+      <tri-test-runner
+        [suites]="testHistory" [adapter]="testAdapter" [available]="sceneReady()"
+        [allowAutoStart]="allowTestAutoStart" [resultSink]="true" (progressChange)="onTestProgress($event)" />
+    </div>
+  </ng-template>
 </scene>
 
 <aside class="diagnostics">
@@ -15,6 +30,6 @@
     </button>
   </div>
   <p>
-    Mechanism not built yet (TODO in the core factory). Gates Q1 to Q6 in plan 080.
+    16 waves, 4 bands, static heights. Not built yet: per-wave fade, roughness transfer, calm, slick and foam. Gates Q1 to Q6 in plan 080.
   </p>
 </aside>
