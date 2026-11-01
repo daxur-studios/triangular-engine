@@ -1,0 +1,101 @@
+<div class="sandbox-shell">
+  <header class="topbar">
+    <a class="back-link" routerLink="/" aria-label="Back to examples"
+      >← Examples</a
+    >
+    <div class="brand-lockup">
+      <span class="brand-mark" aria-hidden="true">△</span>
+      <div>
+        <div class="brand-title">CAPSULE HUMAN SANDBOX</div>
+        <div class="brand-subtitle">PLAYABLE CHARACTERS · CROWD SCALE</div>
+      </div>
+    </div>
+    <span class="top-note">Sandbox prototype</span>
+  </header>
+
+  <main class="play-area" aria-label="Playable capsule human scene">
+    <scene [showFps]="true">
+      <orbitControls
+        [cameraPosition]="cameraPosition()"
+        [target]="cameraTarget()"
+      />
+      <ambientLight [intensity]="1.15" />
+      <directionalLight [position]="[4, 8, 5]" [intensity]="2.1" />
+      <directionalLight [position]="[-5, 5, -3]" [intensity]="1.1" />
+    </scene>
+
+    <ng-template portalTarget="overlay" lane="topStart">
+      <div class="scene-chip">
+        <span class="live-dot"></span>
+        <span>PLAYABLE SCENE</span>
+        <i></i>
+        <strong
+          >{{ population() }} full character{{
+            population() === 1 ? "" : "s"
+          }}</strong
+        >
+      </div>
+    </ng-template>
+
+    <ng-template portalTarget="overlay" lane="topEnd" [order]="10">
+      <div class="population-control" aria-label="Character population">
+        <span>Show</span>
+        @for (count of populationOptions; track count) {
+          <button
+            type="button"
+            [class.active]="population() === count"
+            [attr.aria-pressed]="population() === count"
+            (click)="setPopulation(count)"
+          >
+            {{ count }}
+          </button>
+        }
+      </div>
+    </ng-template>
+
+    <ng-template portalTarget="overlay" lane="bottomStart">
+      <div class="interaction-dock">
+        <div class="dock-heading">
+          <span class="dock-kicker">{{
+            selectedHumanNumber() | number: "2.0-0"
+          }}</span>
+          <div>
+            <strong>Human {{ selectedHumanNumber() | number: "2.0-0" }}</strong>
+            <small>{{ selectedHumanState() }}</small>
+          </div>
+        </div>
+        <button type="button" (click)="pickUpRock()" [disabled]="rockIsHeld()">
+          Pick up rock
+        </button>
+        <button type="button" (click)="useChair()">
+          {{ selectedHumanState() === "Sitting" ? "Stand up" : "Sit in chair" }}
+        </button>
+        @if (rockIsHeld()) {
+          <button class="drop-button" type="button" (click)="dropRock()">
+            Drop rock
+          </button>
+        }
+      </div>
+    </ng-template>
+
+    <ng-template portalTarget="overlay" lane="bottomEnd" [order]="10">
+      <div class="scene-status" aria-live="polite">
+        <strong>{{ status() }}</strong>
+        <span
+          >{{ renderStats().drawCalls }} draw calls ·
+          {{ renderStats().triangles | number }} triangles</span
+        >
+      </div>
+    </ng-template>
+  </main>
+
+  <footer class="statusbar">
+    <span
+      >Click a human to select · click the ground to move · click the chair or
+      rock to interact</span
+    >
+    <span
+      >Live renderer counts are diagnostic, not a performance benchmark</span
+    >
+  </footer>
+</div>

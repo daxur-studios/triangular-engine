@@ -3,7 +3,7 @@ type: Index
 title: Engineering Records
 description: Current initiative evidence and preserved legacy implementation history.
 timestamp: 2026-10-17T00:00:00Z
-tags: [runbook, index]
+tags: [engineering-records, index]
 ---
 
 # Engineering Records
@@ -44,5 +44,6 @@ tags: [runbook, index]
 | [Soft-body parity lab (official Jolt examples)](/docs/engineering-records/076_soft-body-parity-lab.md) | [PLAN-076](/docs/plans/076_soft-body-parity-lab.md) |
 | [Jolt physics for flat, sphere and cylinder worlds](/docs/engineering-records/077_jolt-world-shapes.md) | [PLAN-077](/docs/plans/077_jolt-world-shapes.md) |
 | [Multi-atmosphere solar-system support](/docs/engineering-records/078_multi-atmosphere-solar-system.md) | [PLAN-078](/docs/plans/078_multi-atmosphere-solar-system.md) |
+| [Playable Capsule Human Sandbox](/docs/engineering-records/079_playable-capsule-human-sandbox.md) | [PLAN-079](/docs/plans/079_playable-capsule-human-sandbox.md) |
 
-Existing records retain their `docs/runbook/` paths. Legacy runbooks `001`–`042` retain their historical formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).
+Records `001`–`042` keep their historical formats; new work uses reciprocal plan and Engineering Record pairs. [Convention](/docs/plans-and-runbooks.md).

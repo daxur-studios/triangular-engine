@@ -16,7 +16,7 @@ closing message and wait for a yes; do not create the file on your own initiativ
 
 Numbered handovers (`<NNN>_*.md`) are gitignored (`/docs/handover/[0-9]*.md` in `.gitignore`) because they contain
 local file paths, session ids and transcript paths. They live only in the working tree of the machine that wrote
-them. Only this README is tracked, so anything that must survive beyond the working tree goes into the runbook, not
+them. Only this README is tracked, so anything that must survive beyond the working tree goes into the Engineering Record, not
 the handover.
 
 ## Contents (keep it to one screen where you can)
@@ -29,7 +29,7 @@ the handover.
 5. **Next steps:** in order, and who does each (owner, agent).
 6. **Files:** what was changed, and whether it is committed, staged, unstaged or untracked.
 
-Facts only; link to code, docs, plans and runbooks rather than repeating them. This is a public repo: the
+Facts only; link to code, docs, plans and Engineering Records rather than repeating them. This is a public repo: the
 [AGENTS.md](../../AGENTS.md) rules apply, so no private or consumer app names or paths (write "a consumer app") and no
 process names from result files.
 
@@ -55,4 +55,4 @@ Options:
 `--session` and `--transcript` cannot be used together. The file contains local paths and may contain pasted secrets,
 so review it and send it only by a private channel. Never commit it.
 
-When the work is picked up and finished, delete the handover or fold what still matters into the runbook.
+When the work is picked up and finished, delete the handover or fold what still matters into the Engineering Record.

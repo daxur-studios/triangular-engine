@@ -45,5 +45,6 @@ tags: [plans, index]
 | [Soft-body parity lab (official Jolt examples)](/docs/plans/076_soft-body-parity-lab.md) | planned | [ER 076](/docs/engineering-records/076_soft-body-parity-lab.md) |
 | [Jolt physics for flat, sphere and cylinder worlds](/docs/plans/077_jolt-world-shapes.md) | planned | [ER 077](/docs/engineering-records/077_jolt-world-shapes.md) |
 | [Multi-atmosphere solar-system support](/docs/plans/078_multi-atmosphere-solar-system.md) | planned | [ER 078](/docs/engineering-records/078_multi-atmosphere-solar-system.md) |
+| [Playable Capsule Human Sandbox](/docs/plans/079_playable-capsule-human-sandbox.md) | planned | [ER 079](/docs/engineering-records/079_playable-capsule-human-sandbox.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

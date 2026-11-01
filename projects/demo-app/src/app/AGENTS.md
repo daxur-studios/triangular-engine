@@ -2,6 +2,22 @@
 
 Scoped to `projects/demo-app/src/app/`. See the repo-root `AGENTS.md` first.
 
+## New pages: register in both places, then verify
+
+Every new page needs two entries, and a route alone does not make it reachable:
+
+1. A lazy `loadComponent` route in `app.routes.ts`.
+2. A card in `pages/demo-index/demo-index.component.ts` (the `DEMOS` list, `id`, `number`, `route`, `categoryId`, `tier`, `createdAt`). The main demo page is built from this list, so without it nobody can open the page from the app.
+
+Spikes also go in `SPIKES` (see below). Use the same route string in both entries.
+
+Before reporting a page as working:
+
+- Check the running dev server's output for build errors. A template error such as binding a `private` member
+  fails the whole bundle, so the new route silently never loads. The owner's `ng serve` terminal shows it.
+- Open the page's route in the browser and confirm the page element renders, not just that the URL returns 200.
+- Open the main demo page and confirm the new card links to the route.
+
 ## Demo scene layout
 
 These rules apply whenever a page or component under this directory creates or

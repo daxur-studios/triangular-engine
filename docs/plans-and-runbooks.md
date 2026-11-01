@@ -3,22 +3,22 @@ type: Standard
 title: Plans and Engineering Records
 description: Link current implementation plans to dated decisions and verification evidence.
 timestamp: 2026-10-13T00:00:00Z
-tags: [documentation, plans, runbook]
+tags: [documentation, plans, engineering-records]
 performance: []
 ---
 
 # Plans and Engineering Records
 
 Each active initiative uses a plan in `docs/plans/` and an append-only Engineering Record in
-`docs/runbook/`. The plan's `runbook:` and record's `plans:` references are reciprocal; the first
+`docs/engineering-records/`. The plan's `runbook:` and record's `plans:` references are reciprocal; the first
 pair shares its numbered filename. Plans show current work/status; records preserve dated findings,
-decisions, actions and checks; both indexes include new pairs. Preserve legacy runbooks as history.
+decisions, actions and checks; both indexes include new pairs. Preserve earlier records as history.
 
-The preferred name for a runbook is now **Engineering Record (ER)**. Existing `docs/runbook/`
-paths and frontmatter keys/types remain supported; renaming the concept does not require moving
-historical files. The format and visualization pilot is tracked in
+The name for these records is **Engineering Record (ER)**. Older `docs/runbook/` paths and the
+`runbook:` and `type: Runbook` frontmatter keys remain supported by tooling for compatibility, so
+historical files are not moved or rewritten. The format and visualization pilot is tracked in
 [Plan 066](plans/066_engineering_records_and_development_map.md) and
-[ER 066](runbook/066_engineering_records_and_development_map.md).
+[ER 066](engineering-records/066_engineering_records_and_development_map.md).
 
 ## Retention and references
 
@@ -51,7 +51,7 @@ a shared number through exclusive file creation and updates both indexes under a
 `triangular docs records next` previews the next candidate; it does not reserve it. To create for a
 consumer workspace, invoke `triangular docs plan new --root <workspace> ...`. The tool uses the package's
 templates and the consumer workspace's `docs/plans/`,
-`docs/runbook/` and index files.
+`docs/engineering-records/` and index files.
 
 The paired Engineering Record has `scope_history_schema: 1` and one `tri:scope-history` block.
 Its initial `tri:scope-baseline state="unconfirmed"` is not a baseline. Establish one only after

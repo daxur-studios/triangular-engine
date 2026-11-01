@@ -5,11 +5,11 @@
 - `projects/triangular-engine/` — the published Angular library.
 - `projects/demo-app/` — the local demo application.
 - `projects/triangular-engine/docs/` — cross-cutting library guides; they ship in the npm package. Each secondary entry point's guide is `projects/triangular-engine/<entry>/README.md`, next to its code, and ships with it.
-- `docs/runbook/` — Engineering Records (legacy runbook path): design notes and implementation history for larger features.
+- `docs/engineering-records/` — Engineering Records: design notes and implementation history for larger features.
 - `docs/plans/` — current and preserved historical work plans linked to their Engineering Records; [convention](docs/plans-and-runbooks.md).
 - `docs/handover/` — notes for picking up unfinished work from an earlier session; [convention](docs/handover/README.md).
 - `instructions/` — maintainer workflows and historical project notes.
-- `.daxur/token-map.json` — repository token documentation manifest (see `docs/runbook/029_token_map_usage_guide.md`).
+- `.daxur/token-map.json` — repository token documentation manifest (see `docs/engineering-records/029_token_map_usage_guide.md`).
 
 ## First steps
 
@@ -44,7 +44,7 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 ## Change conventions
 
 - **Do not commit**: Never run `git commit`. Leave all changes in the working tree for the user/maintainer.
-- **No private repos in this public repo**: never name private/consumer repositories, apps or their paths (code, docs, runbooks, plans, CHANGELOG, commit text). Write generic wording such as "a consumer app"; keep repo-specific notes in that repo.
+- **No private repos in this public repo**: never name private/consumer repositories, apps or their paths (code, docs, engineering records, plans, CHANGELOG, commit text). Write generic wording such as "a consumer app"; keep repo-specific notes in that repo.
 - Keep public exports and secondary-entry-point `public-api.ts` files intentional.
 - Add or update a colocated `*.spec.ts` for behavior changes.
 - Update user-facing docs and `CHANGELOG.md` for public API changes.
@@ -52,12 +52,13 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 - Public symbols get TSDoc. IDE hovers show it to consumers, so write it for them.
 - Keep optional integrations isolated from the core entry point.
 - When creating or modifying demo-app scene pages, follow `projects/demo-app/src/app/AGENTS.md`: set `showFPS: true` on the engine provider and `[showFps]="true"` on `<scene>`, and use the engine portal layout for HUD/viewport controls. Do not place independently positioned scene controls with local absolute CSS; portal lanes coordinate their stacking and order.
-- Before feature or part work, use its existing reciprocal plan/runbook pair or create one under `docs/plans/` and `docs/runbook/`.
+- Before feature or part work, use its existing reciprocal plan and Engineering Record pair or create one under `docs/plans/` and `docs/engineering-records/`.
 - Preserve numbered plans and Engineering Records after completion, abandonment or supersession. Record the outcome and replacement links; do not delete them, reuse their numbers, or silently erase earlier commitments. To archive completed or superseded pairs into git-backed stubs, use `triangular docs archive <path>` (or `triangular docs unarchive <path>` to restore); see [the convention](docs/plans-and-runbooks.md).
 - Use `triangular docs plan new --title "..." --slug ...` to allocate a shared number, create the reciprocal Markdown pair from packaged templates, and update both indexes. `triangular docs records check` validates mapped documents; `triangular docs records review docs/plans/<file>.md --reviewer agent` refreshes its scope fingerprint only after reviewing it. A preview from `triangular docs records next` is not a reservation. Pass `--root <workspace>` to target another project. Read [the document format and workflow](docs/plans-and-runbooks.md#engineering-record-format-and-tooling) before authoring mapped plans.
 - Use the `triangular docs consensus` commands for one durable review per engineering decision. Give participants the same frozen brief, preserve independent responses and dissent, and keep developer decisions separate. The CLI creates and updates Markdown; it does not call AI providers. Follow the packaged [triangular-cli skill](projects/triangular-engine/.agents/skills/triangular-cli/SKILL.md).
 - Never run `triangular docs records baseline` unless the developer explicitly confirms the exact scope snapshot; review markers, checkboxes and agent-authored reviewer fields are not confirmation. Keep confirmed baselines and dated scope changes in the paired Engineering Record; do not overwrite the history.
 - Do not edit generated output in `dist/` or `out-tsc/`; rebuild it instead.
+- New demo pages need a route in `projects/demo-app/src/app/app.routes.ts` and a card in `projects/demo-app/src/app/pages/demo-index/demo-index.component.ts`. Check the dev server output for build errors and open the page before reporting it done. See `projects/demo-app/src/app/AGENTS.md`.
 - Check `daxur tokens map status` when adding or expanding sublibraries to keep architecture docs in sync.
 
 ## Browser tests and their results
@@ -94,7 +95,7 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 
 ## Documentation source of truth
 
-The package README, `projects/triangular-engine/docs/` and each entry's `<entry>/README.md` describe the current consumer API. Treat `instructions/summary.md` and old runbooks as historical context unless they explicitly describe a current workflow. For repository documentation coverage and drift tracking, see `docs/runbook/029_token_map_usage_guide.md`.
+The package README, `projects/triangular-engine/docs/` and each entry's `<entry>/README.md` describe the current consumer API. Treat `instructions/summary.md` and old engineering records as historical context unless they explicitly describe a current workflow. For repository documentation coverage and drift tracking, see `docs/engineering-records/029_token_map_usage_guide.md`.
 
 ## Local package archives
 

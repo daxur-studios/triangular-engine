@@ -505,6 +505,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'capsule-human-sandbox',
+    loadComponent: () =>
+      import('./pages/capsule-human-sandbox/capsule-human-sandbox-page.component').then(
+        ({ CapsuleHumanSandboxPageComponent }) =>
+          CapsuleHumanSandboxPageComponent,
+      ),
+  },
+  {
     path: 'characters-lab',
     loadComponent: () =>
       import('./pages/characters-lab/characters-lab-page.component').then(

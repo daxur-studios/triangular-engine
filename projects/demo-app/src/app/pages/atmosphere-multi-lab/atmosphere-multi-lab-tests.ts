@@ -65,7 +65,17 @@ function scenario(view: MultiView, arm: MultiArm, fullMarch = false): TestScenar
   };
 }
 
-const SCENARIOS: readonly TestScenario<MultiAtmosphereSettings>[] = [
+// Keep the first occurrence of each id: the matrix repeats the near `both` cases listed above.
+function uniqueById(list: readonly TestScenario<MultiAtmosphereSettings>[]): TestScenario<MultiAtmosphereSettings>[] {
+  const seen = new Set<string>();
+  return list.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+const SCENARIOS: readonly TestScenario<MultiAtmosphereSettings>[] = uniqueById([
   // The five required cases, first.
   scenario('spaceBoth', 'both'),
   scenario('insideA', 'both'),
@@ -82,7 +92,7 @@ const SCENARIOS: readonly TestScenario<MultiAtmosphereSettings>[] = [
   ...MATRIX_VIEWS.flatMap((view) => MATRIX_ARMS.map((arm) => scenario(view, arm))),
   // Q1: the same close-to-A view with the half-resolution space pass off (runs after nearA-both, which it compares with).
   scenario('nearA', 'both', true),
-];
+]);
 
 export const MULTI_ATMOSPHERE_TEST_HISTORY: readonly TestSuite<MultiAtmosphereSettings>[] = [
   {

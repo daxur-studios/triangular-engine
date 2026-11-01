@@ -83,6 +83,19 @@ export const DEMOS: readonly DemoItem[] = [
     description: 'A focused procedural capsule human and cat studio with editable character presets, appearance controls, expressions, and motion preview.',
   },
   {
+    id: 'capsule-human-sandbox',
+    number: '079',
+    title: 'Capsule Human Sandbox',
+    route: '/capsule-human-sandbox',
+    categoryId: 'core',
+    tier: 'lab',
+    createdAt: '2026-11-01',
+    entryPoints: ['characters', 'procedural'],
+    package: 'triangular-engine/characters + procedural',
+    description:
+      'Use a procedural human in a playable scene: walk to a point, pick up a rock, sit in a chair, and switch between 1, 16, and 48 full characters.',
+  },
+  {
     id: 'characters-lab', number: '20e', title: 'Face Rig & Humanoid Lab', route: '/characters-lab',
     categoryId: 'core', tier: 'lab', createdAt: '2026-10-31', entryPoints: ['characters', 'procedural', 'testing'], package: 'triangular-engine/characters + procedural + testing',
     description: 'Procedural capsule humans and cats with customizable parts, animation, facial expressions, close-up visual verification, and reusable test evidence.',
@@ -365,6 +378,19 @@ export const DEMOS: readonly DemoItem[] = [
     package: 'triangular-engine/atmosphere',
     description:
       'Plan 049 Phase 2b: PlanetSurfaceMaterial lit and hazed by the atmosphere (lighting stage and aerial-perspective stage), with the sky and limb glow behind the globe, from space to the ground. Toggle each part; planet sizes 64 km to Earth.',
+  },
+  {
+    id: 'atmosphere-multi-lab',
+    number: '02k',
+    title: 'Two Atmospheres (Planet and Moon)',
+    route: '/atmosphere-multi-lab',
+    categoryId: 'atmosphere',
+    tier: 'lab',
+    createdAt: '2026-11-01',
+    entryPoints: ['atmosphere', 'planet-material'],
+    package: 'triangular-engine/atmosphere',
+    description:
+      'Plan 078 spike: a planet and a smaller moon, each with its own atmosphere, in one scene. Camera presets from space, inside each air, and close to one body; the test suite records frame time and a picture per case.',
   },
   {
     id: 'takram-clouds',

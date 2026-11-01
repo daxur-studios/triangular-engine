@@ -109,7 +109,7 @@ invalid launch options fail visibly rather than silently substituting a test. `t
 thumbnails off. `testCases=a,b,other@2/c` runs those cases as a batch (bare ids belong to `testSuite`; build the
 link with `buildTestBatchLaunchUrl`).
 
-When updating a spike, plan or runbook, append the runnable experiment to its
+When updating a spike, plan or Engineering Record, append the runnable experiment to its
 `performance` array and provide a Markdown launch link for the latest item. Keep
 prior entries as history. Describe whether a link runs functional checks or
 diagnostic measurements; a runnable link is not an accepted baseline.
