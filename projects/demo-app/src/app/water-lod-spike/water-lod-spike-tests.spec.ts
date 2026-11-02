@@ -1,5 +1,6 @@
 import type { TestContext, TestScenario } from 'triangular-engine/testing';
 import type { ILuminanceImage } from './core/water-lod-spike-image-metrics';
+import type { IPathError, IPrecisionReport } from './core/water-lod-spike-precision';
 import {
   createWaterLodSpikeTestAdapter,
   WATER_LOD_SPIKE_TEST_HISTORY,
@@ -9,6 +10,21 @@ import {
 
 const WIDTH = 32;
 const HEIGHT = 200;
+
+const pathError = (maxRad: number): IPathError => ({ maxRad, rmsRad: maxRad / 3, pairs: 2000, worstWavelengthM: 0.5, worstDistanceM: 30 });
+
+/** A Q5 report: anchor error `anchorRad` and naive error `naiveRad` at both wave times. */
+function precisionReport(anchorRad = 2e-5, naiveRad = 0.4, backend = 'webgpu'): IPrecisionReport {
+  const entry = (timeS: number) => ({
+    timeS,
+    gpuNaive: pathError(naiveRad),
+    gpuAnchor: pathError(anchorRad),
+    emulatedNaive: pathError(naiveRad),
+    emulatedAnchor: pathError(anchorRad),
+    gpuAnchorSineError: 1e-4,
+  });
+  return { backend, radiusM: 600_000, eyeHeightM: 2, waves: 64, samples: 72, cases: [entry(0), entry(3600)] };
+}
 
 /**
  * A fake page whose frames depend on the filter: with the filter off the water rows are a pixel checkerboard whose
@@ -51,6 +67,7 @@ function makeHost(overrides: Partial<WaterLodSpikeTestHost> = {}): WaterLodSpike
       return { width: WIDTH, height: HEIGHT, values };
     },
     horizonRow: () => 44,
+    runPrecisionProbe: async () => precisionReport(),
     environment: () => ({ backend: 'webgpu' }),
     ...overrides,
   };
@@ -217,6 +234,58 @@ describe('createWaterLodSpikeTestAdapter', () => {
       'water rows measured',
       'colour matches the reference within 6/255 in every band',
     ]);
+  });
+
+  describe('precision case', () => {
+    const PRECISION_SCENARIO: TestScenario<WaterLodSpikeTestSettings> = {
+      id: 'sphere',
+      label: 'Sphere',
+      settings: { wireframe: false, measure: 'precision' },
+      durationMs: 1000,
+      warmupMs: 500,
+    };
+    const failed = (observation: Awaited<ReturnType<ReturnType<typeof createWaterLodSpikeTestAdapter>['measure']>>) =>
+      (observation.checks ?? []).filter((check) => !check.passed).map((check) => check.name);
+
+    it('passes when the anchor path is exact enough and the naive control misses', async () => {
+      const host = makeHost();
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(PRECISION_SCENARIO, makeContext(host.calls));
+
+      expect(failed(observation)).toEqual([]);
+      expect(observation.metrics.find((metric) => metric.name === 'phase error, anchor, t = 3600 s')?.samples).toEqual([2e-5]);
+      expect(observation.metrics.find((metric) => metric.name === 'phase error, naive, t = 0 s')?.samples).toEqual([0.4]);
+    });
+
+    it('fails when the anchor path misses the limit', async () => {
+      const host = makeHost({ runPrecisionProbe: async () => precisionReport(5e-3) });
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(PRECISION_SCENARIO, makeContext(host.calls));
+
+      expect(failed(observation)).toEqual([
+        'Q5 anchor-relative phase within 0.001 rad at t = 0 s',
+        'Q5 anchor-relative phase within 0.001 rad at t = 3600 s',
+      ]);
+    });
+
+    it('fails when the naive control is as good as the anchor path (the metric could not tell them apart)', async () => {
+      const host = makeHost({ runPrecisionProbe: async () => precisionReport(2e-5, 2e-5) });
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(PRECISION_SCENARIO, makeContext(host.calls));
+
+      expect(failed(observation).every((name) => name.startsWith('Q5 control'))).toBe(true);
+      expect(failed(observation).length).toBe(2);
+    });
+
+    it('fails off the WebGPU backend', async () => {
+      const host = makeHost({ runPrecisionProbe: async () => precisionReport(2e-5, 0.4, 'webgl') });
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(PRECISION_SCENARIO, makeContext(host.calls));
+
+      expect(failed(observation)).toEqual(['ran on the WebGPU backend']);
+    });
+
+    it('is in the suite history as its own suite', () => {
+      const suite = WATER_LOD_SPIKE_TEST_HISTORY.find((entry) => entry.id === 'water-lod-spike-precision');
+      expect(suite?.version).toBe(1);
+      expect(suite?.scenarios.map((scenario) => scenario.settings.measure)).toEqual(['precision']);
+    });
   });
 
   it('fails the shimmer gate when the filter changes nothing', async () => {

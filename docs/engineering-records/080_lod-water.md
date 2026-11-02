@@ -142,6 +142,32 @@ Colour stays within the 6/255 gate in every tier and view, but Low is 0.3 from i
 
 **Gating decision (same day, 20:11 UTC).** The owner delegated the call on which tiers carry pass/fail limits ("proceed as you see fit"). Aliasing v3 gates `ultra` on all four limits (shimmer, moiré, colour step, colour error) and `high` on colour error only (at most 6/255 in every band). `medium` and `low` report their numbers without limits and are judged by eye. Reason: the lower tiers are blurrier on purpose, and the shimmer and moiré numbers rise with blur by construction (High: shimmer 4.3 against 2.5, moiré 2.2 against 1.8, 600 m step 2.2 against 2.0), so those limits cannot hold a tier that is meant to be coarser. Colour error still catches a real regression such as a shader change. v3 run, headless-hardware, noisy: `auto=pass`, the same numbers as v2. The adapter was not recorded, so none of this is Q1 evidence. A spec found that the adapter reduced the setting to a boolean before `measureAliasing`; it now passes the setting through.
 
+### 2026-11-02 (evening): Q5, wave phase precision on a 600 km sphere
+
+**Question (plan Q5).** On a 600 km sphere with the eye 2 m up, does an anchor-relative wave phase stay within 1e-3 rad of a double-precision reference, and does the naive path (global position, as the flat spike's `heightNode` has it) fail as the control?
+
+**Method.** Suite `water-lod-spike-precision` v1, written before its first run. Sixty-four plane waves (the spike's table, wavelengths, phases and speeds) with fixed 3D unit directions spread over the whole sphere (a spherical Fibonacci set, so some waves point along every axis). Seventy-two points on the water in rings of 1 m, 2 m, 5 m, 10 m, 30 m, 100 m, 300 m, 1 km and the 1.55 km horizon around an anchor that is not on an axis. A WGSL compute kernel (three TSL, float32) evaluates both paths and the page reads the results back; the CPU compares them with doubles. At wave times 0 and 3600 s.
+- naive: `dot(global, d) * k + phase - time * omega`, the global position rounded to float32.
+- anchor-relative: `dot(relative, d) * k + offset`, the relative position rounded to float32, the offset `(k (anchor . d) + phase - omega t) mod 2 pi` computed in doubles on the CPU and sent again whenever the time changes.
+
+A wave is judged only within its range, the distance past which the vertex filter has dropped it (ultra tier, 4K: wavelength / (4 x 4 px x 5e-4)), which leaves 4144 wave and point pairs. A float32 emulation of the same two formulas runs on the CPU beside the readback and agrees with it (naive 0.74 against 0.79 rad, 0.94 against 0.99 rad), so the pure maths and the GPU tell the same story.
+
+**Result, headless NVIDIA (`gpuVendor` nvidia, WebGPU), `auto=pass`:**
+
+| Wave time | anchor-relative, max | naive (control), max |
+| --- | --- | --- |
+| 0 s | 8.1e-5 rad | 0.79 rad |
+| 3600 s | 6.6e-5 rad | 0.99 rad |
+
+The anchor path is about 12 times inside the 1e-3 limit; its worst pair is a 9.5 m wave at 1 km. The naive path is wrong by most of a radian, worst for the 0.64 m wave at 5 m, so the control fails as intended and the check can tell the paths apart. The sine of the wrapped anchor phase on the GPU is within 0.0005 of the double value (reported, not gated).
+
+**What this does and does not show.**
+- The phase formula and its CPU-side folding of the anchor, the wave time and the initial phase are sound. The offset must include the wave time: the same error grows with `omega t` on the naive path, so W1 recomputes the 64 offsets per frame in doubles (a few hundred flops).
+- Position error is not measured here. The kernel is given the float32 position relative to the anchor, as a vertex buffer built relative to the anchor would have it. How the lod-surface vertex stage arrives at that position in float32 is measured by the morph spike's probe, not by this check.
+- The error of the anchor path grows with the distance from the anchor (the float32 spacing of the relative position), so W1 needs a re-anchor rule. At 4K and the ultra tier the farthest a wave is evaluated is 785 radians of phase from the anchor for every wave, which is what keeps the margin. The re-anchor distance is not set by this spike.
+- The adapter was recorded (nvidia) but the load was noisy (GPU 36 to 58%, CPU 68 to 87%); this is a correctness result, not timing, so the load does not matter.
+- Q5 is closed for the spike. It gates nothing in the page; it is the evidence for the anchor-relative design in W1.
+
 ## Scope history
 
 <!-- tri:scope-history -->

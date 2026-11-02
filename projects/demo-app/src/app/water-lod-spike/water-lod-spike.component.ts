@@ -16,6 +16,7 @@ import {
   type IWaterLodSpikeSceneHandle,
 } from './core';
 import { toLuminance, type ILuminanceImage } from './core/water-lod-spike-image-metrics';
+import { runWaterLodSpikePrecisionProbe, type IPrecisionProbeRenderer } from './core/water-lod-spike-precision-probe';
 import { WATER_LOD_SPIKE_QUALITIES, waterLodSpikeQuality, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
 import { WATER_LOD_SPIKE_UNIFORMS } from './core/water-lod-spike-waves';
 import {
@@ -166,6 +167,7 @@ export class WaterLodSpikeComponent {
       waitFrames: (count, context) => this.waitFrames(count, context),
       readFrame: (jitterX, jitterY) => this.readFrame(jitterX, jitterY),
       horizonRow: () => this.horizonRow(),
+      runPrecisionProbe: () => runWaterLodSpikePrecisionProbe(this.engine.renderer as unknown as IPrecisionProbeRenderer, String(this.environment()['backend'])),
       environment: () => this.environment(),
     });
     void navigator.gpu?.requestAdapter().then((adapter) => {

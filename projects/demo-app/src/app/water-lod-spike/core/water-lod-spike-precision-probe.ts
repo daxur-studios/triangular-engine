@@ -56,9 +56,9 @@ export async function runWaterLodSpikePrecisionProbe(renderer: IPrecisionProbeRe
       const a = waveA.element(int(w));
       const b = waveB.element(int(w));
       const direction = a.xyz;
-      const naive = dot(globalBuffer.element(int(s)).xyz, direction).mul(a.w).add(b.x).sub(time.mul(b.y));
-      const relative = dot(relativeBuffer.element(int(s)).xyz, direction).mul(a.w).add(b.z);
-      const wrapped = relative.sub(relative.div(TWO_PI).add(0.5).floor().mul(TWO_PI));
+      const naive: any = (dot(globalBuffer.element(int(s)).xyz, direction) as any).mul(a.w).add(b.x).sub(time.mul(b.y));
+      const relative: any = (dot(relativeBuffer.element(int(s)).xyz, direction) as any).mul(a.w).add(b.z);
+      const wrapped: any = relative.sub(relative.div(TWO_PI).add(0.5).floor().mul(TWO_PI));
       outBuffer.element(i).assign(vec4(naive, relative, sin(wrapped), 0));
     });
   });

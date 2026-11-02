@@ -3,9 +3,13 @@ import {
   MAX_PHASE_ERROR_RAD,
   PRECISION_LATE_TIME_S,
   PRECISION_RADIUS_M,
+  PROBE_STRIDE,
+  anchorPhaseF32,
   anchorPhaseOffset,
+  compareProbeOutput,
   emulatedPrecision,
   horizonDistanceM,
+  naivePhaseF32,
   phaseDifference,
   precisionAnchor,
   precisionSamples,
@@ -73,6 +77,29 @@ describe('water LOD spike Q5 precision maths', () => {
       expect(naive.maxRad).toBeGreaterThan(CONTROL_MIN_ERROR_RAD);
     });
   }
+
+  it('reads a kernel output back into the same errors the emulation gives', () => {
+    const timeS = PRECISION_LATE_TIME_S;
+    const anchor = precisionAnchor();
+    const output = new Float32Array(samples.length * waves.length * PROBE_STRIDE);
+    samples.forEach((sample, s) =>
+      waves.forEach((wave, w) => {
+        const o = (s * waves.length + w) * PROBE_STRIDE;
+        const anchorPhase = anchorPhaseF32(wave, sample.relative, anchorPhaseOffset(wave, anchor, timeS));
+        output[o] = naivePhaseF32(wave, sample.global, timeS);
+        output[o + 1] = anchorPhase;
+        output[o + 2] = Math.sin(wrapAngle(anchorPhase));
+      }),
+    );
+
+    const compared = compareProbeOutput(waves, samples, timeS, output);
+    const emulated = emulatedPrecision(waves, samples, timeS);
+
+    expect(compared.gpuNaive.maxRad).toBeCloseTo(emulated.naive.maxRad, 9);
+    expect(compared.gpuAnchor.maxRad).toBeCloseTo(emulated.anchor.maxRad, 9);
+    expect(compared.gpuAnchor.pairs).toBe(emulated.anchor.pairs);
+    expect(compared.gpuAnchorSineError).toBeLessThan(MAX_PHASE_ERROR_RAD);
+  });
 
   it('shows the naive path worst on the shortest waves, where one wavelength is a few position steps', () => {
     const { naive } = emulatedPrecision(waves, samples, 0);

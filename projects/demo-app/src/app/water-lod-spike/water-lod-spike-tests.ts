@@ -9,6 +9,7 @@ import {
   type ILuminanceImage,
   type IRowRange,
 } from './core/water-lod-spike-image-metrics';
+import { CONTROL_MIN_ERROR_RAD, MAX_PHASE_ERROR_RAD, type IPrecisionReport } from './core/water-lod-spike-precision';
 import { WATER_LOD_SPIKE_QUALITIES, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
 
 /** A fixed camera pose for the aliasing cases. */
@@ -21,8 +22,8 @@ export interface WaterLodSpikeView {
 export interface WaterLodSpikeTestSettings {
   readonly wireframe: boolean;
   readonly view?: WaterLodSpikeView;
-  /** 'aliasing' runs the three aliasing arms instead of timing frames. */
-  readonly measure?: 'aliasing';
+  /** 'aliasing' runs the three aliasing arms instead of timing frames; 'precision' runs the Q5 phase-precision probe. */
+  readonly measure?: 'aliasing' | 'precision';
   /** Renders at this multiple of the page's pixel ratio for the case (a stress or low-cost proxy for another GPU); restored afterwards. */
   readonly pixelRatio?: number;
   /** Quality tier for the case (waves, footprint bias, mesh density); restored afterwards. Omitted keeps the page's own tier. */
@@ -63,6 +64,8 @@ export interface WaterLodSpikeTestHost {
   readFrame(jitterX: number, jitterY: number): ILuminanceImage;
   /** First canvas row below the horizon. */
   horizonRow(): number;
+  /** Runs the Q5 phase-precision compute kernel on the page's renderer and compares it with the double reference. */
+  runPrecisionProbe(): Promise<IPrecisionReport>;
   environment(): Readonly<Record<string, TestSetting>>;
 }
 
@@ -258,6 +261,24 @@ const WATER_LOD_SPIKE_ALIASING_V3: TestSuite<WaterLodSpikeTestSettings> = {
   })),
 };
 
+/**
+ * Plan 080 Q5, written before the first run. A compute kernel evaluates the wave phase in float32 for 64 waves at points on a
+ * 600 km sphere out to the horizon of an eye 2 m up, two ways, and compares it with doubles:
+ *
+ * - anchor-relative (position relative to the anchor, phase offset from the CPU in doubles): at most 1e-3 rad;
+ * - naive (global position, the flat spike's formula): the control, which must miss that limit by at least 0.01 rad.
+ *
+ * Both run at wave time 0 and at one hour. A wave is judged only within its range, the distance past which the vertex
+ * filter drops it (ultra tier, 4K). The sine of the anchor phase is reported but not gated.
+ */
+const WATER_LOD_SPIKE_PRECISION_V1: TestSuite<WaterLodSpikeTestSettings> = {
+  id: 'water-lod-spike-precision',
+  version: 1,
+  title: 'Water LOD spike W0b Q5: wave phase precision on a 600 km sphere, anchor-relative against naive',
+  purpose: 'functional',
+  scenarios: [{ id: 'sphere-600km-eye-2m', label: '600 km sphere, eye 2 m', settings: { wireframe: false, measure: 'precision' }, durationMs: 1000, warmupMs: 500 }],
+};
+
 /** Every version of the W0b suites, oldest first. Add a new entry when a case changes; keep old ones. */
 export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestSettings>[] = [
   WATER_LOD_SPIKE_V1,
@@ -269,6 +290,7 @@ export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestS
   WATER_LOD_SPIKE_ALIASING_V2,
   WATER_LOD_SPIKE_PERFORMANCE_V5,
   WATER_LOD_SPIKE_ALIASING_V3,
+  WATER_LOD_SPIKE_PRECISION_V1,
 ];
 
 const REFERENCE_SAMPLES = 32;
@@ -410,6 +432,43 @@ async function measureAliasing(host: WaterLodSpikeTestHost, context: TestContext
   };
 }
 
+async function measurePrecision(host: WaterLodSpikeTestHost): Promise<TestObservation> {
+  const report = await host.runPrecisionProbe();
+  const rad = (name: string, source: string, value: number) => ({ name, unit: 'rad', source, samples: [value] });
+  const metrics = report.cases.flatMap((entry) => {
+    const at = `t = ${entry.timeS} s`;
+    return [
+      rad(`phase error, anchor, ${at}`, 'GPU kernel readback', entry.gpuAnchor.maxRad),
+      rad(`phase error, naive, ${at}`, 'GPU kernel readback', entry.gpuNaive.maxRad),
+      rad(`phase error rms, anchor, ${at}`, 'GPU kernel readback', entry.gpuAnchor.rmsRad),
+      rad(`phase error, anchor, float32 emulation, ${at}`, 'CPU emulation', entry.emulatedAnchor.maxRad),
+      rad(`phase error, naive, float32 emulation, ${at}`, 'CPU emulation', entry.emulatedNaive.maxRad),
+      { name: `sine error, anchor, ${at}`, unit: 'amplitude fraction', source: 'GPU kernel readback', samples: [entry.gpuAnchorSineError] },
+      { name: `worst wavelength, anchor, ${at}`, unit: 'm', source: 'GPU kernel readback', samples: [entry.gpuAnchor.worstWavelengthM] },
+      { name: `worst distance, anchor, ${at}`, unit: 'm', source: 'GPU kernel readback', samples: [entry.gpuAnchor.worstDistanceM] },
+    ];
+  });
+  return {
+    metrics: [...metrics, { name: 'wave and sample pairs judged', unit: 'pairs', source: 'GPU kernel readback', samples: [report.cases[0]?.gpuAnchor.pairs ?? 0] }],
+    checks: [
+      { name: 'ran on the WebGPU backend', passed: report.backend === 'webgpu', detail: `backend ${report.backend}` },
+      { name: 'pairs judged', passed: (report.cases[0]?.gpuAnchor.pairs ?? 0) >= 1000, detail: `${report.cases[0]?.gpuAnchor.pairs ?? 0} pairs, ${report.waves} waves, ${report.samples} points` },
+      ...report.cases.flatMap((entry) => [
+        {
+          name: `Q5 anchor-relative phase within ${MAX_PHASE_ERROR_RAD} rad at t = ${entry.timeS} s`,
+          passed: entry.gpuAnchor.maxRad <= MAX_PHASE_ERROR_RAD,
+          detail: `${entry.gpuAnchor.maxRad.toExponential(2)} rad, worst wave ${entry.gpuAnchor.worstWavelengthM.toFixed(2)} m at ${entry.gpuAnchor.worstDistanceM.toFixed(0)} m`,
+        },
+        {
+          name: `Q5 control: the naive path misses by at least ${CONTROL_MIN_ERROR_RAD} rad at t = ${entry.timeS} s`,
+          passed: entry.gpuNaive.maxRad >= CONTROL_MIN_ERROR_RAD,
+          detail: `${entry.gpuNaive.maxRad.toExponential(2)} rad, worst wave ${entry.gpuNaive.worstWavelengthM.toFixed(2)} m at ${entry.gpuNaive.worstDistanceM.toFixed(0)} m`,
+        },
+      ]),
+    ],
+  };
+}
+
 async function measureFrames(host: WaterLodSpikeTestHost, durationMs: number, context: TestContext, gpu: boolean): Promise<TestObservation> {
   host.beginFrameSampling();
   const gpuMs: number[] = [];
@@ -466,6 +525,7 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
     environment: () => host.environment(),
     measure: async (scenario, context): Promise<TestObservation> => {
       if (scenario.settings.measure === 'aliasing') return measureAliasing(host, context, scenario.settings.gated ?? true);
+      if (scenario.settings.measure === 'precision') return measurePrecision(host);
       const observation = await measureFrames(host, scenario.durationMs, context, scenario.settings.view !== undefined);
       return {
         ...observation,
