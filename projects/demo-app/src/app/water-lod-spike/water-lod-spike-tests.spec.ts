@@ -200,9 +200,23 @@ describe('createWaterLodSpikeTestAdapter', () => {
     expect(observation.checks?.map((check) => check.name)).toEqual(['water drawn, not blank', 'water rows measured']);
   });
 
-  it('gates only the ultra tier in the aliasing suite', () => {
+  it('gates ultra fully, high on colour only, and leaves medium and low ungated in the latest aliasing suite', () => {
     const suite = WATER_LOD_SPIKE_TEST_HISTORY.filter((entry) => entry.id === 'water-lod-spike-aliasing').reduce((a, b) => (b.version > a.version ? b : a));
-    for (const scenario of suite.scenarios) expect(scenario.settings.gated).toBe(scenario.settings.quality === 'ultra');
+    const expected: Record<string, boolean | 'colour'> = { ultra: true, high: 'colour', medium: false, low: false };
+    for (const scenario of suite.scenarios) expect(scenario.settings.gated).toBe(expected[scenario.settings.quality ?? '']);
+  });
+
+  it('applies only the colour gate for a colour-gated case', async () => {
+    const host = makeHost();
+    const adapter = createWaterLodSpikeTestAdapter(host);
+
+    const observation = await adapter.measure({ ...ALIASING_SCENARIO, settings: { ...ALIASING_SCENARIO.settings, gated: 'colour' } }, makeContext(host.calls));
+
+    expect(observation.checks?.map((check) => check.name)).toEqual([
+      'water drawn, not blank',
+      'water rows measured',
+      'colour matches the reference within 6/255 in every band',
+    ]);
   });
 
   it('fails the shimmer gate when the filter changes nothing', async () => {

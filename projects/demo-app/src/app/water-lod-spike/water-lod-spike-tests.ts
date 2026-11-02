@@ -27,8 +27,11 @@ export interface WaterLodSpikeTestSettings {
   readonly pixelRatio?: number;
   /** Quality tier for the case (waves, footprint bias, mesh density); restored afterwards. Omitted keeps the page's own tier. */
   readonly quality?: WaterLodSpikeQualityId;
-  /** Aliasing cases only: false reports the metrics without the shimmer, moiré, step and colour gates (only the water-drawn checks remain). Default true. */
-  readonly gated?: boolean;
+  /**
+   * Aliasing cases only. true (the default) applies the shimmer, moiré, step and colour gates; 'colour' applies only the colour
+   * error gate and reports the rest; false reports every metric with no gates (only the water-drawn checks remain).
+   */
+  readonly gated?: boolean | 'colour';
 }
 
 /** What the page exposes to the test adapter: its own handles, nothing else. */
@@ -201,6 +204,18 @@ const WATER_LOD_SPIKE_PERFORMANCE_V4: TestSuite<WaterLodSpikeTestSettings> = {
 };
 
 /**
+ * v5 is v4 with shorter windows (1 s warmup, 3 s measured instead of 2 s and 6 s), so a run of two repetitions takes about
+ * a minute instead of three and a half. The medians the ER quotes settled within the first seconds of a case; the p95 of a
+ * 3 s window is noisier, so use v4 when timing evidence for a gate is needed.
+ */
+const WATER_LOD_SPIKE_PERFORMANCE_V5: TestSuite<WaterLodSpikeTestSettings> = {
+  ...WATER_LOD_SPIKE_PERFORMANCE_V4,
+  version: 5,
+  title: 'Water LOD spike W0b: GPU time by quality tier, short windows',
+  scenarios: WATER_LOD_SPIKE_PERFORMANCE_V4.scenarios.map((scenario) => ({ ...scenario, durationMs: 3000, warmupMs: 1000 })),
+};
+
+/**
  * v2 measures every quality tier against the same supersampled reference of the best water (the filter-off arms ignore
  * the tier's bias). Only `ultra` carries the v1 gates. The lower tiers are deliberately blurrier, and the shimmer metric
  * counts detail missing from the reference as change, so they report their numbers without gates: a dial to judge by eye
@@ -227,6 +242,22 @@ const WATER_LOD_SPIKE_ALIASING_V2: TestSuite<WaterLodSpikeTestSettings> = {
   ),
 };
 
+/**
+ * v3 is v2 with `high` gated on colour error only. The tier's shimmer (4.3 against 2.5), moiré (2.2 against 1.8) and 600 m
+ * step (2.2 against 2.0) miss the v1 limits by construction, because it is blurrier than the reference; the colour error
+ * passes at every view and still catches a real regression such as a bad shader change. `medium` and `low` stay ungated. The
+ * owner delegated the call (ER 080, 2026-11-02).
+ */
+const WATER_LOD_SPIKE_ALIASING_V3: TestSuite<WaterLodSpikeTestSettings> = {
+  ...WATER_LOD_SPIKE_ALIASING_V2,
+  version: 3,
+  title: 'Water LOD spike W0b: shimmer, moiré and colour step by quality tier, High gated on colour',
+  scenarios: WATER_LOD_SPIKE_ALIASING_V2.scenarios.map((scenario) => ({
+    ...scenario,
+    settings: { ...scenario.settings, gated: scenario.settings.quality === 'ultra' ? true : scenario.settings.quality === 'high' ? ('colour' as const) : false },
+  })),
+};
+
 /** Every version of the W0b suites, oldest first. Add a new entry when a case changes; keep old ones. */
 export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestSettings>[] = [
   WATER_LOD_SPIKE_V1,
@@ -236,6 +267,8 @@ export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestS
   WATER_LOD_SPIKE_PERFORMANCE_V3,
   WATER_LOD_SPIKE_PERFORMANCE_V4,
   WATER_LOD_SPIKE_ALIASING_V2,
+  WATER_LOD_SPIKE_PERFORMANCE_V5,
+  WATER_LOD_SPIKE_ALIASING_V3,
 ];
 
 const REFERENCE_SAMPLES = 32;
@@ -311,7 +344,7 @@ function hasWater(host: WaterLodSpikeTestHost): boolean {
   return rows.end - rows.start >= 100 && rowBandMeans(frame, rows, 1)[0] > 20;
 }
 
-async function measureAliasing(host: WaterLodSpikeTestHost, context: TestContext, gated: boolean): Promise<TestObservation> {
+async function measureAliasing(host: WaterLodSpikeTestHost, context: TestContext, gated: boolean | 'colour'): Promise<TestObservation> {
   await host.waitFrames(SETTLE_FRAMES, context);
   // The first pipeline compile and the LOD selection for a new view can take longer than the settle frames: wait for water.
   for (let attempt = 0; attempt < 20 && !hasWater(host); attempt++) await host.waitFrames(SETTLE_FRAMES, context);
@@ -345,7 +378,7 @@ async function measureAliasing(host: WaterLodSpikeTestHost, context: TestContext
     checks: [
       { name: 'water drawn, not blank', passed: referenceMean > 20, detail: `reference mean ${referenceMean.toFixed(1)}/255` },
       { name: 'water rows measured', passed: rows.end - rows.start >= 100, detail: `${rows.end - rows.start} rows below the horizon` },
-      ...(gated
+      ...(gated === true
         ? [
             {
               name: `Q3 shimmer: filtered at most ${MAX_SHIMMER_RATIO} x the control, or ${SHIMMER_FLOOR}/255`,
@@ -362,6 +395,10 @@ async function measureAliasing(host: WaterLodSpikeTestHost, context: TestContext
               passed: filtered.colourStep <= MAX_COLOUR_STEP,
               detail: `${filtered.colourStep.toFixed(2)}; no transfer ${noTransfer.colourStep.toFixed(2)}; control ${control.colourStep.toFixed(2)}`,
             },
+          ]
+        : []),
+      ...(gated
+        ? [
             {
               name: `colour matches the reference within ${MAX_COLOUR_ERROR}/255 in every band`,
               passed: filtered.colourError <= MAX_COLOUR_ERROR,
@@ -428,7 +465,7 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
     },
     environment: () => host.environment(),
     measure: async (scenario, context): Promise<TestObservation> => {
-      if (scenario.settings.measure === 'aliasing') return measureAliasing(host, context, scenario.settings.gated !== false);
+      if (scenario.settings.measure === 'aliasing') return measureAliasing(host, context, scenario.settings.gated ?? true);
       const observation = await measureFrames(host, scenario.durationMs, context, scenario.settings.view !== undefined);
       return {
         ...observation,

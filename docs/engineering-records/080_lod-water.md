@@ -116,27 +116,31 @@ The aliasing suite gives the same numbers as before (shimmer 2.4 / 6.1 / 8.5, wo
 
 | Tier | footprint bias | cell px | leaf cap | grazing GPU / triangles | looking-down GPU / triangles |
 | --- | --- | --- | --- | --- | --- |
-| Ultra | 1 | 4 | 4096 | 1.6 ms / 1.21 M | 1.8 ms / 0.88 M |
-| High | 1.25 | 4 | 3072 | 1.5 ms / 0.94 M | 1.7 ms / 0.70 M |
-| Medium | 1.5 | 5 | 2048 | 1.4 ms / 0.66 M | 1.6 ms / 0.48 M |
-| Low | 2 | 6 | 1024 | 0.9 ms / 0.34 M | 1.2 ms / 0.27 M |
+| Ultra | 1 | 4 | 4096 | 2.3 ms / 1.21 M | 4.4 ms / 0.88 M |
+| High | 2 | 6 | 1024 | 2.1 ms / 0.34 M | 2.7 ms / 0.27 M |
+| Medium | 3 | 8 | 512 | 1.4 ms / 0.16 M | 3.1 ms / 0.12 M |
+| Low | 4 | 10 | 256 | 1.1 ms / 0.10 M | 1.8 ms / 0.05 M |
 
-Median GPU frame, suite `water-lod-spike-performance` v4, 3 repetitions of 6 s, headless NVIDIA at 2527 x 1077, GPU shared with another application (about 56 % busy), so differences of 0.1 to 0.2 ms are noise. CPU frame 0.5 ms in every case. Not Q1 (not at 2560 x 1440, adapter unverified).
+The owner found the first tier set (bias 1, 1.25, 1.5, 2; leaf cap 4096, 3072, 2048, 1024) too close together, so the old Low became High and Medium and Low were extended. Median GPU frame, suite `water-lod-spike-performance` v4, 3 repetitions of 6 s, headless NVIDIA at 2527 x 1077. **These runs were made with another application holding the GPU at 99 to 100 %**: Ultra read 2.3 and 4.4 ms against 1.6 and 1.8 ms on a quieter GPU earlier, so the absolute values are inflated and the order between neighbouring tiers (Medium looking down 3.1 ms against High 2.7 ms) is noise. The triangle counts are exact. CPU frame 0.5 ms in every case. Not Q1 (not at 2560 x 1440, adapter unverified); to be rerun on a quiet GPU.
 
-**Look, from `water-lod-spike-aliasing` v2** (same measures as v1, against the Ultra supersampled reference; worst colour error / colour step, in luma/255, grazing - elevated - high):
+**Look, from `water-lod-spike-aliasing` v2** (same measures as v1, against the Ultra supersampled reference, in luma/255; per view grazing - elevated - high (600 m); shimmer and moire are given with their control in v1, so only the order is meant):
 
-| Tier | colour error | colour step | shimmer (grazing) | note |
-| --- | --- | --- | --- | --- |
-| Ultra | 0.5, 2.0, 3.6 | 0.8, 1.1, 1.8 | 2.4 | passes every gate |
-| High | 0.9, 2.5, 3.5 | 0.7, 1.1, 2.6 | 2.9 | step gate (2) crossed at 600 m; shimmer gate crossed |
-| Medium | 1.2, 2.5, 3.6 | 0.8, 1.3, 3.7 | 3.5 | as High, larger |
-| Low | 1.7, 3.3, 3.8 | 1.1, 1.2, 2.2 | 4.3 | moiré gate crossed at 80 m; step 2.2 at 600 m |
+| Tier | colour error | colour step | moire | shimmer (grazing) | note |
+| --- | --- | --- | --- | --- | --- |
+| Ultra | 0.5, 2.0, 3.6 | 0.8, 1.1, 1.8 | 1.3, 2.8, 5.4 | 2.4 | passes every gate |
+| High | 1.7, 3.3, 3.8 | 1.1, 1.2, 2.2 | 2.2, 4.7, 6.6 | 4.3 | step gate (2) crossed at 600 m by 0.2; moire and shimmer gates crossed |
+| Medium | 2.0, 3.4, 4.9 | 0.9, 2.1, 2.7 | 3.6, 5.7, 7.4 | 5.4 | step crossed at elevated and 600 m |
+| Low | 2.6, 3.8, 5.7 | 1.6, 1.8, 3.1 | 4.8, 6.8, 8.1 | 5.9 | colour error 5.7 against the 6 limit at 600 m; step 3.1 |
 
-Colour stays within the 6/255 gate in every tier and view. The shimmer metric compares the filtered frame's error against the reference between half-pixel-shifted views, so detail the reference has and a blurrier tier lacks counts as shimmer: it rises with blur, by construction. **Gate change, after seeing data and not on the owner's instruction:** only Ultra carries the gates in v2 (`gated`); the other tiers report their metrics without gates. The owner should confirm, or say which tier must pass.
+Colour stays within the 6/255 gate in every tier and view, but Low is 0.3 from it at 600 m, so the 600 m view is where the tiers break first. The shimmer metric compares the filtered frame's error against the reference between half-pixel-shifted views, so detail the reference has and a blurrier tier lacks counts as shimmer: it rises with blur, by construction. **Gate change, after seeing data and not on the owner's instruction:** only Ultra carries the gates in v2 (`gated`); the other tiers report their metrics without gates. The owner looked at the tiers in the page and said they look good; the gating policy is still to be confirmed.
 
 **Tried and removed: a cap on the number of waves.** Dropping the shortest waves outright (48, 40 and 20 waves, their slope variance left in the glint spread) was built and measured first. It saved little at 48 waves (no measurable gain), and at 48, 40 and 20 waves it put a colour step of 2.6 to 11 /255 and moiré 9 to 36 /255 (control 1 to 2) into the grazing and elevated views, plus a colour error of 6 to 22. Where those waves are still resolved the 3 x 3 quadrature does not reproduce their mean colour. The cap is not in the code. The wave loop is therefore untouched, and the full-screen near case (looking down, 1.2 to 1.8 ms) has no safe knob left except fewer leaves, which does not help its fragment cost.
 
-**Not done.** Q1, Q4 (the owner's eye on the tiers), Q5, Q6; a moving camera; the 50 km edge; the sphere and cylinder. Mesh tiers were not looked at on screen: the vertex filter assumes `cellPixels` cells, and a leaf cap that bites makes real cells larger, so a vertex-height difference of centimetres is possible. The aliasing suite shows no step from it, but it is a silhouette effect that the readback metrics barely see. First `water-lod-spike-performance` v4 and `-aliasing` v2 runs from this session at 19:10 to 19:25 UTC used earlier tier definitions (wave caps) and are superseded by the runs at 19:28 and 19:29.
+**Not done.** Q1, Q4 (the owner's eye on the tiers), Q5, Q6; a moving camera; the 50 km edge; the sphere and cylinder. Mesh tiers were not looked at on screen: the vertex filter assumes `cellPixels` cells, and a leaf cap that bites makes real cells larger, so a vertex-height difference of centimetres is possible. The aliasing suite shows no step from it, but it is a silhouette effect that the readback metrics barely see. Runs of `water-lod-spike-performance` v4 and `-aliasing` v2 before 19:37 UTC used earlier tier definitions (wave caps, then the 1/1.25/1.5/2 bias set) and are superseded by the runs at 19:37 and 19:38.
+
+**Short-window rerun (same day, 19:55 UTC).** `water-lod-spike-performance` v5 is v4 with 1 s warmup and 3 s windows; two repetitions take 1 min 21 s including start-up (v4 with three took about 3.5 min). GPU load was 55% instead of 93%, but the adapter was still not recorded and the profile is unverified, so these are diagnostics, not Q1 evidence. Median GPU ms, grazing / looking down: Ultra 1.6 / 1.9, High 1.2 / 1.4, Medium 0.8 / 1.2, Low 0.8 / 0.9. Triangles are as in v4. The tiers now order monotonically in both views; the earlier Medium-over-High inversion looking down was load noise. The GPU timer reads in 0.1 ms steps, so the Medium and Low grazing figures are indistinguishable. Use v4 when a gate needs timing evidence.
+
+**Gating decision (same day, 20:11 UTC).** The owner delegated the call on which tiers carry pass/fail limits ("proceed as you see fit"). Aliasing v3 gates `ultra` on all four limits (shimmer, moiré, colour step, colour error) and `high` on colour error only (at most 6/255 in every band). `medium` and `low` report their numbers without limits and are judged by eye. Reason: the lower tiers are blurrier on purpose, and the shimmer and moiré numbers rise with blur by construction (High: shimmer 4.3 against 2.5, moiré 2.2 against 1.8, 600 m step 2.2 against 2.0), so those limits cannot hold a tier that is meant to be coarser. Colour error still catches a real regression such as a shader change. v3 run, headless-hardware, noisy: `auto=pass`, the same numbers as v2. The adapter was not recorded, so none of this is Q1 evidence. A spec found that the adapter reduced the setting to a boolean before `measureAliasing`; it now passes the setting through.
 
 ## Scope history
 
