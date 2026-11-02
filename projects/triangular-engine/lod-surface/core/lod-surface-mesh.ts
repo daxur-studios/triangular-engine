@@ -7,7 +7,7 @@ import {
 } from 'three/tsl';
 import { detailNoiseNode, detailTexelMetres } from './lod-detail-noise';
 import { FACE_FRAMES, PLANE_FRAME, type LodDomain, type Vec3 } from './lod-domain';
-import type { HeightSource } from './lod-height';
+import type { HeightSource, LatticeHeightNodes } from './lod-height';
 import { SIN_DENOMINATORS, anchorFor, latticeSteps, newAnchor } from './lod-lattice';
 import { LEAF_STRIDE, packLeaves } from './lod-leaf-pack';
 import {
@@ -127,7 +127,11 @@ export interface LodSurfaceMeshOptions {
    * Adds detail noise below the texel size (`lod-detail-noise.ts`) to the height, sized by a height texture of this many
    * texels per face side. Absent: no noise nodes are built. Its amplitude is set with `setDetailNoise`.
    */
-  readonly detail?: { readonly cells: number };
+  readonly detail?: {
+    readonly cells: number;
+    /** Per-point weight on the amplitude, read by (face, lattice) like a baked height (a {@link DetailProfile} bake's `source.lattice`). */
+    readonly weights?: LatticeHeightNodes;
+  };
   /**
    * Preview (Plan 059 G6b, needs a sphere domain): builds the globe-to-map morph into the vertex stage. The instance capacity doubles (a
    * leaf that reaches the map's cut is drawn twice), the vertex stage gains the pole stage and the bent position, and fragments outside the
@@ -393,10 +397,12 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     const unit = steps / detailCells;
     const p = sphere ? own.t.div(2 * unit) : vec3(own.lattice.x, own.lattice.y, 0).div(unit);
     const noise = detailNoiseNode(p, length(own.offset), uDetailFade, detailTexelM);
-    const gradient = noise.gradient.mul(uDetailAmp);
+    // The profile's weight scales the amplitude; its own slope (a smooth bilinear ramp across a border) is left out of the normal.
+    const amp = detail?.weights ? uDetailAmp.mul(detail.weights.heightNode(face, own.lattice)) : uDetailAmp;
+    const gradient = noise.gradient.mul(amp);
     // T = n L + axisU (2U - L) + axisV (2V - L), so dp/dU = axisU / unit and dp/dV = axisV / unit.
     const slope = sphere ? vec2(dot(gradient, axisU), dot(gradient, axisV)) : vec2(gradient.x, gradient.y);
-    return { height: noise.value.mul(uDetailAmp), slope: slope.div(unit) };
+    return { height: noise.value.mul(amp), slope: slope.div(unit) };
   };
 
   // Baked sources are read by (face, lattice): a function of the vertex's own integer coordinates, never of the gap or of
@@ -724,7 +730,13 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     },
     setView(view) { uLodColour.value = view === 'lod' ? 1 : 0; },
     setBounds(on) { uBounds.value = on ? 1 : 0; },
-    setWireframe(on) { (material as NodeMaterial & { wireframe: boolean }).wireframe = on; material.needsUpdate = true; },
+    setWireframe(on) {
+      // Only a change recompiles: a material flagged every frame has its program key rebuilt every frame (about 8 ms for a terrain material).
+      const wired = material as NodeMaterial & { wireframe: boolean };
+      if (wired.wireframe === on) return;
+      wired.wireframe = on;
+      material.needsUpdate = true;
+    },
     setFolding(on) { uFolding.value = on ? 1 : 0; },
     setInjectedGap(share) { uGap.value = share; },
     setLighting(on) { uLighting.value = on ? 1 : 0; },

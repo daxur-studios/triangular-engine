@@ -1,6 +1,7 @@
 import { Group, type PerspectiveCamera } from 'three';
 import type { NodeMaterial } from 'three/webgpu';
 import { detailTexelMetres, withDetailNoise } from './lod-detail-noise';
+import { bakeDetailProfile, type DetailProfile, type DetailWeightField } from './lod-detail-profile';
 import type { LodDomain, Vec3 } from './lod-domain';
 import { createGroundSample, groundAt, type GroundSample } from './lod-ground-query';
 import { DEFAULT_BAKE_K } from './lod-height-bake';
@@ -8,7 +9,7 @@ import type { HeightSource } from './lod-height';
 import type { TextureHeightSource } from './lod-height-texture';
 import { MorphMapResolver, projectionBasis, type LodMorphSettings, type MorphUniformsLike } from './lod-morph-frame';
 import { StretchMetric, type StretchBasis, type StretchProjection, type StretchState } from './lod-morph-metric';
-import { CAP_SLACK, LodSelector, PIXEL_FLOOR, type NodeGeometryHook, type PatchCells, type SelectorStats, type SelectorView } from './lod-selector';
+import { CAP_SLACK, LodSelector, PIXEL_FLOOR, type NodeCoverHook, type NodeGeometryHook, type PatchCells, type SelectorStats, type SelectorView } from './lod-selector';
 import { createLodSurfaceMesh, type LodSurfaceMesh, type LodView } from './lod-surface-mesh';
 import { frustumNormals, type CameraAxes } from './lod-view';
 
@@ -43,6 +44,12 @@ export interface LodTerrainSettings {
   readonly detailNoise: number;
   /** Texels per face side the detail noise is sized by; default the heights' baked texture, else 2^{@link DEFAULT_BAKE_K}. */
   readonly detailCells?: number;
+  /**
+   * Where the detail noise is strong or absent (`lod-detail-profile.ts`): a per-point weight on its amplitude, baked once per
+   * profile object. Absent: weight 1 everywhere. Needs `detailNoise` above 0. Pass the same object while it is unchanged;
+   * a new object is a new bake and rebuilds the mesh.
+   */
+  readonly detailProfile?: DetailProfile;
   /** Most leaves selected (the budget); the draw capacity follows from it. */
   readonly leafCap: number;
   /** Target cell size on screen, pixels; clamped to at least `PIXEL_FLOOR`. */
@@ -111,6 +118,8 @@ export class LodTerrainBody {
   private groundStepM = 1;
   private builtKey = '';
   private builtHeights: HeightSource | undefined;
+  private weightField: DetailWeightField | undefined;
+  private builtWeightField: DetailWeightField | undefined;
   private builtMaterial: NodeMaterial | undefined;
   private readonly frustum = new Float64Array(12);
   private readonly selectorView: { -readonly [K in keyof SelectorView]: SelectorView[K] } = { camera: [0, 0, 0], pixelAngle: 0, frustum: this.frustum };
@@ -124,6 +133,7 @@ export class LodTerrainBody {
   /** The culling mode the consumer last set with {@link setMorphCulling}; {@link setMorphMetric} `(false)` restores it. */
   private savedMorphCulling: LodMorphCulling = 'off';
   private geometryHook: NodeGeometryHook | undefined;
+  private coverHook: NodeCoverHook | undefined;
   private readonly unbent: Vec3 = [0, 0, 0];
   private stretchOn = false;
   /** The stretch metric of the current selector (see {@link setMorphMetric}); remade with each selector. */
@@ -172,19 +182,25 @@ export class LodTerrainBody {
     const detailCells = settings.detailCells ?? 2 ** (baked?.layout.k ?? DEFAULT_BAKE_K);
     // The selector and the camera see the noise through the source (heights, bound and node ranges); the mesh adds it in the vertex stage.
     this.groundStepM = detailTexelMetres(domain, detailCells) / 2;
-    this.source = withDetailNoise(heights, { domain, cells: detailCells, share: settings.detailNoise });
+    const profile = settings.detailNoise > 0 ? settings.detailProfile : undefined;
+    if (profile !== this.weightField?.profile) {
+      this.weightField?.source.dispose();
+      this.weightField = profile ? bakeDetailProfile(domain, profile) : undefined;
+    }
+    this.source = withDetailNoise(heights, { domain, cells: detailCells, share: settings.detailNoise, ...(this.weightField ? { weights: this.weightField.weights } : {}) });
     this.selector = new LodSelector({
       domain, patchCells: settings.patchCells, mode: 'distance', fixedLevel: 5, cellPixels: Math.max(PIXEL_FLOOR, settings.cellPixels),
       leafCap: settings.leafCap, heightBoundM: this.source.boundM, cull: settings.cull, hysteresis: settings.hysteresis,
       ...(this.source.nodeRange ? { heightRanges: { nodeRange: this.source.nodeRange.bind(this.source) } } : {}),
     });
     if (this.geometryHook) this.selector.setGeometryHook(this.geometryHook);
+    if (this.coverHook) this.selector.setCoverHook(this.coverHook);
     this.syncStretch();
     const capacity = settings.leafCap + CAP_SLACK + 6;
     const morph = settings.morph === true && domain.kind === 'sphere';
     const poleFan = morph && settings.poleFan === true;
     const key = [domain.kind, domain.sizeM, domain.warp, settings.patchCells, capacity, settings.detailNoise > 0, detailCells, morph, poleFan].join('|');
-    if (this.surface && key === this.builtKey && heights === this.builtHeights && settings.material === this.builtMaterial) {
+    if (this.surface && key === this.builtKey && heights === this.builtHeights && this.weightField === this.builtWeightField && settings.material === this.builtMaterial) {
       this.surface.setDetailNoise(settings.detailNoise);
       return;
     }
@@ -193,7 +209,7 @@ export class LodTerrainBody {
     this.surface?.dispose();
     this.surface = createLodSurfaceMesh({
       domain, patchCells: settings.patchCells, source: this.source, capacity,
-      ...(settings.detailNoise > 0 ? { detail: { cells: detailCells } } : {}),
+      ...(settings.detailNoise > 0 ? { detail: { cells: detailCells, ...(this.weightField ? { weights: this.weightField.source.lattice } : {}) } } : {}),
       ...(settings.material ? { material: settings.material } : {}),
       ...(morph ? { morph } : {}),
       ...(poleFan ? { poleFan } : {}),
@@ -209,6 +225,7 @@ export class LodTerrainBody {
     this.syncPoleFan();
     this.builtKey = key;
     this.builtHeights = heights;
+    this.builtWeightField = this.weightField;
     this.builtMaterial = settings.material;
   }
 
@@ -303,6 +320,21 @@ export class LodTerrainBody {
     }
     this.geometryHook = hook;
     this.selector.setGeometryHook(hook);
+  }
+
+  /**
+   * Installs the selector's {@link NodeCoverHook}: nodes it reports as entirely hidden (land over a water body, say) are not drawn
+   * and take none of the leaf budget. Kept across {@link configure}, which remakes the selector; call {@link invalidateCover}
+   * when what the hook tests against changes.
+   */
+  setCoverHook(hook: NodeCoverHook | undefined): void {
+    this.coverHook = hook;
+    this.selector.setCoverHook(hook);
+  }
+
+  /** Makes the selector ask the cover hook again for every node (the cover changed); the next {@link update} reselects. */
+  invalidateCover(): void {
+    this.selector.invalidateCover();
   }
 
   /**
@@ -423,6 +455,8 @@ export class LodTerrainBody {
     this.surface.mesh.removeFromParent();
     this.surface.poleFanMesh?.removeFromParent();
     this.surface.dispose();
+    this.weightField?.source.dispose();
+    this.weightField = undefined;
     this.object.removeFromParent();
   }
 }

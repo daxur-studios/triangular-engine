@@ -161,10 +161,19 @@ export interface DetailNoiseOptions {
   readonly cells: number;
   /** Amplitude of the first octave as a share of the texel size in metres; 0 or less leaves the source as it is. */
   readonly share: number;
+  /** Per-point weight on the amplitude (a baked {@link DetailProfile}); absent: weight 1 everywhere. */
+  readonly weights?: DetailWeights;
+}
+
+/** The CPU side of a detail profile: the weight of the noise amplitude at a body-fixed position, in [0, maxWeight]. */
+export interface DetailWeights {
+  readonly maxWeight: number;
+  weightAt(x: number, y: number, z: number): number;
 }
 
 /** Largest |offset| the noise adds, metres. */
-export const detailBoundM = (options: DetailNoiseOptions): number => Math.max(0, options.share) * detailTexelMetres(options.domain, options.cells) * DETAIL_UNIT_BOUND;
+export const detailBoundM = (options: DetailNoiseOptions): number =>
+  Math.max(0, options.share) * (options.weights?.maxWeight ?? 1) * detailTexelMetres(options.domain, options.cells) * DETAIL_UNIT_BOUND;
 
 /**
  * The CPU side of the noise as a height source: heights (full detail, no distance fade), the global bound and node ranges
@@ -172,7 +181,7 @@ export const detailBoundM = (options: DetailNoiseOptions): number => Math.max(0,
  */
 export function withDetailNoise(source: HeightSource, options: DetailNoiseOptions): HeightSource {
   if (!(options.share > 0)) return source;
-  const { domain, cells } = options;
+  const { domain, cells, weights } = options;
   const amplitude = options.share * detailTexelMetres(domain, cells);
   const bound = detailBoundM(options);
   const layout: BakeLayout = { kind: domain.kind, warp: domain.warp, sizeM: domain.sizeM, k: Math.round(Math.log2(cells)) };
@@ -183,7 +192,8 @@ export function withDetailNoise(source: HeightSource, options: DetailNoiseOption
     boundM: source.boundM + bound,
     heightAt(x, y, z) {
       latticeOfPosition(layout, x, y, z, place);
-      return source.heightAt(x, y, z) + amplitude * detailAtLattice(domain.kind, cells, place.face, place.u, place.v);
+      const weight = weights ? weights.weightAt(x, y, z) : 1;
+      return source.heightAt(x, y, z) + amplitude * weight * detailAtLattice(domain.kind, cells, place.face, place.u, place.v);
     },
     ...(range ? { nodeRange: (root: number, level: number, i: number, j: number, out: [number, number]) => {
       range(root, level, i, j, out);

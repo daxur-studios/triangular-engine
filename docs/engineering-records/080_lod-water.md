@@ -45,7 +45,7 @@ Plan: [PLAN-080](/docs/plans/080_lod-water.md).
 
 **Open items (carried from the architect).** Could not verify: the planet-material sky and reflection API, Plan 059's runbook, and whether `<flatTerrain>` takes a custom source and material (the spike answers that). The demo build was failing on another page (soft-body lab) when the architect read the record. The plan number is now reserved as 080.
 
-**Shoreline and land under water (noted 2026-11-01, not in W0b).** W0b draws a flat plane with no ground under it, so its numbers do not include land. The land case is covered by plan w2 (terrain-aware culling and depth from `groundAt`), not by the W0b spike. Its cost (full-density water under land) stays unmeasured until w2.
+**Shoreline and land under water (noted 2026-11-01, not in W0b).** W0b draws a flat plane with no ground under it, so its numbers do not include land. The land case is covered by plan w2 (terrain-aware culling and depth from `groundAt`), not by the W0b spike. Its cost (full-density water under land) stays unmeasured until w2. *Update 2026-11-02 (night): a spike measured it, see "w2 spike, water under land" in History; the cull itself is still w2's.*
 
 ## History
 
@@ -167,6 +167,38 @@ The anchor path is about 12 times inside the 1e-3 limit; its worst pair is a 9.5
 - The error of the anchor path grows with the distance from the anchor (the float32 spacing of the relative position), so W1 needs a re-anchor rule. At 4K and the ultra tier the farthest a wave is evaluated is 785 radians of phase from the anchor for every wave, which is what keeps the margin. The re-anchor distance is not set by this spike.
 - The adapter was recorded (nvidia) but the load was noisy (GPU 36 to 58%, CPU 68 to 87%); this is a correctness result, not timing, so the load does not matter.
 - Q5 is closed for the spike. It gates nothing in the page; it is the evidence for the anchor-relative design in W1.
+
+### 2026-11-02 (night): w2 spike, water under land
+
+**Trigger.** The owner's goal: do not render complex water under terrain. Plan w2 owns the real implementation (a cull hook in lod-surface, which needs W1's source hook first), so this entry is the spike that sizes the problem and tests the cull rule. No library file was edited.
+
+**What was built (spike only).** `core/water-lod-spike-land.ts`: a fixed set of eight Gaussian islands over a seabed at -30 m (CPU twin and TSL nodes, drawn by a second `<flatTerrain>` behind a **Land** button on the page, off by default); `landLowerBoundM` (a lower bound of the land over a square, exact for this field because each island falls off with distance, so the minimum is at the farthest corner); `isDrySquare` (a water leaf is dry when that bound is above the water ceiling); `measureLeaves` (runs the test over the drawn leaves of the page's own water selector and checks every call against 81 sample points of the leaf). The ceiling is the water body's global height bound as the selector holds it (waves plus the default detail-noise bound; with the default 0.04 share on a 100 km plane the noise bound is a few metres, so it dominates). Land is drawn first (render order -1) so its depth can reject water early; the land body has detail noise off so its smooth lower bound stays exact.
+
+**Suite `water-lod-spike-land` v1** (gates written before the first run). Five views, each with the land off and on. Gates: the conservative test calls no wet leaf dry; in shore views the centre-only control (judge a leaf by the land under its centre) does call wet leaves dry, so the check can tell a safe test from an unsafe one; open sea has no dry leaf. Reported, not gated: dry share, GPU and CPU frame time, triangles. Headless specs: 62 of 62 pass for the spike (7 new for the page adapter, 7 for the land maths, including 400 random squares against the true minimum and 600 against dense sampling).
+
+**Result** (headless hardware, NVIDIA, 2527 x 1077, noisy load, one run; `auto=pass`, all 10 cases, 0 failed checks; GPU in ms from 1 s averages, differences under 0.2 ms are noise; the adapter was not independently verified, so this is not Q1):
+
+| View | drawn water leaves | under land (conservative) | share | control's wrong calls | GPU water only | GPU with land in front |
+| --- | --- | --- | --- | --- | --- | --- |
+| coast, 200 m | 1160 | 212 | 18 % | 42 | 1.4 | 0.7 |
+| coast, grazing 2 m | 2412 | 75 | 3 % | 30 | 1.6 | 1.5 |
+| looking down from 800 m at an island | 258 | 195 | 76 % | 15 | 1.6 | 0.3 |
+| islands from 5 km | 1199 | 79 | 7 % | 38 | 2.1 | 1.7 |
+| open sea, 200 m (control) | 898 | 0 | 0 % | 0 | 1.5 | 1.4 |
+
+The leaf cap (4096) was hit in every view.
+
+**What it shows.**
+- The conservative rule is safe on the page's own selections: 0 wet leaves called dry in 5 views, against 15 to 42 wrong calls by the centre-only control. In the headless selections of the same views it finds 67 to 85 % of the leaves the control calls dry (the rest are shore leaves it cannot prove dry).
+- How much water sits under land depends on the view: 3 % to 76 % of the drawn leaves. The cull matters most for a high view onto an island and least for a grazing view.
+- **The fragment cost of water under land is already mostly free when the land is drawn first.** The GPU frame fell where land hides water (1.4 to 0.7 ms at the coast, 1.6 to 0.3 ms looking down), although the land adds triangles, because the depth test rejects the water fragments before the 64-wave loop, and that loop is about 70 % of the water cost (ER, cost pass). So a cull is not needed to save fragment time; this holds only while the land is opaque and draws first. A planet scene must keep that order, or water behind land costs full price.
+- What the cull would still save is the water mesh work under land (vertices and triangles, about 0.4 ms of the water in the earlier cost split, scaled by the dry share) and, more important, **leaf budget**: all views were at the 4096 cap, so a share of the cap is spent on invisible leaves. The saving shows up as finer water where it is seen, not as milliseconds. That gain was **not measured**: it needs the cull to act inside the selection, which needs the library hook, and the page cannot do it.
+
+**Not done.**
+- The cull itself (a selector hook that skips or does not refine dry nodes) and its effect on visible mesh density. The library's `NodeGeometryHook` could carry it, but it replaces the node geometry rather than adding to it, so the right form is probably a small predicate on the selector; W2 decides.
+- Real terrain: the islands are analytic Gaussians. The library version would test against the terrain's per-node min and max pyramid (`nodeRange`), which is a different bound and needs its own spec. The spike's bound is exact only because the field is monotone per island.
+- Moving cameras (the selection changes with the view and the cull test runs per node per frame: its cost is unmeasured), a land edge at the plane border, water deeper than the seabed, and the sphere.
+- A visual check of the shoreline: the land body uses the debug material, and no one has looked at the join. Timings are one noisy run on an unverified adapter.
 
 ## Scope history
 

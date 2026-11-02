@@ -9,6 +9,7 @@ import {
   type ILuminanceImage,
   type IRowRange,
 } from './core/water-lod-spike-image-metrics';
+import type { ILeafCull } from './core/water-lod-spike-land';
 import { CONTROL_MIN_ERROR_RAD, MAX_PHASE_ERROR_RAD, type IPrecisionReport } from './core/water-lod-spike-precision';
 import { WATER_LOD_SPIKE_QUALITIES, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
 
@@ -23,7 +24,13 @@ export interface WaterLodSpikeTestSettings {
   readonly wireframe: boolean;
   readonly view?: WaterLodSpikeView;
   /** 'aliasing' runs the three aliasing arms instead of timing frames; 'precision' runs the Q5 phase-precision probe. */
-  readonly measure?: 'aliasing' | 'precision';
+  readonly measure?: 'aliasing' | 'precision' | 'land' | 'cull';
+  /** Cull cases: the library cover hook on the water body (water leaves under the land are not drawn and take no budget); restored afterwards. */
+  readonly cull?: boolean;
+  /** Land under the water for the case (the w2 spike's islands); restored afterwards. Omitted keeps the page's own setting. */
+  readonly land?: boolean;
+  /** Land cases: 'open-sea' expects no dry leaf; 'shore' expects the centre-only control to make wrong calls. */
+  readonly landExpect?: 'open-sea' | 'shore';
   /** Renders at this multiple of the page's pixel ratio for the case (a stress or low-cost proxy for another GPU); restored afterwards. */
   readonly pixelRatio?: number;
   /** Quality tier for the case (waves, footprint bias, mesh density); restored afterwards. Omitted keeps the page's own tier. */
@@ -64,6 +71,18 @@ export interface WaterLodSpikeTestHost {
   readFrame(jitterX: number, jitterY: number): ILuminanceImage;
   /** First canvas row below the horizon. */
   horizonRow(): number;
+  /** Land under the water on or off; null restores the page's own setting. */
+  setLand(enabled: boolean | null): void;
+  /** True once the land body's pipeline is compiled and it draws. */
+  landDrawn(): boolean;
+  /** The water body's drawn leaves of the last selection, judged against the land. */
+  landLeaves(coverMargin?: boolean): ILeafCull;
+  /** The same judged over every selected leaf, drawn or not, against the cover hook's own ceiling (water bound plus margin): how the leaves a hook removed are audited. */
+  landAudit(): ILeafCull;
+  /** The cover hook on the water body on or off (it acts only while the land is on); null restores the page's own setting. */
+  setCull(enabled: boolean | null): void;
+  /** True while the water body's selector has a cover hook installed. */
+  coverActive(): boolean;
   /** Runs the Q5 phase-precision compute kernel on the page's renderer and compares it with the double reference. */
   runPrecisionProbe(): Promise<IPrecisionReport>;
   environment(): Readonly<Record<string, TestSetting>>;
@@ -279,6 +298,77 @@ const WATER_LOD_SPIKE_PRECISION_V1: TestSuite<WaterLodSpikeTestSettings> = {
   scenarios: [{ id: 'sphere-600km-eye-2m', label: '600 km sphere, eye 2 m', settings: { wireframe: false, measure: 'precision' }, durationMs: 1000, warmupMs: 500 }],
 };
 
+/**
+ * Plan 080 w2 spike, written before the first run: how much of the water the selector spends on land, and what the water
+ * costs with land in front of it. Each view runs with the land off (water only) and on (land drawn first, water behind).
+ *
+ * Correctness gates, from the leaf test (`core/water-lod-spike-land.ts`):
+ * - the conservative dry test never calls a leaf dry when a dense sample of it finds a wet point (0 wrong calls);
+ * - the centre-only control makes wrong calls in the shore views (so the check can detect an unsafe test);
+ * - open sea has no dry leaf.
+ *
+ * Reported, not gated: dry share of the drawn leaves, GPU and CPU frame time, triangles. The cost numbers decide whether a
+ * library cull hook is worth its edit (ER 080); they are headless-hardware numbers, not Q1.
+ */
+const WATER_LOD_SPIKE_LAND_V1: TestSuite<WaterLodSpikeTestSettings> = {
+  id: 'water-lod-spike-land',
+  version: 1,
+  title: 'Water LOD spike w2: water leaves under land, and the cost with land in front',
+  purpose: 'performance',
+  scenarios: [
+    { id: 'coast-200m', label: 'Coast from 200 m', view: { position: [0, 200, 600], target: [0, 0, -600] } as WaterLodSpikeView, expect: 'shore' as const },
+    { id: 'coast-grazing-2m', label: 'Coast, grazing from 2 m', view: { position: [0, 2, 800], target: [0, 0, -600] } as WaterLodSpikeView, expect: 'shore' as const },
+    { id: 'down-800m', label: 'Looking down from 800 m', view: { position: [0, 800, -600], target: [0, 0, -600] } as WaterLodSpikeView, expect: 'shore' as const },
+    { id: 'islands-5km', label: 'Islands from 5 km', view: { position: [0, 5000, 9000], target: [3000, 0, -1000] } as WaterLodSpikeView, expect: 'shore' as const },
+    { id: 'open-sea-200m', label: 'Open sea from 200 m', view: { position: [-30000, 200, 30000], target: [-30000, 0, 45000] } as WaterLodSpikeView, expect: 'open-sea' as const },
+  ].flatMap(({ id, label, view, expect }) =>
+    [false, true].map((land) => ({
+      id: `${id}-${land ? 'land' : 'water-only'}`,
+      label: `${label}, ${land ? 'land drawn' : 'water only'}`,
+      settings: { wireframe: false, measure: 'land' as const, land, landExpect: expect, view },
+      durationMs: 4000,
+      warmupMs: 1500,
+    })),
+  ),
+};
+
+/**
+ * Plan 080 w2, the real part: the selector's cover hook. Same five views as the spike suite, land always on, the hook off or on.
+ * Written before the first run.
+ *
+ * Gates:
+ * - safety: no selected leaf, drawn or not, is called dry by the hook's test while a dense sample of it finds a wet point
+ *   (0 wrong calls over every selected leaf), and the hook is installed exactly when asked;
+ * - removal: with the hook on, no drawn leaf lies entirely under land in the shore views (the hook took them all out);
+ * - open sea: the hook covers no leaf there.
+ *
+ * Reported, not gated: leaves covered, drawn, nodes still wanting to split (`unmet`), the deepest level, the mean edge of the
+ * drawn leaves that hold water (smaller is finer water where it can be seen), and GPU and CPU frame time. The question these
+ * answer: does the budget a covered leaf no longer takes show up as finer water in view? Static views only; a moving camera and
+ * the hook's per-frame cost are not measured here.
+ */
+const WATER_LOD_SPIKE_CULL_V1: TestSuite<WaterLodSpikeTestSettings> = {
+  id: 'water-lod-spike-cull',
+  version: 1,
+  title: 'Water LOD spike w2: the selector cover hook, water under land taking no leaf budget',
+  purpose: 'performance',
+  scenarios: [
+    { id: 'coast-200m', label: 'Coast from 200 m', view: { position: [0, 200, 600], target: [0, 0, -600] } as WaterLodSpikeView, expect: 'shore' as const },
+    { id: 'coast-grazing-2m', label: 'Coast, grazing from 2 m', view: { position: [0, 2, 800], target: [0, 0, -600] } as WaterLodSpikeView, expect: 'shore' as const },
+    { id: 'down-800m', label: 'Looking down from 800 m', view: { position: [0, 800, -600], target: [0, 0, -600] } as WaterLodSpikeView, expect: 'shore' as const },
+    { id: 'islands-5km', label: 'Islands from 5 km', view: { position: [0, 5000, 9000], target: [3000, 0, -1000] } as WaterLodSpikeView, expect: 'shore' as const },
+    { id: 'open-sea-200m', label: 'Open sea from 200 m', view: { position: [-30000, 200, 30000], target: [-30000, 0, 45000] } as WaterLodSpikeView, expect: 'open-sea' as const },
+  ].flatMap(({ id, label, view, expect }) =>
+    [false, true].map((cull) => ({
+      id: `${id}-${cull ? 'cull' : 'no-cull'}`,
+      label: `${label}, ${cull ? 'cull on' : 'cull off'}`,
+      settings: { wireframe: false, measure: 'cull' as const, land: true, cull, landExpect: expect, view },
+      durationMs: 4000,
+      warmupMs: 1500,
+    })),
+  ),
+};
+
 /** Every version of the W0b suites, oldest first. Add a new entry when a case changes; keep old ones. */
 export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestSettings>[] = [
   WATER_LOD_SPIKE_V1,
@@ -291,6 +381,8 @@ export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestS
   WATER_LOD_SPIKE_PERFORMANCE_V5,
   WATER_LOD_SPIKE_ALIASING_V3,
   WATER_LOD_SPIKE_PRECISION_V1,
+  WATER_LOD_SPIKE_LAND_V1,
+  WATER_LOD_SPIKE_CULL_V1,
 ];
 
 const REFERENCE_SAMPLES = 32;
@@ -469,6 +561,91 @@ async function measurePrecision(host: WaterLodSpikeTestHost): Promise<TestObserv
   };
 }
 
+async function measureLand(
+  host: WaterLodSpikeTestHost,
+  scenario: { readonly settings: WaterLodSpikeTestSettings; readonly durationMs: number },
+  context: TestContext,
+): Promise<TestObservation> {
+  const wantLand = scenario.settings.land === true;
+  // The land body compiles its pipeline while hidden; wait for it to draw, then let the selection settle on the view.
+  for (let waited = 0; wantLand && !host.landDrawn() && waited < 60_000; waited += 100) await context.wait(100);
+  await host.waitFrames(SETTLE_FRAMES, context);
+  const frames = await measureFrames(host, scenario.durationMs, context, true);
+  const leaves = host.landLeaves();
+  const share = leaves.drawn > 0 ? leaves.dryDrawn / leaves.drawn : 0;
+  const expect = scenario.settings.landExpect;
+  const count = (name: string, source: string, value: number) => ({ name, unit: 'leaves', source, samples: [value] });
+  return {
+    metrics: [
+      ...frames.metrics,
+      count('drawn water leaves', 'water selector', leaves.drawn),
+      count('selected water leaves (the cap is 4096)', 'water selector', leaves.leaves),
+      count('water leaves under land (conservative test)', 'water selector, CPU', leaves.dryDrawn),
+      { name: 'water leaves under land, share of drawn', unit: 'fraction', source: 'water selector, CPU', samples: [share] },
+      count('leaves the centre-only control calls dry', 'water selector, CPU', leaves.dryDrawnByCentre),
+      count('leaves the control calls dry that hold water', 'water selector, CPU', leaves.centreWrongCalls),
+    ],
+    checks: [
+      ...(frames.checks ?? []),
+      { name: 'land drawn when asked', passed: !wantLand || host.landDrawn(), detail: `land ${wantLand ? 'on' : 'off'}, drawn ${host.landDrawn()}` },
+      {
+        name: 'conservative test calls no wet leaf dry',
+        passed: leaves.conservativeWrongCalls === 0,
+        detail: `${leaves.conservativeWrongCalls} wrong calls in ${leaves.drawn} drawn leaves`,
+      },
+      ...(expect === 'shore'
+        ? [{ name: 'control: the centre-only test calls wet leaves dry', passed: leaves.centreWrongCalls > 0, detail: `${leaves.centreWrongCalls} wrong calls` }]
+        : []),
+      ...(expect === 'open-sea' ? [{ name: 'open sea has no leaf under land', passed: leaves.dryDrawn === 0, detail: `${leaves.dryDrawn} leaves` }] : []),
+    ],
+  };
+}
+
+async function measureCull(
+  host: WaterLodSpikeTestHost,
+  scenario: { readonly settings: WaterLodSpikeTestSettings; readonly durationMs: number },
+  context: TestContext,
+): Promise<TestObservation> {
+  const wantCull = scenario.settings.cull === true;
+  for (let waited = 0; !host.landDrawn() && waited < 60_000; waited += 100) await context.wait(100);
+  await host.waitFrames(SETTLE_FRAMES, context);
+  const frames = await measureFrames(host, scenario.durationMs, context, true);
+  const drawn = host.landLeaves(true);
+  const audit = host.landAudit();
+  const expect = scenario.settings.landExpect;
+  const count = (name: string, source: string, value: number) => ({ name, unit: 'leaves', source, samples: [value] });
+  return {
+    metrics: [
+      ...frames.metrics,
+      count('drawn water leaves', 'water selector', drawn.drawn),
+      count('selected water leaves (the cap is 4096)', 'water selector', drawn.leaves),
+      count('leaves the cover hook hid', 'water selector, stats.covered', drawn.covered),
+      count('nodes still wanting to split (unmet)', 'water selector, stats.unmet', drawn.unmet),
+      count('deepest level', 'water selector', drawn.deepestLevel),
+      count('drawn leaves entirely under land', 'water selector, CPU', drawn.dryDrawn),
+      { name: 'mean edge of the drawn leaves that hold water', unit: 'm', source: 'water selector, CPU', samples: [drawn.wetEdgeMeanM] },
+    ],
+    checks: [
+      ...(frames.checks ?? []),
+      { name: 'land drawn', passed: host.landDrawn(), detail: `drawn ${host.landDrawn()}` },
+      { name: 'cover hook installed exactly when asked', passed: host.coverActive() === wantCull, detail: `asked ${wantCull}, installed ${host.coverActive()}` },
+      {
+        name: 'no leaf the hook test calls dry has a wet point',
+        passed: audit.conservativeWrongCalls === 0,
+        detail: `${audit.conservativeWrongCalls} wrong calls in ${audit.checked} selected leaves`,
+      },
+      ...(wantCull && expect === 'shore'
+        ? [
+            { name: 'the hook covered leaves', passed: drawn.covered > 0, detail: `${drawn.covered} covered` },
+            { name: 'no drawn leaf lies entirely under land', passed: drawn.dryDrawn === 0, detail: `${drawn.dryDrawn} drawn leaves under land` },
+          ]
+        : []),
+      ...(wantCull && expect === 'open-sea' ? [{ name: 'open sea: the hook covers nothing', passed: drawn.covered === 0, detail: `${drawn.covered} covered` }] : []),
+      ...(!wantCull ? [{ name: 'no hook: nothing is covered', passed: drawn.covered === 0, detail: `${drawn.covered} covered` }] : []),
+    ],
+  };
+}
+
 async function measureFrames(host: WaterLodSpikeTestHost, durationMs: number, context: TestContext, gpu: boolean): Promise<TestObservation> {
   host.beginFrameSampling();
   const gpuMs: number[] = [];
@@ -510,12 +687,16 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
       host.setView(scenario.settings.view ?? null);
       host.setPixelRatio(scenario.settings.pixelRatio ?? null);
       host.setQuality(scenario.settings.quality ?? null);
+      host.setLand(scenario.settings.land ?? null);
+      host.setCull(scenario.settings.cull ?? null);
     },
     restore: (wireframe) => {
       host.setWireframe(wireframe);
       host.setView(null);
       host.setPixelRatio(null);
       host.setQuality(null);
+      host.setLand(null);
+      host.setCull(null);
     },
     ready: async (context) => {
       while (!host.ready()) {
@@ -526,6 +707,8 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
     measure: async (scenario, context): Promise<TestObservation> => {
       if (scenario.settings.measure === 'aliasing') return measureAliasing(host, context, scenario.settings.gated ?? true);
       if (scenario.settings.measure === 'precision') return measurePrecision(host);
+      if (scenario.settings.measure === 'land') return measureLand(host, scenario, context);
+      if (scenario.settings.measure === 'cull') return measureCull(host, scenario, context);
       const observation = await measureFrames(host, scenario.durationMs, context, scenario.settings.view !== undefined);
       return {
         ...observation,

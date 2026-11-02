@@ -5,6 +5,7 @@
     [isActive]="true"
   />
   <flatTerrain
+    #waterBody
     [size]="planeSizeM"
     [heights]="water.heights"
     [material]="water.material"
@@ -13,6 +14,18 @@
     [cellPixels]="qualityTier().cellPixels"
     [leafCap]="qualityTier().leafCap"
   />
+  @if (land()) {
+    <flatTerrain
+      #landBody
+      [size]="planeSizeM"
+      [heights]="landHeights"
+      view="shaded"
+      [detailNoise]="0"
+      [bounds]="false"
+      [cellPixels]="qualityTier().cellPixels"
+      [leafCap]="qualityTier().leafCap"
+    />
+  }
 
   <ng-template portalTarget="rightSidebar" lane="content">
     <div class="runner-panel">
@@ -38,6 +51,12 @@
     </button>
     <button [class.active]="animating()" (click)="toggleAnimating()">
       Animate
+    </button>
+    <button [class.active]="land()" (click)="toggleLand()">
+      Land
+    </button>
+    <button [class.active]="cull()" [disabled]="!land()" (click)="toggleCull()">
+      Cull under land
     </button>
   </div>
   <label class="quality">

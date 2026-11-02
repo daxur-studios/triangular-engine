@@ -35,6 +35,9 @@ import type { NodeHeightRanges } from './lod-height';
  * Node geometry (centre, normal, bounds, cell length) is the domain's own unless a {@link NodeGeometryHook} supplies it
  * ({@link LodSelector.setGeometryHook}): that is how a bent surface is selected in its own frame (`lod-morph-metric.ts`).
  * Changing the hook's state is {@link LodSelector.invalidateGeometry}; nodes are measured again as they join the next tree.
+ *
+ * A {@link NodeCoverHook} ({@link LodSelector.setCoverHook}) names nodes that something else hides completely (land over water):
+ * such a leaf is not drawn and asks for no split, so it takes none of the leaf budget. Its answer is remembered per node.
  */
 
 export type PatchCells = 16 | 32 | 64;
@@ -150,12 +153,35 @@ export interface NodeGeometryHook {
   readonly refreshBudget?: number;
 }
 
+/**
+ * Says which nodes are entirely hidden by something else that is drawn in front of them (land over a water surface, say), so
+ * the selector can stop spending leaves on them. Install it with {@link LodSelector.setCoverHook}.
+ *
+ * A covered node is never drawn and asks for no split, so it takes none of the leaf budget; it stays in the tree as a leaf
+ * (the tree still tiles the surface), and the 2:1 balance may still split it to keep a finer neighbour legal. Only the node
+ * as a whole is tested: a node that is partly visible must not be reported covered, because nothing draws it then and the
+ * hidden part becomes a hole. When in doubt, return false.
+ *
+ * The answer must not depend on the camera: it is asked once per node and remembered until {@link LodSelector.invalidateCover}
+ * (or a geometry change) says it may have changed. It runs when a node joins a tree, must not allocate, and reads the node
+ * through the selector's own arrays (`root`, `level`, `i`, `j`, `center`, `normal`, `edge`, `radius`).
+ */
+export interface NodeCoverHook {
+  /** True when every visible point of `node` (a pool index of `selector`) is hidden by the cover. */
+  covered(node: number, selector: LodSelector): boolean;
+}
+
 /** Counters of the last selection: tree size, level churn and whether the cap bound. Overwritten by every `select`, so copy what you keep. */
 export interface SelectorStats {
-  /** Leaves of the selected tree, drawn and culled. Independent of the view direction unless `cullInSelection`. */
+  /** Leaves of the selected tree, drawn, culled and covered. Independent of the view direction unless `cullInSelection`. */
   leaves: number;
-  /** Selected leaves inside the frustum, which are the ones drawn (a subset of {@link leaves}); the level-change metrics count these. */
+  /**
+   * Selected leaves inside the frustum that the {@link NodeCoverHook} did not cover, which are the ones drawn (a subset of
+   * {@link leaves}); the level-change metrics count these.
+   */
   drawn: number;
+  /** Selected leaves inside the frustum that the {@link NodeCoverHook} covered: not drawn and not asking to split. 0 without a hook. */
+  covered: number;
   /** Nodes split by their own request this frame, including ones kept split by hysteresis (not the balance splits). */
   splits: number;
   forcedSplits: number;
@@ -269,7 +295,7 @@ export class LodSelector {
   /** Leaves after {@link select}, as node indices, with their edge masks; drawn leaves first (`stats.drawn`). */
   readonly leaves: Int32Array;
   readonly masks: Uint8Array;
-  readonly stats: SelectorStats = { leaves: 0, drawn: 0, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0, geometryMeasured: 0, geometryStale: 0 };
+  readonly stats: SelectorStats = { leaves: 0, drawn: 0, covered: 0, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0, geometryMeasured: 0, geometryStale: 0 };
   /** Most nodes one tree can hold. */
   private readonly treeCapacity: number;
   private readonly heap: Int32Array;
@@ -307,6 +333,16 @@ export class LodSelector {
   /** Generation each node's geometry was measured in. */
   private readonly geoStamp: Int32Array;
   private readonly geometry: NodeGeometry = { ground: [0, 0, 0], normal: [0, 0, 0], centre: [0, 0, 0], boundRadius: 0, across: 0, alongHalf: 0, leafEdge: 0, cellEdge: 0 };
+  /** The active {@link NodeCoverHook}, or undefined for none. */
+  private coverHook: NodeCoverHook | undefined;
+  /** Cover generation: a node whose {@link coverStamp} differs is asked again when it next joins a tree. */
+  private coverVersion = 0;
+  /** Generation each node's {@link coverCache} answer was made in (-1: never, or its geometry was measured again). */
+  private readonly coverStamp: Int32Array;
+  /** The hook's answer for each node, 1 for covered. */
+  private readonly coverCache: Uint8Array;
+  /** 1 for a node of the current tree that is covered and inside the frustum (counted in {@link SelectorStats.covered}). */
+  private readonly hidden: Uint8Array;
   /** Nodes measured again because their geometry was stale (first measurements not counted): the cost of {@link invalidateGeometry}. */
   geometryRefreshes = 0;
   /** Stale re-measures this rebuild may still make: the hook's budget, less those made so far (`Infinity` without a budget). */
@@ -347,6 +383,9 @@ export class LodSelector {
     this.nb = new Int32Array(capacity * 4);
     this.stamp = new Int32Array(capacity + 2);
     this.geoStamp = new Int32Array(capacity);
+    this.coverStamp = new Int32Array(capacity).fill(-1);
+    this.coverCache = new Uint8Array(capacity);
+    this.hidden = new Uint8Array(capacity);
     this.hot = new Float64Array(capacity * HOT);
     this.live = new Uint8Array(capacity);
     this.freeBlocks = new Int32Array(capacity >> 2);
@@ -383,6 +422,30 @@ export class LodSelector {
    */
   invalidateGeometry(): void {
     this.geometryVersion++;
+    this.hasViewKey = false;
+  }
+
+  /**
+   * Installs (or, with `undefined`, removes) the {@link NodeCoverHook} and makes every remembered answer stale. The next
+   * {@link select} rebuilds the tree even for an unchanged view. Removing the hook returns the selection without one exactly.
+   */
+  setCoverHook(hook: NodeCoverHook | undefined): void {
+    if (hook === this.coverHook) return;
+    this.coverHook = hook;
+    this.invalidateCover();
+  }
+
+  /** The installed cover hook, if any. */
+  get cover(): NodeCoverHook | undefined {
+    return this.coverHook;
+  }
+
+  /**
+   * Marks every remembered cover answer stale (what the hook tests against changed: the land moved, the water rose). Nodes are
+   * asked again lazily as they join the next tree, which {@link select} rebuilds even for an unchanged view.
+   */
+  invalidateCover(): void {
+    this.coverVersion++;
     this.hasViewKey = false;
   }
 
@@ -535,7 +598,9 @@ export class LodSelector {
     const { active, open, visible, level, leaves, masks, culledLeaves, culledMasks, nb, stamp, frame } = this;
     let drawn = 0;
     let culled = 0;
+    let covered = 0;
     let deepest = 0;
+    const hidden = this.hidden;
     // Split nodes of this tree that were (kept) or were not (opened) split in the last one.
     let kept = 0;
     let opened = 0;
@@ -562,6 +627,7 @@ export class LodSelector {
         leaves[drawn] = node;
         masks[drawn++] = mask;
       } else {
+        covered += hidden[node];
         culledLeaves[culled] = node;
         culledMasks[culled++] = mask;
       }
@@ -572,6 +638,7 @@ export class LodSelector {
       masks[drawn + k] = culledMasks[k];
     }
     this.stats.drawn = drawn;
+    this.stats.covered = covered;
     this.stats.leaves = drawn + culled;
     this.stats.deepestLevel = deepest;
     this.stats.newSplits = opened;
@@ -675,6 +742,9 @@ export class LodSelector {
     const geoStamp = this.geoStamp;
     const geometryVersion = this.geometryVersion;
     const stats = this.stats;
+    const coverHook = this.coverHook;
+    const { coverStamp, coverCache, hidden } = this;
+    const coverVersion = this.coverVersion;
     for (let node = first; node < first + count; node++) {
       active[n++] = node;
       if (geoStamp[node] !== geometryVersion) {
@@ -698,10 +768,25 @@ export class LodSelector {
       const z = hot[h + 2] - key[2];
       const r = hot[h + 3];
       const outside = cull && (key[3] * x + key[4] * y + key[5] * z < -r || key[6] * x + key[7] * y + key[8] * z < -r || key[9] * x + key[10] * y + key[11] * z < -r || key[12] * x + key[13] * y + key[14] * z < -r);
+      hidden[node] = 0;
       if (outside && cullInSelection === true) {
         visible[node] = 0;
         priority[node] = 0;
         continue;
+      }
+      if (coverHook !== undefined) {
+        // Asked once per node and cover generation; the answer is the camera's business no more than the node's geometry is.
+        if (coverStamp[node] !== coverVersion) {
+          coverStamp[node] = coverVersion;
+          coverCache[node] = coverHook.covered(node, this) ? 1 : 0;
+        }
+        if (coverCache[node] === 1) {
+          // Not drawn and not asking: a covered leaf takes no budget, wherever the camera looks.
+          visible[node] = 0;
+          priority[node] = 0;
+          hidden[node] = outside ? 0 : 1;
+          continue;
+        }
       }
       // Default: the split request ignores the frustum; it only decides whether the leaf is drawn.
       visible[node] = outside ? 0 : 1;
@@ -768,6 +853,8 @@ export class LodSelector {
   /** Sets a node's geometry (centre, normal, bounds, cell length) from the hook, or the domain's own without one. */
   private measureNode(node: number): void {
     this.geoStamp[node] = this.geometryVersion;
+    // A remembered cover answer was about the old geometry.
+    this.coverStamp[node] = -1;
     const hook = this.geometryHook;
     if (hook === undefined) {
       this.domainGeometry(node);

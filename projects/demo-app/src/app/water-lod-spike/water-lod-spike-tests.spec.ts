@@ -1,5 +1,6 @@
 import type { TestContext, TestScenario } from 'triangular-engine/testing';
 import type { ILuminanceImage } from './core/water-lod-spike-image-metrics';
+import type { ILeafCull } from './core/water-lod-spike-land';
 import type { IPathError, IPrecisionReport } from './core/water-lod-spike-precision';
 import {
   createWaterLodSpikeTestAdapter,
@@ -24,6 +25,14 @@ function precisionReport(anchorRad = 2e-5, naiveRad = 0.4, backend = 'webgpu'): 
     gpuAnchorSineError: 1e-4,
   });
   return { backend, radiusM: 600_000, eyeHeightM: 2, waves: 64, samples: 72, cases: [entry(0), entry(3600)] };
+}
+
+/** A leaf report for a shore view: a quarter of the drawn leaves are under land, and the centre-only control is wrong on some. */
+function leafCull(overrides: Partial<ILeafCull> = {}): ILeafCull {
+  return {
+    leaves: 4096, drawn: 1000, dryDrawn: 250, dryDrawnByCentre: 290, centreWrongCalls: 40, conservativeWrongCalls: 0, wetDrawn: 750,
+    checked: 1000, covered: 0, unmet: 120, capHit: true, deepestLevel: 14, wetEdgeMeanM: 90, ...overrides,
+  };
 }
 
 /**
@@ -68,6 +77,12 @@ function makeHost(overrides: Partial<WaterLodSpikeTestHost> = {}): WaterLodSpike
     },
     horizonRow: () => 44,
     runPrecisionProbe: async () => precisionReport(),
+    setLand: () => undefined,
+    landDrawn: () => true,
+    landLeaves: () => leafCull(),
+    landAudit: () => leafCull({ checked: 4096 }),
+    setCull: () => undefined,
+    coverActive: () => false,
     environment: () => ({ backend: 'webgpu' }),
     ...overrides,
   };
@@ -285,6 +300,149 @@ describe('createWaterLodSpikeTestAdapter', () => {
       const suite = WATER_LOD_SPIKE_TEST_HISTORY.find((entry) => entry.id === 'water-lod-spike-precision');
       expect(suite?.version).toBe(1);
       expect(suite?.scenarios.map((scenario) => scenario.settings.measure)).toEqual(['precision']);
+    });
+  });
+
+  describe('land case', () => {
+    const LAND_SCENARIO = (landExpect: 'shore' | 'open-sea', land = true): TestScenario<WaterLodSpikeTestSettings> => ({
+      id: 'coast',
+      label: 'Coast',
+      settings: { wireframe: false, measure: 'land', land, landExpect },
+      durationMs: 2000,
+      warmupMs: 500,
+    });
+    const failed = (observation: Awaited<ReturnType<ReturnType<typeof createWaterLodSpikeTestAdapter>['measure']>>) =>
+      (observation.checks ?? []).filter((check) => !check.passed).map((check) => check.name);
+
+    it('passes a shore view when the test is safe and the control is wrong, and reports the dry share', async () => {
+      const host = makeHost();
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(LAND_SCENARIO('shore'), makeContext(host.calls));
+
+      expect(failed(observation)).toEqual([]);
+      expect(observation.metrics.find((metric) => metric.name === 'water leaves under land, share of drawn')?.samples).toEqual([0.25]);
+      expect(observation.metrics.find((metric) => metric.name === 'GPU frame')?.samples.length).toBeGreaterThan(0);
+    });
+
+    it('fails when the conservative test calls a wet leaf dry', async () => {
+      const host = makeHost({ landLeaves: () => leafCull({ conservativeWrongCalls: 3 }) });
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(LAND_SCENARIO('shore'), makeContext(host.calls));
+
+      expect(failed(observation)).toEqual(['conservative test calls no wet leaf dry']);
+    });
+
+    it('fails when the centre-only control never goes wrong (the check could not tell a safe test from an unsafe one)', async () => {
+      const host = makeHost({ landLeaves: () => leafCull({ centreWrongCalls: 0 }) });
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(LAND_SCENARIO('shore'), makeContext(host.calls));
+
+      expect(failed(observation)).toEqual(['control: the centre-only test calls wet leaves dry']);
+    });
+
+    it('expects no dry leaf over open sea', async () => {
+      const host = makeHost({ landLeaves: () => leafCull({ dryDrawn: 5, wetDrawn: 995 }) });
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(LAND_SCENARIO('open-sea'), makeContext(host.calls));
+
+      expect(failed(observation)).toEqual(['open sea has no leaf under land']);
+    });
+
+    it('fails when land was asked for and does not draw', async () => {
+      const host = makeHost({ landDrawn: () => false });
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(LAND_SCENARIO('shore'), makeContext(host.calls));
+
+      expect(failed(observation)).toEqual(['land drawn when asked']);
+    });
+
+    it('sets the land for the case and puts the page back afterwards', async () => {
+      const lands: (boolean | null)[] = [];
+      const host = makeHost({ setLand: (enabled) => lands.push(enabled) });
+      const adapter = createWaterLodSpikeTestAdapter(host);
+      const context = makeContext(host.calls);
+      const snapshot = await adapter.capture(context);
+      await adapter.apply(LAND_SCENARIO('shore', false), context);
+      await adapter.restore(snapshot, context);
+
+      expect(lands).toEqual([false, null]);
+    });
+
+    it('is in the suite history, each view with the land off and on', () => {
+      const suite = WATER_LOD_SPIKE_TEST_HISTORY.find((entry) => entry.id === 'water-lod-spike-land');
+      expect(suite?.version).toBe(1);
+      expect(suite?.scenarios.length).toBe(10);
+      expect(suite?.scenarios.filter((scenario) => scenario.settings.land).length).toBe(5);
+    });
+  });
+
+  describe('cull case', () => {
+    const CULL_SCENARIO = (cull: boolean, landExpect: 'shore' | 'open-sea' = 'shore'): TestScenario<WaterLodSpikeTestSettings> => ({
+      id: 'coast',
+      label: 'Coast',
+      settings: { wireframe: false, measure: 'cull', land: true, cull, landExpect },
+      durationMs: 2000,
+      warmupMs: 500,
+    });
+    const failed = (observation: Awaited<ReturnType<ReturnType<typeof createWaterLodSpikeTestAdapter>['measure']>>) =>
+      (observation.checks ?? []).filter((check) => !check.passed).map((check) => check.name);
+    const culled = { coverActive: () => true, landLeaves: () => leafCull({ dryDrawn: 0, covered: 250, wetDrawn: 1000 }) };
+
+    it('passes a shore view with the hook on when it covered leaves and no covered leaf has water', async () => {
+      const host = makeHost(culled);
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(CULL_SCENARIO(true), makeContext(host.calls));
+
+      expect(failed(observation)).toEqual([]);
+      expect(observation.metrics.find((metric) => metric.name === 'leaves the cover hook hid')?.samples).toEqual([250]);
+      expect(observation.metrics.find((metric) => metric.name === 'mean edge of the drawn leaves that hold water')?.samples).toEqual([90]);
+    });
+
+    it('passes the same view with the hook off when nothing is covered', async () => {
+      const host = makeHost();
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(CULL_SCENARIO(false), makeContext(host.calls));
+
+      expect(failed(observation)).toEqual([]);
+    });
+
+    it('fails when a leaf the hook would cover has water (the audit finds a wrong call)', async () => {
+      const host = makeHost({ ...culled, landAudit: () => leafCull({ checked: 4096, conservativeWrongCalls: 2 }) });
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(CULL_SCENARIO(true), makeContext(host.calls));
+
+      expect(failed(observation)).toEqual(['no leaf the hook test calls dry has a wet point']);
+    });
+
+    it('fails when the hook is on and a drawn leaf is still entirely under land, or none was covered', async () => {
+      const stillDry = makeHost({ ...culled, landLeaves: () => leafCull({ dryDrawn: 4, covered: 250 }) });
+      expect(failed(await createWaterLodSpikeTestAdapter(stillDry).measure(CULL_SCENARIO(true), makeContext(stillDry.calls)))).toEqual(['no drawn leaf lies entirely under land']);
+      const none = makeHost({ ...culled, landLeaves: () => leafCull({ dryDrawn: 0, covered: 0 }) });
+      expect(failed(await createWaterLodSpikeTestAdapter(none).measure(CULL_SCENARIO(true), makeContext(none.calls)))).toEqual(['the hook covered leaves']);
+    });
+
+    it('expects the hook to cover nothing over open sea, and nothing at all when it is off', async () => {
+      const open = makeHost({ ...culled, landLeaves: () => leafCull({ dryDrawn: 0, covered: 3 }) });
+      expect(failed(await createWaterLodSpikeTestAdapter(open).measure(CULL_SCENARIO(true, 'open-sea'), makeContext(open.calls)))).toEqual(['open sea: the hook covers nothing']);
+      const off = makeHost({ landLeaves: () => leafCull({ covered: 7 }) });
+      expect(failed(await createWaterLodSpikeTestAdapter(off).measure(CULL_SCENARIO(false), makeContext(off.calls)))).toEqual(['no hook: nothing is covered']);
+    });
+
+    it('fails when the hook state is not what the case asked for', async () => {
+      const host = makeHost({ landLeaves: () => leafCull({ covered: 250, dryDrawn: 0 }), coverActive: () => false });
+      expect(failed(await createWaterLodSpikeTestAdapter(host).measure(CULL_SCENARIO(true), makeContext(host.calls)))).toEqual(['cover hook installed exactly when asked']);
+    });
+
+    it('sets the hook for the case and puts the page back afterwards', async () => {
+      const culls: (boolean | null)[] = [];
+      const host = makeHost({ setCull: (enabled) => culls.push(enabled) });
+      const adapter = createWaterLodSpikeTestAdapter(host);
+      const context = makeContext(host.calls);
+      const snapshot = await adapter.capture(context);
+      await adapter.apply(CULL_SCENARIO(true), context);
+      await adapter.restore(snapshot, context);
+
+      expect(culls).toEqual([true, null]);
+    });
+
+    it('is in the suite history, each view with the hook off and on', () => {
+      const suite = WATER_LOD_SPIKE_TEST_HISTORY.find((entry) => entry.id === 'water-lod-spike-cull');
+      expect(suite?.version).toBe(1);
+      expect(suite?.scenarios.length).toBe(10);
+      expect(suite?.scenarios.filter((scenario) => scenario.settings.cull).length).toBe(5);
+      expect(suite?.scenarios.every((scenario) => scenario.settings.land === true)).toBe(true);
     });
   });
 

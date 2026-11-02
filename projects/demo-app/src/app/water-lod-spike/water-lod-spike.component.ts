@@ -6,6 +6,7 @@ import {
   inject,
   isDevMode,
   signal,
+  viewChild,
 } from '@angular/core';
 import { Color, PerspectiveCamera, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
@@ -16,6 +17,7 @@ import {
   type IWaterLodSpikeSceneHandle,
 } from './core';
 import { toLuminance, type ILuminanceImage } from './core/water-lod-spike-image-metrics';
+import { COVER_MARGIN_M, createLandCoverHook, createWaterLodSpikeLand, measureLeaves, waterCeilingM, type ILeafCull } from './core/water-lod-spike-land';
 import { runWaterLodSpikePrecisionProbe, type IPrecisionProbeRenderer } from './core/water-lod-spike-precision-probe';
 import { WATER_LOD_SPIKE_QUALITIES, waterLodSpikeQuality, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
 import { WATER_LOD_SPIKE_UNIFORMS } from './core/water-lod-spike-waves';
@@ -67,6 +69,20 @@ export class WaterLodSpikeComponent {
   /** Autostart from a launch link is a dev-only convenience; the owner's dev server is in dev mode. */
   readonly allowTestAutoStart = isDevMode();
   readonly testAdapter: TestRunAdapter<WaterLodSpikeTestSettings, boolean>;
+
+  /** Land under the water (Plan 080 w2 spike): islands from `core/water-lod-spike-land.ts`, drawn as a second body. Off by default. */
+  readonly land = signal(false);
+  protected readonly landHeights = createWaterLodSpikeLand();
+  private readonly waterBody = viewChild<FlatTerrainComponent>('waterBody');
+  private readonly landBody = viewChild<FlatTerrainComponent>('landBody');
+  private savedLand: boolean | null = null;
+  /**
+   * The library cover hook on the water body (Plan 080 w2): water leaves entirely under the land are not drawn and take no leaf
+   * budget. Only acts while the land is on. Off by default so the page keeps showing what the selector does without it.
+   */
+  readonly cull = signal(false);
+  private readonly coverHook = createLandCoverHook();
+  private savedCull: boolean | null = null;
 
   readonly wireframe = signal(false);
   /** True while the vertex heights are forced to zero (the shading normal is kept). */
@@ -125,6 +141,10 @@ export class WaterLodSpikeComponent {
       }
       this.lastFrameMs = nowMs;
       this.renderedFrames++;
+      // The land draws first so its depth rejects the water under it early (a group's order applies to its children).
+      const landObject = this.landBody()?.terrain()?.object;
+      if (landObject && landObject.renderOrder !== -1) landObject.renderOrder = -1;
+      this.syncCover();
     });
     // A held test view is re-applied every frame after the controls' tick, so nothing moves the camera off it.
     const holdSubscription = this.engine.lateUpdate$.subscribe(() => {
@@ -167,6 +187,12 @@ export class WaterLodSpikeComponent {
       waitFrames: (count, context) => this.waitFrames(count, context),
       readFrame: (jitterX, jitterY) => this.readFrame(jitterX, jitterY),
       horizonRow: () => this.horizonRow(),
+      setLand: (enabled) => this.holdLand(enabled),
+      landDrawn: () => this.landBody()?.terrain()?.object.visible === true,
+      landLeaves: (cover) => this.landLeaves('drawn', cover === true),
+      landAudit: () => this.landLeaves('all', true),
+      setCull: (enabled) => this.holdCull(enabled),
+      coverActive: () => this.waterBody()?.terrain()?.selector.cover !== undefined,
       runPrecisionProbe: () => runWaterLodSpikePrecisionProbe(this.engine.renderer as unknown as IPrecisionProbeRenderer, String(this.environment()['backend'])),
       environment: () => this.environment(),
     });
@@ -188,6 +214,56 @@ export class WaterLodSpikeComponent {
   toggleFlatVertices(): void {
     this.flatVertices.update((flat) => !flat);
     WATER_LOD_SPIKE_UNIFORMS.vertexHeightScale.value = this.flatVertices() ? 0 : 1;
+  }
+
+  toggleLand(): void {
+    this.land.update((enabled) => !enabled);
+  }
+
+  /** Puts the land on or off for a test case (null restores the page's own setting). */
+  private holdLand(enabled: boolean | null): void {
+    if (enabled !== null) {
+      this.savedLand ??= this.land();
+      this.land.set(enabled);
+      return;
+    }
+    if (this.savedLand !== null) this.land.set(this.savedLand);
+    this.savedLand = null;
+  }
+
+  /**
+   * The drawn leaves of the water body's last selection judged against the land (see `measureLeaves`). The ceiling is the
+   * body's own global height bound, waves and detail noise included, as a library cull hook would read it.
+   */
+  private landLeaves(scope: 'drawn' | 'all', cover: boolean): ILeafCull {
+    const body = this.waterBody()?.terrain();
+    if (!body) throw new Error('The water body does not exist yet');
+    const selector = body.selector;
+    // With the cover margin the judgement is the hook's own: land must clear the water's bound by the margin.
+    return measureLeaves(selector, selector.settings.domain, waterCeilingM(selector.settings.heightBoundM, cover ? COVER_MARGIN_M : 0), undefined, scope);
+  }
+
+  toggleCull(): void {
+    this.cull.update((enabled) => !enabled);
+  }
+
+  /** Puts the cover hook on or off for a test case (null restores the page's own setting). */
+  private holdCull(enabled: boolean | null): void {
+    if (enabled !== null) {
+      this.savedCull ??= this.cull();
+      this.cull.set(enabled);
+      return;
+    }
+    if (this.savedCull !== null) this.cull.set(this.savedCull);
+    this.savedCull = null;
+  }
+
+  /** Installs or removes the cover hook on the water body so it matches the Cull and Land buttons; the body keeps it across rebuilds. */
+  private syncCover(): void {
+    const body = this.waterBody()?.terrain();
+    if (!body) return;
+    const wanted = this.cull() && this.land() ? this.coverHook : undefined;
+    if (body.selector.cover !== wanted) body.setCoverHook(wanted);
   }
 
   toggleFilter(): void {

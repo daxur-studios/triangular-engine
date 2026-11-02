@@ -3,7 +3,7 @@ import type { NodeMaterial } from 'three/webgpu';
 import type { Vector3Tuple } from 'three';
 import { EngineService, PLANET_CONTEXT } from 'triangular-engine';
 import {
-  TERRAIN_DEFAULTS, createHeightSource, type GroundSample, type CubeWarp, type HeightSource, type LodView, type PatchCells, type Vec3,
+  TERRAIN_DEFAULTS, createHeightSource, type DetailProfile, type GroundSample, type CubeWarp, type HeightSource, type LodView, type PatchCells, type Vec3,
 } from 'triangular-engine/lod-surface/core';
 import { createPlanetMorphUniforms, setPlanetMapExtent, setPlanetProjectionCentre, type IPlanetMorphUniforms } from 'triangular-engine/planet-material';
 import { TerrainPlanetMaterial } from '../terrain-planet-material';
@@ -71,6 +71,11 @@ export class PlanetTerrainComponent {
   readonly heights = input<HeightSource | undefined>(undefined);
   /** Detail noise below the height texture's texel, amplitude as a share of the texel; 0 is off. Default 0.04. */
   readonly detailNoise = input<number>(TERRAIN_DEFAULTS.detailNoise);
+  /**
+   * Where the detail noise is strong, weak or absent: a game-supplied weight on its amplitude (meadows flat, mountains rough,
+   * or the same everywhere). Default: none, weight 1 everywhere. Bound a stable object; a new one re-bakes and rebuilds the mesh.
+   */
+  readonly detailProfile = input<DetailProfile | undefined>(undefined);
   /** Texels per face side the noise is sized by. Default: the baked heights' own texture, else 1,024. */
   readonly detailCells = input<number | undefined>(undefined);
   /** The most leaves selected. Default 4,096. */
@@ -170,6 +175,7 @@ export class PlanetTerrainComponent {
       const radius = this.effectiveRadius();
       if (radius === undefined) return undefined;
       const detailCells = this.detailCells();
+      const detailProfile = this.detailProfile();
       // Read both, so the owned material is released as soon as an own `material` is set.
       const own = this.material();
       const owned = this.groundMaterial();
@@ -180,6 +186,7 @@ export class PlanetTerrainComponent {
           heights: this.heights() ?? this.planet?.heights() ?? this.flat,
           detailNoise: this.detailNoise(),
           ...(detailCells === undefined ? {} : { detailCells }),
+          ...(detailProfile ? { detailProfile } : {}),
           morph: true,
           poleFan: true,
           leafCap: this.leafCap(),
