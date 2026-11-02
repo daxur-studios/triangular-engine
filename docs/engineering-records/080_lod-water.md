@@ -200,6 +200,34 @@ The leaf cap (4096) was hit in every view.
 - Moving cameras (the selection changes with the view and the cull test runs per node per frame: its cost is unmeasured), a land edge at the plane border, water deeper than the seabed, and the sphere.
 - A visual check of the shoreline: the land body uses the debug material, and no one has looked at the join. Timings are one noisy run on an unverified adapter.
 
+### 2026-11-02 (late night): w2, the selector cover hook
+
+**Trigger.** The owner chose to build the real hook after the spike. Library edit, first of Plan 080's: `NodeCoverHook` on `LodSelector` (`setCoverHook`, `cover`, `invalidateCover`) and `LodTerrainBody.setCoverHook` / `invalidateCover` (kept across `configure`, like the geometry hook). A covered leaf is not drawn and asks for no split; the 2:1 balance can still split it. The answer is asked once per node and remembered (cover generation, reset when the node's geometry is measured again), so it must not depend on the camera. `SelectorStats.covered` counts covered leaves in the frustum; `stats.drawn` excludes them. Without a hook the selection is unchanged bit for bit (a spec compares the trees). A predicate on the selector, not the geometry hook, because the geometry hook replaces a node's geometry; the cover only adds a yes or no. CHANGELOG and `lod-surface/README.md` are updated; `SelectorStats` gained a required field, so the one page that builds it by hand (the lod-surface lab) needed `covered: 0`.
+
+**Spike side.** `createLandCoverHook` (the conservative land test with a 3 m margin for the land mesh's sag between vertices), a **Cull under land** button (needs Land), and suite `water-lod-spike-cull` v1, written before the first run. Gates: no selected leaf, drawn or not, is called dry while a dense sample of it holds water (audit over every selected leaf); with the hook on, no drawn leaf lies entirely under land in the shore views and the hook covers some; open sea covers none; hook off covers none. Reported: leaves covered, drawn, `unmet`, deepest level, mean edge of the drawn leaves that hold water, GPU and CPU time.
+
+**Tests.** 17 selector specs (7 new: no-op hook identical, covered leaves undrawn and counted, a binding cap's budget goes to the visible side, removal restores the tree when the cap does not bind, asked once per node and again after `invalidateCover`, reselect on an unchanged view after `invalidateCover`, the 2:1 tree stays legal) and 75 of 75 in the demo app's water specs (5 new for the hook on the real selector, 8 for the page adapter). Not mine and not caused by this change: the full lod-surface run also failed 3 morph specs (sweep bench packFrames, settle share) and then lost the browser connection at 227 of 375; those paths install no cover hook, and other uncommitted edits to `lod-surface-mesh.ts` are in the tree.
+
+**Result** (headless hardware, NVIDIA, noisy load, one run; `auto=pass`, all 10 cases, 0 failed checks; adapter not independently verified, so not Q1):
+
+| View | drawn, no hook | drawn, hook | leaves hidden | unmet, no hook | unmet, hook | mean wet edge m (off / on) | GPU ms (off / on) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| coast, 200 m | 1160 | 1011 | 115 | 4096 | 3934 | 1052 / 1023 | 0.8 / 0.8 |
+| coast, grazing 2 m | 2415 | 2379 | 42 | 3784 | 3712 | 342 / 339 | 1.9 / 1.6 |
+| looking down, 800 m | 258 | 68 | 85 | 4086 | 3836 | 98 / 98 | 0.3 / 0.3 |
+| islands, 5 km | 1196 | 1138 | 36 | 2516 | 2423 | 1443 / 1431 | 2.0 / 1.9 |
+| open sea (control) | 898 | 898 | 0 | 4096 | 4092 | 499 / 499 | 1.4 / 1.4 |
+
+**What it shows.**
+- The hook is safe and complete here: 0 wrong calls over every selected leaf, no dry leaf drawn once it is on, nothing covered over open sea. (Without it, 66 to 192 drawn leaves per shore view are entirely under land.)
+- **The visible water did not get finer.** The mean edge of the drawn wet leaves moved by 0 to 3 %, and the deepest level did not change. `unmet` fell by 70 to 250 of about 4000. The reason is in the selection: it does not depend on the heading, so the cap is spread over the whole 360 degrees and the hundred-odd leaves a view frees go to nodes behind the camera as much as in front. The 3 to 76 % dry share was a share of the drawn leaves, not of the selected tree.
+- What it does save is draw work: the triangles fell 0.6 to 6 % (down-looking 6 %), and GPU time fell a little at the grazing coast (1.9 to 1.6 ms) and is otherwise inside the noise. That is small next to the land-first early-z result of the spike.
+- **Cost under a moving camera** (headless spec, 600 selections sweeping 7 km of coast): median 1.1 to 1.4 ms, p95 1.6 to 2.1 ms, max 6.7 to 14.8 ms with the hook (about 69 leaves covered). The plan's selection budget is 0.2 ms for water, so the hook's test is not free: eight islands cost eight exponentials per node asked.
+
+**Reading.** The mechanism works and is safe, but at these budgets it buys little. Where it could buy more: (1) with `cullInSelection` on, the freed budget stays in the frustum (the legacy option the library keeps for this); (2) a cheaper test (a tiled min-height pyramid of the real terrain instead of summed Gaussians) is also the form the real terrain needs; (3) a lower cap with the hook against a higher cap without it. None of these is measured yet.
+
+**Not done.** The three options above; real terrain (`nodeRange`); the sphere (a leaf on a sphere is not an axis-aligned square); moving-camera visual check for holes at the shore (the geometry audit is the safety evidence, no one has looked); the hook inside `<flatWater>`/`<planetWater>`, which do not exist yet.
+
 ## Scope history
 
 <!-- tri:scope-history -->

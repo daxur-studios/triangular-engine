@@ -26,6 +26,7 @@ export * from './lod-cell-planet-heights';
 export * from './lod-cell-planet-lookup';
 export * from './lod-detail-noise';
 export * from './lod-detail-profile';
+export * from './lod-cell-detail-profile';
 export * from './lod-ground-query';
 export * from './lod-surface-mesh';
 export * from './lod-terrain-body';

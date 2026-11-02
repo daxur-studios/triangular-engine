@@ -87,6 +87,11 @@ export interface LodTerrainSettings {
 export type LodMorphCulling = 'off' | 'bent-bounds';
 
 /** The camera's world position and axes, which {@link LodTerrainBody.update} reads from a `PerspectiveCamera`. */
+/** The camera may move this share of its height above the surface before a body reselects: a far body is not rebuilt every frame. */
+const CAMERA_SLACK = 0.005;
+/** Pixels the frustum may turn before a body reselects; only leaves at the screen edge can show it. */
+const FRUSTUM_SLACK_PX = 2;
+
 const AXES: { right: Vec3; up: Vec3; forward: Vec3 } = { right: [1, 0, 0], up: [0, 1, 0], forward: [0, 0, -1] };
 
 /**
@@ -191,6 +196,7 @@ export class LodTerrainBody {
     this.selector = new LodSelector({
       domain, patchCells: settings.patchCells, mode: 'distance', fixedLevel: 5, cellPixels: Math.max(PIXEL_FLOOR, settings.cellPixels),
       leafCap: settings.leafCap, heightBoundM: this.source.boundM, cull: settings.cull, hysteresis: settings.hysteresis,
+      cameraSlack: CAMERA_SLACK, frustumSlackPx: FRUSTUM_SLACK_PX,
       ...(this.source.nodeRange ? { heightRanges: { nodeRange: this.source.nodeRange.bind(this.source) } } : {}),
     });
     if (this.geometryHook) this.selector.setGeometryHook(this.geometryHook);

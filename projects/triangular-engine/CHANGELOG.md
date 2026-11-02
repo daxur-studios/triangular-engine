@@ -1,5 +1,7 @@
 # Changelog
 
+- `triangular-engine/lod-surface`: `LodTerrainBody.setWireframe` (and the surface's) no longer flags the material for recompile when the wireframe value is unchanged. `<planet-terrain>` calls it on every update, so with a moving sun or body each terrain material had its shader cache key rebuilt every frame (about 8 ms per body in a four-body scene, measured in a consumer app with the clock running). No API change.
+
 - `triangular-engine/lod-surface`: a node cover hook for the selector (Plan 080, w2), so a surface that something else completely hides stops taking leaf budget (water under land). New `NodeCoverHook` (`covered(node, selector)`), `LodSelector.setCoverHook`, `LodSelector.cover`, `LodSelector.invalidateCover` and `LodTerrainBody.setCoverHook` / `invalidateCover` (kept across `configure`). A covered leaf is never drawn and asks for no split (the 2:1 balance can still split it); the answer is remembered per node, so it must not depend on the camera. New `SelectorStats.covered` counts the covered leaves in the frustum, and `stats.drawn` no longer includes them. Without a hook the selection is unchanged bit for bit. `SelectorStats` gains a required field, so code that builds one by hand must add `covered: 0`.
 
 - `triangular-engine/lod-surface`: `cellPlanetHeights` and `<planet [world]>` now carry the optional `terrain` policy through worker baking and the cell-colour world. Terrain changes participate in bake comparison and world cache identity, keeping illustrative relief consistent between rendered terrain and CPU queries.

@@ -244,7 +244,8 @@ describe('PlanetTerrainComponent', () => {
       fixture.componentRef.setInput('leafCap', 512);
       fixture.detectChanges();
       beforeRender$.next();
-      expect(compileAsync).toHaveBeenCalledTimes(2);
+      // The replacement waits for the first compile: the renderer cannot compile two things at once.
+      expect(compileAsync).toHaveBeenCalledTimes(1);
 
       pending[0].resolve();
       await flush();

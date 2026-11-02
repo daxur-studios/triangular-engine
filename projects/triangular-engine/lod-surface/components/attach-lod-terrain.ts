@@ -28,6 +28,25 @@ interface CompilingRenderer {
   compileAsync?(object: Object3D, camera: Camera, targetScene: Scene): Promise<void>;
 }
 
+/** Per renderer, the compile in flight (and those queued behind it), see {@link serialCompile}. */
+const compileTails = new WeakMap<object, Promise<void>>();
+
+/**
+ * Runs `run` (which must not reject) once the renderer's earlier compiles have finished; at once when it has none.
+ * `WebGPURenderer.compileAsync` keeps its precompile state in a single slot, so two compiles that overlap (two terrains
+ * rebuilt in the same frame, or one rebuilt while another still compiles) make the second `_finishPreCompile` throw and leave
+ * the renderer's call depth raised: every later render is then treated as nested and nothing reaches the canvas. The
+ * failure is only reported on `engine.error$`, so the scene just stops with no console error.
+ */
+function serialCompile(renderer: object, run: () => Promise<void>): void {
+  const tail = compileTails.get(renderer);
+  const next = tail ? tail.then(run) : run();
+  compileTails.set(renderer, next);
+  void next.then(() => {
+    if (compileTails.get(renderer) === next) compileTails.delete(renderer);
+  });
+}
+
 /**
  * Shared wiring of `<planetTerrain>` and `<flatTerrain>`; call it from a field initializer or constructor (it uses
  * `effect`). The body is made on the first run of the effect, when the required inputs are set, and added to the engine
@@ -99,11 +118,16 @@ export function attachLodTerrain(engine: EngineService, destroyRef: DestroyRef, 
       if (failure) report(failure.error);
     };
     guard = setTimeout(() => finish({ error: new Error(`Pipeline compilation did not finish in ${COMPILE_GUARD_MS / 1000} s`) }), COMPILE_GUARD_MS);
-    try {
-      renderer.compileAsync(mesh, engine.camera, engine.scene).then(() => finish(), (error: unknown) => finish({ error }));
-    } catch (error) {
-      finish({ error });
-    }
+    serialCompile(renderer, async () => {
+      // A rebuild (or the end of this terrain) while it waited for an earlier compile makes this one pointless.
+      if (destroyed || warming !== mesh) return;
+      try {
+        await renderer.compileAsync!(mesh, engine.camera, engine.scene);
+        finish();
+      } catch (error) {
+        finish({ error });
+      }
+    });
   };
 
   const frame = engine.beforeRender$.subscribe(() => {

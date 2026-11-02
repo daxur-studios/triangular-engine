@@ -393,3 +393,51 @@ describe('Plan 080 selector cover hook', () => {
     }
   });
 });
+
+describe('selector view slack', () => {
+  const FAR = 4_000_000;
+
+  it('keeps the tree while the camera moves less than its share of the height, and reselects past it', () => {
+    const selector = new LodSelector(settings({ cameraSlack: 0.005 }));
+    selector.select(view(FAR));
+    const built = selector.version;
+    selector.select(view(FAR, 1_000));
+    expect(selector.version).toBe(built);
+    selector.select(view(FAR, 100_000));
+    expect(selector.version).toBe(built + 1);
+  });
+
+  it('reselects for any movement without slack, and near the ground even with it', () => {
+    const exact = new LodSelector(settings());
+    exact.select(view(FAR));
+    exact.select(view(FAR, 1));
+    expect(exact.version).toBe(2);
+    const slack = new LodSelector(settings({ cameraSlack: 0.005 }));
+    slack.select(view(2));
+    slack.select(view(2, 0.1));
+    expect(slack.version).toBe(2);
+  });
+
+  it('compares with the last selection, so small moves cannot add up', () => {
+    const selector = new LodSelector(settings({ cameraSlack: 0.005 }));
+    selector.select(view(FAR));
+    const built = selector.version;
+    for (let step = 1; step <= 10; step++) selector.select(view(FAR, step * 5_000));
+    expect(selector.version).toBeGreaterThan(built);
+  });
+
+  it('keeps the tree for a turn under the frustum allowance and rebuilds past it', () => {
+    const selector = new LodSelector(settings({ frustumSlackPx: 2 }));
+    const a = view(FAR);
+    selector.select(a);
+    const built = selector.version;
+    const b = view(FAR);
+    b.frustum[0] = PIXEL;
+    selector.select(b);
+    expect(selector.version).toBe(built);
+    const c = view(FAR);
+    c.frustum[0] = 3 * PIXEL;
+    selector.select(c);
+    expect(selector.version).toBe(built + 1);
+  });
+});

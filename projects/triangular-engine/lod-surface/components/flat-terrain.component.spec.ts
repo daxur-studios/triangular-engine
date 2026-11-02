@@ -110,6 +110,50 @@ describe('FlatTerrainComponent', () => {
     fixture.destroy();
   });
 
+  it('never runs two compileAsync calls at once on a renderer, and skips a mesh that was replaced while it waited', async () => {
+    const resolvers: (() => void)[] = [];
+    let running = 0;
+    let mostRunning = 0;
+    const compileAsync = jasmine.createSpy('compileAsync').and.callFake(() => {
+      mostRunning = Math.max(mostRunning, ++running);
+      return new Promise<void>((resolve) => resolvers.push(() => { running--; resolve(); }));
+    });
+    engine.renderer = { isWebGPURenderer: true, domElement: { height: 1080 }, compileAsync };
+    const flush = () => new Promise<void>((resolve) => setTimeout(resolve));
+    const fixture = TestBed.createComponent(FlatTerrainComponent);
+    fixture.componentRef.setInput('size', 100_000);
+    fixture.detectChanges();
+    const first = fixture.componentInstance.terrain()!;
+    const firstMesh = first.surface.mesh;
+    beforeRender$.next();
+    expect(compileAsync).toHaveBeenCalledTimes(1);
+
+    // Two rebuilds while the first compile is still running: nothing starts yet.
+    fixture.componentRef.setInput('patchCells', 32);
+    fixture.detectChanges();
+    beforeRender$.next();
+    const secondMesh = first.surface.mesh;
+    fixture.componentRef.setInput('patchCells', 64);
+    fixture.detectChanges();
+    beforeRender$.next();
+    expect(compileAsync).toHaveBeenCalledTimes(1);
+    expect(first.object.visible).toBeFalse();
+
+    // The first compile ends; only the current mesh is compiled next (the one in between was replaced).
+    resolvers[0]();
+    await flush();
+    expect(compileAsync).toHaveBeenCalledTimes(2);
+    expect(compileAsync.calls.argsFor(1)[0]).toBe(first.surface.mesh);
+    expect(compileAsync.calls.argsFor(1)[0]).not.toBe(firstMesh);
+    expect(compileAsync.calls.argsFor(1)[0]).not.toBe(secondMesh);
+    resolvers[1]();
+    await flush();
+    beforeRender$.next();
+    expect(first.object.visible).toBeTrue();
+    expect(mostRunning).toBe(1);
+    fixture.destroy();
+  });
+
   it('refuses cell-planet heights with a clear error: that source is a sphere source', async () => {
     const heights = await cellPlanetHeights(
       (source, layout, planet) => Promise.resolve({ ...runBake(source, layout, planet), roundTripMs: 0 }),

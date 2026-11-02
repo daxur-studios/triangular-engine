@@ -88,6 +88,19 @@ export interface SelectorSettings {
    * so a new request must beat a kept split by that margin to take its place in the budget.
    */
   readonly hysteresis?: number;
+  /**
+   * Sphere domains only (absent or 0: any camera movement reselects, as before). The tree is kept while the camera has moved
+   * less than this fraction of its height above the surface bound since the last selection, so a body far away, whose tree
+   * cannot change from a small move, is not rebuilt every frame. Close to the ground the allowance is centimetres and every
+   * frame still reselects. Measured from the last selection, not the last frame, so slow drift cannot add up.
+   */
+  readonly cameraSlack?: number;
+  /**
+   * Pixels the frustum's side planes may turn since the last selection before the tree is rebuilt (absent or 0: any change
+   * rebuilds). Only the drawn set depends on the frustum, so the effect is a leaf at the screen edge drawn or dropped this
+   * many pixels of turn late.
+   */
+  readonly frustumSlackPx?: number;
 }
 
 /** The camera as the selector sees it, rewritten in place every frame. */
@@ -524,9 +537,20 @@ export class LodSelector {
     const key = this.viewKey;
     const camera = view.camera;
     const frustum = view.frustum;
-    let same = this.hasViewKey && key[15] === view.pixelAngle;
-    for (let k = 0; k < 3; k++) if (key[k] !== camera[k]) same = false;
-    for (let k = 0; k < 12; k++) if (key[3 + k] !== frustum[k]) same = false;
+    const { cameraSlack = 0, frustumSlackPx = 0, domain, heightBoundM } = this.settings;
+    // The allowance is a share of the height above the surface bound, so it is metres far from the body and centimetres near it.
+    const moveSlack = domain.kind === 'sphere' && cameraSlack > 0 ? cameraSlack * Math.max(0, Math.hypot(camera[0], camera[1], camera[2]) - domain.sizeM - heightBoundM) : 0;
+    const turnSlack = frustumSlackPx * view.pixelAngle;
+    let same = this.hasViewKey && Math.abs(key[15] - view.pixelAngle) <= (moveSlack > 0 || turnSlack > 0 ? 1e-3 * view.pixelAngle : 0);
+    if (same) {
+      let moved = 0;
+      for (let k = 0; k < 3; k++) {
+        const d = key[k] - camera[k];
+        moved += d * d;
+      }
+      if (moved > moveSlack * moveSlack) same = false;
+      for (let k = 0; k < 12; k++) if (Math.abs(key[3 + k] - frustum[k]) > turnSlack) same = false;
+    }
     // A refresh still spread over several passes is not settled: the same view measures its next nodes.
     if (same) return this.stats.geometryStale === 0;
     for (let k = 0; k < 3; k++) key[k] = camera[k];

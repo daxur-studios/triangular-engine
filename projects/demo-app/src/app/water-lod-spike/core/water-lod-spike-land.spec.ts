@@ -166,26 +166,3 @@ describe('water LOD spike w2: the selector cover hook on the water body', () => 
     expect(flat(CEILING_M + COVER_MARGIN_M + 1).covered(leaf, selector)).toBe(true);
   });
 });
-
-describe('PROBE cover hook cost', () => {
-  it('LANDPROBE moving camera', () => {
-    const run = (withHook: boolean) => {
-      const settings = planeSelectorSettings(PLANE_M, 4, 4096, CEILING_M);
-      const selector = new LodSelector(settings);
-      if (withHook) selector.setCoverHook(createLandCoverHook());
-      const times: number[] = [];
-      for (let k = 0; k < 600; k++) {
-        const x = -2_000 + k * 12;
-        const v = selectorViewFor(view([x, 200, 600 + k * 3], [x, 0, -600]));
-        const t = performance.now();
-        selector.select(v);
-        times.push(performance.now() - t);
-      }
-      times.sort((a, b) => a - b);
-      return { median: times[300], p95: times[570], max: times[599], covered: selector.stats.covered };
-    };
-    run(false); run(true);
-    console.log('LANDPROBE', JSON.stringify({ off: run(false), on: run(true) }));
-    expect(true).toBe(true);
-  });
-});
