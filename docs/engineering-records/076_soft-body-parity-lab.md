@@ -101,6 +101,10 @@ page skips a component whose body is sampled in the frame it is destroyed.
   (+456 KB baseline, no growth between samples).
 - `jolt-soft-body-examples@v1` quick headless run: pass; cloth 1.38 % / 2.60 % shape strain,
   pressure volume ratio 1.01, penetration 0.00 m.
+- `jolt-soft-body-examples@v1` quick visible-browser run
+  `2026-10-31T20-37-00-683Z_visible-browser_quick_5d03af99-7c83be8f`: pass; cloth 1.35 % / 2.60 %
+  shape strain, pressure volume ratio 1.02, penetration 0.00 m. The runner redid `cloth-spheres`
+  twice because the window lost focus (visible profile only), not because of a failure.
 - `tsc -p projects/demo-app/tsconfig.app.json --noEmit`: pass.
 
 **Limitation.** The suite's "no console error" check stops with the run, so it did not catch this

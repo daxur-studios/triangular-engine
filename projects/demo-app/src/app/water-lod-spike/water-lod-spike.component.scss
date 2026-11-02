@@ -66,6 +66,26 @@ button {
   }
 }
 
+.quality {
+  display: grid;
+  gap: 0.25rem;
+
+  input {
+    width: 100%;
+  }
+
+  .tiers {
+    color: #a9bccd;
+    display: flex;
+    justify-content: space-between;
+
+    .current {
+      color: white;
+      font-weight: 700;
+    }
+  }
+}
+
 p {
   color: #a9bccd;
   margin: 0;

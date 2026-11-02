@@ -3,6 +3,7 @@ import { MeshBasicNodeMaterial } from 'three/webgpu';
 import type { EngineService } from 'triangular-engine';
 import type { HeightSource } from 'triangular-engine/lod-surface/core';
 import { createWaterLodSpikeMaterial } from './water-lod-spike-material';
+import { waterLodSpikeQuality, type IWaterLodSpikeQuality, type WaterLodSpikeQualityId } from './water-lod-spike-quality';
 import { WATER_LOD_SPIKE_UNIFORMS, createWaterLodSpikeWaves } from './water-lod-spike-waves';
 
 export interface IWaterLodSpikeDiagnostics {
@@ -22,6 +23,11 @@ export interface IWaterLodSpikeSceneHandle {
   setFilter(enabled: boolean): void;
   /** Roughness transfer on or off (off is the colour-step control). */
   setTransfer(enabled: boolean): void;
+  /**
+   * Applies a quality tier to the filter bias and the vertex filter's cell size, and returns it. The mesh density
+   * (`cellPixels`, `leafCap`) is `<flatTerrain>` inputs, so the page sets them from the returned tier. The filter-off arms ignore the bias.
+   */
+  setQuality(id: WaterLodSpikeQualityId): IWaterLodSpikeQuality;
   /** Waves move with time while true; false freezes them at the current time. */
   setAnimating(enabled: boolean): void;
   /** Sets the wave time in seconds (tests use a fixed time). */
@@ -49,6 +55,7 @@ export function createWaterLodSpikeScene(
   const uniforms = WATER_LOD_SPIKE_UNIFORMS;
   let animating = true;
   let lastTickMs = 0;
+  let quality = waterLodSpikeQuality('ultra');
 
   let lastSampleMs = 0;
   const tickSubscription = engine.tick$.subscribe(() => {
@@ -62,10 +69,9 @@ export function createWaterLodSpikeScene(
     }
     if (nowMs - lastSampleMs >= 500) {
       lastSampleMs = nowMs;
-      onDiagnostics({
-        drawCalls: engine.renderer.info.render.calls,
-        triangles: engine.renderer.info.render.triangles,
-      });
+      // WebGPU's `calls` counts cumulatively; `drawCalls` is the last frame's (the FPS panel reads it the same way).
+      const render = engine.renderer.info.render as { calls: number; drawCalls?: number; triangles: number };
+      onDiagnostics({ drawCalls: render.drawCalls ?? render.calls, triangles: render.triangles });
     }
   });
 
@@ -79,6 +85,12 @@ export function createWaterLodSpikeScene(
     },
     setFilter(enabled: boolean): void {
       uniforms.filter.value = enabled ? 1 : 0;
+    },
+    setQuality(id: WaterLodSpikeQualityId): IWaterLodSpikeQuality {
+      quality = waterLodSpikeQuality(id);
+      uniforms.lodBias.value = quality.lodBias;
+      uniforms.cellPixels.value = quality.cellPixels;
+      return quality;
     },
     setTransfer(enabled: boolean): void {
       uniforms.transfer.value = enabled ? 1 : 0;

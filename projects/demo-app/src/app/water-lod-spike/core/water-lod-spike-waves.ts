@@ -105,6 +105,8 @@ export const WATER_LOD_SPIKE_UNIFORMS = {
   visibility: uniform(0.4),
   /** Scale of the lost slope covariance. Calibrated against the supersampled reference: the sinusoid sum is less heavy-tailed than the Gaussian that stands in for it (material). */
   lostScale: uniform(0.8),
+  /** Multiplies every wave's pixel footprint in the shading filter: 2 fades each wave out at twice the wavelength (quality tier). */
+  lodBias: uniform(1),
 };
 
 /** Footprint/wavelength ratio where the shading weight starts to fall, and where it reaches 0 (wavelengths of 2.9 and 1.4 pixels). */
@@ -186,30 +188,52 @@ function spacingWeightNode(spacing: any, wave: IWaterWave): any {
  * own direction), as `lostXX`, `lostXZ`, `lostZZ`.
  */
 export function createWaterLodSpikeShadingNodes(position: any): { gradient: any; lostXX: any; lostXZ: any; lostZZ: any } {
-  // A wave whose weight has fallen to 0 adds nothing but its lost variance, so its cosine is skipped. Neighbouring pixels
-  // drop the same waves, so the branch is coherent. The derivatives come first, in uniform control flow.
+  // The lost covariance starts at its total (every wave dropped) and each wave that is still in the shading takes its
+  // part back, so a wave whose footprint is too wide costs one cheap test: no smoothstep, no cosine, no accumulation.
+  // Neighbouring pixels drop the same waves, so the branch is coherent. The derivatives come first, in uniform control flow.
+  let totalXX = 0;
+  let totalXZ = 0;
+  let totalZZ = 0;
+  for (const wave of WATER_LOD_SPIKE_WAVES) {
+    const slope = (wave.amplitudeM * 2 * Math.PI) / wave.wavelengthM;
+    totalXX += 0.5 * slope * slope * wave.dirX * wave.dirX;
+    totalXZ += 0.5 * slope * slope * wave.dirX * wave.dirZ;
+    totalZZ += 0.5 * slope * slope * wave.dirZ * wave.dirZ;
+  }
   const shading: any = Fn(() => {
     const ddx = dFdx(vec2(position.x, position.z));
     const ddy = dFdy(vec2(position.x, position.z));
     const gradient = vec3(0, 0, 0).toVar();
-    const lostXX = float(0).toVar();
-    const lostXZ = float(0).toVar();
-    const lostZZ = float(0).toVar();
+    const lostXX = float(totalXX).toVar();
+    const lostXZ = float(totalXZ).toVar();
+    const lostZZ = float(totalZZ).toVar();
     for (const wave of WATER_LOD_SPIKE_WAVES) {
       const k = (2 * Math.PI) / wave.wavelengthM;
       const direction = vec2(wave.dirX, wave.dirZ);
-      // Metres per pixel along this wave's direction, summed over both screen axes.
-      const footprint = abs(dot(ddx, direction)).add(abs(dot(ddy, direction)));
-      const filtered = float(1).sub(smoothstep(FOOTPRINT_FADE_START, FOOTPRINT_FADE_END, footprint.div(wave.wavelengthM)));
-      const weight = mix(float(1), filtered, WATER_LOD_SPIKE_UNIFORMS.filter).toVar();
+      // Metres per pixel along this wave's direction, summed over both screen axes, in wavelengths.
+      const ratio = abs(dot(ddx, direction)).add(abs(dot(ddy, direction))).mul(1 / wave.wavelengthM);
       const slope = wave.amplitudeM * k;
-      If(weight.greaterThan(0), () => {
-        gradient.addAssign(vec3(wave.dirX, 0, wave.dirZ).mul(cos(wavePhase(position, wave)).mul(slope).mul(weight)));
+      // With the filter off the test passes for every wave; the quality bias widens every footprint.
+      const gate = ratio.mul(WATER_LOD_SPIKE_UNIFORMS.filter).mul(WATER_LOD_SPIKE_UNIFORMS.lodBias);
+      If(gate.lessThan(FOOTPRINT_FADE_END), () => {
+        const crest = cos(wavePhase(position, wave)).mul(slope).toVar();
+        const keptVariance = 0.5 * slope * slope;
+        // Most kept waves are resolved (weight 1): no fade to evaluate and a constant share of the variance to take back.
+        If(gate.lessThan(FOOTPRINT_FADE_START), () => {
+          gradient.addAssign(vec3(wave.dirX, 0, wave.dirZ).mul(crest));
+          lostXX.subAssign(keptVariance * wave.dirX * wave.dirX);
+          lostXZ.subAssign(keptVariance * wave.dirX * wave.dirZ);
+          lostZZ.subAssign(keptVariance * wave.dirZ * wave.dirZ);
+        }).Else(() => {
+          // Only reached with the filter on (gate above the fade start), where the gate is the biased ratio.
+          const weight = float(1).sub(smoothstep(FOOTPRINT_FADE_START, FOOTPRINT_FADE_END, gate));
+          gradient.addAssign(vec3(wave.dirX, 0, wave.dirZ).mul(crest.mul(weight)));
+          const kept = weight.mul(weight).mul(keptVariance);
+          lostXX.subAssign(kept.mul(wave.dirX * wave.dirX));
+          lostXZ.subAssign(kept.mul(wave.dirX * wave.dirZ));
+          lostZZ.subAssign(kept.mul(wave.dirZ * wave.dirZ));
+        });
       });
-      const lost = float(1).sub(weight.mul(weight)).mul(0.5 * slope * slope);
-      lostXX.addAssign(lost.mul(wave.dirX * wave.dirX));
-      lostXZ.addAssign(lost.mul(wave.dirX * wave.dirZ));
-      lostZZ.addAssign(lost.mul(wave.dirZ * wave.dirZ));
     }
     return mat3(gradient, vec3(lostXX, lostXZ, lostZZ), vec3(0, 0, 0));
   })();
@@ -268,3 +292,4 @@ export function createWaterLodSpikeWaves(): HeightSource {
     },
   } as HeightSource;
 }
+

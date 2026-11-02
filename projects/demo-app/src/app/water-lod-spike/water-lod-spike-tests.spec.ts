@@ -2,6 +2,7 @@ import type { TestContext, TestScenario } from 'triangular-engine/testing';
 import type { ILuminanceImage } from './core/water-lod-spike-image-metrics';
 import {
   createWaterLodSpikeTestAdapter,
+  WATER_LOD_SPIKE_TEST_HISTORY,
   type WaterLodSpikeTestHost,
   type WaterLodSpikeTestSettings,
 } from './water-lod-spike-tests';
@@ -31,6 +32,7 @@ function makeHost(overrides: Partial<WaterLodSpikeTestHost> = {}): WaterLodSpike
       calls.push('end');
       return [16.7, 16.6, 6.1];
     },
+    takeCpuFrameMs: () => [2.5, 2.6, 2.4],
     gpuFrameMs: () => 0.8,
     setView: (view) => calls.push(`setView:${view ? 'held' : 'free'}`),
     setFilter: (enabled) => {
@@ -38,6 +40,7 @@ function makeHost(overrides: Partial<WaterLodSpikeTestHost> = {}): WaterLodSpike
     },
     setTransfer: () => undefined,
     setPixelRatio: () => undefined,
+    setQuality: () => undefined,
     waitFrames: async () => undefined,
     readFrame: (jitterX, jitterY): ILuminanceImage => {
       const values = new Float32Array(WIDTH * HEIGHT);
@@ -120,6 +123,15 @@ describe('createWaterLodSpikeTestAdapter', () => {
     expect(held.metrics.find((metric) => metric.name === 'GPU frame')?.samples).toEqual([0.8, 0.8, 0.8]);
   });
 
+  it('records the CPU frame time of the measured window', async () => {
+    const host = makeHost();
+    const adapter = createWaterLodSpikeTestAdapter(host);
+
+    const observation = await adapter.measure(SOLID_SCENARIO, makeContext(host.calls));
+
+    expect(observation.metrics.find((metric) => metric.name === 'CPU frame')?.samples).toEqual([2.5, 2.6, 2.4]);
+  });
+
   it('reports a failed check when the water body has not drawn', async () => {
     const host = makeHost({ counts: () => ({ drawCalls: 0, triangles: 0 }) });
     const adapter = createWaterLodSpikeTestAdapter(host);
@@ -142,6 +154,29 @@ describe('createWaterLodSpikeTestAdapter', () => {
     expect(host.calls).toEqual(['setWireframe:true', 'setView:held', 'setWireframe:false', 'setView:free']);
   });
 
+  it('holds the scenario quality tier and hands the page its own back afterwards', async () => {
+    const tiers: (string | null)[] = [];
+    const host = makeHost({ setQuality: (id) => tiers.push(id) });
+    const adapter = createWaterLodSpikeTestAdapter(host);
+    const context = makeContext(host.calls);
+
+    const snapshot = await adapter.capture(context);
+    await adapter.apply({ ...SOLID_SCENARIO, settings: { wireframe: false, quality: 'low' } }, context);
+    await adapter.restore(snapshot, context);
+
+    expect(tiers).toEqual(['low', null]);
+  });
+
+  it('sweeps every quality tier at the grazing and looking-down views in the performance and aliasing suites', () => {
+    const latest = (id: string) => WATER_LOD_SPIKE_TEST_HISTORY.filter((suite) => suite.id === id).reduce((a, b) => (b.version > a.version ? b : a));
+    for (const suite of [latest('water-lod-spike-performance'), latest('water-lod-spike-aliasing')]) {
+      const tiers = new Set(suite.scenarios.map((scenario) => scenario.settings.quality));
+      expect([...tiers].sort()).toEqual(['high', 'low', 'medium', 'ultra']);
+      expect(new Set(suite.scenarios.map((scenario) => scenario.id)).size).toBe(suite.scenarios.length);
+    }
+    expect(latest('water-lod-spike-performance').scenarios.some((scenario) => scenario.id === 'down-ultra')).toBe(true);
+  });
+
   it('passes the aliasing gates when the filter removes the aliasing', async () => {
     const host = makeHost();
     const adapter = createWaterLodSpikeTestAdapter(host);
@@ -153,6 +188,21 @@ describe('createWaterLodSpikeTestAdapter', () => {
     expect(metric('shimmer, control')).toBeGreaterThan(100);
     expect(metric('water rows')).toBe(150);
     expect(observation.checks?.filter((c) => !c.passed).map((c) => JSON.stringify(c))).toEqual([]);
+  });
+
+  it('reports the metrics but no aliasing gates for an ungated case', async () => {
+    const host = makeHost();
+    const adapter = createWaterLodSpikeTestAdapter(host);
+
+    const observation = await adapter.measure({ ...ALIASING_SCENARIO, settings: { ...ALIASING_SCENARIO.settings, gated: false } }, makeContext(host.calls));
+
+    expect(observation.metrics.some((metric) => metric.name === 'shimmer, filtered')).toBe(true);
+    expect(observation.checks?.map((check) => check.name)).toEqual(['water drawn, not blank', 'water rows measured']);
+  });
+
+  it('gates only the ultra tier in the aliasing suite', () => {
+    const suite = WATER_LOD_SPIKE_TEST_HISTORY.filter((entry) => entry.id === 'water-lod-spike-aliasing').reduce((a, b) => (b.version > a.version ? b : a));
+    for (const scenario of suite.scenarios) expect(scenario.settings.gated).toBe(scenario.settings.quality === 'ultra');
   });
 
   it('fails the shimmer gate when the filter changes nothing', async () => {

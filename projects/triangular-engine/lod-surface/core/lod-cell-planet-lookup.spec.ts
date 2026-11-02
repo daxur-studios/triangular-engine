@@ -62,6 +62,26 @@ describe('cell planet lookup', () => {
     expect(() => resolveCellPlanetWorld({ seed: -1, cellCount: 60 })).toThrow();
   });
 
+  it('includes illustrative terrain in the rebuilt world and its cache identity', () => {
+    const terrain = { version: 1 as const, kind: 'illustrative' as const, lowlandReliefScale: 0.12 };
+    const plain = resolveCellPlanetWorld({ seed: 3, cellCount: 60 });
+    const shaped = resolveCellPlanetWorld({ seed: 3, cellCount: 60, terrain });
+    const equivalent = resolveCellPlanetWorld({
+      seed: 3,
+      cellCount: 60,
+      terrain: { ...terrain, mountainRelief: 0.32 },
+    });
+
+    expect(shaped).not.toBe(plain);
+    expect(equivalent).toBe(shaped);
+    const land = shaped.graph.cells.find((cell) => shaped.isLand(cell.center));
+    expect(land).toBeDefined();
+    expect(shaped.sampler.sample(land!.center).elevation).not.toBeCloseTo(
+      plain.sampler.sample(land!.center).elevation,
+      5,
+    );
+  });
+
   it('lowers the globe by the sea level in metres so its sea meets the terrain\'s', () => {
     expect(seaAlignedGlobeRadius(10_000, 0.3232, 150)).toBeCloseTo(10_000 - 48.48, 6);
     expect(seaAlignedGlobeRadius(600_000, world, 1200)).toBeCloseTo(600_000 - world.tectonics.seaLevelElevation * 1200, 6);

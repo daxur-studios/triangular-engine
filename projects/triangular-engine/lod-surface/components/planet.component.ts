@@ -3,6 +3,7 @@ import {
 } from '@angular/core';
 import { Group, type Object3D, type QuaternionTuple, type Vector3Tuple } from 'three';
 import { EngineService, PLANET_CONTEXT, type PlanetContext } from 'triangular-engine';
+import { illustrativeTerrainKey } from 'triangular-engine/worldgen';
 import {
   cellPlanetHeights, resolveCellPlanetWorld, runBake, seaAlignedGlobeRadius,
   type BakeClient, type CellPlanetHeightsOptions, type CellPlanetSource, type HeightSource, type TextureHeightSource, type Vec3,
@@ -46,7 +47,8 @@ function sameWorld(a: PlanetWorld | undefined, b: PlanetWorld | undefined): bool
   if (!a || !b) return false;
   return a.seed === b.seed && a.cellCount === b.cellCount && a.relaxationIterations === b.relaxationIterations
     && a.heightScaleM === b.heightScaleM && a.bakeK === b.bakeK
-    && a.worldProfileKind === b.worldProfileKind && a.plateCount === b.plateCount && a.jitter === b.jitter;
+    && a.worldProfileKind === b.worldProfileKind && a.plateCount === b.plateCount && a.jitter === b.jitter
+    && illustrativeTerrainKey(a.terrain) === illustrativeTerrainKey(b.terrain);
 }
 
 /** The default `bake`: runs the bake on the calling thread, after yielding once so the page can paint first. */
@@ -167,6 +169,7 @@ export class PlanetComponent implements PlanetContext {
       ...(world.worldProfileKind === undefined ? {} : { worldProfileKind: world.worldProfileKind }),
       ...(world.plateCount === undefined ? {} : { plateCount: world.plateCount }),
       ...(world.jitter === undefined ? {} : { jitter: world.jitter }),
+      ...(world.terrain === undefined ? {} : { terrain: world.terrain }),
     };
   });
 

@@ -1,4 +1,13 @@
-import { buildCellPlanetWorld, findCellNear, type ICellPlanetWorld, type IVec3, type WorldProfileKind } from 'triangular-engine/worldgen';
+import {
+  buildCellPlanetWorld,
+  findCellNear,
+  illustrativeTerrainKey,
+  resolveIllustrativeTerrain,
+  type ICellPlanetWorld,
+  type IIllustrativeTerrainConfig,
+  type IVec3,
+  type WorldProfileKind,
+} from 'triangular-engine/worldgen';
 import type { HeightSampler } from './lod-height-bake';
 import { groundFrame, type DomainKind, type Vec3 } from './lod-domain';
 
@@ -25,6 +34,8 @@ export interface CellPlanetDescription {
   readonly plateCount?: number;
   /** Voronoi jitter. Default 0.15. */
   readonly jitter?: number;
+  /** Optional illustrative relief policy shared by the renderer and CPU terrain queries. */
+  readonly terrain?: IIllustrativeTerrainConfig;
 }
 
 /**
@@ -61,6 +72,14 @@ export function parseCellPlanet(value: unknown): CellPlanetDescription {
     || typeof d.heightScaleM !== 'number' || !Number.isFinite(d.heightScaleM) || d.heightScaleM <= 0) {
     throw new Error(`Not a cell planet description: ${JSON.stringify(value)}`);
   }
+  let terrain: ReturnType<typeof resolveIllustrativeTerrain> | undefined;
+  if (d.terrain !== undefined) {
+    try {
+      terrain = resolveIllustrativeTerrain(d.terrain as IIllustrativeTerrainConfig);
+    } catch {
+      throw new Error(`Not a cell planet description: ${JSON.stringify(value)}`);
+    }
+  }
   return {
     seed: d.seed,
     cellCount: d.cellCount,
@@ -69,12 +88,13 @@ export function parseCellPlanet(value: unknown): CellPlanetDescription {
     ...(typeof d.worldProfileKind === 'string' ? { worldProfileKind: d.worldProfileKind as WorldProfileKind } : {}),
     ...(typeof d.plateCount === 'number' && Number.isInteger(d.plateCount) ? { plateCount: d.plateCount } : {}),
     ...(typeof d.jitter === 'number' && Number.isFinite(d.jitter) ? { jitter: d.jitter } : {}),
+    ...(terrain ? { terrain } : {}),
   };
 }
 
-/** What identifies the world itself (the height scale only multiplies its heights, so two scales share one world). */
+/** What identifies the generated world and relief (height scale only multiplies the resulting heights). */
 export const cellPlanetWorldKey = (d: CellPlanetDescription): string =>
-  `${d.seed}|${d.cellCount}|${d.relaxationIterations}|${d.jitter ?? 0.15}|${d.plateCount ?? 10}|${d.worldProfileKind ?? 'terran'}`;
+  `${d.seed}|${d.cellCount}|${d.relaxationIterations}|${d.jitter ?? 0.15}|${d.plateCount ?? 10}|${d.worldProfileKind ?? 'terran'}${illustrativeTerrainKey(d.terrain)}`;
 
 /** A built cell planet world and what its build cost. */
 export interface BuiltCellPlanet {
@@ -100,6 +120,7 @@ export function cellPlanetWorld(description: CellPlanetDescription, now: () => n
     ...(description.worldProfileKind ? { worldProfileKind: description.worldProfileKind } : {}),
     ...(description.plateCount !== undefined ? { plateCount: description.plateCount } : {}),
     ...(description.jitter !== undefined ? { jitter: description.jitter } : {}),
+    ...(description.terrain !== undefined ? { terrain: description.terrain } : {}),
   });
   const built = { world, buildMs: now() - began };
   worlds.set(key, built);

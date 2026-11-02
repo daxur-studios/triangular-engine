@@ -19,20 +19,21 @@ function fifthPower(x: any): any {
   return squared.mul(squared).mul(x);
 }
 
-/** Five-point Gauss-Hermite rule for a unit normal distribution (probabilists'): nodes and weights. */
+/**
+ * Three-point Gauss-Hermite rule for a unit normal distribution (probabilists'): nodes and weights. The 5 x 5 rule it
+ * replaced (25 samples) measured the same on the aliasing suite (worst colour error 3.8 against 3.6/255), so 9 samples do.
+ */
 const GAUSS_HERMITE = [
-  [-2.8569700138728056, 0.011257411327720691],
-  [-1.3556261799742659, 0.2220759220056126],
-  [0, 0.5333333333333333],
-  [1.3556261799742659, 0.2220759220056126],
-  [2.8569700138728056, 0.011257411327720691],
+  [-1.7320508075688772, 1 / 6],
+  [0, 2 / 3],
+  [1.7320508075688772, 1 / 6],
 ] as const;
 
 /**
  * Spike-local water material for plan 080 (W0b).
  *
  * The slope at a pixel is a distribution: the mean is the filtered wave gradient and the covariance is what the filter
- * removed (`createWaterLodSpikeShadingNodes`). The colour is the shading averaged over that distribution with a 5 x 5 Gauss-Hermite rule weighted by visible area, each sample
+ * removed (`createWaterLodSpikeShadingNodes`). The colour is the shading averaged over that distribution with a 3 x 3 Gauss-Hermite rule weighted by visible area, each sample
  * clamped to the displayable range first. That is what a supersampled pixel of the full surface shows, so the far water
  * keeps its colour where waves fade out, and a narrow glint on resolved waves does not sparkle.
  *

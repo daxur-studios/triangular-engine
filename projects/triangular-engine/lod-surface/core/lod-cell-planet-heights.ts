@@ -1,4 +1,4 @@
-import type { WorldProfileKind } from 'triangular-engine/worldgen';
+import type { IIllustrativeTerrainConfig, WorldProfileKind } from 'triangular-engine/worldgen';
 import type { CubeWarp } from './lod-domain';
 import { DEFAULT_BAKE_K } from './lod-height-bake';
 import type { BakeClient } from './lod-height-bake-client';
@@ -33,6 +33,8 @@ export interface CellPlanetHeightsOptions {
   readonly plateCount?: number;
   /** Voronoi jitter. Default 0.15. */
   readonly jitter?: number;
+  /** Optional terrain shaping; must match the world used for CPU queries, placement and colours. */
+  readonly terrain?: IIllustrativeTerrainConfig;
 }
 
 /**
@@ -47,8 +49,8 @@ export interface CellPlanetHeightsOptions {
  * // template: <planetTerrain [radius]="600_000" [heights]="heights()" />
  * ```
  *
- * **The parameters must match the ones the game used for `buildCellPlanetWorld`**: a different `seed`, `cellCount`,
- * `relaxationIterations` or `worldProfileKind` is a different planet.
+ * **The parameters must match the ones the game used for `buildCellPlanetWorld`**, including optional `terrain`; a
+ * different seed, topology, profile or relief policy is a different surface.
  *
  * Sphere only: a cell planet has no plane form, so passing the result to `<flatTerrain>` throws. Dispose the source
  * when you replace it (`heights.dispose()`).
@@ -65,6 +67,7 @@ export async function cellPlanetHeights(bake: BakeClient, options: CellPlanetHei
     ...(options.worldProfileKind ? { worldProfileKind: options.worldProfileKind } : {}),
     ...(options.plateCount !== undefined ? { plateCount: options.plateCount } : {}),
     ...(options.jitter !== undefined ? { jitter: options.jitter } : {}),
+    ...(options.terrain !== undefined ? { terrain: options.terrain } : {}),
   });
   if (!Number.isFinite(options.radius) || options.radius <= 0) throw new Error(`Cell planet radius must be positive: ${options.radius}`);
   const { baked } = await bake(

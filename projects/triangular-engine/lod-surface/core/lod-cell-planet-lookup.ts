@@ -124,7 +124,7 @@ export type CellPlanetSource =
       Partial<
         Pick<
           CellPlanetDescription,
-          'relaxationIterations' | 'worldProfileKind' | 'plateCount' | 'jitter'
+          'relaxationIterations' | 'worldProfileKind' | 'plateCount' | 'jitter' | 'terrain'
         >
       >);
 

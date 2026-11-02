@@ -84,6 +84,60 @@ Before the calibration the same suite failed every view (colour error 7.5 to 21.
 
 **Checks run.** `ng test demo-app` for `water-lod-spike` specs: 25 passed. Suites `water-lod-spike-aliasing` v1 and `water-lod-spike-performance` v2 run through `npm run test:run` with `--profile headless-hardware --noisy`.
 
+### 2026-11-02 (later): cost pass on the water shader
+
+**Trigger.** The owner looked at the water in a visible browser (NVIDIA, 2560 x 1308): the look is right, the cost leaves little headroom.
+
+**Measuring.** `water-lod-spike-performance` v3 renders the grazing view at 0.5, 1 and 2 times the pixel ratio and records CPU frame time as well as GPU time, so the cost splits into a fixed part and a part per pixel. Switching the colour to a constant gave 0.4 ms at every size: vertices, 1.2 million triangles and submission are cheap. A quadrature-only arm (no wave loop) added about 0.6 ms at 2x. The 64-wave loop in the fragment shader was the rest, about 70 % of the frame. CPU frame time is 0.5 to 0.7 ms: draw calls are not the cost.
+
+**Changes.** (1) Waves whose footprint has passed the fade are skipped in the fragment and vertex stages (a branch, coherent between neighbours); the lost covariance is the total minus the share of the waves still kept, so a skipped wave costs one test. (2) Resolved waves (weight 1) skip the fade arithmetic. (3) Fresnel by multiplication instead of a power. (4) One shading sample where the lost variance is negligible. (5) The quadrature is 3 x 3 instead of 5 x 5.
+
+**Result, GPU frame in ms on the headless NVIDIA run (noisy and throttled; one run each, differences under 0.2 ms are noise):**
+
+| Pixels | Before | After |
+| --- | --- | --- |
+| 0.25x (0.5 ratio) | 0.8 | 0.7 |
+| 1x (2527 x 1077) | 1.7 | 1.3 |
+| 4x (2 ratio) | 5.5 | 3.2 |
+
+The aliasing suite gives the same numbers as before (shimmer 2.4 / 6.1 / 8.5, worst colour error 0.5 / 2.0 / 3.6 of 255) and passes. Items 1 and 2 are exact (the image is unchanged); item 5 changes the image slightly and measured no worse.
+
+**Not done, and what is left.** The fragment wave loop is still most of the frame: about 0.9 ms of 1.3 at 1x, and a GPU several times slower scales it. Fewer waves (64 to about 40) or a texture-based normal field would cut it further, and either changes the look the owner approved, so neither was done. The window size, the adapter and the power profile of the owner's runs are recorded only partly. The draw-call count in `water-lod-spike-performance` v3 differs between the three cases (3200 to 8200), so it probably accumulates; not investigated. Q1 (water pass p95 at 2560 x 1440 on a verified adapter) is still not measured.
+
+### 2026-11-02 (later still): quality tiers, and why close water looks cheap
+
+**Trigger.** The owner compared two views in a visible browser: looking at a small patch of water from above, the GPU frame reads 0.2 ms; grazing to the horizon it reads 2.0 ms. The owner asked for a quality setting to see look and cost together, and for a status of the plan.
+
+**Why the two views differ.** The cost is per water pixel plus the mesh. The close view covers a small part of the screen. Water filling the screen from 12 m up (56 degrees down, `down-*` cases) costs more than the grazing view, not less: every pixel is near water with all 64 waves resolved, so the fragment wave loop cannot skip any. In the same 3-repetition run on the Ultra tier: grazing 1.6 ms, looking down 1.8 ms. The worst case for the water is full-screen near water, not the horizon.
+
+**Correction to the earlier entries.** The draw-call counts recorded above (3264, 3200 to 8200) were `renderer.info.render.calls`, which WebGPU counts cumulatively; the FPS panel already reads `drawCalls` for that reason. The spike now reads `drawCalls` too: the water is 2 draw calls per frame in every case. The earlier statement that "the draw calls are not the cost" stands, for the right reason (2 calls, CPU frame 0.5 ms). The "not investigated" item is closed.
+
+**Quality tiers.** Page slider and test setting `quality`: Ultra, High, Medium, Low. A tier sets the shading filter bias `lodBias` (multiplies every wave's footprint, so waves fade out sooner), the vertex filter's cell size and the mesh `leafCap` (the 100 km plane reaches the default 4096-leaf cap in every test view, so the leaf cap, not `cellPixels`, sets the triangle count: 1.21 M triangles at grazing in Ultra).
+
+| Tier | footprint bias | cell px | leaf cap | grazing GPU / triangles | looking-down GPU / triangles |
+| --- | --- | --- | --- | --- | --- |
+| Ultra | 1 | 4 | 4096 | 1.6 ms / 1.21 M | 1.8 ms / 0.88 M |
+| High | 1.25 | 4 | 3072 | 1.5 ms / 0.94 M | 1.7 ms / 0.70 M |
+| Medium | 1.5 | 5 | 2048 | 1.4 ms / 0.66 M | 1.6 ms / 0.48 M |
+| Low | 2 | 6 | 1024 | 0.9 ms / 0.34 M | 1.2 ms / 0.27 M |
+
+Median GPU frame, suite `water-lod-spike-performance` v4, 3 repetitions of 6 s, headless NVIDIA at 2527 x 1077, GPU shared with another application (about 56 % busy), so differences of 0.1 to 0.2 ms are noise. CPU frame 0.5 ms in every case. Not Q1 (not at 2560 x 1440, adapter unverified).
+
+**Look, from `water-lod-spike-aliasing` v2** (same measures as v1, against the Ultra supersampled reference; worst colour error / colour step, in luma/255, grazing - elevated - high):
+
+| Tier | colour error | colour step | shimmer (grazing) | note |
+| --- | --- | --- | --- | --- |
+| Ultra | 0.5, 2.0, 3.6 | 0.8, 1.1, 1.8 | 2.4 | passes every gate |
+| High | 0.9, 2.5, 3.5 | 0.7, 1.1, 2.6 | 2.9 | step gate (2) crossed at 600 m; shimmer gate crossed |
+| Medium | 1.2, 2.5, 3.6 | 0.8, 1.3, 3.7 | 3.5 | as High, larger |
+| Low | 1.7, 3.3, 3.8 | 1.1, 1.2, 2.2 | 4.3 | moiré gate crossed at 80 m; step 2.2 at 600 m |
+
+Colour stays within the 6/255 gate in every tier and view. The shimmer metric compares the filtered frame's error against the reference between half-pixel-shifted views, so detail the reference has and a blurrier tier lacks counts as shimmer: it rises with blur, by construction. **Gate change, after seeing data and not on the owner's instruction:** only Ultra carries the gates in v2 (`gated`); the other tiers report their metrics without gates. The owner should confirm, or say which tier must pass.
+
+**Tried and removed: a cap on the number of waves.** Dropping the shortest waves outright (48, 40 and 20 waves, their slope variance left in the glint spread) was built and measured first. It saved little at 48 waves (no measurable gain), and at 48, 40 and 20 waves it put a colour step of 2.6 to 11 /255 and moiré 9 to 36 /255 (control 1 to 2) into the grazing and elevated views, plus a colour error of 6 to 22. Where those waves are still resolved the 3 x 3 quadrature does not reproduce their mean colour. The cap is not in the code. The wave loop is therefore untouched, and the full-screen near case (looking down, 1.2 to 1.8 ms) has no safe knob left except fewer leaves, which does not help its fragment cost.
+
+**Not done.** Q1, Q4 (the owner's eye on the tiers), Q5, Q6; a moving camera; the 50 km edge; the sphere and cylinder. Mesh tiers were not looked at on screen: the vertex filter assumes `cellPixels` cells, and a leaf cap that bites makes real cells larger, so a vertex-height difference of centimetres is possible. The aliasing suite shows no step from it, but it is a silhouette effect that the readback metrics barely see. First `water-lod-spike-performance` v4 and `-aliasing` v2 runs from this session at 19:10 to 19:25 UTC used earlier tier definitions (wave caps) and are superseded by the runs at 19:28 and 19:29.
+
 ## Scope history
 
 <!-- tri:scope-history -->

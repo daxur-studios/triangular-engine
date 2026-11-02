@@ -16,6 +16,7 @@ import {
   type IWaterLodSpikeSceneHandle,
 } from './core';
 import { toLuminance, type ILuminanceImage } from './core/water-lod-spike-image-metrics';
+import { WATER_LOD_SPIKE_QUALITIES, waterLodSpikeQuality, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
 import { WATER_LOD_SPIKE_UNIFORMS } from './core/water-lod-spike-waves';
 import {
   createWaterLodSpikeTestAdapter,
@@ -72,6 +73,11 @@ export class WaterLodSpikeComponent {
   /** Footprint and mesh-spacing filters (off shows the aliasing the filters remove). */
   readonly filter = signal(true);
   readonly animating = signal(true);
+  /** Quality tier: waves evaluated, footprint bias and mesh density. */
+  readonly quality = signal<WaterLodSpikeQualityId>('ultra');
+  readonly qualities = WATER_LOD_SPIKE_QUALITIES;
+  protected readonly qualityTier = computed(() => waterLodSpikeQuality(this.quality()));
+  protected readonly qualityIndex = computed(() => WATER_LOD_SPIKE_QUALITIES.findIndex((tier) => tier.id === this.quality()));
   readonly drawCalls = signal(0);
   readonly triangles = signal(0);
   /** True once the water body has drawn, so a test case has something to look at. */
@@ -90,11 +96,13 @@ export class WaterLodSpikeComponent {
   });
   /** Frame intervals (ms) collected while a performance case measures; null when not sampling. */
   private frameTimes: number[] | null = null;
+  private cpuTimes: number[] | null = null;
   private lastFrameMs = 0;
   private renderedFrames = 0;
   /** Camera position before a test view took it, put back (looking at the orbit target) when the view is released. */
   private savedPosition: Vector3 | null = null;
   private savedPixelRatio: number | null = null;
+  private savedQuality: WaterLodSpikeQualityId | null = null;
   private scratch: CanvasRenderingContext2D | null = null;
 
   /** GPU vendor from the WebGPU adapter, filled in once the adapter resolves. */
@@ -111,6 +119,8 @@ export class WaterLodSpikeComponent {
       const nowMs = performance.now();
       if (this.frameTimes && this.lastFrameMs > 0) {
         this.frameTimes.push(nowMs - this.lastFrameMs);
+        // The previous frame's tick-and-render time on the CPU, as the FPS panel shows it.
+        this.cpuTimes?.push(this.engine.fpsController.cpuFrameTime());
       }
       this.lastFrameMs = nowMs;
       this.renderedFrames++;
@@ -134,6 +144,7 @@ export class WaterLodSpikeComponent {
       counts: () => ({ drawCalls: this.drawCalls(), triangles: this.triangles() }),
       beginFrameSampling: () => {
         this.frameTimes = [];
+        this.cpuTimes = [];
         this.lastFrameMs = 0;
       },
       endFrameSampling: () => {
@@ -141,11 +152,17 @@ export class WaterLodSpikeComponent {
         this.frameTimes = null;
         return frames;
       },
+      takeCpuFrameMs: () => {
+        const cpu = this.cpuTimes ?? [];
+        this.cpuTimes = null;
+        return cpu;
+      },
       gpuFrameMs: () => this.engine.fpsController.gpuFrameTime(),
       setView: (view) => this.holdView(view),
       setFilter: (enabled) => this.water.setFilter(enabled),
       setTransfer: (enabled) => this.water.setTransfer(enabled),
       setPixelRatio: (ratio) => this.holdPixelRatio(ratio),
+      setQuality: (id) => this.holdQuality(id),
       waitFrames: (count, context) => this.waitFrames(count, context),
       readFrame: (jitterX, jitterY) => this.readFrame(jitterX, jitterY),
       horizonRow: () => this.horizonRow(),
@@ -179,6 +196,27 @@ export class WaterLodSpikeComponent {
   toggleAnimating(): void {
     this.animating.update((enabled) => !enabled);
     this.water.setAnimating(this.animating());
+  }
+
+  /** Picks a quality tier from the slider (an index into the tiers, best first). */
+  onQualitySlider(event: Event): void {
+    const tier = WATER_LOD_SPIKE_QUALITIES[Number((event.target as HTMLInputElement).value)];
+    if (tier) this.setQuality(tier.id);
+  }
+
+  setQuality(id: WaterLodSpikeQualityId): void {
+    this.water.setQuality(id);
+    this.quality.set(id);
+  }
+
+  private holdQuality(id: WaterLodSpikeQualityId | null): void {
+    if (id !== null) {
+      this.savedQuality ??= this.quality();
+      this.setQuality(id);
+      return;
+    }
+    if (this.savedQuality !== null) this.setQuality(this.savedQuality);
+    this.savedQuality = null;
   }
 
   private holdPixelRatio(ratio: number | null): void {

@@ -54,7 +54,7 @@ solver.
 | measurement      | done    |
 | visual-review    | done    |
 
-<!-- tri:review version="1" scope-hash="e29f6a0cca4ccf6dd1d66f7ec2e921bc28665cdfbc7191e5fe937a880f32aa01" reviewed="2026-10-31" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="57d1fe8cdbe838b952a213f156397a2e46cd6728fcd205944f59f2653593314d" reviewed="2026-11-02" reviewer="agent" -->
 <!-- tri:item id="Q1" kind="intent" applies-to="visual-review" blocks="none" state="resolved" -->
 
 - [x] Do the measured gates match what the official pages show?

@@ -39,6 +39,23 @@ describe('cellPlanetHeights', () => {
     expect(structuredClone({ layout, planet })).toEqual({ layout, planet });
   });
 
+  it('forwards the illustrative terrain policy so the baked heights match the authored world', async () => {
+    const { bake, calls } = recordingBake();
+    const terrain = {
+      version: 1 as const,
+      kind: 'illustrative' as const,
+      lowlandReliefScale: 0.12,
+      mountainRelief: 0.42,
+      mountainRadiusFraction: 0.78,
+      volcanoRelief: 0.62,
+      volcanoRadiusFraction: 0.86,
+    };
+    (await cellPlanetHeights(bake, { ...SMALL, terrain })).dispose();
+
+    expect(calls[0][2]?.terrain).toEqual(terrain);
+    expect(structuredClone(calls[0][2]?.terrain)).toEqual(terrain);
+  });
+
   it('defaults to two relaxation iterations, the equal-angle warp and the default texture size', async () => {
     const calls: Parameters<BakeClient>[] = [];
     const bake: BakeClient = (source, layout, planet) => {

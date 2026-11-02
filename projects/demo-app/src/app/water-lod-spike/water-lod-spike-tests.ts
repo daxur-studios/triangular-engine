@@ -9,6 +9,7 @@ import {
   type ILuminanceImage,
   type IRowRange,
 } from './core/water-lod-spike-image-metrics';
+import { WATER_LOD_SPIKE_QUALITIES, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
 
 /** A fixed camera pose for the aliasing cases. */
 export interface WaterLodSpikeView {
@@ -24,6 +25,10 @@ export interface WaterLodSpikeTestSettings {
   readonly measure?: 'aliasing';
   /** Renders at this multiple of the page's pixel ratio for the case (a stress or low-cost proxy for another GPU); restored afterwards. */
   readonly pixelRatio?: number;
+  /** Quality tier for the case (waves, footprint bias, mesh density); restored afterwards. Omitted keeps the page's own tier. */
+  readonly quality?: WaterLodSpikeQualityId;
+  /** Aliasing cases only: false reports the metrics without the shimmer, moiré, step and colour gates (only the water-drawn checks remain). Default true. */
+  readonly gated?: boolean;
 }
 
 /** What the page exposes to the test adapter: its own handles, nothing else. */
@@ -37,12 +42,16 @@ export interface WaterLodSpikeTestHost {
   beginFrameSampling(): void;
   /** Stops collecting and returns the frame intervals (ms) since `beginFrameSampling`. */
   endFrameSampling(): readonly number[];
+  /** CPU time (ms) of each frame's tick and render since `beginFrameSampling`, as the FPS panel shows it; call after `endFrameSampling`. */
+  takeCpuFrameMs(): readonly number[];
   /** GPU frame time (ms, one-second average from timestamp queries), or null when unsupported. */
   gpuFrameMs(): number | null;
   /** Holds the camera at `view` with the orbit controls off and the waves frozen; null hands the camera back. */
   setView(view: WaterLodSpikeView | null): void;
   /** Scales the renderer pixel ratio by `ratio`; null restores the one the page had. */
   setPixelRatio(ratio: number | null): void;
+  /** Holds the quality tier `id` for the case; null restores the tier the page had. */
+  setQuality(id: WaterLodSpikeQualityId | null): void;
   setFilter(enabled: boolean): void;
   setTransfer(enabled: boolean): void;
   /** Waits until the engine has rendered `count` more frames (so the LOD selection settles on the new view). */
@@ -161,6 +170,63 @@ const WATER_LOD_SPIKE_PERFORMANCE_V3: TestSuite<WaterLodSpikeTestSettings> = {
   })),
 };
 
+const GRAZING_VIEW: WaterLodSpikeView = { position: [0, 12, 0], target: [0, 0, -300] };
+const ELEVATED_VIEW: WaterLodSpikeView = { position: [0, 80, 0], target: [0, 0, -500] };
+const HIGH_VIEW: WaterLodSpikeView = { position: [0, 600, 0], target: [0, 0, -2500] };
+/** Water fills the whole screen at about 56 degrees down from 12 m: every pixel is near water with all waves resolved. */
+const LOOKING_DOWN_VIEW: WaterLodSpikeView = { position: [0, 12, 8], target: [0, 0, 0] };
+
+/**
+ * v4 sweeps the quality tiers at two views: grazing (water to the horizon, most pixels far) and looking down (every
+ * pixel near water, the most waves resolved per pixel). Each case is GPU and CPU frame time at the page's pixel ratio.
+ * Pairs with `water-lod-spike-aliasing` v2, which gates the same tiers for aliasing.
+ */
+const WATER_LOD_SPIKE_PERFORMANCE_V4: TestSuite<WaterLodSpikeTestSettings> = {
+  id: 'water-lod-spike-performance',
+  version: 4,
+  title: 'Water LOD spike W0b: GPU time by quality tier, grazing and looking down',
+  purpose: 'performance',
+  scenarios: [
+    { id: 'grazing', label: 'Grazing view', view: GRAZING_VIEW },
+    { id: 'down', label: 'Looking down from 12 m', view: LOOKING_DOWN_VIEW },
+  ].flatMap(({ id, label, view }) =>
+    WATER_LOD_SPIKE_QUALITIES.map((quality) => ({
+      id: `${id}-${quality.id}`,
+      label: `${label}, ${quality.label}`,
+      settings: { wireframe: false, quality: quality.id, view },
+      durationMs: 6000,
+      warmupMs: 2000,
+    })),
+  ),
+};
+
+/**
+ * v2 measures every quality tier against the same supersampled reference of the best water (the filter-off arms ignore
+ * the tier's bias). Only `ultra` carries the v1 gates. The lower tiers are deliberately blurrier, and the shimmer metric
+ * counts detail missing from the reference as change, so they report their numbers without gates: a dial to judge by eye
+ * and by the numbers, not a pass/fail. That choice was made after seeing the tiers cross the gates by small amounts
+ * (ER 080) and is the owner's to confirm.
+ */
+const WATER_LOD_SPIKE_ALIASING_V2: TestSuite<WaterLodSpikeTestSettings> = {
+  id: 'water-lod-spike-aliasing',
+  version: 2,
+  title: 'Water LOD spike W0b: shimmer, moiré and colour step by quality tier',
+  purpose: 'functional',
+  scenarios: [
+    { id: 'grazing', label: 'Grazing view, 12 m up', view: GRAZING_VIEW },
+    { id: 'elevated', label: 'Elevated view, 80 m up', view: ELEVATED_VIEW },
+    { id: 'high', label: 'High view, 600 m up', view: HIGH_VIEW },
+  ].flatMap(({ id, label, view }) =>
+    WATER_LOD_SPIKE_QUALITIES.map((quality) => ({
+      id: `${id}-${quality.id}`,
+      label: `${label}, ${quality.label}`,
+      settings: { wireframe: false, measure: 'aliasing' as const, quality: quality.id, gated: quality.id === 'ultra', view },
+      durationMs: 1000,
+      warmupMs: 1000,
+    })),
+  ),
+};
+
 /** Every version of the W0b suites, oldest first. Add a new entry when a case changes; keep old ones. */
 export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestSettings>[] = [
   WATER_LOD_SPIKE_V1,
@@ -168,6 +234,8 @@ export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestS
   WATER_LOD_SPIKE_PERFORMANCE_V2,
   WATER_LOD_SPIKE_ALIASING_V1,
   WATER_LOD_SPIKE_PERFORMANCE_V3,
+  WATER_LOD_SPIKE_PERFORMANCE_V4,
+  WATER_LOD_SPIKE_ALIASING_V2,
 ];
 
 const REFERENCE_SAMPLES = 32;
@@ -243,7 +311,7 @@ function hasWater(host: WaterLodSpikeTestHost): boolean {
   return rows.end - rows.start >= 100 && rowBandMeans(frame, rows, 1)[0] > 20;
 }
 
-async function measureAliasing(host: WaterLodSpikeTestHost, context: TestContext): Promise<TestObservation> {
+async function measureAliasing(host: WaterLodSpikeTestHost, context: TestContext, gated: boolean): Promise<TestObservation> {
   await host.waitFrames(SETTLE_FRAMES, context);
   // The first pipeline compile and the LOD selection for a new view can take longer than the settle frames: wait for water.
   for (let attempt = 0; attempt < 20 && !hasWater(host); attempt++) await host.waitFrames(SETTLE_FRAMES, context);
@@ -277,26 +345,30 @@ async function measureAliasing(host: WaterLodSpikeTestHost, context: TestContext
     checks: [
       { name: 'water drawn, not blank', passed: referenceMean > 20, detail: `reference mean ${referenceMean.toFixed(1)}/255` },
       { name: 'water rows measured', passed: rows.end - rows.start >= 100, detail: `${rows.end - rows.start} rows below the horizon` },
-      {
-        name: `Q3 shimmer: filtered at most ${MAX_SHIMMER_RATIO} x the control, or ${SHIMMER_FLOOR}/255`,
-        passed: filtered.shimmer <= Math.max(MAX_SHIMMER_RATIO * control.shimmer, SHIMMER_FLOOR),
-        detail: `${filtered.shimmer.toFixed(2)} vs ${control.shimmer.toFixed(2)} (ratio ${ratio(filtered.shimmer, control.shimmer)})`,
-      },
-      {
-        name: `moiré: filtered structure at most ${MAX_MOIRE_RATIO} x the control`,
-        passed: filtered.moire <= MAX_MOIRE_RATIO * control.moire,
-        detail: `${filtered.moire.toFixed(2)}; control ${control.moire.toFixed(2)}`,
-      },
-      {
-        name: `Q2 colour step: error changes at most ${MAX_COLOUR_STEP}/255 between neighbouring bands`,
-        passed: filtered.colourStep <= MAX_COLOUR_STEP,
-        detail: `${filtered.colourStep.toFixed(2)}; no transfer ${noTransfer.colourStep.toFixed(2)}; control ${control.colourStep.toFixed(2)}`,
-      },
-      {
-        name: `colour matches the reference within ${MAX_COLOUR_ERROR}/255 in every band`,
-        passed: filtered.colourError <= MAX_COLOUR_ERROR,
-        detail: `${filtered.colourError.toFixed(2)}; no transfer ${noTransfer.colourError.toFixed(2)}; control ${control.colourError.toFixed(2)}`,
-      },
+      ...(gated
+        ? [
+            {
+              name: `Q3 shimmer: filtered at most ${MAX_SHIMMER_RATIO} x the control, or ${SHIMMER_FLOOR}/255`,
+              passed: filtered.shimmer <= Math.max(MAX_SHIMMER_RATIO * control.shimmer, SHIMMER_FLOOR),
+              detail: `${filtered.shimmer.toFixed(2)} vs ${control.shimmer.toFixed(2)} (ratio ${ratio(filtered.shimmer, control.shimmer)})`,
+            },
+            {
+              name: `moiré: filtered structure at most ${MAX_MOIRE_RATIO} x the control`,
+              passed: filtered.moire <= MAX_MOIRE_RATIO * control.moire,
+              detail: `${filtered.moire.toFixed(2)}; control ${control.moire.toFixed(2)}`,
+            },
+            {
+              name: `Q2 colour step: error changes at most ${MAX_COLOUR_STEP}/255 between neighbouring bands`,
+              passed: filtered.colourStep <= MAX_COLOUR_STEP,
+              detail: `${filtered.colourStep.toFixed(2)}; no transfer ${noTransfer.colourStep.toFixed(2)}; control ${control.colourStep.toFixed(2)}`,
+            },
+            {
+              name: `colour matches the reference within ${MAX_COLOUR_ERROR}/255 in every band`,
+              passed: filtered.colourError <= MAX_COLOUR_ERROR,
+              detail: `${filtered.colourError.toFixed(2)}; no transfer ${noTransfer.colourError.toFixed(2)}; control ${control.colourError.toFixed(2)}`,
+            },
+          ]
+        : []),
     ],
   };
 }
@@ -310,10 +382,12 @@ async function measureFrames(host: WaterLodSpikeTestHost, durationMs: number, co
     if (gpu && sample !== null) gpuMs.push(sample);
   }
   const frameMs = host.endFrameSampling();
+  const cpuMs = host.takeCpuFrameMs();
   const { drawCalls, triangles } = host.counts();
   return {
     metrics: [
       { name: 'frame interval', unit: 'ms', source: 'engine.tick$ intervals', samples: [...frameMs] },
+      { name: 'CPU frame', unit: 'ms', source: 'fpsController.cpuFrameTime (tick and render)', samples: [...cpuMs] },
       ...(gpu ? [{ name: 'GPU frame', unit: 'ms', source: 'WebGPU timestamp queries, 1 s averages', samples: gpuMs }] : []),
       { name: 'draw calls', unit: 'calls', source: 'renderer.info.render.calls', samples: [drawCalls] },
       { name: 'triangles', unit: 'triangles', source: 'renderer.info.render.triangles', samples: [triangles] },
@@ -339,11 +413,13 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
       host.setWireframe(scenario.settings.wireframe);
       host.setView(scenario.settings.view ?? null);
       host.setPixelRatio(scenario.settings.pixelRatio ?? null);
+      host.setQuality(scenario.settings.quality ?? null);
     },
     restore: (wireframe) => {
       host.setWireframe(wireframe);
       host.setView(null);
       host.setPixelRatio(null);
+      host.setQuality(null);
     },
     ready: async (context) => {
       while (!host.ready()) {
@@ -352,7 +428,7 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
     },
     environment: () => host.environment(),
     measure: async (scenario, context): Promise<TestObservation> => {
-      if (scenario.settings.measure === 'aliasing') return measureAliasing(host, context);
+      if (scenario.settings.measure === 'aliasing') return measureAliasing(host, context, scenario.settings.gated !== false);
       const observation = await measureFrames(host, scenario.durationMs, context, scenario.settings.view !== undefined);
       return {
         ...observation,

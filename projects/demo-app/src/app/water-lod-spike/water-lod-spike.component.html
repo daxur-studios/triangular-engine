@@ -10,6 +10,8 @@
     [material]="water.material"
     [lighting]="false"
     [bounds]="false"
+    [cellPixels]="qualityTier().cellPixels"
+    [leafCap]="qualityTier().leafCap"
   />
 
   <ng-template portalTarget="rightSidebar" lane="content">
@@ -38,8 +40,17 @@
       Animate
     </button>
   </div>
+  <label class="quality">
+    <span>Quality: <strong>{{ qualityTier().label }}</strong></span>
+    <input type="range" min="0" [max]="qualities.length - 1" step="1" [value]="qualityIndex()" (input)="onQualitySlider($event)" />
+    <span class="tiers">
+      @for (tier of qualities; track tier.id) {<span [class.current]="tier.id === quality()">{{ tier.label }}</span>}
+    </span>
+    <span>footprint ×{{ qualityTier().lodBias }} · mesh {{ qualityTier().cellPixels }} px cells, {{ qualityTier().leafCap }} leaves</span>
+  </label>
   <p>
     64 waves, jittered spectrum. Each wave fades by its pixel footprint (shading) and mesh spacing (vertices); the lost
-    slope widens the glint. Filter off is the aliasing control. Gates: suite water-lod-spike-aliasing.
+    slope widens the glint. Lower quality fades waves sooner and thins the mesh. Filter off is the aliasing control.
+    Gates: suites water-lod-spike-aliasing and -performance.
   </p>
 </aside>

@@ -168,6 +168,26 @@ describe('PlanetComponent', () => {
       expect(planet.cellPlanet()).toEqual({ seed: 3, cellCount: 60, relaxationIterations: 1 });
     });
 
+    it('keeps illustrative terrain in the colour world and rebakes when its relief changes', () => {
+      const { fixture, host, planet } = create();
+      const manual = manualBake();
+      const terrain = {
+        version: 1 as const,
+        kind: 'illustrative' as const,
+        volcanoRelief: 0.62,
+      };
+      host.bake.set(manual.client);
+      host.world.set({ ...world, terrain });
+      fixture.detectChanges();
+
+      expect(planet.cellPlanet()).toEqual({ seed: 3, cellCount: 60, terrain });
+      expect(manual.calls.length).toBe(1);
+
+      host.world.set({ ...world, terrain: { ...terrain, volcanoRelief: 0.8 } });
+      fixture.detectChanges();
+      expect(manual.calls.length).toBe(2);
+    });
+
     it('ignores a stale bake that lands after a newer one, and frees its texture', async () => {
       const { fixture, host, planet } = create();
       const manual = manualBake();
