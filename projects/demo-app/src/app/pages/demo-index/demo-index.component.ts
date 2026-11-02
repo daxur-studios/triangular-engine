@@ -341,6 +341,19 @@ export const DEMOS: readonly DemoItem[] = [
       'The PlanetSurfaceMaterial extension slots on a plain sphere: a road surface layer, a moon-eclipse sun occluder, a city-lights emissive and the replaceable day/night lighting stage, each a toggle with live uniform sliders.',
   },
   {
+    id: 'slope-suitability-lab',
+    number: '02i',
+    title: 'Terrain Slope Suitability',
+    route: '/slope-suitability-lab',
+    categoryId: 'terrain',
+    tier: 'lab',
+    createdAt: '2026-11-02',
+    entryPoints: ['planet-material'],
+    package: 'triangular-engine/planet-material',
+    description:
+      'A live green-to-red slope overlay on rolling planet terrain; change the maximum grade to compare vehicle suitability without recompiling the shader.',
+  },
+  {
     id: 'atmosphere-lab',
     number: '02h',
     title: 'Atmosphere Lab (plain sphere)',

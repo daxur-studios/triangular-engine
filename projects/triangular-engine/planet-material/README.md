@@ -43,6 +43,7 @@ Geometry needs the attributes the stages read: `aFlatPos` / `aFlatNorm` (the fla
 | `PlanetSurfaceMaterial` | The material, with the stage/slot API above |
 | `vertexColorLayer`, `solidColorLayer` | Base layers |
 | `cellLookupLayer`, `streamedMaterialLayer`, `macroVariationLayer` | Stock surface layers (ports of the GLSL patches) |
+| `slopeSuitabilityLayer` | Optional green-to-red grade overlay with a live maximum-slope threshold |
 | `cellVoronoiLayer` | `cellLookupLayer` with exact cell edges at any zoom ([below](#exact-cell-edges-at-any-zoom)) |
 | `flatFeatureLayer` | Runways, taxiways, aprons and roads from a per-page feature list, with markings ([below](#flat-features-runways-roads)) |
 | `checkerDebugLayer` | A debug checkerboard as a layer: geography (`latLon`) or map-UV cells, `fwidth`-filtered, live-toggled |
@@ -54,6 +55,24 @@ Geometry needs the attributes the stages read: `aFlatPos` / `aFlatNorm` (the fla
 | `IPlanetStageOverride`, `PlanetSurfaceMaterial.setStageOverride` | Supply stage 1 for a mesh that is not the morph globe ([below](#using-the-material-on-another-mesh)) |
 | `equirectangularFlat`, `equalEarthFlat`, `seam*` | The projection and seam `Fn`s |
 | `planetMapXY`, `planetMapExtents`, `planetMapRowHalfWidth`, `planetMapRows`, `PLANET_MAP_EQUAL_EARTH_SCALE` | The material's map on the CPU in doubles ([below](#the-map-on-the-cpu)) |
+
+## Terrain slope suitability
+
+`slopeSuitabilityLayer` compares the unmorphed terrain normal with radial up and colours grades below a vehicle's
+maximum slope green and steeper grades red. The transition band avoids a hard colour edge. All controls are uniforms,
+so the overlay and vehicle threshold can change without recompiling the terrain material. It adds no vertex attributes.
+The grade stays tied to the physical terrain as the display morphs. This is a visual estimate only; it does not constrain
+route planning or physics.
+
+```ts
+import { PlanetSurfaceMaterial, SURFACE_LAYER_ORDER, slopeSuitabilityLayer } from 'triangular-engine/planet-material';
+
+const material = new PlanetSurfaceMaterial();
+const grade = slopeSuitabilityLayer({ maxSlopeDegrees: 18, transitionDegrees: 4, enabled: false });
+material.addSurfaceLayer({ id: 'slopeSuitability', order: SURFACE_LAYER_ORDER.game, layer: grade.layer });
+grade.enabled.value = 1;          // no shader rebuild
+grade.maxSlopeDegrees.value = 12; // adapt to another vehicle
+```
 
 ## The map on the CPU
 

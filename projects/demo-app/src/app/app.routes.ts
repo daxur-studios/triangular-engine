@@ -659,6 +659,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'slope-suitability-lab',
+    loadComponent: () =>
+      import('./pages/slope-suitability-lab/slope-suitability-lab-page.component').then(
+        ({ SlopeSuitabilityLabPageComponent }) => SlopeSuitabilityLabPageComponent,
+      ),
+  },
+  {
     // Plan 050 Phase 0 throwaway spike; removed once `cell-planet-tsl` exists.
     path: 'tsl-webgpu-spike',
     loadComponent: () =>

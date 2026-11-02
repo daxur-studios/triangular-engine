@@ -628,3 +628,20 @@ instead of being copied per page.
 - Demo: `cell-planet-tsl?checker=1` adds the layer at `SURFACE_LAYER_ORDER.game`, with a live panel toggle.
 - Not done: no pixel-parity screenshot and no test that drives a non-uniform-control-flow call; the layer only
   changes `albedo` and passes `roughness` / `metalness` through.
+
+## 2026-11-02 — Terrain slope suitability layer
+
+Added `slopeSuitabilityLayer` to the public `triangular-engine/planet-material`
+entry. It estimates grade from the unmorphed `terrainNormal` versus radial up,
+colours below-threshold terrain green and over-limit terrain red, and uses a
+cosine comparison rather than `acos`. Visibility, threshold, transition,
+opacity and colours are uniforms, and the layer reads no additional vertex
+attributes.
+
+The new `/slope-suitability-lab` page exercises the reusable layer on synthetic
+rolling terrain with a rotatable camera and a live maximum-grade slider. BSP
+also consumes it in the surface-logistics terrain preview. Headless engine
+planet-material specs pass 122/122, focused `TerrainPlanetMaterial` specs pass
+18/18, the Angular package build passes, and the demo host rebuilt successfully.
+This is not a GPU performance measurement or
+visual acceptance; those remain open. Route search and physics are unchanged.

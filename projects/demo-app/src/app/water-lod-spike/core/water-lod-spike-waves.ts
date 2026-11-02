@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Fn, If, abs, cameraPosition, cos, dFdx, dFdy, dot, float, length, mat3, mix, sin, smoothstep, sub, uniform, vec2, vec3 } from 'three/tsl';
+import { Fn, If, abs, cameraPosition, cos, dFdx, dFdy, dot, exp, float, length, mat3, max, mix, sin, smoothstep, sub, uniform, vec2, vec3 } from 'three/tsl';
 import type { HeightSource } from 'triangular-engine/lod-surface/core';
+import { SEA_LEVEL_M, SHORE_LOOK, landHeightNode, shoreDeepness, shoreFoam, shoreWeight, waterDepthM, type IShoreLookParams } from './water-lod-spike-land';
 
 /**
  * Spike-local wave spectrum for plan 080 (W0b): 64 directional sines with jittered wavelengths from 300 m to 0.5 m
@@ -107,7 +108,81 @@ export const WATER_LOD_SPIKE_UNIFORMS = {
   lostScale: uniform(0.8),
   /** Multiplies every wave's pixel footprint in the shading filter: 2 fades each wave out at twice the wavelength (quality tier). */
   lodBias: uniform(1),
+  /** 1: wave height and shading slope are scaled by the shore weight of the water depth under the land (needs the land). 0: off (control). */
+  shore: uniform(0),
+  /** Metres of water depth from which the waves have their full height (ER 080, shoreline review). */
+  shoreRampM: uniform(12),
+  /** 1: foam at the waterline and breaker lines from the water depth D (needs the land). 0: off. */
+  foam: uniform(0),
+  /** 1: the water colour goes from shallow to deep with D (needs the land). 0: off. */
+  depthColour: uniform(0),
+  /** The shore look's depth scales, metres (see `IShoreLookParams`). */
+  foamEdgeM: uniform(SHORE_LOOK.edgeM),
+  foamZoneM: uniform(SHORE_LOOK.zoneM),
+  foamSpacingM: uniform(SHORE_LOOK.spacingM),
+  foamSpeedMS: uniform(SHORE_LOOK.speedMS),
+  tintScaleM: uniform(SHORE_LOOK.tintScaleM),
 };
+
+/**
+ * Foam (x) and water deepness (y) at a plane position node, both from the water depth D of the land under it. Foam is 0 and
+ * deepness 1 where both looks are off, so the material needs no branch of its own. The land's height is read once for both.
+ */
+export function shoreLookNode(position: any): any {
+  return (Fn(() => {
+    const look = vec2(0, 1).toVar();
+    If(WATER_LOD_SPIKE_UNIFORMS.foam.greaterThan(0).or(WATER_LOD_SPIKE_UNIFORMS.depthColour.greaterThan(0)), () => {
+      const depth = float(SEA_LEVEL_M).sub(landHeightNode(position));
+      const u = WATER_LOD_SPIKE_UNIFORMS;
+      If(u.foam.greaterThan(0), () => {
+        const edge = float(1).sub(smoothstep(0, u.foamEdgeM, depth));
+        const phase = depth.add(u.foamSpeedMS.mul(u.time)).div(u.foamSpacingM);
+        const stripe = smoothstep(0.75, 1, cos(phase.mul(2 * Math.PI)).mul(0.5).add(0.5));
+        const breakers = float(1).sub(smoothstep(u.foamEdgeM, u.foamZoneM, depth)).mul(stripe).mul(0.8);
+        look.x.assign(max(edge, breakers));
+      });
+      If(u.depthColour.greaterThan(0), () => {
+        look.y.assign(float(1).sub(exp(max(depth, 0).negate().div(u.tintScaleM))));
+      });
+    });
+    return look;
+  }) as any)();
+}
+
+/** CPU twin of {@link shoreLookNode}. */
+export function shoreLookAt(x: number, z: number): { foam: number; deepness: number } {
+  const u = WATER_LOD_SPIKE_UNIFORMS;
+  const look: IShoreLookParams = {
+    edgeM: u.foamEdgeM.value as number,
+    zoneM: u.foamZoneM.value as number,
+    spacingM: u.foamSpacingM.value as number,
+    speedMS: u.foamSpeedMS.value as number,
+    tintScaleM: u.tintScaleM.value as number,
+  };
+  const depth = waterDepthM(x, z);
+  return {
+    foam: (u.foam.value as number) > 0 ? shoreFoam(depth, u.time.value as number, look) : 0,
+    deepness: (u.depthColour.value as number) > 0 ? shoreDeepness(depth, look) : 1,
+  };
+}
+
+/** Shore weight at a plane position node: 1 where the shore is off, else `smoothstep(0, ramp, D)` with D from the land's height. */
+export function shoreWeightNode(position: any): any {
+  return (Fn(() => {
+    const weight = float(1).toVar();
+    If(WATER_LOD_SPIKE_UNIFORMS.shore.greaterThan(0), () => {
+      const depth = float(SEA_LEVEL_M).sub(landHeightNode(position));
+      weight.assign(smoothstep(0, WATER_LOD_SPIKE_UNIFORMS.shoreRampM, depth));
+    });
+    return weight;
+  }) as any)();
+}
+
+/** CPU twin of {@link shoreWeightNode}. */
+export function shoreWeightAt(x: number, z: number): number {
+  if ((WATER_LOD_SPIKE_UNIFORMS.shore.value as number) <= 0) return 1;
+  return shoreWeight(waterDepthM(x, z), WATER_LOD_SPIKE_UNIFORMS.shoreRampM.value as number);
+}
 
 /** Footprint/wavelength ratio where the shading weight starts to fall, and where it reaches 0 (wavelengths of 2.9 and 1.4 pixels). */
 export const FOOTPRINT_FADE_START = 0.35;
@@ -260,7 +335,7 @@ export function createWaterLodSpikeWaves(): HeightSource {
         const k = (2 * Math.PI) / wave.wavelengthM;
         h += wave.amplitudeM * Math.sin(k * (x * wave.dirX + z * wave.dirZ) + wave.phase - wave.angularSpeed * t);
       }
-      return h;
+      return h * shoreWeightAt(x, z);
     },
     // Waves the mesh cannot carry (spacing weight 0) are skipped: far vertices keep only the long waves.
     heightNode(position) {
@@ -273,7 +348,7 @@ export function createWaterLodSpikeWaves(): HeightSource {
             h.addAssign(sin(wavePhase(position, wave)).mul(wave.amplitudeM).mul(weight));
           });
         }
-        return h.mul(WATER_LOD_SPIKE_UNIFORMS.vertexHeightScale);
+        return h.mul(shoreWeightNode(position)).mul(WATER_LOD_SPIKE_UNIFORMS.vertexHeightScale);
       }) as any)();
     },
     gradientNode(position) {
@@ -287,7 +362,7 @@ export function createWaterLodSpikeWaves(): HeightSource {
             g.addAssign(vec3(wave.dirX, 0, wave.dirZ).mul(cos(wavePhase(position, wave)).mul(wave.amplitudeM * k).mul(weight)));
           });
         }
-        return g;
+        return g.mul(shoreWeightNode(position));
       }) as any)();
     },
   } as HeightSource;

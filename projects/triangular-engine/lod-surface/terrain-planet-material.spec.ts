@@ -241,6 +241,7 @@ describe('TerrainPlanetMaterial', () => {
     const globeNodes = { ...nodes, position, globePosition, globeNormal } as unknown as LodSurfaceNodes;
     material.bindLodSurfaceNodes(globeNodes);
     expect(material.context.bodyFixedLocal).toBe(globePosition);
+    expect(material.context.terrainNormal).toBe(globeNormal);
     expect(material.context.morphedPosition).toBe(position);
     expect(material.context.morphedBatchedLocal).toBe(position);
     // The relief fades as the map flattens: the globe normal at morph 0 and the bent up at morph 1 (not the drawn normal).

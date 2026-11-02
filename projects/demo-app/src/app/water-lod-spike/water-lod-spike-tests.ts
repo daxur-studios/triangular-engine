@@ -9,7 +9,7 @@ import {
   type ILuminanceImage,
   type IRowRange,
 } from './core/water-lod-spike-image-metrics';
-import type { ILeafCull } from './core/water-lod-spike-land';
+import type { ILeafCull, IShoreAudit, IShoreLookAudit } from './core/water-lod-spike-land';
 import { CONTROL_MIN_ERROR_RAD, MAX_PHASE_ERROR_RAD, type IPrecisionReport } from './core/water-lod-spike-precision';
 import { WATER_LOD_SPIKE_QUALITIES, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
 
@@ -24,7 +24,11 @@ export interface WaterLodSpikeTestSettings {
   readonly wireframe: boolean;
   readonly view?: WaterLodSpikeView;
   /** 'aliasing' runs the three aliasing arms instead of timing frames; 'precision' runs the Q5 phase-precision probe. */
-  readonly measure?: 'aliasing' | 'precision' | 'land' | 'cull';
+  readonly measure?: 'aliasing' | 'precision' | 'land' | 'cull' | 'shore' | 'shore-look';
+  /** Shore cases: the water body's detail noise on or off; restored afterwards. Omitted keeps the page's own setting. */
+  readonly waterNoise?: boolean;
+  /** Shore cases: the depth weight on the waves on or off; restored afterwards. Omitted keeps the page's own setting. */
+  readonly shore?: boolean;
   /** Cull cases: the library cover hook on the water body (water leaves under the land are not drawn and take no budget); restored afterwards. */
   readonly cull?: boolean;
   /** Land under the water for the case (the w2 spike's islands); restored afterwards. Omitted keeps the page's own setting. */
@@ -83,6 +87,18 @@ export interface WaterLodSpikeTestHost {
   setCull(enabled: boolean | null): void;
   /** True while the water body's selector has a cover hook installed. */
   coverActive(): boolean;
+  /** The water body's detail noise on or off; null restores the page's own setting. */
+  setWaterNoise(enabled: boolean | null): void;
+  /** The depth weight on the waves on or off; null restores the page's own setting. */
+  setShore(enabled: boolean | null): void;
+  /** The crescent gate: dry points where the water the body would draw (at each of `times`, seconds) stands above the land. */
+  shoreAudit(times: readonly number[]): IShoreAudit;
+  /** Foam at the waterline and breaker lines on or off; null restores the page's own setting. The next frame read shows it. */
+  setFoam(enabled: boolean | null): void;
+  /** The shallow-to-deep water colour on or off; null restores the page's own setting. */
+  setDepthColour(enabled: boolean | null): void;
+  /** The shore look gate over the audit grid with both looks on, judged against the land. */
+  shoreLookAudit(): IShoreLookAudit;
   /** Runs the Q5 phase-precision compute kernel on the page's renderer and compares it with the double reference. */
   runPrecisionProbe(): Promise<IPrecisionReport>;
   environment(): Readonly<Record<string, TestSetting>>;
@@ -369,6 +385,86 @@ const WATER_LOD_SPIKE_CULL_V1: TestSuite<WaterLodSpikeTestSettings> = {
   ),
 };
 
+/** The wave times (s) the shore gate samples the water at. */
+const SHORE_AUDIT_TIMES_S = [0, 7.3, 12.5, 31.9];
+
+/**
+ * Plan 080 shoreline review (ER 080, 2026-11-02): where does the water stand above the land? The gate is written before the
+ * first run. At every dry point of a 5 km grid around the islands (land above the sea level, 25 m apart) the water surface the
+ * water body would draw (waves at four times, and the detail noise when it is on) is compared with the land.
+ *
+ * Arms: detail noise on or off, shore weight on or off. Gates:
+ * - the control: with the shore weight off, the water stands above the land at some dry point (else the gate cannot see a crescent);
+ * - noise off and shore weight on: no dry point has water above the land by more than 5 cm;
+ * - the water draws (the page is not frozen).
+ *
+ * Reported, not gated: the dry points, the violation count, the largest and the mean excess, and the same with the noise on,
+ * which says how much of the crescent is the water body's detail noise and how much the waves.
+ */
+const WATER_LOD_SPIKE_SHORE_V1: TestSuite<WaterLodSpikeTestSettings> = {
+  id: 'water-lod-spike-shore',
+  version: 1,
+  title: 'Water LOD spike shoreline review: water standing above the land, with and without the water depth weight',
+  purpose: 'functional',
+  scenarios: [
+    { id: 'noise-on-weight-off', noise: true, shore: false },
+    { id: 'noise-off-weight-off', noise: false, shore: false },
+    { id: 'noise-on-weight-on', noise: true, shore: true },
+    { id: 'noise-off-weight-on', noise: false, shore: true },
+  ].map(({ id, noise, shore }) => ({
+    id,
+    label: `Detail noise ${noise ? 'on' : 'off'}, depth weight ${shore ? 'on' : 'off'}`,
+    settings: {
+      wireframe: false,
+      measure: 'shore' as const,
+      land: true,
+      waterNoise: noise,
+      shore,
+      view: { position: [0, 200, 600], target: [0, 0, -600] } as WaterLodSpikeView,
+    },
+    durationMs: 1000,
+    warmupMs: 500,
+  })),
+};
+
+/**
+ * Plan 080 shoreline review, experiment 4 (ER 080, 2026-11-02): foam and water colour from the water depth D. The gate is
+ * written before the first run.
+ *
+ * CPU gate over the 5 km audit grid, the page's own look functions against the land:
+ * - the waterline foam has no gap: every water point within half the edge width of the waterline has foam of at least one half;
+ * - no foam deeper than the breaker zone;
+ * - the water is more shallow-coloured within 2 m of the waterline than it is in deep water, by at least 0.3.
+ *
+ * GPU gate on the coast view (a frame read each, same wave time): foam alone raises the frame's mean luminance by at least one
+ * level (of 255), and depth colour alone changes it by at least a quarter of a level. Both looks are off in the reference frame,
+ * so the page's other settings cannot move it.
+ *
+ * Reported, not gated: the share of foam-white pixels (over 225 of 255) and the mean luminance of each frame.
+ */
+const WATER_LOD_SPIKE_SHORE_LOOK_V1: TestSuite<WaterLodSpikeTestSettings> = {
+  id: 'water-lod-spike-shore-look',
+  version: 1,
+  title: 'Water LOD spike shoreline review: foam and water colour from the water depth',
+  purpose: 'functional',
+  scenarios: [
+    {
+      id: 'coast-view',
+      label: 'Coast: foam and depth colour against the land',
+      settings: {
+        wireframe: false,
+        measure: 'shore-look' as const,
+        land: true,
+        waterNoise: false,
+        shore: true,
+        view: { position: [300, 50, 500], target: [0, 5, -150] } as WaterLodSpikeView,
+      },
+      durationMs: 1000,
+      warmupMs: 500,
+    },
+  ],
+};
+
 /** Every version of the W0b suites, oldest first. Add a new entry when a case changes; keep old ones. */
 export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestSettings>[] = [
   WATER_LOD_SPIKE_V1,
@@ -383,6 +479,8 @@ export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestS
   WATER_LOD_SPIKE_PRECISION_V1,
   WATER_LOD_SPIKE_LAND_V1,
   WATER_LOD_SPIKE_CULL_V1,
+  WATER_LOD_SPIKE_SHORE_V1,
+  WATER_LOD_SPIKE_SHORE_LOOK_V1,
 ];
 
 const REFERENCE_SAMPLES = 32;
@@ -646,6 +744,110 @@ async function measureCull(
   };
 }
 
+/** Largest excess (m) the water may stand above the land at a dry point before the shore gate calls it a crescent. */
+const SHORE_TOLERANCE_M = 0.05;
+
+/**
+ * The arms of a shore suite run one after another on one page, so the control ("the gate can see a crescent") is judged on this
+ * case's own numbers: a case with the weight off reports it, a case with the weight on and noise off must be clean.
+ */
+async function measureShore(
+  host: WaterLodSpikeTestHost,
+  scenario: { readonly settings: WaterLodSpikeTestSettings },
+  context: TestContext,
+): Promise<TestObservation> {
+  for (let waited = 0; !host.landDrawn() && waited < 60_000; waited += 100) await context.wait(100);
+  await host.waitFrames(SETTLE_FRAMES, context);
+  const audit = host.shoreAudit(SHORE_AUDIT_TIMES_S);
+  const counts = host.counts();
+  const wantClean = scenario.settings.shore === true && scenario.settings.waterNoise === false;
+  const wantSeen = scenario.settings.shore === false;
+  return {
+    metrics: [
+      { name: 'dry grid points', unit: 'points', source: 'CPU grid, 25 m', samples: [audit.dryPoints] },
+      { name: 'dry points with water above the land (mean over the times)', unit: 'points', source: 'CPU, body heightAt', samples: [audit.violations] },
+      { name: 'largest height of water over land', unit: 'm', source: 'CPU, body heightAt', samples: [audit.maxExcessM] },
+      { name: 'mean height of water over land at the violations', unit: 'm', source: 'CPU, body heightAt', samples: [audit.meanExcessM] },
+    ],
+    checks: [
+      { name: 'water body draws', passed: counts.drawCalls > 0, detail: `draw calls ${counts.drawCalls}` },
+      { name: 'the grid has dry points', passed: audit.dryPoints > 0, detail: `${audit.dryPoints} points` },
+      ...(wantSeen
+        ? [{ name: 'control: with the weight off the water stands above the land somewhere', passed: audit.violations > 0, detail: `${audit.violations} points, worst ${audit.maxExcessM.toFixed(2)} m` }]
+        : []),
+      ...(wantClean
+        ? [{ name: `noise off, weight on: no dry point has water more than ${SHORE_TOLERANCE_M * 100} cm above the land`, passed: audit.violations === 0, detail: `${audit.violations} points, worst ${audit.maxExcessM.toFixed(3)} m` }]
+        : []),
+    ],
+  };
+}
+
+/** Luminance (0..255, encoded) above which a pixel counts as foam-white: the foam colour is about 244, the sky reflection about 195, deep water far below. Reported only: foam also covers the glint's own bright pixels. */
+const FOAM_BRIGHT_LUMINANCE = 225;
+/** Smallest rise of the frame's mean luminance (0..255 levels) the foam must make in the coast view (the first look measured about 9). */
+const FOAM_MIN_MEAN_RISE = 1;
+/** Smallest difference in deepness between the water at the waterline and the deep water. */
+const DEPTH_COLOUR_MIN_SPAN = 0.3;
+/** Smallest change of the frame's mean luminance (0..255 levels) the depth colour must make in the coast view. */
+const DEPTH_COLOUR_MIN_MEAN_CHANGE = 0.25;
+
+function frameStats(image: ILuminanceImage): { readonly brightShare: number; readonly mean: number } {
+  let bright = 0;
+  let sum = 0;
+  for (const value of image.values) {
+    if (value > FOAM_BRIGHT_LUMINANCE) bright++;
+    sum += value;
+  }
+  return { brightShare: bright / image.values.length, mean: sum / image.values.length };
+}
+
+async function measureShoreLook(
+  host: WaterLodSpikeTestHost,
+  scenario: { readonly settings: WaterLodSpikeTestSettings },
+  context: TestContext,
+): Promise<TestObservation> {
+  for (let waited = 0; !host.landDrawn() && waited < 60_000; waited += 100) await context.wait(100);
+  await host.waitFrames(SETTLE_FRAMES, context);
+  const frame = async (foam: boolean, colour: boolean) => {
+    host.setFoam(foam);
+    host.setDepthColour(colour);
+    await host.waitFrames(5, context);
+    return frameStats(host.readFrame(0, 0));
+  };
+  const reference = await frame(false, false);
+  const withFoam = await frame(true, false);
+  const withColour = await frame(false, true);
+  const audit = host.shoreLookAudit();
+  const counts = host.counts();
+  const foamRise = withFoam.mean - reference.mean;
+  const meanChange = Math.abs(withColour.mean - reference.mean);
+  const span = audit.deepDeepness - audit.shallowDeepness;
+  return {
+    metrics: [
+      { name: 'water grid points', unit: 'points', source: 'CPU grid, 25 m', samples: [audit.wetPoints] },
+      { name: 'points at the waterline', unit: 'points', source: 'CPU grid, within half the edge width', samples: [audit.edgePoints] },
+      { name: 'waterline points without foam', unit: 'points', source: 'CPU, page look', samples: [audit.edgeGaps] },
+      { name: 'foam points deeper than the breaker zone', unit: 'points', source: 'CPU, page look', samples: [audit.farFoam] },
+      { name: 'deepness at the waterline', unit: 'ratio', source: 'CPU, page look', samples: [audit.shallowDeepness] },
+      { name: 'deepness in deep water', unit: 'ratio', source: 'CPU, page look', samples: [audit.deepDeepness] },
+      { name: 'bright pixel share, no foam', unit: 'ratio', source: 'canvas readback', samples: [reference.brightShare] },
+      { name: 'bright pixel share, foam', unit: 'ratio', source: 'canvas readback', samples: [withFoam.brightShare] },
+      { name: 'mean luminance, foam', unit: 'levels', source: 'canvas readback, 0..255', samples: [withFoam.mean] },
+      { name: 'mean luminance, no depth colour', unit: 'levels', source: 'canvas readback, 0..255', samples: [reference.mean] },
+      { name: 'mean luminance, depth colour', unit: 'levels', source: 'canvas readback, 0..255', samples: [withColour.mean] },
+    ],
+    checks: [
+      { name: 'water body draws', passed: counts.drawCalls > 0, detail: `draw calls ${counts.drawCalls}` },
+      { name: 'the grid has waterline points', passed: audit.edgePoints > 0, detail: `${audit.edgePoints} points` },
+      { name: 'the foam has no gap along the waterline', passed: audit.edgeGaps === 0, detail: `${audit.edgeGaps} of ${audit.edgePoints} points` },
+      { name: 'no foam deeper than the breaker zone', passed: audit.farFoam === 0, detail: `${audit.farFoam} points` },
+      { name: `the water is lighter at the waterline than in deep water (by ${DEPTH_COLOUR_MIN_SPAN})`, passed: span >= DEPTH_COLOUR_MIN_SPAN, detail: `span ${span.toFixed(3)}` },
+      { name: `foam brightens the coast view (mean luminance up by at least ${FOAM_MIN_MEAN_RISE} level)`, passed: foamRise >= FOAM_MIN_MEAN_RISE, detail: `mean luminance up by ${foamRise.toFixed(3)} levels` },
+      { name: 'depth colour changes the coast frame', passed: meanChange >= DEPTH_COLOUR_MIN_MEAN_CHANGE, detail: `mean luminance changes by ${meanChange.toFixed(3)} levels` },
+    ],
+  };
+}
+
 async function measureFrames(host: WaterLodSpikeTestHost, durationMs: number, context: TestContext, gpu: boolean): Promise<TestObservation> {
   host.beginFrameSampling();
   const gpuMs: number[] = [];
@@ -689,6 +891,8 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
       host.setQuality(scenario.settings.quality ?? null);
       host.setLand(scenario.settings.land ?? null);
       host.setCull(scenario.settings.cull ?? null);
+      host.setWaterNoise(scenario.settings.waterNoise ?? null);
+      host.setShore(scenario.settings.shore ?? null);
     },
     restore: (wireframe) => {
       host.setWireframe(wireframe);
@@ -697,6 +901,10 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
       host.setQuality(null);
       host.setLand(null);
       host.setCull(null);
+      host.setWaterNoise(null);
+      host.setShore(null);
+      host.setFoam(null);
+      host.setDepthColour(null);
     },
     ready: async (context) => {
       while (!host.ready()) {
@@ -709,6 +917,8 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
       if (scenario.settings.measure === 'precision') return measurePrecision(host);
       if (scenario.settings.measure === 'land') return measureLand(host, scenario, context);
       if (scenario.settings.measure === 'cull') return measureCull(host, scenario, context);
+      if (scenario.settings.measure === 'shore') return measureShore(host, scenario, context);
+      if (scenario.settings.measure === 'shore-look') return measureShoreLook(host, scenario, context);
       const observation = await measureFrames(host, scenario.durationMs, context, scenario.settings.view !== undefined);
       return {
         ...observation,

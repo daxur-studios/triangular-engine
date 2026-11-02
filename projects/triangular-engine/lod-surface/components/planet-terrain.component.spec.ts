@@ -106,6 +106,29 @@ describe('PlanetTerrainComponent', () => {
     fixture.destroy();
   });
 
+  it('keeps its selector, and so its tree, when only the sun or the position changes', () => {
+    const fixture = create();
+    fixture.detectChanges();
+    const terrain = fixture.componentInstance.terrain()!;
+    beforeRender$.next();
+    const selector = terrain.selector;
+    const mesh = terrain.surface.mesh;
+
+    // A planet in orbit changes these every frame; none of them is a setting of the terrain.
+    fixture.componentRef.setInput('sunDirection', [1, 0, 0]);
+    fixture.componentRef.setInput('position', [5, 6, 7]);
+    fixture.detectChanges();
+    expect(terrain.selector).toBe(selector);
+    expect(terrain.surface.mesh).toBe(mesh);
+
+    // A real setting still remakes it.
+    fixture.componentRef.setInput('leafCap', 300);
+    fixture.detectChanges();
+    expect(terrain.selector).not.toBe(selector);
+    expect(terrain.selector.settings.leafCap).toBe(300);
+    fixture.destroy();
+  });
+
   it('selects from the active camera each frame and keeps the object at the camera', () => {
     const fixture = create();
     fixture.componentRef.setInput('leafCap', 256);

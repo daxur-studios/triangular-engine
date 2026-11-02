@@ -1,6 +1,11 @@
 # Changelog
 
+- `triangular-engine/planet-material`: new `slopeSuitabilityLayer` colours terrain by physical grade against a live maximum-slope threshold. It uses the unmorphed `terrainNormal` and radial up in TSL, adds no vertex attributes, and exposes uniform controls for visibility, threshold, transition, opacity and colours. This is a visual estimate; route planning and physics are unchanged.
+
 - `triangular-engine/lod-surface`: `LodTerrainBody.setWireframe` (and the surface's) no longer flags the material for recompile when the wireframe value is unchanged. `<planet-terrain>` calls it on every update, so with a moving sun or body each terrain material had its shader cache key rebuilt every frame (about 8 ms per body in a four-body scene, measured in a consumer app with the clock running). No API change.
+
+- `triangular-engine/lod-surface`: `SelectorSettings` gains `cameraSlack` and `frustumSlackPx` (both off by default), and `LodTerrainBody` turns them on (0.5 % of the camera's height above the surface, 2 px of frustum turn). A body whose camera has moved less than that since its last selection keeps its tree instead of rebuilding it, so a distant moon or planet no longer reselects every frame while the clock runs. Near the ground the allowance is centimetres, so close-up selection is unchanged. A leaf at the very screen edge can be drawn or dropped up to 2 px of turn late.
+- `triangular-engine/lod-surface`: `<planetTerrain>` and `<flatTerrain>` no longer rebuild their whole LOD tree whenever an unrelated input changes. The components bundle the sun direction and position with the terrain settings, so a planet that moves or turns every frame re-ran `LodTerrainBody.configure`, which remakes the selector and discards the tree: on a 4095-leaf terrain that was about 1300 splits and 11 ms of selection per frame. `configure` is now called only when the settings differ field for field. `LodTerrainBody.configure` itself is unchanged and still always remakes the selector.
 
 - `triangular-engine/lod-surface`: a node cover hook for the selector (Plan 080, w2), so a surface that something else completely hides stops taking leaf budget (water under land). New `NodeCoverHook` (`covered(node, selector)`), `LodSelector.setCoverHook`, `LodSelector.cover`, `LodSelector.invalidateCover` and `LodTerrainBody.setCoverHook` / `invalidateCover` (kept across `configure`). A covered leaf is never drawn and asks for no split (the 2:1 balance can still split it); the answer is remembered per node, so it must not depend on the camera. New `SelectorStats.covered` counts the covered leaves in the frustum, and `stats.drawn` no longer includes them. Without a hook the selection is unchanged bit for bit. `SelectorStats` gains a required field, so code that builds one by hand must add `covered: 0`.
 
@@ -300,6 +305,7 @@ All notable changes to triangular-engine are documented here.
 ## [Unreleased]
 
 - `triangular-engine/jolt`: keep activation/contact listeners alive until body cleanup and world destruction finish. Removing an active body can synchronously call its listener; freeing the wrapper first could hang teardown.
+- `triangular-engine/lod-surface`: `<flatTerrain>` and `<planetTerrain>` no longer run two `renderer.compileAsync` calls at once. When two terrains rebuilt their meshes together (a quality change with a second terrain on the page) or one was rebuilt while another still compiled, WebGPURenderer's single precompile slot broke: the error went only to `engine.error$`, the renderer's call depth stayed raised, and the scene froze with nothing in the console. Compiles now queue per renderer, and a mesh replaced while it waits is skipped.
 
 ### Added
 

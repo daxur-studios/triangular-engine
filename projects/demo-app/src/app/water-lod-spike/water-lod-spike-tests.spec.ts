@@ -83,6 +83,12 @@ function makeHost(overrides: Partial<WaterLodSpikeTestHost> = {}): WaterLodSpike
     landAudit: () => leafCull({ checked: 4096 }),
     setCull: () => undefined,
     coverActive: () => false,
+    setWaterNoise: () => undefined,
+    setShore: () => undefined,
+    shoreAudit: () => ({ dryPoints: 9000, violations: 0, maxExcessM: 0, meanExcessM: 0 }),
+    setFoam: () => undefined,
+    setDepthColour: () => undefined,
+    shoreLookAudit: () => ({ wetPoints: 20000, edgePoints: 900, edgeGaps: 0, farFoam: 0, shallowDeepness: 0.05, deepDeepness: 0.95 }),
     environment: () => ({ backend: 'webgpu' }),
     ...overrides,
   };
@@ -443,6 +449,155 @@ describe('createWaterLodSpikeTestAdapter', () => {
       expect(suite?.scenarios.length).toBe(10);
       expect(suite?.scenarios.filter((scenario) => scenario.settings.cull).length).toBe(5);
       expect(suite?.scenarios.every((scenario) => scenario.settings.land === true)).toBe(true);
+    });
+  });
+
+  describe('shore case', () => {
+    const SHORE_SCENARIO = (waterNoise: boolean, shore: boolean): TestScenario<WaterLodSpikeTestSettings> => ({
+      id: 'shore',
+      label: 'Shore',
+      settings: { wireframe: false, measure: 'shore', land: true, waterNoise, shore },
+      durationMs: 1000,
+      warmupMs: 500,
+    });
+    const failed = (observation: Awaited<ReturnType<ReturnType<typeof createWaterLodSpikeTestAdapter>['measure']>>) =>
+      (observation.checks ?? []).filter((check) => !check.passed).map((check) => check.name);
+    const crescents = { shoreAudit: () => ({ dryPoints: 9000, violations: 120, maxExcessM: 3.2, meanExcessM: 1.1 }) };
+
+    it('sees the crescents with the weight off (the control) and reports their size', async () => {
+      const host = makeHost(crescents);
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(SHORE_SCENARIO(true, false), makeContext(host.calls));
+
+      expect(failed(observation)).toEqual([]);
+      expect(observation.metrics.find((metric) => metric.name === 'largest height of water over land')?.samples).toEqual([3.2]);
+    });
+
+    it('fails the control when the gate finds nothing with the weight off', async () => {
+      const host = makeHost();
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(SHORE_SCENARIO(false, false), makeContext(host.calls));
+
+      expect(failed(observation)).toEqual(['control: with the weight off the water stands above the land somewhere']);
+    });
+
+    it('passes noise off with the weight on when no dry point has water above the land, and fails when one does', async () => {
+      const clean = makeHost();
+      expect(failed(await createWaterLodSpikeTestAdapter(clean).measure(SHORE_SCENARIO(false, true), makeContext(clean.calls)))).toEqual([]);
+      const leaky = makeHost(crescents);
+      expect(failed(await createWaterLodSpikeTestAdapter(leaky).measure(SHORE_SCENARIO(false, true), makeContext(leaky.calls)))).toEqual([
+        'noise off, weight on: no dry point has water more than 5 cm above the land',
+      ]);
+    });
+
+    it('does not gate the noise-on arm with the weight on (it is reported)', async () => {
+      const host = makeHost(crescents);
+      expect(failed(await createWaterLodSpikeTestAdapter(host).measure(SHORE_SCENARIO(true, true), makeContext(host.calls)))).toEqual([]);
+    });
+
+    it('sets noise and weight for the case and puts the page back afterwards', async () => {
+      const noise: (boolean | null)[] = [];
+      const shore: (boolean | null)[] = [];
+      const host = makeHost({ setWaterNoise: (enabled) => noise.push(enabled), setShore: (enabled) => shore.push(enabled) });
+      const adapter = createWaterLodSpikeTestAdapter(host);
+      const context = makeContext(host.calls);
+      const snapshot = await adapter.capture(context);
+      await adapter.apply(SHORE_SCENARIO(false, true), context);
+      await adapter.restore(snapshot, context);
+
+      expect(noise).toEqual([false, null]);
+      expect(shore).toEqual([true, null]);
+    });
+
+    it('is in the suite history with the four noise and weight arms', () => {
+      const suite = WATER_LOD_SPIKE_TEST_HISTORY.find((entry) => entry.id === 'water-lod-spike-shore');
+      expect(suite?.version).toBe(1);
+      expect(suite?.scenarios.map((scenario) => [scenario.settings.waterNoise, scenario.settings.shore])).toEqual([
+        [true, false],
+        [false, false],
+        [true, true],
+        [false, true],
+      ]);
+    });
+  });
+
+  describe('shore look case', () => {
+    const LOOK_SCENARIO: TestScenario<WaterLodSpikeTestSettings> = {
+      id: 'coast-view',
+      label: 'Coast',
+      settings: { wireframe: false, measure: 'shore-look', land: true, waterNoise: false, shore: true },
+      durationMs: 1000,
+      warmupMs: 500,
+    };
+    const failed = (observation: Awaited<ReturnType<ReturnType<typeof createWaterLodSpikeTestAdapter>['measure']>>) =>
+      (observation.checks ?? []).filter((check) => !check.passed).map((check) => check.name);
+
+    /** A page whose frame gets 1 % foam-white pixels with the foam on (about 2 levels of mean luminance) and 2 levels brighter water with the depth colour on. */
+    const lookHost = (overrides: Partial<WaterLodSpikeTestHost> = {}, foamAdds = true, colourAdds = true) => {
+      let foam = false;
+      let colour = false;
+      return makeHost({
+        setFoam: (enabled) => {
+          foam = enabled ?? false;
+        },
+        setDepthColour: (enabled) => {
+          colour = enabled ?? false;
+        },
+        readFrame: (): ILuminanceImage => {
+          const values = new Float32Array(WIDTH * HEIGHT).fill(60 + (colour && colourAdds ? 2 : 0));
+          if (foam && foamAdds) values.fill(250, 0, Math.round(values.length * 0.01));
+          return { width: WIDTH, height: HEIGHT, values };
+        },
+        ...overrides,
+      });
+    };
+
+    it('passes when the foam and the colour show and the audit is clean', async () => {
+      const host = lookHost();
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(LOOK_SCENARIO, makeContext(host.calls));
+
+      expect(failed(observation)).toEqual([]);
+      expect(observation.metrics.find((metric) => metric.name === 'bright pixel share, foam')?.samples[0]).toBeCloseTo(0.01, 3);
+    });
+
+    it('fails when the foam has a gap along the waterline or stands in deep water', async () => {
+      const gap = lookHost({ shoreLookAudit: () => ({ wetPoints: 20000, edgePoints: 900, edgeGaps: 40, farFoam: 3, shallowDeepness: 0.05, deepDeepness: 0.95 }) });
+      expect(failed(await createWaterLodSpikeTestAdapter(gap).measure(LOOK_SCENARIO, makeContext(gap.calls)))).toEqual([
+        'the foam has no gap along the waterline',
+        'no foam deeper than the breaker zone',
+      ]);
+    });
+
+    it('fails when the colour does not depend on the depth', async () => {
+      const flat = lookHost({ shoreLookAudit: () => ({ wetPoints: 20000, edgePoints: 900, edgeGaps: 0, farFoam: 0, shallowDeepness: 0.9, deepDeepness: 0.95 }) });
+      expect(failed(await createWaterLodSpikeTestAdapter(flat).measure(LOOK_SCENARIO, makeContext(flat.calls)))).toEqual([
+        'the water is lighter at the waterline than in deep water (by 0.3)',
+      ]);
+    });
+
+    it('fails when the foam adds no pixels to the frame, or the colour changes nothing', async () => {
+      const noFoam = lookHost({}, false, true);
+      expect(failed(await createWaterLodSpikeTestAdapter(noFoam).measure(LOOK_SCENARIO, makeContext(noFoam.calls)))).toEqual([
+        'foam brightens the coast view (mean luminance up by at least 1 level)',
+      ]);
+      const noColour = lookHost({}, true, false);
+      expect(failed(await createWaterLodSpikeTestAdapter(noColour).measure(LOOK_SCENARIO, makeContext(noColour.calls)))).toEqual([
+        'depth colour changes the coast frame',
+      ]);
+    });
+
+    it('puts the page back afterwards and is in the suite history', async () => {
+      const foam: (boolean | null)[] = [];
+      const colour: (boolean | null)[] = [];
+      const host = makeHost({ setFoam: (enabled) => foam.push(enabled), setDepthColour: (enabled) => colour.push(enabled) });
+      const adapter = createWaterLodSpikeTestAdapter(host);
+      const context = makeContext(host.calls);
+      const snapshot = await adapter.capture(context);
+      await adapter.restore(snapshot, context);
+
+      expect(foam).toEqual([null]);
+      expect(colour).toEqual([null]);
+      const suite = WATER_LOD_SPIKE_TEST_HISTORY.find((entry) => entry.id === 'water-lod-spike-shore-look');
+      expect(suite?.version).toBe(1);
+      expect(suite?.scenarios.map((scenario) => scenario.settings.measure)).toEqual(['shore-look']);
     });
   });
 

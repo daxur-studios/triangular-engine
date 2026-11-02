@@ -17,16 +17,31 @@ import {
   type IWaterLodSpikeSceneHandle,
 } from './core';
 import { toLuminance, type ILuminanceImage } from './core/water-lod-spike-image-metrics';
-import { COVER_MARGIN_M, createLandCoverHook, createWaterLodSpikeLand, measureLeaves, waterCeilingM, type ILeafCull } from './core/water-lod-spike-land';
+import {
+  COVER_MARGIN_M,
+  auditShore,
+  auditShoreLook,
+  createLandCoverHook,
+  createWaterLodSpikeLand,
+  measureLeaves,
+  waterCeilingM,
+  type ILeafCull,
+  type IShoreAudit,
+  type IShoreLookAudit,
+} from './core/water-lod-spike-land';
 import { runWaterLodSpikePrecisionProbe, type IPrecisionProbeRenderer } from './core/water-lod-spike-precision-probe';
 import { WATER_LOD_SPIKE_QUALITIES, waterLodSpikeQuality, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
-import { WATER_LOD_SPIKE_UNIFORMS } from './core/water-lod-spike-waves';
+import { WATER_LOD_SPIKE_UNIFORMS, shoreLookAt } from './core/water-lod-spike-waves';
 import {
   createWaterLodSpikeTestAdapter,
   WATER_LOD_SPIKE_TEST_HISTORY,
   type WaterLodSpikeTestSettings,
   type WaterLodSpikeView,
 } from './water-lod-spike-tests';
+
+/** The crescent gate's grid: a 5 km square around the origin at 25 m (the islands near the origin and their shores). */
+const AUDIT_HALF_M = 2_500;
+const AUDIT_STEP_M = 25;
 
 /** Wave time (s) the aliasing cases freeze the water at, so every arm and the reference see the same surface. */
 const TEST_WAVE_TIME_S = 12.5;
@@ -84,6 +99,28 @@ export class WaterLodSpikeComponent {
   private readonly coverHook = createLandCoverHook();
   private savedCull: boolean | null = null;
 
+  /** The terrain default for detail noise (a share of the texel). The water body carried it unasked until the shoreline review. */
+  protected readonly defaultDetailNoise = 0.04;
+  /**
+   * The water body's detail noise on or off. On is the terrain default, which at 100 km over 1,024 texels is about 4 m of lumpy
+   * height on the water and widens the body's height bound. Off by default since the shoreline review: the water has its own
+   * waves, and the noise is not scaled by the shore weight, so it still stands above the land at the shore.
+   */
+  readonly waterNoise = signal(false);
+  private savedWaterNoise: boolean | null = null;
+  /**
+   * Waves scaled by `smoothstep(0, ramp, D)` of the water depth D over the land (Plan 080 shoreline review): the waterline is
+   * where the land crosses the sea level and no crest stands above the land. Acts only while the land is on.
+   */
+  readonly shore = signal(true);
+  private savedShore: boolean | null = null;
+  /** Foam at the waterline and breaker lines, from the water depth D (Plan 080 shoreline review, experiment 4). Acts only while the land is on. */
+  readonly foam = signal(true);
+  private savedFoam: boolean | null = null;
+  /** Water colour from shallow to deep with D. Acts only while the land is on. */
+  readonly depthColour = signal(true);
+  private savedDepthColour: boolean | null = null;
+
   readonly wireframe = signal(false);
   /** True while the vertex heights are forced to zero (the shading normal is kept). */
   readonly flatVertices = signal(false);
@@ -126,8 +163,7 @@ export class WaterLodSpikeComponent {
   private gpuVendor = 'unknown';
 
   constructor() {
-    this.engine.scene.background = new Color('#12181f');
-    this.water = createWaterLodSpikeScene(this.engine, (diagnostics) => {
+    this.engine.scene.background = new Color('#12181f');    this.water = createWaterLodSpikeScene(this.engine, (diagnostics) => {
       this.drawCalls.set(diagnostics.drawCalls);
       this.triangles.set(diagnostics.triangles);
     });
@@ -145,6 +181,9 @@ export class WaterLodSpikeComponent {
       const landObject = this.landBody()?.terrain()?.object;
       if (landObject && landObject.renderOrder !== -1) landObject.renderOrder = -1;
       this.syncCover();
+      WATER_LOD_SPIKE_UNIFORMS.shore.value = this.shore() && this.land() ? 1 : 0;
+      WATER_LOD_SPIKE_UNIFORMS.foam.value = this.foam() && this.land() ? 1 : 0;
+      WATER_LOD_SPIKE_UNIFORMS.depthColour.value = this.depthColour() && this.land() ? 1 : 0;
     });
     // A held test view is re-applied every frame after the controls' tick, so nothing moves the camera off it.
     const holdSubscription = this.engine.lateUpdate$.subscribe(() => {
@@ -192,6 +231,12 @@ export class WaterLodSpikeComponent {
       landLeaves: (cover) => this.landLeaves('drawn', cover === true),
       landAudit: () => this.landLeaves('all', true),
       setCull: (enabled) => this.holdCull(enabled),
+      setWaterNoise: (enabled) => this.holdWaterNoise(enabled),
+      setShore: (enabled) => this.holdShore(enabled),
+      shoreAudit: (times) => this.auditShoreOverTime(times),
+      setFoam: (enabled) => this.holdFoam(enabled),
+      setDepthColour: (enabled) => this.holdDepthColour(enabled),
+      shoreLookAudit: () => this.auditShoreLookNow(),
       coverActive: () => this.waterBody()?.terrain()?.selector.cover !== undefined,
       runPrecisionProbe: () => runWaterLodSpikePrecisionProbe(this.engine.renderer as unknown as IPrecisionProbeRenderer, String(this.environment()['backend'])),
       environment: () => this.environment(),
@@ -241,6 +286,115 @@ export class WaterLodSpikeComponent {
     const selector = body.selector;
     // With the cover margin the judgement is the hook's own: land must clear the water's bound by the margin.
     return measureLeaves(selector, selector.settings.domain, waterCeilingM(selector.settings.heightBoundM, cover ? COVER_MARGIN_M : 0), undefined, scope);
+  }
+
+  toggleWaterNoise(): void {
+    this.waterNoise.update((enabled) => !enabled);
+  }
+
+  /** Puts the water's detail noise on or off for a test case (null restores the page's own setting). */
+  private holdWaterNoise(enabled: boolean | null): void {
+    if (enabled !== null) {
+      this.savedWaterNoise ??= this.waterNoise();
+      this.waterNoise.set(enabled);
+      return;
+    }
+    if (this.savedWaterNoise !== null) this.waterNoise.set(this.savedWaterNoise);
+    this.savedWaterNoise = null;
+  }
+
+  toggleShore(): void {
+    this.shore.update((enabled) => !enabled);
+  }
+
+  /** Puts the shore weight on or off for a test case (null restores the page's own setting). */
+  private holdShore(enabled: boolean | null): void {
+    if (enabled !== null) {
+      this.savedShore ??= this.shore();
+      this.shore.set(enabled);
+      return;
+    }
+    if (this.savedShore !== null) this.shore.set(this.savedShore);
+    this.savedShore = null;
+  }
+
+  /**
+   * The crescent gate over the water body's own surface (waves at the given times, detail noise included, shore weight as set)
+   * against the land: dry points where the water stands above the land. Worst case over the times.
+   */
+  private auditShoreOverTime(times: readonly number[]): IShoreAudit {
+    const source = this.waterBody()?.terrain()?.source;
+    if (!source) throw new Error('The water body does not exist yet');
+    const savedTime = WATER_LOD_SPIKE_UNIFORMS.time.value as number;
+    // The shore weight reads the land, which the uniform follows from the page's tick; the audit needs it now.
+    const savedShore = WATER_LOD_SPIKE_UNIFORMS.shore.value as number;
+    WATER_LOD_SPIKE_UNIFORMS.shore.value = this.shore() ? 1 : 0;
+    try {
+      let worst: IShoreAudit = { dryPoints: 0, violations: 0, maxExcessM: 0, meanExcessM: 0 };
+      let violations = 0;
+      for (const t of times) {
+        WATER_LOD_SPIKE_UNIFORMS.time.value = t;
+        const audit = auditShore((x, z) => source.heightAt(x, 0, z), AUDIT_HALF_M, AUDIT_STEP_M);
+        violations += audit.violations;
+        if (audit.maxExcessM >= worst.maxExcessM) worst = audit;
+      }
+      return { ...worst, violations: Math.round(violations / times.length) };
+    } finally {
+      WATER_LOD_SPIKE_UNIFORMS.time.value = savedTime;
+      WATER_LOD_SPIKE_UNIFORMS.shore.value = savedShore;
+    }
+  }
+
+  toggleFoam(): void {
+    this.foam.update((enabled) => !enabled);
+  }
+
+  toggleDepthColour(): void {
+    this.depthColour.update((enabled) => !enabled);
+  }
+
+  /** Puts the foam on or off for a test case (null restores the page's own setting). The uniform follows at once, so a frame read next shows it. */
+  private holdFoam(enabled: boolean | null): void {
+    if (enabled !== null) {
+      this.savedFoam ??= this.foam();
+      this.foam.set(enabled);
+    } else {
+      if (this.savedFoam !== null) this.foam.set(this.savedFoam);
+      this.savedFoam = null;
+    }
+    WATER_LOD_SPIKE_UNIFORMS.foam.value = this.foam() && this.land() ? 1 : 0;
+  }
+
+  /** Puts the depth colour on or off for a test case (null restores the page's own setting). */
+  private holdDepthColour(enabled: boolean | null): void {
+    if (enabled !== null) {
+      this.savedDepthColour ??= this.depthColour();
+      this.depthColour.set(enabled);
+    } else {
+      if (this.savedDepthColour !== null) this.depthColour.set(this.savedDepthColour);
+      this.savedDepthColour = null;
+    }
+    WATER_LOD_SPIKE_UNIFORMS.depthColour.value = this.depthColour() && this.land() ? 1 : 0;
+  }
+
+  /** The shore look gate over the 5 km grid with both looks on (the page's uniforms for the look's scales), judged against the land. */
+  private auditShoreLookNow(): IShoreLookAudit {
+    const savedFoam = WATER_LOD_SPIKE_UNIFORMS.foam.value as number;
+    const savedColour = WATER_LOD_SPIKE_UNIFORMS.depthColour.value as number;
+    WATER_LOD_SPIKE_UNIFORMS.foam.value = 1;
+    WATER_LOD_SPIKE_UNIFORMS.depthColour.value = 1;
+    try {
+      return auditShoreLook(shoreLookAt, AUDIT_HALF_M, AUDIT_STEP_M, {
+        edgeM: WATER_LOD_SPIKE_UNIFORMS.foamEdgeM.value as number,
+        zoneM: WATER_LOD_SPIKE_UNIFORMS.foamZoneM.value as number,
+        spacingM: WATER_LOD_SPIKE_UNIFORMS.foamSpacingM.value as number,
+        speedMS: WATER_LOD_SPIKE_UNIFORMS.foamSpeedMS.value as number,
+        tintScaleM: WATER_LOD_SPIKE_UNIFORMS.tintScaleM.value as number,
+      });
+    } finally {
+      WATER_LOD_SPIKE_UNIFORMS.foam.value = savedFoam;
+      WATER_LOD_SPIKE_UNIFORMS.depthColour.value = savedColour;
+    }
   }
 
   toggleCull(): void {

@@ -228,9 +228,80 @@ The leaf cap (4096) was hit in every view.
 
 **Not done.** The three options above; real terrain (`nodeRange`); the sphere (a leaf on a sphere is not an axis-aligned square); moving-camera visual check for holes at the shore (the geometry audit is the safety evidence, no one has looked); the hook inside `<flatWater>`/`<planetWater>`, which do not exist yet.
 
+### 2026-11-02 (shoreline review): water depth as the one shore mechanism
+
+**Trigger.** The owner tried w2 with Land on and was uneasy: the land is an inner area, so water and land overlap a lot, and wave crests appear as crescents above the land as the water animates. The goals behind it: a very clear waterline, water visibly meeting the surface (crashing, foam), river-to-ocean meeting points, and no high-resolution water under terrain at the shore. The architect (a read-only review; its notes are outside the repository) was asked whether culling is the right main strategy, what causes the crescents, what to test first, and whether the sphere and cylinder change anything.
+
+**The review's answer.** One mechanism: the water shader reads the water depth `D = sea level - terrain height` at each vertex and pixel.
+- Waterline: scale each wave's height by `w(D) = smoothstep(0, ramp, D)`. The water is flat where it meets land, so the waterline is exactly where the terrain crosses the sea level, and the depth test draws it sharply. No crest can stand above land.
+- Foam and shore break: a foam band where `D` is small, breaker lines along the direction in which `D` changes; no baked distance-to-coast field.
+- River mouths: rivers are separate ribbons; the same weight and a mask fade the ocean waves into the flow.
+- Water under land: the land drawn first already rejects the water fragments (the spike above). A coast needs less water mesh, not more, once the waves fade there. Stop investing in culling; keep the hook and the compile queue.
+- Sphere and cylinder: `D` along the local up works on every domain. Water and terrain cells share quadtree addresses, so a water cell can read the terrain's own per-cell heights: no global coast map (it has seams on a cube-sphere), and a cheap cover test too.
+- Experiments, in order: (1) water detail noise off; (2) wave amplitude zero; (3) `w(D)` with a gate written first; (4) foam and depth colour from `D`; (5) per-cell terrain heights for the water, and what reading them costs; (6) only then more culling.
+
+**What was built (spike only, no library file).** `core/water-lod-spike-land.ts`: `waterDepthM`, `shoreWeight` (the smoothstep), `auditShore` (the gate) and `landHeightNode` (the TSL twin the weight reads). `core/water-lod-spike-waves.ts`: uniforms `shore` and `shoreRampM` (12 m), `shoreWeightNode` and `shoreWeightAt`; the weight scales the vertex height (CPU twin included, so parity holds), the vertex gradient, and the shading slope in the material (the lost variance keeps the glint width). Page: **Water noise** and **Shore weight** buttons (the weight acts only with Land on). The water body used to carry the terrain's default detail noise (0.04 of a 98 m texel, about 4 m) without anyone asking; the page now defaults it off, so earlier suite numbers (aliasing, performance, land, cull) were taken with it on.
+
+**Suite `water-lod-spike-shore` v1** (gates written before the first run; CPU only). A 5 km grid around the islands at 25 m; at every dry point (land above the sea level) the water surface the body would draw (waves at four times, detail noise when on) is compared with the land. Gates: with the weight off the water stands above the land somewhere (so the gate can see a crescent); noise off and weight on: no dry point has water more than 5 cm above the land. Reported: dry points, violations, largest and mean excess. Specs: 84 of 84 in the demo app's water specs (new: weight, audit, and the shore case of the page adapter).
+
+**Result** (CPU gate, 18,420 dry points, the page in headless Chrome on the NVIDIA adapter, one run):
+
+| detail noise | depth weight | dry points with water above land | largest height over land |
+| --- | --- | --- | --- |
+| on | off | 625 | 11.8 m |
+| off | off | 565 | 11.5 m |
+| on | on | 276 | 5.6 m |
+| off | on | 0 | 0 m |
+
+**What it shows.**
+- **The crescents are the waves, not the noise.** Noise off alone barely moves the count (625 to 565, 11.8 to 11.5 m): the waves' own crests stand up to about 11 m above beach land. The review's first suspect (the noise) is a small part.
+- With the weight on and the noise off the gate is clean: 0 points. With the noise on the weight still leaves 276 points up to 5.6 m, because the body's noise is added after the weight and is not scaled by it. The water should carry no terrain noise.
+- Experiment 2 (flat vertices, shading kept) at a shoreline view: no slivers. So the land and water meshes crossing between vertices is not the cause in that view; the crests are.
+- Pictures (frozen wave time 12.5 s, 12 to 50 m above a shore, headless): with the weight off a crest bulges into the land at the waterline; with the weight on the waterline is a clean line. Only I looked, on a headless run; the owner's eye on the real GPU is the check.
+
+**Not done.**
+- Foam and depth colour from `D`, breaker lines, and the river-mouth mask (experiment 4 and beyond).
+- Cost of the weight: it evaluates the land height per vertex and per pixel (eight exponentials here, from the analytic islands). Not measured; the library form reads the terrain's per-cell heights (experiment 5), which is a different cost.
+- The ramp (12 m) is untuned, and the weight's second-order term in the shading slope (the weight's own gradient) is dropped.
+- Moving camera at the shore, the sphere, and real terrain.
+- The earlier suites were not re-run with the noise off.
+
+### 2026-11-02 (shoreline review, experiment 4): foam and depth colour from `D`
+
+**What was built (spike only).** Both read the same water depth `D` the shore weight reads, per pixel, so they follow the waterline wherever the land crosses the sea level and need no coast map.
+- Foam (`shoreFoam`, `core/water-lod-spike-land.ts`): a band at the waterline (full at `D = 0`, gone at 3 m) and breaker lines, which are stripes of constant `D` (6 m apart) that travel towards the shore at 2 m/s of depth and fade out by `D = 20 m`. Laid over the shaded colour (colour `#eef6fa`, strength 0.9 at the waterline, 0.72 on a breaker).
+- Depth colour (`shoreDeepness`): the water's colour goes from a shallow turquoise to the deep colour as `1 - exp(-D / 8 m)`.
+- `core/water-lod-spike-waves.ts`: uniforms `foam`, `depthColour` and the scales; `shoreLookNode` (one land-height read per pixel for both, 0 foam and deepness 1 when both are off) and its CPU twin `shoreLookAt`. Material: the deep colour is a mix by deepness, the foam mixes over the result. Page: **Foam** and **Depth colour** buttons (on by default, acting only with Land on). The scales are sized to the spike's 30 m seabed (no water is deeper than 30 m here); a planet's oceans size them from the sea's depth range.
+
+**Suite `water-lod-spike-shore-look` v1** (gates written before the first run). CPU, over the 5 km audit grid: no gap in the waterline foam (every water point within half the edge width has foam of at least a half), no foam deeper than the breaker zone, and the water at the waterline lighter than the deep water by at least 0.3. GPU, on a coast view (frames read back at the same wave time): foam alone raises the frame's mean luminance by at least one level of 255, depth colour alone changes it by at least a quarter of a level. Specs: 94 of 94 in the demo app's water specs.
+
+**Result** (headless Chrome on the NVIDIA adapter, one run, auto=pass): 21,981 water points, 672 at the waterline with no gap, no foam in deep water; deepness 0.12 at the waterline against 0.95 in deep water; mean luminance 79.0 with neither, 88.3 with foam, 84.6 with depth colour.
+
+**What it shows and what it does not.**
+- The first GPU gate counted bright pixels and was wrong: foam also covers the glint's own bright pixels, so the bright share went down (0.147 % to 0.128 %) while the mean luminance went up by 9. The gate now uses the mean; the bright share is reported only.
+- The first screenshots showed no change at all (identical frames to the last digit) although the uniforms reached the page. After a rebuild the same code showed the foam. I did not find why; the likely cause is that a build mid-edit was served. Frames from the page, not only uniforms, are what the GPU gate reads.
+- Pictures (headless, frozen wave time, 50 m above the shore, 500 m back): a foam line along the waterline, breaker stripes parallel to the shore, turquoise shallows. Only I looked; the look is untuned (stripe spacing, speed, strength, colours).
+- The breaker stripes move with time in the shader and in the CPU twin, but the movement has no gate beyond a spec on the pure function (the pattern at `D + s*t` at time 0 is at `D` at time `t`).
+
+**Not done.** River-mouth mask; breaker lines that bend with the wave direction (they are contours of `D` only); foam from the wave's own crest (whitecaps); cost of the per-pixel land read (it is the same eight exponentials as the weight, now shared by foam and colour but still computed twice, once for the weight and once for the look: `shoreLookNode` and `shoreWeightNode` each read the land); experiment 5 (per-cell terrain heights) and the sphere.
+
 ## Scope history
 
 <!-- tri:scope-history -->
 <!-- tri:scope-baseline state="unconfirmed" -->
 <!-- /tri:scope-baseline -->
 <!-- /tri:scope-history -->
+
+### 2026-11-02 (night): scene froze after Land on, then a quality change
+
+**Report.** With Land on, changing the quality froze the scene (the UI still worked, nothing in the console).
+
+**Cause.** Not the cover hook. A quality change rebuilds the surface mesh of both terrains in one frame, and each one calls `renderer.compileAsync`. three 0.187's `compileAsync` keeps its precompile state in one slot (`_precompilationState`, `_callDepth`), so the overlapping second call throws in `_finishPreCompile` and skips the `_callDepth--`. The error went only to `engine.error$`; the raised call depth makes later renders count as nested. Reproduced in headless Chrome by turning Land on and changing quality 20 to 250 ms apart: the engine error and a call depth that grew by one per change, and the land was not drawn (2 draw calls instead of 3).
+
+**Fix.** `attachLodTerrain` queues compiles per renderer (`serialCompile`): one at a time, and a mesh replaced while it waited is skipped. The same sweep now shows no engine error, a steady call depth and the land drawn. Specs: a new flat-terrain spec (never two compiles at once, a replaced mesh is skipped) and the planet-terrain spec that had asserted the overlap now asserts the queue; 58 of 58 component specs pass.
+
+**Not done.** The other pages that call `compileAsync` themselves are untouched; any of them that compiles next to a terrain can overlap the same way. Headed Chrome on the owner's hybrid GPU was not tried; the sweep ran headless.
+
+### 2026-11-02 (shoreline review): w2 depth mechanism
+
+Plan 080's Depth outcome, the w2 line and the testing matrix changed on this date. Before: depth meant terrain-aware culling (no water drawn under land, a cull hook in lod-surface). After: the water depth over the terrain scales the waves (`smoothstep(0, ramp, D)`), foam and river mouths read the same `D`, and culling is optional. Reason: the owner's goals (a crisp waterline, water meeting the surface, river mouths) and the spike results (land drawn first already removes most of the cost; the hook saved 0 to 6 % of triangles; crescents are wave crests above low land, and the gate is clean with the weight). The w2 acceptance gained the shore gate (`water-lod-spike-shore`). No earlier commitment was removed; the cover hook stays in the library. No baseline was confirmed.

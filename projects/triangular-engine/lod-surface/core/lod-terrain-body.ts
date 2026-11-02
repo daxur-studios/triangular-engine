@@ -381,8 +381,7 @@ export class LodTerrainBody {
     this.surface.upload(this.selector, position);
     this.syncPoleFan();
     this.object.position.set(e[12], e[13], e[14]);
-    this.selectionMs = performance.now() - began;
-  }
+    this.selectionMs = performance.now() - began;  }
 
   /**
    * Preview (G6e, sphere only, needs the morph setting): selects above morph 0 in the bent frame, with a {@link StretchMetric} on each

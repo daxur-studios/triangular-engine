@@ -63,6 +63,7 @@ export interface TerrainPlanetMaterialOptions extends IPlanetSurfaceMaterialOpti
  * |---|---|
  * | `radialDirection`, `latLon` | `nodes.up`, the unit direction of the vertex's base point (exact, no height in it) |
  * | `sphereNormal` | `nodes.normal`, the height-gradient shading normal (tilts with relief, as the field's doc says) |
+ * | `terrainNormal` | `nodes.globeNormal` when available, otherwise `nodes.normal`; the physical grade normal, stable as the display morphs |
  * | `bodyFixedLocal` | `nodes.globePosition` (unbent) with `morphUniforms` and the mesh's globe fields, else `nodes.position`; relative to the camera: lift it through `modelWorldMatrix` as the macro layer does (the mesh must sit at the camera, as `LodTerrainBody` keeps it) |
  * | `morphedBatchedLocal`, `morphedPosition` | `nodes.position`, the drawn (bent above morph 0) position, lifted the same way |
  * | `uv` | the cell atlas's longitude/latitude uv of `radialDirection` |
@@ -148,6 +149,7 @@ export class TerrainPlanetMaterial extends PlanetSurfaceMaterial implements LodS
       id: shared ? 'lodTerrainMorph' : 'lodTerrain',
       context: {
         sphereNormal: nodes.normal,
+        terrainNormal: onGlobe ? globeNormal : nodes.normal,
         radialDirection: radial,
         morphedPosition: nodes.position,
         latLon: vec2(asin(clamp((radial as any).y, -1, 1)), atan((radial as any).x, (radial as any).z)),

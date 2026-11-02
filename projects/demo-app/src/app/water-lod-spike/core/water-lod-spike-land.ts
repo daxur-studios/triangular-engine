@@ -141,9 +141,189 @@ export function createLandCoverHook(islands: readonly IIsland[] = ISLANDS, margi
   };
 }
 
+/** Water depth D at (x, z): the sea level minus the land height, metres. Positive over water, negative on dry land. */
+export function waterDepthM(x: number, z: number, islands: readonly IIsland[] = ISLANDS): number {
+  return SEA_LEVEL_M - landHeightM(x, z, islands);
+}
+
+/**
+ * What the shore review's one mechanism does to the waves (ER 080, 2026-11-02 shoreline review): the wave height is scaled by
+ * `smoothstep(0, rampM, D)`, so the water is flat at the waterline (D = 0) and on dry land, and has its full waves from
+ * `rampM` metres of depth. The shore is then exactly where the land crosses the sea level, and no crest can stand above land.
+ */
+export function shoreWeight(depthM: number, rampM: number): number {
+  const t = Math.min(1, Math.max(0, depthM / rampM));
+  return t * t * (3 - 2 * t);
+}
+
+/** What {@link auditShore} finds. */
+export interface IShoreAudit {
+  /** Sample points that lie on dry land (land above the sea level). */
+  readonly dryPoints: number;
+  /** Dry points where the water surface is above the land: the crescents. */
+  readonly violations: number;
+  /** Largest height of the water surface over the land at a dry point, metres (0 when none). */
+  readonly maxExcessM: number;
+  /** Mean of the same over the violations, metres. */
+  readonly meanExcessM: number;
+}
+
+/**
+ * The crescent gate (CPU): over a square grid of `halfM` and `stepM`, at every dry point (land above the sea level) the water
+ * surface `waterAt` must not stand above the land by more than `toleranceM`. The land height is the analytic one the land
+ * body draws (its mesh sags below it by under a metre between vertices, which the tolerance allows for).
+ */
+export function auditShore(
+  waterAt: (x: number, z: number) => number,
+  halfM: number,
+  stepM: number,
+  toleranceM = 0.05,
+  islands: readonly IIsland[] = ISLANDS,
+): IShoreAudit {
+  let dry = 0;
+  let violations = 0;
+  let maxExcess = 0;
+  let excessSum = 0;
+  for (let x = -halfM; x <= halfM; x += stepM) {
+    for (let z = -halfM; z <= halfM; z += stepM) {
+      const land = landHeightM(x, z, islands);
+      if (land <= SEA_LEVEL_M) continue;
+      dry++;
+      const excess = waterAt(x, z) - land;
+      if (excess > toleranceM) {
+        violations++;
+        excessSum += excess;
+        if (excess > maxExcess) maxExcess = excess;
+      }
+    }
+  }
+  return { dryPoints: dry, violations, maxExcessM: maxExcess, meanExcessM: violations > 0 ? excessSum / violations : 0 };
+}
+
+/** What the shore look reads (ER 080, 2026-11-02 shoreline review, experiment 4): every length is a water depth D or a distance in D. */
+export interface IShoreLookParams {
+  /** Depth over which the waterline foam falls from full (at D = 0) to none, metres. */
+  readonly edgeM: number;
+  /** Depth from which there are no breaker lines, metres. */
+  readonly zoneM: number;
+  /** Distance between breaker lines, metres of depth. */
+  readonly spacingM: number;
+  /** Speed at which the breaker lines travel towards the shore, metres of depth per second. */
+  readonly speedMS: number;
+  /** Depth scale of the water colour: the deep colour is reached from a few of these, metres. */
+  readonly tintScaleM: number;
+}
+
+/**
+ * The look the spike starts with (untuned). The spike's seabed is 30 m below the sea level, so no water here is deeper than 30 m:
+ * the breaker zone and the colour scale are sized to that. A planet's oceans need these scales from the sea's own depth range.
+ */
+export const SHORE_LOOK: IShoreLookParams = { edgeM: 3, zoneM: 20, spacingM: 6, speedMS: 2, tintScaleM: 8 };
+
+function smooth(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Foam at water depth `depthM` and time `timeS`, 0 to 1: a band at the waterline (full at D = 0, gone at `edgeM`) and breaker
+ * lines, which are stripes of constant D that travel towards the shore and fade out by `zoneM`. Depends on D alone, so it
+ * follows the shore wherever the land crosses the sea level, with no coast map.
+ */
+export function shoreFoam(depthM: number, timeS: number, look: IShoreLookParams = SHORE_LOOK): number {
+  const edge = 1 - smooth(0, look.edgeM, depthM);
+  const phase = (depthM + look.speedMS * timeS) / look.spacingM;
+  const stripe = smooth(0.75, 1, 0.5 + 0.5 * Math.cos(2 * Math.PI * phase));
+  const breakers = (1 - smooth(look.edgeM, look.zoneM, depthM)) * stripe * 0.8;
+  return Math.max(edge, breakers);
+}
+
+/** Water colour depth term at `depthM`, 0 (shallow) to 1 (deep): the light the water absorbs on the way down and up. */
+export function shoreDeepness(depthM: number, look: IShoreLookParams = SHORE_LOOK): number {
+  return 1 - Math.exp(-Math.max(depthM, 0) / look.tintScaleM);
+}
+
+/** What {@link auditShoreLook} finds. */
+export interface IShoreLookAudit {
+  /** Sample points over water (land at or below the sea level). */
+  readonly wetPoints: number;
+  /** Water points within half of `edgeM` of the waterline. */
+  readonly edgePoints: number;
+  /** Of those, the ones whose foam is under one half: a gap in the waterline foam. Must be 0. */
+  readonly edgeGaps: number;
+  /** Water points deeper than `zoneM` that have any foam. Must be 0. */
+  readonly farFoam: number;
+  /** Mean deepness of the water within 2 m of the waterline. */
+  readonly shallowDeepness: number;
+  /** Mean deepness of the water deeper than `zoneM`. */
+  readonly deepDeepness: number;
+}
+
+/**
+ * The shore look gate (CPU): over a square grid, the foam must cover the waterline without a gap, be gone in deep water, and the
+ * colour must go from shallow to deep with the depth. `lookAt` is the page's own look at a point (so its uniforms and the
+ * land it reads are what is judged), returning foam and deepness.
+ */
+export function auditShoreLook(
+  lookAt: (x: number, z: number) => { readonly foam: number; readonly deepness: number },
+  halfM: number,
+  stepM: number,
+  look: IShoreLookParams = SHORE_LOOK,
+  islands: readonly IIsland[] = ISLANDS,
+): IShoreLookAudit {
+  let wet = 0;
+  let edge = 0;
+  let gaps = 0;
+  let far = 0;
+  let shallowSum = 0;
+  let shallowCount = 0;
+  let deepSum = 0;
+  let deepCount = 0;
+  for (let x = -halfM; x <= halfM; x += stepM) {
+    for (let z = -halfM; z <= halfM; z += stepM) {
+      const depth = waterDepthM(x, z, islands);
+      if (depth < 0) continue;
+      wet++;
+      const { foam, deepness } = lookAt(x, z);
+      if (depth <= look.edgeM / 2) {
+        edge++;
+        if (foam < 0.5) gaps++;
+      }
+      if (depth <= 2) {
+        shallowSum += deepness;
+        shallowCount++;
+      }
+      if (depth > look.zoneM) {
+        if (foam > 0) far++;
+        deepSum += deepness;
+        deepCount++;
+      }
+    }
+  }
+  return {
+    wetPoints: wet,
+    edgePoints: edge,
+    edgeGaps: gaps,
+    farFoam: far,
+    shallowDeepness: shallowCount > 0 ? shallowSum / shallowCount : 0,
+    deepDeepness: deepCount > 0 ? deepSum / deepCount : 0,
+  };
+}
+
 /** The naive control: judges a square by the land under its centre only, so a shore cell is wrongly called dry. */
 export function isDryByCentre(x: number, z: number, ceilingM: number, islands: readonly IIsland[] = ISLANDS): boolean {
   return landHeightM(x, z, islands) > ceilingM;
+}
+
+/** TSL twin of {@link landHeightM} at a plane-frame position node. */
+export function landHeightNode(position: any, islands: readonly IIsland[] = ISLANDS): any {
+  let h: any = float(SEABED_M);
+  for (const island of islands) {
+    const dx = position.x.sub(island.x);
+    const dz = position.z.sub(island.z);
+    h = h.add(exp(dx.mul(dx).add(dz.mul(dz)).div(-2 * island.sigmaM * island.sigmaM)).mul(island.peakM));
+  }
+  return h;
 }
 
 /**
@@ -157,13 +337,7 @@ export function createWaterLodSpikeLand(islands: readonly IIsland[] = ISLANDS): 
     boundM,
     heightAt: (x, _y, z) => landHeightM(x, z, islands),
     heightNode(position: any) {
-      let h: any = float(SEABED_M);
-      for (const island of islands) {
-        const dx = position.x.sub(island.x);
-        const dz = position.z.sub(island.z);
-        h = h.add(exp(dx.mul(dx).add(dz.mul(dz)).div(-2 * island.sigmaM * island.sigmaM)).mul(island.peakM));
-      }
-      return h;
+      return landHeightNode(position, islands);
     },
     gradientNode(position: any) {
       let gx: any = float(0);

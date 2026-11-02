@@ -28,7 +28,7 @@ Water is a second body on the `lod-surface` lattice, so it inherits the terrain'
 - **Near form:** analytic waves (16 sines in four bands) that fade out per wave as their size approaches the vertex spacing.
 - **Far form:** roughness, reflectivity, calm, slick and foam regions, all from one deterministic wind field `W(p, t)` shared with the near form. Lit by the planet's own stages (Plan 063 rules).
 - **Presets:** calm, swell, storm, and blends between them that change amplitudes only.
-- **Depth:** from the terrain height at each lattice point, so no water is drawn under land.
+- **Depth:** the water depth `D` (sea level minus terrain height) is read at each vertex and pixel. It scales the wave height by `smoothstep(0, ramp, D)`, so the waterline is where the terrain crosses the sea level and no crest stands above land; foam, breaker lines and river mouths read the same `D`. Water under land costs little because the land draws first and its depth rejects the water before the wave loop; culling is an extra, not the mechanism (ER 080, shoreline review, 2026-11-02).
 - **Morph:** water bends with the planet's G6 morph (phase W4).
 
 Out of scope for v1: water on the cylinder's end caps (a border with no water and no reflection); Gerstner sideways motion (decided at the M3 review); Jolt buoyancy (`lod-water/jolt`, later); underwater look (Plan 057 W14, later); precomputed water pages (reserved).
@@ -39,7 +39,7 @@ Phases and their gates are fixed here. Packets (the chunks of work) are defined 
 
 - **w0** — Plan pair and spike S-W1. Acceptance: spike gates Q1–Q6 written into the suite before the first run; the owner runs the visible-browser GPU pass on the RTX 3080.
 - **w1** — Core. Anchor-relative source hook in lod-surface; `lod-water/core` with waves, CPU twin, wind field, foam curve and `waterAt`. Acceptance: parity ≤ 1e-3 m within 1 km of the anchor and ≤ 1 cm to 10 km; no steady-state allocation (spec); lod-surface specs unchanged apart from the three known failures; terrain output bit-identical.
-- **w2** — Water v0 on plane and sphere (= Plan 059 M3). Source, material, terrain-aware culling and depth, `<flatWater>`, `<planetWater>`, docs and suites. Acceptance: surface ≤ 0.5 ms GPU p95; water selection ≤ 0.2 ms main-thread p95 (its own budget, beside the terrain's); 0 crack pixels; Q2/Q3 metrics under motion; owner visual review of the pops and the regional look.
+- **w2** — Water v0 on plane and sphere (= Plan 059 M3). Source, material, the shore depth weight (waves scaled by the water depth over the terrain, with foam from it), `<flatWater>`, `<planetWater>`, docs and suites; terrain-aware culling is optional (the cover hook exists; it saved 0 to 6 % of triangles and costs 1.1 to 1.4 ms of selection, so it is not on the path). Acceptance: surface ≤ 0.5 ms GPU p95; water selection ≤ 0.2 ms main-thread p95 (its own budget, beside the terrain's); 0 crack pixels; Q2/Q3 metrics under motion; no dry point with water above the land (the shore gate, `water-lod-spike-shore`); owner visual review of the pops, the regional look and the shoreline.
 - **w3** — Cylinder domain and `<cylinderWater>`. Acceptance: seam bit-identity spec; 0 crack pixels in a seam sweep; anisotropic sag spec; same cost as the sphere.
 - **w4** — Sphere morph for water. Blocked until the G6 GPU check is done. Acceptance: morph 0 bit-equal to W2; terrain and water bend identically at shared lattice points; 0 crack pixels with the cut masked; colour step in the sweep within the Q2 gate.
 - **w5** — Weather presets. Calm, swell, storm and blends (amplitudes only), and the freeze-fraction hook for Plan 057 W17. Acceptance: blend popping score below a hard-swap control; owner check.
@@ -61,7 +61,7 @@ Phases and their gates are fixed here. Packets (the chunks of work) are defined 
 | w4    | planned |
 | w5    | planned |
 
-<!-- tri:review version="1" scope-hash="pending" reviewed="2026-11-01" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="00c388e269ced7e5e9aed205dbe30c4ccb7f8a6507438e9bd03c03ddcf37f149" reviewed="2026-11-02" reviewer="agent" -->
 <!-- tri:item id="Q1" kind="intent" applies-to="w0" blocks="none" state="resolved" -->
 
 - [x] Entry name: `lod-water`, approved by the owner on 2026-11-01 (ER 080, decision 1).
@@ -110,7 +110,8 @@ Packets for W0 are defined now. Packets for W1 to W5 are defined when their phas
 - the amplitude bound holds over all t;
 - wind field determinism, advection and CPU/GPU parity;
 - near foam mean equals f(U);
-- terrain-aware culling (a node over land is skipped);
+- shore depth weight: waves flat at the waterline and on land, full from the ramp depth, CPU twin equal to the shader, and no dry point with water above the land (the gate's CPU form);
+- terrain-aware culling (a node over land is skipped; optional, see w2);
 - lattice depth matches `groundAt`;
 - cylinder seam bit-identity, sector wrap neighbours, caps as borders, quantised wavenumbers periodic;
 - morph 0 bit-equal, and bend equality with terrain;
@@ -118,7 +119,7 @@ Packets for W0 are defined now. Packets for W1 to W5 are defined when their phas
 - no steady-state allocation.
 
 **`triangular-engine/testing` suites:** timings only from visible-browser runs on the RTX 3080 NVIDIA adapter at 2560 × 1440. Headless runs check correctness.
-- **`water-lod-spike` v1** (performance and visual review): Q1–Q6. Aliasing gates for Q2 and Q3 run as `water-lod-spike-aliasing` v1 (GPU readback against a supersampled reference); GPU and CPU frame time against pixel count as `water-lod-spike-performance` v3, by quality tier at a grazing and a looking-down view as v4, with v5 as the same sweep on short windows (aliasing by tier as `water-lod-spike-aliasing` v2; v3 gates Ultra fully and High on colour error only); Q5 as `water-lod-spike-precision` v1 (compute readback on a 600 km sphere: anchor-relative phase within 1e-3 rad, the naive path failing as the control; passed 2026-11-02); the w2 spike on water under land as `water-lod-spike-land` v1 (conservative dry-leaf test safe in 5 views; the water under land is 3 to 76 % of drawn leaves; land drawn first already removes most of its fragment cost), and the selector cover hook as `water-lod-spike-cull` v1 (hook safe and complete in 5 views; it takes 3 to 76 % of the drawn water leaves out, but the visible water is no finer in these views because the freed budget goes to the rest of the 360 degree tree; the hook costs about 0.3 ms of selection under a moving camera). Definitions and first results are in ER 080, History 2026-11-02.
+- **`water-lod-spike` v1** (performance and visual review): Q1–Q6. Aliasing gates for Q2 and Q3 run as `water-lod-spike-aliasing` v1 (GPU readback against a supersampled reference); GPU and CPU frame time against pixel count as `water-lod-spike-performance` v3, by quality tier at a grazing and a looking-down view as v4, with v5 as the same sweep on short windows (aliasing by tier as `water-lod-spike-aliasing` v2; v3 gates Ultra fully and High on colour error only); Q5 as `water-lod-spike-precision` v1 (compute readback on a 600 km sphere: anchor-relative phase within 1e-3 rad, the naive path failing as the control; passed 2026-11-02); the w2 spike on water under land as `water-lod-spike-land` v1 (conservative dry-leaf test safe in 5 views; the water under land is 3 to 76 % of drawn leaves; land drawn first already removes most of its fragment cost), and the selector cover hook as `water-lod-spike-cull` v1 (hook safe and complete in 5 views; it takes 3 to 76 % of the drawn water leaves out, but the visible water is no finer in these views because the freed budget goes to the rest of the 360 degree tree; the hook costs about 0.3 ms of selection under a moving camera). The shoreline review's gate is `water-lod-spike-shore` v1 (CPU: dry points of a 5 km grid with water above the land; with the depth weight on and the detail noise off there are 0 of 18,420, against 565 to 625 without it); `water-lod-spike-shore-look` v1 (foam with no gap along the waterline and none in deep water, the colour shallow to deep with `D`, and the foam and the colour visible in a read-back frame). Definitions and first results are in ER 080, History 2026-11-02.
 - **`lod-water-baseline` v1** (performance): plane 100 km, sphere 10 km and 600 km, at eye 2 m, 200 m, 5 km, orbit and 2 m grazing, for calm, swell and storm. Metrics: water pass GPU p95, selection p95, leaves, triangles, draws, crack pixels. ABAB toggles: near waves, far form, foam, K = 8 against 16, σ² transfer, terrain-aware culling. v2 adds the cylinder.
 - **`lod-water-visual` v1** (functional, `requiresVisualReview`): noon and low sun; the handover band; calm and slick patches; foam; the horizon; shore depth tint. Thumbnails for the owner.
 - **`lod-water-movement` v1** (performance):
@@ -144,6 +145,8 @@ Packets for W0 are defined now. Packets for W1 to W5 are defined when their phas
 - New plan and record pair (this document).
 - Dated note in Plan 059: M3 is delivered by this plan; the cylinder domain and the anchored-source hook are dated scope changes to lod-surface core. (Done in packet W0a, 2026-11-01.)
 - Dated note in Plan 057: narrowed to contender A as v0; the race stays parked. (Done in packet W0a, 2026-11-01.)
+- Dated note, 2026-11-02 (shoreline review): w2's depth mechanism is the water depth weight on the waves, not culling; the Depth outcome, the w2 line and the testing matrix say so. Scope change recorded in ER 080, Scope history.
+- Dated note, 2026-11-02 (shoreline review, experiment 4): the spike now draws foam and a shallow-to-deep colour from `D`; no commitment changed. River mouths, per-cell terrain heights and the sphere are still open (ER 080, History).
 - Plan 063 unchanged; its Q5 is used as a gate here.
 - The lod-surface README describes the hook and, later, the cylinder.
 

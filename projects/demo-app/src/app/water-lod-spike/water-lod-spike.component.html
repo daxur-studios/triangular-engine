@@ -9,6 +9,7 @@
     [size]="planeSizeM"
     [heights]="water.heights"
     [material]="water.material"
+    [detailNoise]="waterNoise() ? defaultDetailNoise : 0"
     [lighting]="false"
     [bounds]="false"
     [cellPixels]="qualityTier().cellPixels"
@@ -57,6 +58,18 @@
     </button>
     <button [class.active]="cull()" [disabled]="!land()" (click)="toggleCull()">
       Cull under land
+    </button>
+    <button [class.active]="waterNoise()" (click)="toggleWaterNoise()">
+      Water noise
+    </button>
+    <button [class.active]="shore()" [disabled]="!land()" (click)="toggleShore()">
+      Shore weight
+    </button>
+    <button [class.active]="foam()" [disabled]="!land()" (click)="toggleFoam()">
+      Foam
+    </button>
+    <button [class.active]="depthColour()" [disabled]="!land()" (click)="toggleDepthColour()">
+      Depth colour
     </button>
   </div>
   <label class="quality">

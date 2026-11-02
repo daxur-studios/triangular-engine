@@ -275,3 +275,20 @@ What this material needs:
 | Port only the streaming-demo path first (see table). Other `onBeforeCompile` users later, if ever | Proposed |
 | `simpleDayNightLighting` as a stand-in lighting stage until Plan 049 replaces it | Proposed |
 | Demo pages keep the default `WebGPURenderer` pipeline. three 0.186 `DirectRenderPipeline` (`?pipeline=direct` on the spike) only removes the MSAA surcharge, not the gap to classic (Runbook 050, three 0.186.1 entry). Plan 049 atmosphere needs an HDR `RenderPipeline` for bloom/exposure; direct cannot provide it | **Decided** 2026-10-16 |
+
+## Terrain slope suitability extension — 2026-11-02
+
+Added `slopeSuitabilityLayer` as a reusable `PlanetSurfaceMaterial` layer. It
+compares `IPlanetContext.terrainNormal` against `radialDirection` using a
+cosine threshold, preserving the physical grade through display morphs. Live
+uniforms control enabled state, maximum slope, transition, opacity and colours.
+It adds no vertex attributes and does not change the material slot model. The
+standalone `/slope-suitability-lab` demo shows the layer on a synthetic rolling
+planet; the BSP surface-logistics terrain view consumes it on actual LOD cell
+terrain.
+
+Headless planet-material specs pass 122/122, and the focused
+`TerrainPlanetMaterial` specs pass 18/18; the engine package builds. Human
+visual inspection and hardware cost are still open. The layer is a
+visual grade cue only; route constraints and vehicle physics remain consumer
+decisions.

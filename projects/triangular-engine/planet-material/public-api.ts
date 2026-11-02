@@ -13,6 +13,7 @@ export * from './planet-surface-material';
 export * from './planet-lighting';
 export * from './planet-extension-examples';
 export * from './macro-variation-layer';
+export * from './slope-suitability-layer';
 export * from './checker-debug-layer';
 export * from './cell-lookup-layer';
 export * from './cell-voronoi-layer';

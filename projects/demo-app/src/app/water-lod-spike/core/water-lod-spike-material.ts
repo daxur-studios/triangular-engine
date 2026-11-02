@@ -1,7 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Fn, If, cameraPosition, clamp, color, dot, float, max, min, mix, normalize, positionWorld, pow, sqrt, sub, vec2, vec3 } from 'three/tsl';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { WATER_LOD_SPIKE_UNIFORMS, createWaterLodSpikeShadingNodes } from './water-lod-spike-waves';
+import { WATER_LOD_SPIKE_UNIFORMS, createWaterLodSpikeShadingNodes, shoreLookNode, shoreWeightNode } from './water-lod-spike-waves';
+
+/** Foam colour (a little blue-white) and its strength where the foam amount is 1. */
+const FOAM_COLOUR = color('#eef6fa');
+const FOAM_STRENGTH = 0.9;
 
 /** Fixed sun direction (towards the sun): low and ahead of the default camera, so the glint is in view. */
 const SUN_DIRECTION = [0.4, 0.35, -0.85] as const;
@@ -50,10 +54,14 @@ export function createWaterLodSpikeMaterial(): MeshBasicNodeMaterial {
   const half = normalize(view.add(sun));
   const specularFresnel = fifthPower(float(1).sub(clamp(dot(half, view), 0, 1))).mul(0.98).add(0.02);
   const deepWater = color('#0a2a3c');
+  // Over shallow ground the water is lighter and greener (the sea floor's colour, little absorbed).
+  const shallowWater = color('#2c8a8f');
+  let deep: any = deepWater;
   const sky = color('#a9c8da');
 
   const { gradient, lostXX, lostXZ, lostZZ } = createWaterLodSpikeShadingNodes(positionWorld);
-  const mean = vec2(gradient.x, gradient.z);
+  // At the shore the waves flatten (shore weight), so the shading slope goes with them; the lost variance keeps the glint width.
+  const mean = vec2(gradient.x, gradient.z).mul(shoreWeightNode(positionWorld));
   const transfer = WATER_LOD_SPIKE_UNIFORMS.transfer.mul(WATER_LOD_SPIKE_UNIFORMS.lostScale);
   const xx = lostXX.mul(transfer);
   const xz = lostXZ.mul(transfer);
@@ -70,7 +78,7 @@ export function createWaterLodSpikeMaterial(): MeshBasicNodeMaterial {
     const facing = clamp(dot(view, normal), 0, 1);
     const fresnel = fifthPower(float(1).sub(facing)).mul(0.98).add(0.02);
     const lambert = max(dot(normal, sun), 0);
-    const water = deepWater.mul(float(0.55).add(lambert.mul(0.45)));
+    const water = deep.mul(float(0.55).add(lambert.mul(0.45)));
     const glint = pow(max(dot(normal, half), 0), exponent).mul(exponent.add(2).div(8 * Math.PI)).mul(specularFresnel).mul(lambert).mul(GLINT_SCALE);
     return { colour: min(mix(water, sky, fresnel as any).add(glint), vec3(1)), facing };
   };
@@ -80,6 +88,9 @@ export function createWaterLodSpikeMaterial(): MeshBasicNodeMaterial {
   // than the shading of the whole slope distribution, and the weight puts it back.
   // Where the filter removed next to nothing (resolved water), every quadrature sample is the mean one: shade once.
   const result: any = Fn(() => {
+    // Foam and the shallow-to-deep colour read the water depth D once per pixel (both off: foam 0, deepness 1, no cost beyond the branch).
+    const look = shoreLookNode(positionWorld).toVar();
+    deep = mix(shallowWater, deepWater, look.y);
     const out = vec3(0).toVar();
     If(xx.add(zz).lessThan(NEGLIGIBLE_LOST_VARIANCE), () => {
       out.assign(shade(mean.x, mean.y).colour);
@@ -98,7 +109,8 @@ export function createWaterLodSpikeMaterial(): MeshBasicNodeMaterial {
       }
       out.assign(colour.div(visible));
     });
-    return out;
+    // Foam is a lit white laid over the water, thinned by nothing else: its edge is the depth contour, so it follows the waterline.
+    return mix(out, FOAM_COLOUR, look.x.mul(FOAM_STRENGTH));
   })();
   material.colorNode = result;
   material.wireframe = false;

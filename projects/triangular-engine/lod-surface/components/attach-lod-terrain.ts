@@ -20,6 +20,24 @@ export interface LodTerrainInputs {
   readonly center?: Vec3 | readonly [number, number, number];
 }
 
+/** Same keys and `===` values, one level deep (so a rebuilt `domain` object with the same fields counts as equal). */
+function shallowEqual(a: object, b: object): boolean {
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  return keys.every((key) => key in right && left[key] === right[key]);
+}
+
+/**
+ * True when two settings objects describe the same terrain. A component rebuilds its settings object whenever any input it reads
+ * changes, including the sun direction and position that move every frame on an orbiting body; `configure` would then remake
+ * the selector and throw away the whole tree each time.
+ */
+function sameSettings(a: LodTerrainSettings, b: LodTerrainSettings): boolean {
+  return shallowEqual({ ...a, domain: undefined }, { ...b, domain: undefined }) && shallowEqual(a.domain, b.domain);
+}
+
 /** The terrain is shown after this long even if `compileAsync` has not answered; its first frame then pays the compile. */
 const COMPILE_GUARD_MS = 60_000;
 
@@ -73,8 +91,9 @@ export function attachLodTerrain(engine: EngineService, destroyRef: DestroyRef, 
     const inputs = read();
     if (!inputs) return;
     untracked(() => {
-      if (body) body.configure(inputs.settings);
-      else {
+      if (body) {
+        if (!sameSettings(body.settings, inputs.settings)) body.configure(inputs.settings);
+      } else {
         body = new LodTerrainBody(inputs.settings);
         body.object.visible = false;
         engine.scene.add(body.object);

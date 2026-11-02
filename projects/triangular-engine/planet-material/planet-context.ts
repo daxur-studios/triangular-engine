@@ -19,6 +19,8 @@ export interface IPlanetContext {
   readonly morph: any;
   /** Sphere-space unit direction (`aSphereNorm`). On terrain this is the surface normal and tilts with relief: use it for shading only. */
   readonly sphereNormal: any;
+  /** Unmorphed physical terrain normal, independent of the display projection; consumers can compare it with radial up for grade. */
+  readonly terrainNormal?: any;
   /** Radial unit direction (planet centre to the shaded point): use it for geography, lat/lon and sun angle lookups. */
   readonly radialDirection: any;
   /** Morphed local position, before batching. */
@@ -45,6 +47,7 @@ export function createPlanetContext(
     uniforms,
     morph: uniforms.uMorph,
     sphereNormal: graph.sphereNormal,
+    terrainNormal: graph.sphereNormal,
     radialDirection: n,
     morphedPosition: graph.morphedLocal,
     latLon: vec2(asin(clamp(n.y, -1, 1)), atan(n.x, n.z)),
