@@ -85,6 +85,9 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
   a server.
 - Timings from SwiftShader runs are not hardware numbers. Runs with `--profile headless-hardware` use the real GPU,
   but compare them only with other headless runs. Check which GPU adapter a run recorded.
+- For functional checks and quick iterations, start the unattended launcher with `--noisy` (add it to `npm run test:run`).
+  Without it the launcher waits for a quiet GPU and can sit for a long time while another app uses it. Keep runs
+  without `--noisy` for timing evidence only.
 
 ## Verification checklist
 

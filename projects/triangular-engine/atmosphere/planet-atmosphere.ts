@@ -1,6 +1,6 @@
 import { Group, Matrix4, Quaternion, Vector3, type Camera, type IUniform, type Object3D } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
-import { If, float, mix, uniform } from 'three/tsl';
+import { If, cameraPosition, float, mix, normalize, positionWorld, smoothstep, uniform } from 'three/tsl';
 import type { AtmosphereAerialPerspectiveOptions } from './atmosphere-aerial-perspective';
 import { AtmosphereBackdrop, type AtmosphereBackdropOptions } from './atmosphere-backdrop';
 import { AtmosphereGpuModel } from './atmosphere-gpu-model';
@@ -41,6 +41,12 @@ export interface AtmosphereSurfaceOptions {
   lighting?: boolean;
   /** Aerial perspective (stage 6): distant ground fades into the air. */
   haze?: boolean;
+  /**
+   * Beyond the froxel range (a moon or a planet seen through the air), fade to the air along the view ray instead of
+   * taking the haze of the range's far edge. Use it on a whole body seen from inside its atmosphere; terrain leaves it
+   * off. Default false.
+   */
+  beyondRange?: boolean;
 }
 
 /** What the air is and how big the planet is. Changing any of it rebakes the tables (about 1-2 s at default sizes). */
@@ -81,6 +87,7 @@ export interface PlanetAtmosphereOptions extends PlanetAtmosphereShape {
 interface SurfaceEntry {
   lighting: boolean;
   haze: boolean;
+  beyondRange: boolean;
 }
 
 export interface PlanetSkyBodyOptions extends AtmosphereSkyBodyOptions {
@@ -153,6 +160,7 @@ export class PlanetAtmosphere {
   private readonly amount = uniform(1);
   private readonly lightingStage: AtmosphereLightingStage;
   private readonly hazeStage: AtmosphereHazeStage;
+  private readonly distantHazeStage: AtmosphereHazeStage;
   private readonly surfaces = new Map<IAtmosphereSurface, SurfaceEntry>();
   private shape: PlanetAtmosphereShape;
 
@@ -197,6 +205,19 @@ export class PlanetAtmosphere {
         out.assign(mix(color, haze(context, color), float(amount)));
       });
       return out;
+    };
+    // Past the froxel range the table clamps to its far edge, so a far body would take that edge's haze. This stage
+    // fades to the air along the fragment's view ray (the sky bodies' term) over the last quarter beyond the range.
+    const table = this.binding.aerialPerspective;
+    this.distantHazeStage = (context, color) => {
+      const near = this.hazeStage(context, color);
+      if (!table) return near;
+      const metres = context.cameraDistance.mul(this.binding.metersPerUnit);
+      const rangeMax = table.rangeMax;
+      const { inscatter, transmittance } = this.backdrop.atmosphereSky(normalize(positionWorld.sub(cameraPosition)));
+      const far = color.mul(transmittance).add(inscatter);
+      const beyond = smoothstep(rangeMax, rangeMax.mul(1.25), metres);
+      return mix(near, far, beyond.mul(amount));
     };
   }
 
@@ -281,13 +302,18 @@ export class PlanetAtmosphere {
    * `'atmosphere'`. Calling it again with other options swaps the stages; the same options do nothing. Returns `this`.
    */
   withAtmosphere(surface: IAtmosphereSurface, options: AtmosphereSurfaceOptions = {}): this {
-    const next: SurfaceEntry = { lighting: options.lighting ?? true, haze: options.haze ?? true };
+    const next: SurfaceEntry = {
+      lighting: options.lighting ?? true,
+      haze: options.haze ?? true,
+      beyondRange: options.beyondRange ?? false,
+    };
     const previous = this.surfaces.get(surface);
     if (previous?.lighting !== next.lighting) {
       surface.setLightingStage(next.lighting ? { id: 'atmosphere', stage: this.lightingStage } : null);
     }
-    if (previous?.haze !== next.haze) {
-      surface.setAtmosphereStage(next.haze ? { id: 'atmosphere', stage: this.hazeStage } : null);
+    if (previous?.haze !== next.haze || previous?.beyondRange !== next.beyondRange) {
+      const stage = next.beyondRange ? this.distantHazeStage : this.hazeStage;
+      surface.setAtmosphereStage(next.haze ? { id: 'atmosphere', stage } : null);
     }
     this.surfaces.set(surface, next);
     return this;

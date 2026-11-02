@@ -95,7 +95,7 @@ Packets for W0 are defined now. Packets for W1 to W5 are defined when their phas
 
 **Spike questions (gates fixed before the run):**
 - **Q1 cost:** water pass GPU p95 ≤ 0.5 ms at 2560 × 1440, at eye heights 2 m, 200 m, 5 km, and 2 m grazing to the horizon. If it fails: reduce K, or band the normals per pixel.
-- **Q2 no colour step:** time frozen; a scripted descent from 5 km to 2 m and a 200 m flyover. Luminance change per frame in the band ≤ 2/255 (proposal). A hard-switch control must exceed 5/255, or the metric is invalid. If it fails: widen the fade band.
+- **Q2 no colour step** (implemented in `water-lod-spike-aliasing` v1 as the change of the band-mean error against a supersampled reference between neighbouring bands, at most 2/255; see ER 080 for how the definition changed): time frozen; a scripted descent from 5 km to 2 m and a 200 m flyover. Luminance change per frame in the band ≤ 2/255 (proposal). A hard-switch control must exceed 5/255, or the metric is invalid. If it fails: widen the fade band.
 - **Q3 no shimmer:** time frozen, camera creeping 1 mm per frame. Temporal standard deviation of luminance in the horizon band < 0.5 × the control with the transfer off (proposal). If it fails: widen the fade band.
 - **Q4 regional look:** the owner judges by eye at 5 km and 50 km that calm, slick and foam regions read and move with the wind (thumbnails and a WebM).
 - **Q5 precision:** pure maths plus a compute readback on a 600 km sphere at eye 2 m. Anchor-relative phase error ≤ 1e-3 rad; the naive `heightNode(global)` path must fail as the control. If it fails: the formula is wrong; fix before W1.
@@ -118,7 +118,7 @@ Packets for W0 are defined now. Packets for W1 to W5 are defined when their phas
 - no steady-state allocation.
 
 **`triangular-engine/testing` suites:** timings only from visible-browser runs on the RTX 3080 NVIDIA adapter at 2560 × 1440. Headless runs check correctness.
-- **`water-lod-spike` v1** (performance and visual review): Q1–Q6.
+- **`water-lod-spike` v1** (performance and visual review): Q1–Q6. Aliasing gates for Q2 and Q3 run as `water-lod-spike-aliasing` v1 (GPU readback against a supersampled reference); GPU frame time as `water-lod-spike-performance` v2. Definitions and first results are in ER 080, History 2026-11-02.
 - **`lod-water-baseline` v1** (performance): plane 100 km, sphere 10 km and 600 km, at eye 2 m, 200 m, 5 km, orbit and 2 m grazing, for calm, swell and storm. Metrics: water pass GPU p95, selection p95, leaves, triangles, draws, crack pixels. ABAB toggles: near waves, far form, foam, K = 8 against 16, σ² transfer, terrain-aware culling. v2 adds the cylinder.
 - **`lod-water-visual` v1** (functional, `requiresVisualReview`): noon and low sun; the handover band; calm and slick patches; foam; the horizon; shore depth tint. Thumbnails for the owner.
 - **`lod-water-movement` v1** (performance):

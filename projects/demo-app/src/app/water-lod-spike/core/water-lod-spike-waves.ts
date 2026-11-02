@@ -1,87 +1,270 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { cos, dot, float, sin, vec3 } from 'three/tsl';
+import { Fn, If, abs, cameraPosition, cos, dFdx, dFdy, dot, float, length, mat3, mix, sin, smoothstep, sub, uniform, vec2, vec3 } from 'three/tsl';
 import type { HeightSource } from 'triangular-engine/lod-surface/core';
 
 /**
- * Spike-local wave table for plan 080 (W0b): 16 directional sines in four
- * wavelength bands, fixed for the whole spike. Each wave is `amp * sin(k . p + phase)`
- * over the plane's base position (metres, plane frame). The CPU twin (`heightAt`)
- * and the TSL nodes read this one table, so they agree to float32 rounding.
+ * Spike-local wave spectrum for plan 080 (W0b): 64 directional sines with jittered wavelengths from 300 m to 0.5 m
+ * (log-spaced, denser at the long end), directions spread around one wind direction and random phases. Every wave has the same steepness (amplitude x
+ * wavenumber), so each octave adds the same slope variance. The CPU twin (`heightAt`) and the TSL nodes read this one table.
  *
- * Not built here (plan 080 W0b / S-W1 follow-up): per-wave distance fade, the
- * sigma-squared roughness transfer, wind-driven amplitude, and any time term.
- * The heights are static, so the mesh does not animate.
+ * Why not the earlier 16-wave table: four bands of four near-equal wavelengths spread over golden-angle directions sum to
+ * a regular lattice and concentric rings at every distance. No fade or amplitude tuning removes that; only an irregular
+ * spectrum does. `waveSlopeRegularity` measures it (see the spec).
+ *
+ * Anti-aliasing, two filters with one rule (keep a wave only where it is sampled at least twice per wavelength):
+ * - Shading: each wave's weight comes from the pixel footprint along that wave's own direction (screen derivatives of
+ *   the position), so it is anisotropic at grazing angles. The slope covariance the filter removes is returned, and the
+ *   material averages its shading over it, so the far water keeps its mean colour.
+ * - Vertices: each wave's height weight comes from the mesh spacing, estimated from the camera distance the same way the
+ *   lod-surface selector sizes cells (`cellPixels` pixels per cell). The weight is a function of the vertex position, so
+ *   vertices shared by two leaves get the same height and no crack opens. The CPU twin keeps every wave.
  */
-interface IWaterWave {
-  readonly axis: readonly [number, number, number];
+export interface IWaterWave {
+  /** Unit direction of travel in the XZ plane. */
+  readonly dirX: number;
+  readonly dirZ: number;
   readonly wavelengthM: number;
   readonly amplitudeM: number;
   readonly phase: number;
+  /** Deep-water dispersion, rad/s: sqrt(g k). */
+  readonly angularSpeed: number;
 }
 
-const BAND_WAVELENGTHS_M = [400, 120, 40, 12] as const;
-/*
- * Raised from [1.2, 0.35, 0.1, 0.03] so each band has a slope near 0.03 to 0.05 (amplitude x wavenumber). The earlier
- * slopes were around 0.016 to 0.019, too flat to read as 3D water from the orbit camera.
- */
-const BAND_AMPLITUDES_M = [2, 0.9, 0.3, 0.08] as const;
-const WAVES_PER_BAND = 4;
-/** Golden angle in radians: spreads the directions of the 16 waves without clustering them. */
-const GOLDEN_ANGLE = 2.39996322972865332;
+export interface IWaterWaveTableOptions {
+  readonly count?: number;
+  readonly longestM?: number;
+  readonly shortestM?: number;
+  /** Amplitude x wavenumber, the same for every wave. */
+  readonly steepness?: number;
+  /** Wind direction, radians from +X towards +Z. */
+  readonly windAngle?: number;
+  /**
+   * Exponent on the slot position: above 1 packs more waves into the long wavelengths, the ones still on screen far
+   * away, so the far water is not left with a handful of waves that read as a lattice. Default 1.5.
+   */
+  readonly longWaveDensity?: number;
+  readonly seed?: number;
+}
 
-function buildWaves(): readonly IWaterWave[] {
+const GRAVITY = 9.81;
+
+/** Small seeded generator (mulberry32), so the table is the same on every load and in the spec. */
+function seededRandom(seed: number): () => number {
+  let state = seed | 0;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Builds the spectrum. Each wavelength sits at a random point inside its own slot, so no two waves share one. */
+export function buildWaterLodSpikeWaveTable(options: IWaterWaveTableOptions = {}): readonly IWaterWave[] {
+  const { count = 64, longestM = 300, shortestM = 0.5, steepness = 0.032, windAngle = 0.6, longWaveDensity = 1.5, seed = 80 } = options;
+  const random = seededRandom(seed);
   const waves: IWaterWave[] = [];
-  for (let band = 0; band < BAND_WAVELENGTHS_M.length; band++) {
-    for (let i = 0; i < WAVES_PER_BAND; i++) {
-      const index = band * WAVES_PER_BAND + i;
-      const angle = index * GOLDEN_ANGLE;
-      waves.push({
-        axis: [Math.cos(angle), 0, Math.sin(angle)],
-        wavelengthM: BAND_WAVELENGTHS_M[band] * (1 + 0.07 * i),
-        amplitudeM: BAND_AMPLITUDES_M[band],
-        phase: 0.7 * index,
-      });
-    }
+  for (let i = 0; i < count; i++) {
+    const slot = 0.15 + 0.7 * random();
+    const wavelengthM = longestM * Math.pow(shortestM / longestM, Math.pow((i + slot) / count, longWaveDensity));
+    // Sum of three uniforms: a bell-shaped spread around the wind, about 45 degrees standard deviation.
+    const angle = windAngle + (random() + random() + random() - 1.5) * 1.6;
+    const k = (2 * Math.PI) / wavelengthM;
+    waves.push({
+      dirX: Math.cos(angle),
+      dirZ: Math.sin(angle),
+      wavelengthM,
+      amplitudeM: steepness / k,
+      phase: random() * 2 * Math.PI,
+      angularSpeed: Math.sqrt(GRAVITY * k),
+    });
   }
   return waves;
 }
 
-/** The 16 waves, shared by the CPU twin and the TSL nodes. */
-export const WATER_LOD_SPIKE_WAVES: readonly IWaterWave[] = buildWaves();
+/** The spike's spectrum, shared by the CPU twin and the TSL nodes. */
+export const WATER_LOD_SPIKE_WAVES: readonly IWaterWave[] = buildWaterLodSpikeWaveTable();
 
 /**
- * A `HeightSource` for `<flatTerrain [heights]>`: the plane's water height as a
- * sum of the spike's 16 waves. Gives the lod-surface mesh its vertex-stage height
- * (`heightNode`), its gradient (`gradientNode`) and the CPU twin used by
- * selection and ground queries (`heightAt`).
+ * Uniforms the page drives. `filter` and `transfer` are the controls the aliasing suite switches off (1 on, 0 off);
+ * `pixelAngle` (radians per pixel, vertical) and `cellPixels` size the vertex filter.
+ */
+export const WATER_LOD_SPIKE_UNIFORMS = {
+  /** Seconds; the waves move with it. The page advances it; tests freeze it. */
+  time: uniform(0),
+  /** 1: footprint and mesh-spacing filters on. 0: every wave at full weight (the aliasing control). */
+  filter: uniform(1),
+  /** 1: lost slope variance goes into the glint roughness. 0: it is dropped (the colour-step control). */
+  transfer: uniform(1),
+  /** Diagnostic scale on the vertex height. 0 keeps the mesh flat while the shading normal still comes from the waves. */
+  vertexHeightScale: uniform(1),
+  pixelAngle: uniform(0.001),
+  /** The lod-surface target cell size in pixels (`<flatTerrain [cellPixels]>`, default 4). */
+  cellPixels: uniform(4),
+  /** Exponent of the visible-area weight (view . normal) on the quadrature samples; 1 is projected area, 0 weights equally (material). */
+  visibility: uniform(0.4),
+  /** Scale of the lost slope covariance. Calibrated against the supersampled reference: the sinusoid sum is less heavy-tailed than the Gaussian that stands in for it (material). */
+  lostScale: uniform(0.8),
+};
+
+/** Footprint/wavelength ratio where the shading weight starts to fall, and where it reaches 0 (wavelengths of 2.9 and 1.4 pixels). */
+export const FOOTPRINT_FADE_START = 0.35;
+export const FOOTPRINT_FADE_END = 0.7;
+
+/**
+ * Shading weight of a wave from the pixel footprint along its direction (metres per pixel): 1 down to about 3 pixels per
+ * wavelength, 0 at about 1.4. The late fade keeps resolved detail that a blurrier cut would turn into false shimmer; the
+ * quadrature supplies the rest.
+ */
+export function waveFootprintWeight(footprintM: number, wavelengthM: number): number {
+  return 1 - smoothstepNumber(FOOTPRINT_FADE_START, FOOTPRINT_FADE_END, footprintM / wavelengthM);
+}
+
+/** Height weight of a wave from the mesh spacing (metres): 1 at 8 cells per wavelength or more, 0 at 4 or less. */
+export function waveSpacingWeight(spacingM: number, wavelengthM: number): number {
+  return smoothstepNumber(4 * spacingM, 8 * spacingM, wavelengthM);
+}
+
+function smoothstepNumber(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * How regular the slope field of the waves at or above `minWavelengthM` is: the normalised slope autocorrelation
+ * sum (a k)^2 cos(k . tau) / sum (a k)^2 sampled over lags tau in the annulus [rMinM, rMaxM]. A lattice or ring pattern keeps
+ * the correlation high far from the origin; an irregular spectrum lets it fall. Returns the RMS and the largest |value|.
+ */
+export function waveSlopeRegularity(
+  waves: readonly IWaterWave[], minWavelengthM: number, rMinM: number, rMaxM: number,
+): { readonly waves: number; readonly rms: number; readonly max: number } {
+  const kept = waves.filter((wave) => wave.wavelengthM >= minWavelengthM).map((wave) => {
+    const k = (2 * Math.PI) / wave.wavelengthM;
+    return { kx: k * wave.dirX, kz: k * wave.dirZ, weight: (wave.amplitudeM * k) ** 2 };
+  });
+  const total = kept.reduce((sum, wave) => sum + wave.weight, 0);
+  let max = 0;
+  let sumSquares = 0;
+  let samples = 0;
+  for (let ri = 0; ri < 200; ri++) {
+    const r = rMinM + ((rMaxM - rMinM) * ri) / 199;
+    for (let ai = 0; ai < 90; ai++) {
+      const a = (Math.PI * ai) / 90;
+      const tx = r * Math.cos(a);
+      const tz = r * Math.sin(a);
+      let value = 0;
+      for (const wave of kept) value += wave.weight * Math.cos(wave.kx * tx + wave.kz * tz);
+      value /= total;
+      max = Math.max(max, Math.abs(value));
+      sumSquares += value * value;
+      samples++;
+    }
+  }
+  return { waves: kept.length, rms: Math.sqrt(sumSquares / samples), max };
+}
+
+/** Phase of one wave at a plane-frame position node and the time uniform. */
+function wavePhase(position: any, wave: IWaterWave): any {
+  const k = (2 * Math.PI) / wave.wavelengthM;
+  return dot(vec2(position.x, position.z), vec2(wave.dirX, wave.dirZ)).mul(k).add(wave.phase).sub(WATER_LOD_SPIKE_UNIFORMS.time.mul(wave.angularSpeed));
+}
+
+/** Mesh spacing estimate at a plane-frame position (vertex stage): cellPixels x pixel angle x camera distance. */
+function meshSpacingNode(position: any): any {
+  return length(sub(position, cameraPosition)).mul(WATER_LOD_SPIKE_UNIFORMS.pixelAngle).mul(WATER_LOD_SPIKE_UNIFORMS.cellPixels);
+}
+
+/** Height weight node of one wave, 1 when the filter is off. */
+function spacingWeightNode(spacing: any, wave: IWaterWave): any {
+  const weight = smoothstep(spacing.mul(4), spacing.mul(8), float(wave.wavelengthM));
+  return mix(float(1), weight, WATER_LOD_SPIKE_UNIFORMS.filter);
+}
+
+/**
+ * Fragment-stage shading nodes at a world position (the plane is untransformed): the filtered height gradient
+ * (dh/dx, 0, dh/dz) and the covariance of the slopes the filter removed (each wave adds (1 - w^2) (a k)^2 / 2 along its
+ * own direction), as `lostXX`, `lostXZ`, `lostZZ`.
+ */
+export function createWaterLodSpikeShadingNodes(position: any): { gradient: any; lostXX: any; lostXZ: any; lostZZ: any } {
+  // A wave whose weight has fallen to 0 adds nothing but its lost variance, so its cosine is skipped. Neighbouring pixels
+  // drop the same waves, so the branch is coherent. The derivatives come first, in uniform control flow.
+  const shading: any = Fn(() => {
+    const ddx = dFdx(vec2(position.x, position.z));
+    const ddy = dFdy(vec2(position.x, position.z));
+    const gradient = vec3(0, 0, 0).toVar();
+    const lostXX = float(0).toVar();
+    const lostXZ = float(0).toVar();
+    const lostZZ = float(0).toVar();
+    for (const wave of WATER_LOD_SPIKE_WAVES) {
+      const k = (2 * Math.PI) / wave.wavelengthM;
+      const direction = vec2(wave.dirX, wave.dirZ);
+      // Metres per pixel along this wave's direction, summed over both screen axes.
+      const footprint = abs(dot(ddx, direction)).add(abs(dot(ddy, direction)));
+      const filtered = float(1).sub(smoothstep(FOOTPRINT_FADE_START, FOOTPRINT_FADE_END, footprint.div(wave.wavelengthM)));
+      const weight = mix(float(1), filtered, WATER_LOD_SPIKE_UNIFORMS.filter).toVar();
+      const slope = wave.amplitudeM * k;
+      If(weight.greaterThan(0), () => {
+        gradient.addAssign(vec3(wave.dirX, 0, wave.dirZ).mul(cos(wavePhase(position, wave)).mul(slope).mul(weight)));
+      });
+      const lost = float(1).sub(weight.mul(weight)).mul(0.5 * slope * slope);
+      lostXX.addAssign(lost.mul(wave.dirX * wave.dirX));
+      lostXZ.addAssign(lost.mul(wave.dirX * wave.dirZ));
+      lostZZ.addAssign(lost.mul(wave.dirZ * wave.dirZ));
+    }
+    return mat3(gradient, vec3(lostXX, lostXZ, lostZZ), vec3(0, 0, 0));
+  })();
+  const gradient = shading.element(0);
+  const lost = shading.element(1);
+  return { gradient, lostXX: lost.x, lostXZ: lost.y, lostZZ: lost.z };
+}
+
+/**
+ * A `HeightSource` for `<flatTerrain [heights]>`: the plane's water height as the sum of the spectrum. The vertex stage
+ * (`heightNode`, `gradientNode`) applies the mesh-spacing filter; the CPU twin (`heightAt`) keeps every wave at the
+ * current `time` uniform value, so it differs from the drawn mesh by at most the filtered waves' amplitudes (centimetres).
  */
 export function createWaterLodSpikeWaves(): HeightSource {
   const boundM = WATER_LOD_SPIKE_WAVES.reduce((sum, wave) => sum + wave.amplitudeM, 0);
   return {
+    // HeightSourceId is a closed union; 'bumps' is its analytic id. lod-surface keys nothing on it for planes.
     id: 'bumps',
     boundM,
-    heightAt(x, y, z) {
+    heightAt(x, _y, z) {
+      const t = WATER_LOD_SPIKE_UNIFORMS.time.value as number;
       let h = 0;
-      for (const { axis, wavelengthM, amplitudeM, phase } of WATER_LOD_SPIKE_WAVES) {
-        h += amplitudeM * Math.sin(((2 * Math.PI) / wavelengthM) * (x * axis[0] + y * axis[1] + z * axis[2]) + phase);
+      for (const wave of WATER_LOD_SPIKE_WAVES) {
+        const k = (2 * Math.PI) / wave.wavelengthM;
+        h += wave.amplitudeM * Math.sin(k * (x * wave.dirX + z * wave.dirZ) + wave.phase - wave.angularSpeed * t);
       }
       return h;
     },
+    // Waves the mesh cannot carry (spacing weight 0) are skipped: far vertices keep only the long waves.
     heightNode(position) {
-      let h: any = float(0);
-      for (const { axis, wavelengthM, amplitudeM, phase } of WATER_LOD_SPIKE_WAVES) {
-        h = h.add(sin(dot(position, vec3(...axis)).mul((2 * Math.PI) / wavelengthM).add(phase)).mul(amplitudeM));
-      }
-      return h;
+      return (Fn(() => {
+        const spacing = meshSpacingNode(position);
+        const h = float(0).toVar();
+        for (const wave of WATER_LOD_SPIKE_WAVES) {
+          const weight = spacingWeightNode(spacing, wave).toVar();
+          If(weight.greaterThan(0), () => {
+            h.addAssign(sin(wavePhase(position, wave)).mul(wave.amplitudeM).mul(weight));
+          });
+        }
+        return h.mul(WATER_LOD_SPIKE_UNIFORMS.vertexHeightScale);
+      }) as any)();
     },
     gradientNode(position) {
-      let g: any = vec3(0, 0, 0);
-      for (const { axis, wavelengthM, amplitudeM, phase } of WATER_LOD_SPIKE_WAVES) {
-        const k = (2 * Math.PI) / wavelengthM;
-        const term = cos(dot(position, vec3(...axis)).mul(k).add(phase)).mul(amplitudeM * k);
-        g = g.add(vec3(...axis).mul(term));
-      }
-      return g;
+      return (Fn(() => {
+        const spacing = meshSpacingNode(position);
+        const g = vec3(0, 0, 0).toVar();
+        for (const wave of WATER_LOD_SPIKE_WAVES) {
+          const k = (2 * Math.PI) / wave.wavelengthM;
+          const weight = spacingWeightNode(spacing, wave).toVar();
+          If(weight.greaterThan(0), () => {
+            g.addAssign(vec3(wave.dirX, 0, wave.dirZ).mul(cos(wavePhase(position, wave)).mul(wave.amplitudeM * k).mul(weight)));
+          });
+        }
+        return g;
+      }) as any)();
     },
   } as HeightSource;
 }

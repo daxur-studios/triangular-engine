@@ -143,14 +143,25 @@ function finiteSamples(value: number): number[] {
             The nearer atmosphere owns the sky; the other draws only its bounded air.
             Showing: {{ shown() }}
           </p>
-          <tri-test-runner
-            [suites]="testHistory"
-            [adapter]="testAdapter"
-            [available]="testAvailable()"
-            [allowAutoStart]="allowTestAutoStart"
-            [resultSink]="true"
-            (progressChange)="onTestProgress($event)"
-          />
+          @if (spikeMode) {
+            <tri-test-runner
+              [suites]="spikeTestHistory"
+              [adapter]="spikeAdapter"
+              [available]="testAvailable()"
+              [allowAutoStart]="allowTestAutoStart"
+              [resultSink]="true"
+              (progressChange)="onTestProgress($event)"
+            />
+          } @else {
+            <tri-test-runner
+              [suites]="labTestHistory"
+              [adapter]="labAdapter"
+              [available]="testAvailable()"
+              [allowAutoStart]="allowTestAutoStart"
+              [resultSink]="true"
+              (progressChange)="onTestProgress($event)"
+            />
+          }
         </section>
       </ng-template>
     </scene>
@@ -184,7 +195,8 @@ export class AtmosphereMultiLabPageComponent {
 
   /** `?spike=body-tint`: the Plan 081 spike page, with its own suite and adapter. */
   readonly spikeMode = new URLSearchParams(location.search).get('spike') === 'body-tint';
-  readonly testHistory = this.spikeMode ? BODY_TINT_SPIKE_HISTORY : MULTI_ATMOSPHERE_TEST_HISTORY;
+  readonly labTestHistory = MULTI_ATMOSPHERE_TEST_HISTORY;
+  readonly spikeTestHistory = BODY_TINT_SPIKE_HISTORY;
   readonly allowTestAutoStart = isDevMode();
   readonly shown = signal('');
   readonly testBusy = signal(false);
@@ -307,7 +319,7 @@ export class AtmosphereMultiLabPageComponent {
     while (this.renderedFrames < start + count) await context.wait(16);
   }
 
-  private readonly labAdapter: TestRunAdapter<MultiAtmosphereSettings, undefined> = {
+  readonly labAdapter: TestRunAdapter<MultiAtmosphereSettings, undefined> = {
     windowModes: false,
     capture: () => undefined,
     apply: (scenario) => this.applySettings(scenario.settings),
@@ -322,7 +334,7 @@ export class AtmosphereMultiLabPageComponent {
   };
 
   /** The spike sets its own scene, so nothing is applied or restored; the run checks that the spike is installed. */
-  private readonly spikeAdapter: TestRunAdapter<BodyTintSpikeSettings, undefined> = {
+  readonly spikeAdapter: TestRunAdapter<BodyTintSpikeSettings, undefined> = {
     windowModes: false,
     capture: () => undefined,
     apply: () => undefined,
@@ -331,8 +343,6 @@ export class AtmosphereMultiLabPageComponent {
     restore: () => undefined,
     environment: () => this.environment(),
   };
-
-  readonly testAdapter = this.spikeMode ? this.spikeAdapter : this.labAdapter;
 
   private async measureSpike(): Promise<TestObservation> {
     const spike = this.bodyTintSpike;

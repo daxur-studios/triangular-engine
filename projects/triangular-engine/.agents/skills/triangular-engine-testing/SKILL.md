@@ -239,6 +239,8 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   quiet, 4 setup error. The test Chrome keeps rendering when other windows cover it (minimized is untested), so the
   owner can keep working elsewhere; light work barely affects numbers, heavy GPU work will, and a window without focus
   is recorded as a page-focus loss. Without --profile headless-hardware it opens full screen: prefer running it when the machine is free.
+  For a functional check or any quick iteration (no timings needed), add `--noisy` from the start. Without it the
+  launcher queues until the GPU is quiet, which can wait indefinitely while another app uses the GPU.
 - **Headless run while the owner works:** add `--profile headless-hardware`. Chrome starts hidden (`--headless=new`, real GPU
   via D3D11, no SwiftShader), does not wait for the away switch (it still waits for a quiet GPU) and does not take the
   screen. Window is 1707x872 at scale 1.5, the size of the owner's headed full-screen runs; `--window-size WxH` overrides.
@@ -255,7 +257,7 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   (rows without a tag are clean). Suite versions do not change. Measured once (testing README, "Clean and noisy
   runs"): owner work and a game client did not change headless results; a running game doubled the frame interval
   only. Headless and headed counts differ by about 10%, so never compare counts across the two modes. Iterate on
-  noisy headless runs; idle runs are for headed frame time and end-of-phase checks, not after every change.
+  noisy headless runs; idle runs are for headed frame time and end-of-phase checks, not after every change. Default to `--noisy` for functional checks and while iterating; drop it only when the timings are the point.
 - **"I'm away — let queued runs start".** A local dashboard (the Daxur app) has this switch. It writes
   `triangular-test-away.json` in the OS temp folder, and the launcher waits for it. When the user says it is on, that
   is permission to run: do not ask again and do not hand them a link to click. Start the launcher yourself for the

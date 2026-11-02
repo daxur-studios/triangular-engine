@@ -1,7 +1,7 @@
-<scene [class.test-running]="testing()">
+<scene [showFps]="true" [class.test-running]="testing()">
   <orbitControls
     [cameraPosition]="[0, 30, 45]"
-    [target]="[0, 0, 0]"
+    [target]="orbitTarget()"
     [isActive]="true"
   />
   <flatTerrain
@@ -28,8 +28,18 @@
     <button [class.active]="wireframe()" (click)="toggleWireframe()">
       Wireframe
     </button>
+    <button [class.active]="flatVertices()" (click)="toggleFlatVertices()">
+      Flat vertices
+    </button>
+    <button [class.active]="filter()" (click)="toggleFilter()">
+      Filter
+    </button>
+    <button [class.active]="animating()" (click)="toggleAnimating()">
+      Animate
+    </button>
   </div>
   <p>
-    16 waves, 4 bands, static heights. Not built yet: per-wave fade, roughness transfer, calm, slick and foam. Gates Q1 to Q6 in plan 080.
+    64 waves, jittered spectrum. Each wave fades by its pixel footprint (shading) and mesh spacing (vertices); the lost
+    slope widens the glint. Filter off is the aliasing control. Gates: suite water-lod-spike-aliasing.
   </p>
 </aside>

@@ -152,6 +152,22 @@ describe('PlanetAtmosphere', () => {
     atmosphere.dispose();
   });
 
+  it('swaps the haze stage for the beyond-range one only when asked, and only once', () => {
+    const atmosphere = smallAtmosphere();
+    const surface = new FakeSurface();
+    atmosphere.withAtmosphere(surface);
+    const nearStage = (surface.haze as unknown as { stage: unknown }).stage;
+
+    atmosphere.withAtmosphere(surface, { beyondRange: true });
+    const farStage = (surface.haze as unknown as { stage: unknown }).stage;
+    expect(farStage).not.toBe(nearStage);
+    expect(surface.calls).toBe(3);
+
+    atmosphere.withAtmosphere(surface, { beyondRange: true });
+    expect(surface.calls).toBe(3);
+    atmosphere.dispose();
+  });
+
   it('fits the planet material and clears its stages on dispose', () => {
     const atmosphere = smallAtmosphere();
     const material = new PlanetSurfaceMaterial();

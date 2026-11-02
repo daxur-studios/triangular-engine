@@ -113,6 +113,10 @@ suite could keep the error watcher alive through `restore`.
   Measured parity suite passes; visual review pending.
 - 2026-10-31 — Fixed the soft-body body-handle and creation-settings lifetime; two consecutive
   repetitions run without console errors.
+- 2026-11-02 — Visual review accepted. The developer compared `/soft-body-lab` with
+  `soft/soft_body.html` and `soft/soft_sphere_pressure.html` and recorded two human `pass`
+  reviews on the visible-browser run `2026-10-31T20-37-00-683Z_visible-browser_quick_5d03af99-7c83be8f`.
+  Plan 076 is complete.
 
 ## Scope history
 

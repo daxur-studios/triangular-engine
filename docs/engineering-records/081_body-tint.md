@@ -8,7 +8,10 @@ record_id: er-081
 scope_history_schema: 1
 plans:
   - /docs/plans/081_body-tint.md
-performance: []
+performance:
+  - id: body-tint-spike-v1
+    url: http://triangular-demo.localhost:4200/atmosphere-multi-lab?spike=body-tint&testSuite=body-tint-spike&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1
+    status: runnable-visual-review-pending
 ---
 
 # Engineering Record 081: Body tint for meshes in atmosphere
@@ -52,6 +55,13 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **Checks run.** `tsc --noEmit` on `projects/demo-app/tsconfig.app.json` passes.
 - **Not yet verified.** The owner's served page did not show the spike readout when the worker loaded it (it showed the Plan 078 text), so the served bundle may be stale or a rebuild may have failed. The owner's dev-server output should show which. Pipeline errors (`renderPipeline_NodeMaterial_22`, `MeshStandardNodeMaterial_20`) also appear on the plain page without the flag, so they are not from the spike.
 - **Open.** The saved spike run and the owner's screenshot review (blend-band width) are pending. P1 is not signed off.
+
+### 2026-11-01 (recorded 2026-11-02) — bt-spike P1 follow-up: suite, fix, saved run
+
+- **Spike suite.** `body-tint-spike` v1 (`BODY_TINT_SPIKE_HISTORY` in `atmosphere-multi-lab-tests.ts`): one functional scenario, `requiresVisualReview: true`. The v1 lab suite `MULTI_ATMOSPHERE_TEST_HISTORY` is unchanged. The lab page runs the spike suite only with `?spike=body-tint`, through its own adapter; it checks that the spike is installed and that the readout is shown.
+- **Build fix.** The spike output node is built inside TSL `Fn`. Calling `If` during plain construction threw `Cannot read properties of null (reading 'If')` in `skyAlong`. The lab page now binds one typed `<tri-test-runner>` per mode, because a union of the two suite types failed to compile. The Daxur build is clean (0 errors).
+- **Saved run.** Headless hardware, `--noisy`, standard mode, fingerprint `9c815587-5d2fd051`, GPU nvidia/webgpu, saved at 2026-11-01T23:59 (`body-tint-spike@v1/2026-11-01T23-59-06-362Z_headless-hardware_9c815587-5d2fd051.json`). Result: `auto=pass`, `perf=not-run`, `visual=pending`. The readout recorded no metrics, as expected for a functional spike. The run is not a timing result; it was taken under load from other apps (gpu 43/87%).
+- **Review.** Owner's screenshot in their RTX 3080 Chrome for the blend band is still pending. P1 is not signed off.
 
 ## Scope history
 

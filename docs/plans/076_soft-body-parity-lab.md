@@ -13,7 +13,7 @@ performance: []
 
 # Plan 076: Soft-body parity lab (official Jolt examples)
 
-Status: **implemented; visual review pending**. Evidence and decisions: [ER 076](/docs/engineering-records/076_soft-body-parity-lab.md).
+Status: **implemented; visually reviewed and accepted**. Evidence and decisions: [ER 076](/docs/engineering-records/076_soft-body-parity-lab.md).
 
 <!-- tri:scope -->
 
@@ -36,7 +36,7 @@ solver.
 - **component-parity** - `<joltSoftBody>` exposes the creation settings the examples use (`updatePosition`, creation-time `pressure`, `friction`, `restitution`, `vertexRadius`, `maxLinearVelocity`), a live body accessor, rotation-following mesh, no stale culling, and disposal. Acceptance: engine build and the demo app build pass.
 - **parity-lab** - `/soft-body-lab` renders both examples with the same meshes, settings, camera and floor as the official pages. Acceptance: the page renders both examples; the mesh generators match the official vertex/face counts.
 - **measurement** - a functional suite records shape strain, mesh volume and floor penetration and gates the two behaviours that define the examples: the cloth keeps its mesh under the spheres, and pressure changes the spheres while the highest pressure holds its volume. Acceptance: `jolt-soft-body-examples@v1` passes headless.
-- **visual-review** - a person compares the page with both official pages. Acceptance: a recorded review. Planned.
+- **visual-review** - a person compares the page with both official pages. Acceptance: a recorded review. Done: two human `pass` reviews recorded for the visible-browser run (`cloth-spheres`, `pressure-row`).
 
 ## Relationships
 
@@ -52,15 +52,19 @@ solver.
 | component-parity | done    |
 | parity-lab       | done    |
 | measurement      | done    |
-| visual-review    | planned |
+| visual-review    | done    |
 
 <!-- tri:review version="1" scope-hash="e29f6a0cca4ccf6dd1d66f7ec2e921bc28665cdfbc7191e5fe937a880f32aa01" reviewed="2026-10-31" reviewer="agent" -->
-<!-- tri:item id="Q1" kind="intent" applies-to="visual-review" blocks="none" state="open" -->
+<!-- tri:item id="Q1" kind="intent" applies-to="visual-review" blocks="none" state="resolved" -->
 
-- [ ] Do the measured gates match what the official pages show?
+- [x] Do the measured gates match what the official pages show?
   - Why it matters: the gates are sanity bounds derived from the observed parity run, not a
     pixel comparison; a person still has to confirm the look.
-  - Next action: compare `/soft-body-lab` with both official pages and record the review.
+  - Next action: none. The developer compared `/soft-body-lab` with both official pages and
+    recorded two human `pass` reviews on the visible-browser run
+    `2026-10-31T20-37-00-683Z_visible-browser_quick_5d03af99-7c83be8f`.
+  - Resolution: the recorded reviews confirm the sighted result matches both official pages; the
+    measured gates stand as sanity bounds, not pixel parity.
     <!-- /tri:item -->
     <!-- /tri:review -->
 
