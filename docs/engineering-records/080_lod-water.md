@@ -312,6 +312,157 @@ The leaf cap (4096) was hit in every view.
 
 **Not done.** Sphere and cylinder reads; the cost of the extra texture on a body that already reads several; higher `k` or a second finer texture near the shore; whether to move the bake's `k` from the terrain's own setting.
 
+### 2026-11-03 (shoreline review): the spike keeps pictures and clips
+
+The owner asked for visual evidence to be viewable in the chat without anyone opening the media. The spike now takes case stills (`thumbnail`, the page's `ScreenshotService`, 480 px WebP) and records a clip for cases with an orbit (`recording`, the canvas copied into a 640x360 canvas at 24 fps, 900 kbit/s). The new suite `water-lod-spike-coast-look` v1 has four still cases (analytic and baked at Ultra, baked at High and Low) and two 90-degree orbit cases (Ultra and High, baked). The waves are frozen for it, so anything that swims with the camera is the terrain or the water mesh, not the waves. Its gates are only that the water and the land draw; the pictures are the evidence, and `requiresVisualReview` stays pending until someone looks.
+
+**Run.** Stills: `triangular-test-run` headless on the real GPU, six cases pass. Clips: the runner's "Record short video around each case" checkbox in headless Chrome (there is no CLI flag or launch link for recording, by design); two clips of about 300 KB, 114 and 122 frames, not blank. The labelled contact sheet comes from `triangular testing media contact-sheet` over the four stills.
+
+**Reported by the run, not gated.** Triangles at the coast view: analytic Ultra 2.29 M, baked Ultra 1.18 M, baked High 0.32 M, baked Low 0.08 M. The analytic land source has no height range per node, so its leaves carry a plus-or-minus 865 m bound and more of them are drawn; the baked source has tight per-node ranges. The two arms of the baked toggle therefore do not draw the same land, which matters for any cost comparison between them.
+
+**Not done.** The camera-moves-with-everything report (Land on, then a quality change, then moving the camera) is not reproduced headless: the rebuilt bodies keep the right settings and the orbit frames are consistent. Whether it shows in a headed browser is for the owner's eye on the two orbit clips.
+
+### 2026-11-03 (shoreline review): one depth read per pixel
+
+The owner saw the baked terrain look the same as the analytic one but cost a bit more. The water material read the land twice per pixel: the shore weight (flattening the waves) and the foam and depth colour each called `landReadNode`, eight texture loads per pixel on the baked path. The material now reads D once (`waterDepthNode`) and passes it to `shoreWeightFromDepth` and `shoreLookFromDepth`; four loads per pixel. The vertex stage is unchanged, and `shoreWeightNode` and `shoreLookNode` keep their one-argument form. The read is skipped when shore, foam and depth colour are all off.
+
+**Run.** 111 of 111 specs pass. On the RTX at full screen (owner away), terrain-read v2, shore-look v1, shore v1 and coast-look v1 all pass with unchanged numbers (largest baked-against-analytic depth error 0.24 m; no waterline point without foam; coast-look triangles 2.18 M analytic Ultra, 1.02 M baked Ultra, 0.28 M High, 0.07 M Low). The runs were vsync-bound (frame interval 6.1 ms, GPU frame 0.6 to 1.3 ms, 0.1 ms steps) and another app held the GPU (`gpu-throttled`, `other-app-measuring`), so they cannot show a change of this size. The cost of the baked path is therefore not measured yet.
+
+**Not done.** A frame-time A/B of baked against analytic with the same leaf counts (the two arms draw different amounts of land), at a size where the GPU frame is above the 0.1 ms step.
+
+### 2026-11-03 (shoreline review): clips of the camera moving while the quality changes
+
+The owner still sees the water, the wave crescent and the terrain "move with the camera" after switching to Low and rotating, and asked for a clip to check it by eye. My earlier probes could not reproduce it, and they all held the camera still with the waves frozen (the `holdView` path), so a bug that appears only while the camera moves live could not show in them. The new suite `water-lod-spike-camera-quality` v1 (visual review) moves the camera through the page's own orbit controls (`setLiveCamera`: the pose goes in each frame ahead of the controls' update, the waves keep animating) and switches quality along the path. Six 7 s clips on the coast view with the island on and the baked terrain: orbit 120 degrees at Ultra, Ultra then Low then orbit (the report's sequence), orbit at Low, zoom in then pan then zoom out then pan back at Ultra and at Low, and an orbit of 160 degrees while the quality steps High, Medium, Low. The recording copy now writes the active quality in the clip's corner.
+
+**Run.** Seven new specs (the water spike's specs pass headless); one headless run on the real GPU passes all six cases (frame interval median 6.1 ms, longest frame 8 to 37 ms, so no stall in the page). Clips from a headless Chrome on the real GPU driven over the DevTools protocol to tick the runner's recording box (the launcher has no recording option): six WebM files of about 310 to 410 KB, 140 frames each, not blank, sent to the owner as MP4. A run in the built-in browser pane rendered at about 1 frame per second while the pane was not in front and failed the "page kept rendering" gate, as it should; it is not evidence.
+
+**Reported by the run, not gated.** The gates are only that the water and land draw, the page kept rendering (60 frames) and every quality switch was applied. The clips are the evidence; no review is recorded, and the clips show nothing about the cause. One frame of the Ultra-then-Low clip shows a pale rectangle at the bottom edge during the orbit, which the owner may want to look at.
+
+**Not done.** Pointer-driven orbit (damping) is not driven by the test.
+
+### 2026-11-03 (shoreline review): the water stayed fixed to the camera after a quality change
+
+The owner saw the clips: after the switch to Low the water moved with the camera and blocks of it were missing. A second model (Opus 5.5) was briefed with the code excerpts and asked questions instead of exploring; it agreed with the cause below (about 80 % before the check).
+
+**Cause.** Every quality change changes `leafCap`, so `LodTerrainBody.configure` builds a new surface mesh. The water body is given one material object that every new surface is wired onto: `createLodSurfaceMesh` assigns `material.positionNode` (a graph over that surface's own per-frame anchor uniforms and instance buffers) and never flags the material. three.js 0.187 recomputes a material's program cache key only when `material.version` changes (`NodeManager.getCustomProgramCacheKey`), and a render object's cache key adds only geometry attribute names, so the new mesh found the old compiled program in `nodeBuilderCache` and drew with the old surface's uniforms, which nothing updates any more. The mesh group still follows the camera each frame, so the water sat rigidly in front of the camera, turned with it, and the new tree's leaves no longer matched the frozen view (blocks missing). With the camera held still after the switch it looks right, which is why every earlier probe passed. The land body makes a fresh default material per surface, so it compiled fresh; its odd look was most likely the camera-fixed water plane cutting through it. Not shown by direct inspection of `nodeBuilderCache`; the evidence is the code path plus the clips below.
+
+**Fix.** `createLodSurfaceMesh` sets `material.needsUpdate = true` after wiring a supplied material (a new spec checks the version rises with each surface built on one material and that the built-in material is left at 0). This fixes every consumer that passes `[material]`, planet materials included. CHANGELOG entry added.
+
+**Check.** The same suite rerun on the real GPU (headless, all six cases pass, median frame 6.1 ms): in the Ultra-then-Low-then-orbit clip the frame that had a rectangle of water missing at the bottom edge is whole, and the shore moves with the world through the orbit. One frame is blank at the switch (the pipeline compile, as before). Whether the owner sees any remaining effect is for the owner's eye; no review is recorded. The lod-surface specs: 402 pass, 3 fail (morph sweep budgets and a settle check, from the uncommitted selector and metric changes, not from this).
+
+**Not done.** The object-level experiment (set `water.material.needsUpdate` after a switch on the old build, or compare the render object's node builder state) was not run. The v2 cost suite still needs a clean rerun; any earlier measurement that switched quality before measuring may have drawn the stale water, so treat those as suspect until it is rerun.
+
+### 2026-11-03 (shoreline review): ideas from a public MIT-licensed ocean demo
+
+The owner asked for a public WebGL2 ocean demo (Ultra Water, MIT, github.com/Humpalumps/Ultra-Water; read at commit `30ea65e`, line numbers below are for that commit) to be compared with the spike. It is raw GLSL on a 2.4 km island, not WebGPU, TSL or planet-scale, so none of it ports directly. This entry only records what it does that the spike does not, as ideas to explore later; no commitment changed and nothing was copied.
+
+**What it has that the spike does not**
+
+| Area | Ultra Water | Spike now |
+| ---- | ----------- | --------- |
+| Breaking | eikonal travel-time field for wave direction, Green's-law shoaling, height capped at 0.42 x depth, peeling, a lean ahead of the crest (`shoreMap.js`, `OceanSurface.js` 218-297) | the depth weight only, `smoothstep(0, 12 m, D)` |
+| Pinched crests and the 3D waterline | the mesh is displaced horizontally as well as vertically: crests are compressed and narrow (power 1.6) and a plunging lip leans over, all inside one pinch budget so the surface never folds (`OceanSurface.js` 235-297) | height-only waves (a sum of sinusoids); the waterline is a depth contour on a flat mesh |
+| Swash | analytic run-up and drain-back of each bore on the sand, as a film thickness, edge foam and wetness (`OceanSurface.js` 98-166, used by `terrain.js`); spray in `Spray.js` | none |
+| Foam | Jacobian-driven foam from the crests, eroded with age into lace, advected by a two-phase flow map (`OceanSurface.js` 654-690, `bakeTextures.js`) | stripes of constant `D` that ignore wave direction |
+| Glint | Poisson-disc glint facets for sub-pixel sparkle (`OceanSurface.js` 616-637) | the Gauss-Hermite quadrature, which is deliberately sparkle-free |
+| Other | Snell's window, sun shafts, caustics, floaters, a Hillaire sky | not in the spike |
+
+**Ideas, in the order they look worth trying** (each would get a gate before any code, like the earlier experiments)
+
+1. **Depth-limited crest height.** Cap each wave's amplitude at a fraction of `D` (they use 0.42), so crests stop growing into shallows. Low effort: our waves already take the depth weight, this changes the cap from a fade to a physical limit. The pinch (idea 2) and the swash (idea 3) build on the same height-against-depth limit.
+2. **Pinched, sharper crests.** Add a horizontal displacement to the waves (the Gerstner idea) so crests narrow and troughs flatten, with a budget that keeps the surface from folding. Medium effort and a real cost: our 64 waves are heightfield-only, the horizontal term changes the position the wave sum is read at, and the normal and covariance maths in the shading would need the matching Jacobian. It also interacts with the LOD morph and with the wave-phase precision gate (Q5). Whether it is worth it depends on how flat the crests look at the coast.
+3. **Swash on the sand.** Run-up and drain-back from our shore amplitude and `D`, drawn on the terrain as a thin film and edge foam. Medium effort. It serves the waterline goal directly, and the water already shares one depth read per pixel with the terrain's baked height.
+4. **Crest-driven foam with age erosion.** Foam where the wave Jacobian compresses, eroded over time, instead of fixed depth stripes. Medium effort. It needs the same Jacobian as idea 2.
+5. **Travel-time (eikonal) bake for wave direction and shoaling.** Gives the two things experiment 4 lists as missing. High effort, and the sphere would need a per-face version, so only after 1 to 4 have passed their gates.
+6. **Poisson glint facets.** Adds temporal noise, so it must pass the Q3 shimmer gate first. Lowest priority.
+
+**Licence.** Ideas and maths are not copyrightable, so a citation here is enough. Code copied (even adapted from GLSL to TSL line by line) must carry the MIT copyright line and permission text, and a third-party notice. Their caustics code credits another project that their own notices file does not list, so check that licence before borrowing the method.
+
+**Not done.** Nothing was tried. The pinch (idea 2) is the one the owner noticed on first sight; it is the least certain, because it changes the wave sum itself.
+
+### 2026-11-03 (shoreline review): what the baked read costs, land body held fixed
+
+The earlier cost run flipped the land body and the water's depth read together, and the analytic land body draws about twice the triangles of the baked one, so it could not say what the read costs. Suite `water-lod-spike-terrain-cost` v1 flips them apart: four arms (analytic or baked land body, analytic or baked depth read), two rounds in opposite order, 3x pixel ratio, GPU timestamps. The page gained `setWaterRead`, which holds the water's depth read apart from the land body. Gate, written before the first run: every arm's GPU frame at least 0.5 ms (five timer steps), and on each land body the baked read at most 10 % over the analytic read.
+
+**Run.** 117 of 117 specs pass. On the RTX (visible browser, owner away, load clean, one repetition), auto=pass:
+
+| View | Analytic land, analytic read | Analytic land, baked read | Baked land, analytic read | Baked land, baked read | Triangles (analytic land / baked land) |
+| ---- | ---- | ---- | ---- | ---- | ---- |
+| Coast | 7.33 ms | 7.40 | 7.40 | 7.37 | 2.18 M / 1.02 M |
+| Look down from 800 m | 1.20 ms | 1.20 | 1.30 | 1.30 | 1.62 M / 0.22 M |
+
+The baked read costs 0.03 and -0.02 ms on the coast view (ratio 1.00) and 0.00 ms on both land bodies in the look-down view. The baked land body costs 0.03 and -0.02 ms on the coast view and 0.10 ms (one timer step) in the look-down view. Halving the land triangles did not change the coast frame either, so that frame is bound by the water's pixel work, the same in every arm.
+
+**What it shows.** In GPU time the baked depth read is not measurably more expensive than the analytic one, to within one timer step (about 1 % of the coast frame, about 8 % of the look-down frame). It does not reproduce the owner's "baked costs a bit more". Caveats: the machine recorded `gpu-throttled` and `gpu-adapter-unrecorded`, one repetition only, and the look-down frame is too short to resolve less than about 8 %.
+
+**Not done.** The suite records GPU time only. If the owner's impression came from CPU time (the FPS panel's CPU frame) or from the rebuild when the toggle flips, this run would not see it. Next cheap step: record the CPU frame per arm and the time to the first drawn frame after a flip.
+
+### 2026-11-03 (shoreline review): the owner finds the foam stylized; what two public repos do instead
+
+The owner reviewed the regional look (Q4) and found the foam stylized: fine for some games, not for a realistic look. The spike's foam is stripes of constant `D` (`shoreFoam`), which ignore wave direction. A second public ocean demo was read beside Ultra Water: Minamo (`kanaworksai-hue/minamo`, MIT, WebGPU and TSL on three.js r186, an open bay). It was not recorded here before. Nothing was copied and no commitment changed; these are candidates for a gated experiment.
+
+**Correction to the entry above.** It says Ultra Water's foam is eroded with age. In its source, offshore erosion follows foam density (a noise threshold, `cover = smoothstep(1.05 - foam, 1.3 - foam, pattern) * sqrt(foam)`); age enters only through the two-phase flow map, and only for shore foam.
+
+| Area | Ultra Water | Minamo |
+| ---- | ----------- | ------ |
+| Open-water foam | Jacobian of the displacement, thresholded | Jacobian written per texel, decays exponentially and persists |
+| Foam erosion | noise threshold on the foam density | world-noise threshold on the foam |
+| Breaker foam | crest band with a trailing tail, gated by breaking | none |
+| Advection | two-phase flow map at the wave's phase speed (shore foam only) | none |
+| Depth colour | per-channel Beer absorption from scene depth, in-scatter over bright sand | Jerlov IA-IB per-channel absorption and scattering, closed-form single scatter |
+| Sub-surface | crest SSS, breaking-lip glow | back-lit crest SSS |
+| Reflection | Fresnel F0 0.02, sky cube plus planar | exact dielectric Fresnel (n 1.333), PMREM sky |
+| Sun glint | GGX with a floor, Poisson facets | GGX with an angular-radius floor |
+| Waterline | analytic swash, crest pinch | waterline and displacement share one function |
+
+**Cheapest ways to look less stylized, in order**
+1. Erode the foam with a noise threshold and fade it with density, instead of constant-`D` stripes. One noise sample per pixel, no wave data needed.
+2. Put the breaker band on each wave train's crest, with a trailing tail, and move it at the wave's phase speed. This makes foam follow wave direction. A few taps and the per-train phase.
+3. Persistent crest-compression foam with decay. Most physical for open water, but the spike's waves are height-only, so it needs the horizontal-displacement term first (idea 2 above).
+
+Colour is a separate, cheap step: per-channel Beer absorption with published Jerlov values.
+
+**Not done.** None of it was tried.
+
+### 2026-11-03 (water on a planet, stage A): the plane spike's water on a 600 km sphere, with terrain and the atmosphere
+
+The owner asked to try the water on the planet, with the atmosphere, and to confirm the game stays performant with 3D terrain, atmosphere and water together. Stage A is a second spike page, `/water-lod-spike-sphere` (`water-lod-spike/water-lod-spike-sphere.component.*`, listed on the spikes index as spike 7). Nothing in `lod-surface` core changed.
+
+**What it is.** Two standalone `<planetTerrain>` bodies (no `<planet>`): the land (the plane spike's islands as a Gaussian-bump `HeightSource` on the sphere, `TerrainPlanetMaterial`) and the water (the plane's 64 waves as `ISphereWave` plane waves with fixed 3D directions, spherical Fibonacci, so there is no pole or face seam), plus an optional standalone `<planetAtmosphere preset="earth">` whose only surface is the land's material. Poses: orbit, 20 km, coast at 50 m, 2 m eye. Layer toggles (land, water, atmosphere, atmosphere light and haze separately), the plane spike's wireframe, filter, animate, shore, foam, depth-colour toggles and the quality slider.
+
+**How the water works on the sphere.**
+- Vertex stage: the plane's spacing-filtered sum of sines, with a naive float32 phase `k (up * R).d + phase - omega t`, times the shore weight. The CPU twin keeps every wave. The float32 phase error (Q5) is millimetres of height at the shortest wavelengths, because the amplitude there is millimetres; the geometry carries it, the shading does not.
+- Fragment stage: slopes are rebuilt per pixel from a camera-anchored phase, `k dot(base - camera, d) + offset_i`, where `offset_i` is computed in doubles on the CPU each frame from `camera.matrixWorld` and the wave time (`updateSphereWaterAnchor`, the Q5 anchor path) and `base` is the position minus `up * vertexHeight` (the vertex height travels as a varying, so the vertex stage still computes it once). The footprint gate, the lost-slope covariance and the 3 x 3 Gauss-Hermite shading are the plane's. The tangent pair for the slopes is a branch-free orthonormal basis built in the home frame (no screen derivatives), continuous except on the great circle 90 degrees from home.
+- The sphere's sun is the body's (`setSunDirection`); a day factor (smoothstep of `dot(up, sun)` over -0.12..0.2, ambient floor 0.06) dims the water colour, the reflected sky and the glint, because the plane's sun is always above the horizon.
+- Shore weight, foam and depth colour read the land's analytic height at the base point's direction (no baked read, no cover hook).
+
+**Verified (built-in browser, `http://triangular-demo.localhost:4200`, AMD integrated GPU, so the picture and not the timing).**
+- The page compiles, loads without console errors, and draws land, water and the sky at all four poses, with and without the atmosphere. Stills were sent to the owner in chat.
+- 35 new unit specs pass headless (land, waves and basis, material day factor, poses, the cost suite with a fake host, 161 passing together with the existing water spike specs).
+- Not verified: any GPU timing. Suite `water-lod-spike-sphere-cost` v1 exists (five layer sets at four poses, two rounds in opposite order; gates: the water's marginal GPU cost on the land at most 0.5 ms, plan 080's gate, defined on an RTX 3080 at 2560 x 1440 in a visible browser; the full stack at most 8.3 ms, which is this spike's proposal and not a plan figure). It has not been run; it needs the owner's visible browser.
+
+**Limits recorded now, so they are not mistaken for findings.**
+- The water is a `MeshBasicNodeMaterial`, not an atmosphere surface: it gets the sky backdrop only, with no aerial haze and no atmosphere light. The sky colour in its reflection is a constant. At the coast the hazed, atmosphere-lit land stands beside un-hazed water. Making the water a surface the atmosphere lights and hazes is the next stage.
+- The vertex phase is naive float32 (above). Plan 080 W1a would put the anchored phase in the lod-surface vertex stage; this spike does it in the material because the hook does not exist.
+- No cover hook and no shore audit on the sphere: the water is drawn under the land by depth only.
+- The orbit glint shows the 3 x 3 quadrature as a cluster of lobes (large lost variance, nine samples). The plane's far view was not checked for the same.
+- The basis seam (90 degrees from home) and a 600 km radius with the plane's wavelengths were taken as they are; no other radius was tried.
+- Observed, not investigated: giving the land body `renderOrder = -1` with the atmosphere on hid the land (the sky backdrop showed through where it should be). Removing the line fixed it. The page leaves both bodies at the default order.
+- Running the stack on the integrated GPU gave about 18 FPS at the coast with 1.27 million triangles; that is a machine note, not a result.
+
+**Next.** The owner runs the cost suite on the RTX 3080 (launch link below, visible browser). Then decide whether to make the water an atmosphere surface (haze and light), and whether to move the anchored phase into the vertex stage (W1a).
+
+Launch link (auto-starts): `http://triangular-demo.localhost:4200/water-lod-spike-sphere?testSuite=water-lod-spike-sphere-cost&testVersion=1&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1`
+
+**First cost run (2026-11-03 22:00, visible browser, RTX 3080, one repetition; result file `water-lod-spike-sphere-cost@v1/2026-11-03T22-00-16-979Z_visible-browser_0d9a6f51-2a75e5d7.json`).** Automation failed on all four poses; performance is recorded as inconclusive.
+- The machine reported `gpu-busy-before-start` (GPU 96 % busy, 87 C) and `gpu-throttled`. These are warnings, not a rejection, but the numbers are from a loaded, hot GPU and should be repeated on a quiet one before they are quoted as hardware figures. GPU timestamps come in steps of 0.1 ms.
+- Water marginal GPU cost on the land (gate 0.5 ms): orbit 1.58, 20 km 2.55, coast 2.55, 2 m eye 3.28 ms. Four to seven times the gate at every pose, and the gap is far larger than the 0.1 ms step.
+- Full stack (land + water + atmosphere) GPU frame: 1.90, 3.10, 3.00, 3.93 ms against the 8.3 ms proposal, so that gate was not the one that failed. Atmosphere on land costs 0.2 to 0.3 ms.
+- The water body alone is 0.75 to 0.92 of the whole stack's GPU time. Its triangles equal the land's or exceed them (water 613k, 605k, 630k, 928k; land 613k, 614k, 1.33M, 1.33M).
+- The other check at every pose, "land and land + water arms are at least 0.5 ms", failed too (shortest 0.2 to 0.4 ms). That is a flaw in the suite's design and not a measurement fault: the land alone is cheaper than the floor the check demands, so the marginal cost cannot be called "readable" by that rule even where it plainly is.
+- CPU frame stayed at 0.6 to 1.5 ms. The longest frame after a layer switch reached 25 to 97 ms for the arms that add water (pipeline compile), against about 6 ms for the land alone.
+- **Not diagnosed.** The cost rises as the camera nears the water (1.5 to 3.3 ms), which points at the fragment stage (nine-sample quadrature, depth read for shore and colour) and the 64-wave vertex stage over 600k to 900k triangles. Which one dominates has not been measured. The water also draws a full-density lattice under the land, which the cover hook was meant to remove.
+
 ## Scope history
 
 <!-- tri:scope-history -->

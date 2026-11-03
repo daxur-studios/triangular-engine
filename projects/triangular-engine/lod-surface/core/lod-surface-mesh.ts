@@ -507,6 +507,10 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   material.positionNode = positionNode;
   if (ownMaterial) material.colorNode = colorNode;
   else if (consumesNodes(material)) material.bindLodSurfaceNodes(nodes);
+  // A supplied material outlives its surface (a rebuild makes a new surface for the same material). The renderer keys compiled programs
+  // on the material's cache key, which it recomputes only when `version` changes; without this the new mesh would reuse the old build,
+  // whose anchor uniforms nothing updates any more, and the surface would stay fixed to the camera.
+  if (!ownMaterial) material.needsUpdate = true;
   const probeMaterial = new MeshBasicNodeMaterial({ side: FrontSide });
   probeMaterial.positionNode = positionNode;
   probeMaterial.colorNode = vec4(1, 1, 1, 1);

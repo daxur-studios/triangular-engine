@@ -771,6 +771,7 @@ export class LodSelector {
     const coverVersion = this.coverVersion;
     for (let node = first; node < first + count; node++) {
       active[n++] = node;
+      let staleGeometry = false;
       if (geoStamp[node] !== geometryVersion) {
         // A stale node is measured while the budget lasts. Past it the node keeps its old geometry (a pool node always has one)
         // and the next pass measures it.
@@ -779,7 +780,10 @@ export class LodSelector {
           this.geometryRefreshes++;
           stats.geometryMeasured++;
           this.measureNode(node);
-        } else stats.geometryStale++;
+        } else {
+          stats.geometryStale++;
+          staleGeometry = true;
+        }
       }
       // Split in the last tree: open there, and in that tree (stamped one rebuild ago; older flags are stale).
       const kept = wasOpen[node] === 1 && stamp[node] === frame - 1;
@@ -791,7 +795,9 @@ export class LodSelector {
       const y = hot[h + 1] - key[1];
       const z = hot[h + 2] - key[2];
       const r = hot[h + 3];
-      const outside = cull && (key[3] * x + key[4] * y + key[5] * z < -r || key[6] * x + key[7] * y + key[8] * z < -r || key[9] * x + key[10] * y + key[11] * z < -r || key[12] * x + key[13] * y + key[14] * z < -r);
+      // Old bounds belong to an earlier state of the hook (a morph a step or more ago), so they can lie anywhere near the node's
+      // new place: a node that has not been measured again is never culled, or it blinks out of the view for the refresh's passes.
+      const outside = cull && !staleGeometry && (key[3] * x + key[4] * y + key[5] * z < -r || key[6] * x + key[7] * y + key[8] * z < -r || key[9] * x + key[10] * y + key[11] * z < -r || key[12] * x + key[13] * y + key[14] * z < -r);
       hidden[node] = 0;
       if (outside && cullInSelection === true) {
         visible[node] = 0;

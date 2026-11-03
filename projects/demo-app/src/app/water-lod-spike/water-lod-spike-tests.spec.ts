@@ -4,6 +4,7 @@ import type { ILeafCull } from './core/water-lod-spike-land';
 import type { IPathError, IPrecisionReport } from './core/water-lod-spike-precision';
 import {
   createWaterLodSpikeTestAdapter,
+  motionPose,
   WATER_LOD_SPIKE_TEST_HISTORY,
   type WaterLodSpikeTestHost,
   type WaterLodSpikeTestSettings,
@@ -60,6 +61,7 @@ function makeHost(overrides: Partial<WaterLodSpikeTestHost> = {}): WaterLodSpike
     takeCpuFrameMs: () => [2.5, 2.6, 2.4],
     gpuFrameMs: () => 0.8,
     setView: (view) => calls.push(`setView:${view ? 'held' : 'free'}`),
+    setLiveCamera: (view) => calls.push(`setLiveCamera:${view ? 'live' : 'free'}`),
     setFilter: (enabled) => {
       filter = enabled;
     },
@@ -90,6 +92,7 @@ function makeHost(overrides: Partial<WaterLodSpikeTestHost> = {}): WaterLodSpike
     setDepthColour: () => undefined,
     shoreLookAudit: () => ({ wetPoints: 20000, edgePoints: 900, edgeGaps: 0, farFoam: 0, shallowDeepness: 0.05, deepDeepness: 0.95 }),
     setBakedTerrain: () => undefined,
+    setWaterRead: () => undefined,
     terrainReadAudit: () => ({ points: 40000, maxDepthErrorM: 0.1, meanDepthErrorM: 0.01, signFlips: 12, clearFlips: 0, nearWaterline: 900 }),
     terrainReadInfo: () => ({ k: 11, texelM: 48.8, megabytes: 16.8, bakeMs: 300 }),
     environment: () => ({ backend: 'webgpu' }),
@@ -192,7 +195,7 @@ describe('createWaterLodSpikeTestAdapter', () => {
     await adapter.apply({ ...ALIASING_SCENARIO, settings: { ...ALIASING_SCENARIO.settings, wireframe: true } }, context);
     await adapter.restore(snapshot, context);
 
-    expect(host.calls).toEqual(['setWireframe:true', 'setView:held', 'setWireframe:false', 'setView:free']);
+    expect(host.calls).toEqual(['setWireframe:true', 'setView:held', 'setWireframe:false', 'setView:free', 'setLiveCamera:free']);
   });
 
   it('holds the scenario quality tier and hands the page its own back afterwards', async () => {
@@ -693,6 +696,285 @@ describe('createWaterLodSpikeTestAdapter', () => {
       const second = WATER_LOD_SPIKE_TEST_HISTORY.filter((entry) => entry.id === 'water-lod-spike-terrain-read').find((entry) => entry.version === 2);
       expect(second?.scenarios.map((scenario) => scenario.settings.pixelRatio)).toEqual([3]);
       expect(suite?.scenarios.map((scenario) => scenario.settings.pixelRatio)).toEqual([undefined]);
+    });
+  });
+
+  describe('terrain cost case (four arms)', () => {
+    const suite = WATER_LOD_SPIKE_TEST_HISTORY.filter((entry) => entry.id === 'water-lod-spike-terrain-cost').at(-1)!;
+    const COST_SCENARIO = suite.scenarios[0];
+    const failed = (observation: Awaited<ReturnType<ReturnType<typeof createWaterLodSpikeTestAdapter>['measure']>>) =>
+      (observation.checks ?? []).filter((check) => !check.passed).map((check) => check.name);
+
+    /** A page whose GPU frame follows the two switches: `base` ms, plus `land` for the baked land body and `read` for the baked read. */
+    const costHost = (base: number, land: number, read: number, overrides: Partial<WaterLodSpikeTestHost> = {}) => {
+      let landBaked = false;
+      let readBaked: boolean | null = null;
+      const state = { landSwitches: [] as boolean[], readSwitches: [] as (boolean | null)[] };
+      const host = makeHost({
+        setBakedTerrain: (enabled) => {
+          landBaked = enabled ?? false;
+          state.landSwitches.push(landBaked);
+        },
+        setWaterRead: (enabled) => {
+          readBaked = enabled;
+          state.readSwitches.push(enabled);
+        },
+        gpuFrameMs: () => base + (landBaked ? land : 0) + ((readBaked ?? landBaked) ? read : 0),
+        ...overrides,
+      });
+      return { host, state };
+    };
+    const metric = (observation: Awaited<ReturnType<ReturnType<typeof createWaterLodSpikeTestAdapter>['measure']>>, name: string) =>
+      observation.metrics.find((entry) => entry.name === name)?.samples[0];
+
+    it('is a performance suite at 3x pixel ratio over two views', () => {
+      expect(suite.version).toBe(2);
+      expect(suite.purpose).toBe('performance');
+      expect(suite.scenarios.map((scenario) => scenario.id)).toEqual(['coast-view', 'down-800m']);
+      expect(suite.scenarios.map((scenario) => scenario.settings.pixelRatio)).toEqual([3, 3]);
+      expect(suite.scenarios.map((scenario) => scenario.settings.measure)).toEqual(['terrain-cost', 'terrain-cost']);
+    });
+
+    it('separates the read from the land body and passes when the read is cheap', async () => {
+      const { host } = costHost(4, -1, 0.1);
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(COST_SCENARIO, makeContext(host.calls));
+
+      expect(failed(observation)).toEqual([]);
+      expect(metric(observation, 'cost of the baked read, analytic land body')).toBeCloseTo(0.1, 6);
+      expect(metric(observation, 'cost of the baked read, baked land body')).toBeCloseTo(0.1, 6);
+      expect(metric(observation, 'cost of the baked land body, analytic read')).toBeCloseTo(-1, 6);
+      expect(metric(observation, 'cost of the baked land body, baked read')).toBeCloseTo(-1, 6);
+      expect(metric(observation, 'GPU frame, analytic land, analytic read')).toBeCloseTo(4, 6);
+    });
+
+    it('reports each arm\'s CPU frame, the longest frame after the switch, and the time to a drawn land body', async () => {
+      const { host } = costHost(4, 0, 0.1);
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(COST_SCENARIO, makeContext(host.calls));
+      const samples = (name: string) => observation.metrics.find((entry) => entry.name === name)?.samples;
+
+      expect(samples('CPU frame, baked land, baked read')?.map((value) => Math.round(value * 1000) / 1000)).toEqual([2.5, 2.5]);
+      expect(samples('longest frame after the switch, analytic land, analytic read')).toEqual([16.7, 16.7]);
+      expect(samples('time to a drawn land body after the switch, baked land, analytic read')?.length).toBe(2);
+      expect(metric(observation, 'CPU frame, baked read over analytic read, baked land body')).toBeCloseTo(1, 6);
+      expect(failed(observation)).toEqual([]);
+    });
+
+    it('fails when no CPU frame time can be read in an arm', async () => {
+      const { host } = costHost(4, 0, 0.1, { takeCpuFrameMs: () => [] });
+      expect(failed(await createWaterLodSpikeTestAdapter(host).measure(COST_SCENARIO, makeContext(host.calls)))).toEqual([
+        'CPU frame time measured in every arm',
+      ]);
+    });
+
+    it('visits each arm twice, the second round reversed, and hands the switches back', async () => {
+      const { host, state } = costHost(4, 0, 0.1);
+      await createWaterLodSpikeTestAdapter(host).measure(COST_SCENARIO, makeContext(host.calls));
+
+      expect(state.landSwitches).toEqual([false, false, true, true, true, true, false, false, false]);
+      expect(state.readSwitches).toEqual([false, true, false, true, true, false, true, false, null]);
+    });
+
+    it('fails when the baked read costs more than a tenth on either land body', async () => {
+      const { host } = costHost(4, 0, 0.6);
+      expect(failed(await createWaterLodSpikeTestAdapter(host).measure(COST_SCENARIO, makeContext(host.calls)))).toEqual([
+        'on the analytic land body the baked read costs at most 10 % more GPU time',
+        'on the baked land body the baked read costs at most 10 % more GPU time',
+      ]);
+    });
+
+    it('fails when a frame is too short to resolve a difference, or no time can be measured', async () => {
+      const { host } = costHost(0.2, 0, 0.01);
+      expect(failed(await createWaterLodSpikeTestAdapter(host).measure(COST_SCENARIO, makeContext(host.calls)))).toEqual([
+        "every arm's GPU frame is at least 0.5 ms, so a difference can be read",
+      ]);
+      const blind = costHost(4, 0, 0.1, { gpuFrameMs: () => null }).host;
+      expect(failed(await createWaterLodSpikeTestAdapter(blind).measure(COST_SCENARIO, makeContext(blind.calls)))).toContain(
+        "every arm's GPU frame is at least 0.5 ms, so a difference can be read",
+      );
+    });
+
+    it('puts the water read back to following the land body', async () => {
+      const held: (boolean | null)[] = [];
+      const host = makeHost({ setWaterRead: (enabled) => held.push(enabled) });
+      const adapter = createWaterLodSpikeTestAdapter(host);
+      const context = makeContext(host.calls);
+      await adapter.restore(await adapter.capture(context), context);
+
+      expect(held).toEqual([null]);
+    });
+  });
+
+  describe('coast look case (pictures and clips)', () => {
+    const suite = WATER_LOD_SPIKE_TEST_HISTORY.find((entry) => entry.id === 'water-lod-spike-coast-look')!;
+    const scenarioOf = (id: string) => suite.scenarios.find((scenario) => scenario.id === id)!;
+    const clip = { stop: async () => { throw new Error('not stopped in this test'); }, dispose: () => undefined };
+
+    it('is a visual-review suite with four stills and two orbit clips over one coast view', () => {
+      expect(suite.version).toBe(1);
+      expect(suite.requiresVisualReview).toBe(true);
+      expect(suite.scenarios.map((scenario) => scenario.id)).toEqual([
+        'ultra-analytic', 'ultra-baked', 'high-baked', 'low-baked', 'orbit-ultra-baked', 'orbit-high-baked',
+      ]);
+      expect(suite.scenarios.map((scenario) => scenario.settings.orbitDegrees)).toEqual([undefined, undefined, undefined, undefined, 90, 90]);
+      expect(new Set(suite.scenarios.map((scenario) => JSON.stringify(scenario.settings.view))).size).toBe(1);
+    });
+
+    it('records only the orbit cases', () => {
+      const host = makeHost({ recording: () => clip });
+      const adapter = createWaterLodSpikeTestAdapter(host);
+
+      expect(suite.scenarios.map((scenario) => adapter.recording?.(scenario, makeContext(host.calls)) !== undefined)).toEqual([false, false, false, false, true, true]);
+    });
+
+    it('offers no recording or thumbnail hook when the page has none', () => {
+      const adapter = createWaterLodSpikeTestAdapter(makeHost());
+
+      expect(adapter.recording).toBeUndefined();
+      expect(adapter.thumbnail).toBeUndefined();
+    });
+
+    it('takes one still on the first repetition only', async () => {
+      const image = new Blob(['x'], { type: 'image/webp' });
+      const adapter = createWaterLodSpikeTestAdapter(makeHost({ thumbnail: async () => image }));
+      const context = makeContext([]);
+
+      expect(await adapter.thumbnail?.(scenarioOf('ultra-baked'), context)).toEqual([image]);
+      expect(await adapter.thumbnail?.(scenarioOf('ultra-baked'), { ...context, repetition: 2 } as TestContext)).toBeUndefined();
+    });
+
+    it('applies the quality and terrain of the case, waits for the land, and passes when water and land draw', async () => {
+      const terrain: (boolean | null)[] = [];
+      const quality: (string | null)[] = [];
+      const host = makeHost({ setBakedTerrain: (enabled) => terrain.push(enabled), setQuality: (id) => quality.push(id) });
+      const adapter = createWaterLodSpikeTestAdapter(host);
+      const scenario = scenarioOf('high-baked');
+
+      await adapter.apply(scenario, makeContext(host.calls));
+      const observation = await adapter.measure(scenario, makeContext(host.calls));
+
+      expect(terrain).toEqual([true]);
+      expect(quality).toEqual(['high']);
+      expect((observation.checks ?? []).filter((check) => !check.passed)).toEqual([]);
+      expect(observation.checks?.map((check) => check.name)).toContain('land drawn');
+    });
+
+    it('fails when the land never draws', async () => {
+      const host = makeHost({ landDrawn: () => false });
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(scenarioOf('ultra-baked'), makeContext(host.calls));
+
+      expect((observation.checks ?? []).filter((check) => !check.passed).map((check) => check.name)).toEqual(['land drawn']);
+    });
+
+    it('sweeps the camera on an orbit case and puts the view back', async () => {
+      const views: string[] = [];
+      const host = makeHost({ setView: (view) => views.push(view ? `${Math.round(view.position[0])},${Math.round(view.position[2])}` : 'free') });
+      await createWaterLodSpikeTestAdapter(host).measure({ ...scenarioOf('orbit-ultra-baked'), durationMs: 50 }, makeContext(host.calls));
+
+      expect(views.length).toBeGreaterThan(1);
+      expect(new Set(views).size).toBeGreaterThan(1);
+      expect(views.at(-1)).toBe('300,500');
+    });
+  });
+
+  describe('camera and quality clips', () => {
+    const suite = WATER_LOD_SPIKE_TEST_HISTORY.find((entry) => entry.id === 'water-lod-spike-camera-quality')!;
+    const scenarioOf = (id: string) => suite.scenarios.find((scenario) => scenario.id === id)!;
+    const clip = { stop: async () => { throw new Error('not stopped in this test'); }, dispose: () => undefined };
+
+    it('is a visual-review suite of six clips over the coast view, each with a camera path', () => {
+      expect(suite.version).toBe(1);
+      expect(suite.purpose).toBe('functional');
+      expect(suite.requiresVisualReview).toBe(true);
+      expect(suite.scenarios.map((scenario) => scenario.id)).toEqual([
+        'ultra-orbit', 'switch-low-then-orbit', 'low-orbit', 'ultra-zoom-pan', 'low-zoom-pan', 'quality-sweep-orbit',
+      ]);
+      for (const scenario of suite.scenarios) {
+        const keys = scenario.settings.motion?.keys ?? [];
+        expect(keys[0]?.at).toBe(0);
+        expect(keys.at(-1)?.at).toBe(1);
+        expect(scenario.settings.view).toBeUndefined();
+        expect(scenario.durationMs).toBeLessThanOrEqual(8000);
+      }
+      expect(new Set(suite.scenarios.map((scenario) => JSON.stringify(scenario.settings.motion?.view))).size).toBe(1);
+    });
+
+    it('records every case, and the quality switches only where the case says', () => {
+      const host = makeHost({ recording: () => clip });
+      const adapter = createWaterLodSpikeTestAdapter(host);
+
+      expect(suite.scenarios.every((scenario) => adapter.recording?.(scenario, makeContext(host.calls)) !== undefined)).toBe(true);
+      expect(suite.scenarios.map((scenario) => scenario.settings.motion?.qualityAt?.map((entry) => entry.quality))).toEqual([
+        undefined, ['low'], undefined, undefined, undefined, ['high', 'medium', 'low'],
+      ]);
+    });
+
+    it('starts the path at the view and turns it about the target by the azimuth', () => {
+      const motion = scenarioOf('ultra-orbit').settings.motion!;
+      const start = motionPose(motion, 0);
+      const end = motionPose(motion, 1);
+      const distance = (pose: { position: readonly number[]; target: readonly number[] }) => Math.hypot(pose.position[0] - pose.target[0], pose.position[2] - pose.target[2]);
+
+      expect(start.position.map(Math.round)).toEqual([300, 50, 500]);
+      expect(distance(end)).toBeCloseTo(distance(start), 6);
+      expect(end.position[1]).toBe(start.position[1]);
+      const bearing = (pose: { position: readonly number[]; target: readonly number[] }) => Math.atan2(pose.position[2] - pose.target[2], pose.position[0] - pose.target[0]);
+      const turned = (((bearing(end) - bearing(start)) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      expect(turned).toBeCloseTo((120 * Math.PI) / 180, 6);
+    });
+
+    it('zooms in and pans on the zoom-and-pan path, and comes home', () => {
+      const motion = scenarioOf('low-zoom-pan').settings.motion!;
+      const distanceTo = (progress: number) => {
+        const pose = motionPose(motion, progress);
+        return Math.hypot(pose.position[0] - pose.target[0], pose.position[1] - pose.target[1], pose.position[2] - pose.target[2]);
+      };
+
+      expect(distanceTo(0.25)).toBeCloseTo(0.4 * distanceTo(0), 6);
+      expect(motionPose(motion, 0.5).target[0]).toBeCloseTo(200, 6);
+      expect(motionPose(motion, 1).position.map(Math.round)).toEqual([300, 50, 500]);
+      expect(motionPose(motion, 1).target).toEqual([0, 5, -150]);
+    });
+
+    it('moves the camera live every frame, switches quality at its marks, and hands the camera back', async () => {
+      const poses: string[] = [];
+      const quality: (string | null)[] = [];
+      const host = makeHost({
+        setLiveCamera: (view) => poses.push(view ? `${Math.round(view.position[0])},${Math.round(view.position[2])}` : 'free'),
+        setQuality: (id) => quality.push(id),
+        endFrameSampling: () => Array.from({ length: 100 }, () => 16.7),
+      });
+      const adapter = createWaterLodSpikeTestAdapter(host);
+      const scenario = { ...scenarioOf('quality-sweep-orbit'), durationMs: 80 };
+
+      await adapter.apply(scenario, makeContext(host.calls));
+      const observation = await adapter.measure(scenario, makeContext(host.calls));
+      await adapter.restore(await adapter.capture(makeContext(host.calls)), makeContext(host.calls));
+
+      expect(new Set(poses).size).toBeGreaterThan(2);
+      expect(poses.at(-1)).toBe('free');
+      expect(quality).toEqual(['ultra', 'high', 'medium', 'low', null]);
+      expect(host.calls).not.toContain('setView:held');
+      expect((observation.checks ?? []).filter((check) => !check.passed)).toEqual([]);
+    });
+
+    it('reports the frame times and the longest frame, and fails when the land never draws', async () => {
+      const host = makeHost({ landDrawn: () => false });
+      const scenario = { ...scenarioOf('low-orbit'), durationMs: 20 };
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(scenario, makeContext(host.calls));
+
+      expect(observation.metrics?.map((metric) => metric.name)).toEqual(['frame interval', 'CPU frame', 'longest frame']);
+      expect(observation.metrics?.find((metric) => metric.name === 'longest frame')?.samples).toEqual([16.7]);
+      expect((observation.checks ?? []).filter((check) => !check.passed).map((check) => check.name)).toEqual([
+        'land drawn after the path',
+        jasmine.stringContaining('the page kept rendering'),
+      ]);
+    });
+
+    it('fails when the page stalls for most of the clip', async () => {
+      const host = makeHost({ endFrameSampling: () => [16.7, 2400] });
+      const observation = await createWaterLodSpikeTestAdapter(host).measure({ ...scenarioOf('low-orbit'), durationMs: 20 }, makeContext(host.calls));
+
+      expect((observation.checks ?? []).filter((check) => !check.passed).map((check) => check.name)).toEqual([jasmine.stringContaining('the page kept rendering')]);
     });
   });
 

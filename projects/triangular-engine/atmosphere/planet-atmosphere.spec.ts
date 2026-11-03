@@ -2,7 +2,7 @@ import { Object3D, PerspectiveCamera, Scene, Vector3 } from 'three';
 import { uniform } from 'three/tsl';
 import { getEvalRenderer } from '../planet-material/gpu-eval.testing';
 import { PlanetSurfaceMaterial } from '../planet-material/planet-surface-material';
-import { PlanetAtmosphere, type IAtmosphereSurface, type PlanetAtmosphereOptions } from './planet-atmosphere';
+import { PlanetAtmosphere, skyShellFade, type IAtmosphereSurface, type PlanetAtmosphereOptions } from './planet-atmosphere';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -263,5 +263,36 @@ describe('PlanetAtmosphere', () => {
     expect(atmosphere.backdrop.coverage).toBe('full');
     expect(atmosphere.backdrop.mesh.visible).toBeTrue();
     atmosphere.dispose();
+  });
+});
+
+describe('skyShellFade: the unbent sky shell leaves as the planet unrolls', () => {
+  const TOP = 100_000;
+  it('keeps the sky on the globe, and near the ground whatever the morph', () => {
+    expect(skyShellFade(0, 10 * TOP, TOP)).toBe(0);
+    expect(skyShellFade(1, 0, TOP)).toBe(0);
+    expect(skyShellFade(1, TOP, TOP)).toBe(0);
+  });
+
+  it('from orbit (4 air heights) no ghost globe is left once a third of the way to the map, at 0.5 and above', () => {
+    for (const morph of [0.35, 0.5, 0.85, 1]) expect(skyShellFade(morph, 4 * TOP, TOP)).toBe(1);
+    // The old curve left half the shell at morph 0.5.
+    expect(skyShellFade(0.17, 4 * TOP, TOP)).toBeGreaterThan(0);
+    expect(skyShellFade(0.17, 4 * TOP, TOP)).toBeLessThan(1);
+  });
+
+  it('is monotonic in the morph and in the height', () => {
+    let last = -1;
+    for (let m = 0; m <= 1; m += 0.05) {
+      const f = skyShellFade(m, 3 * TOP, TOP);
+      expect(f).toBeGreaterThanOrEqual(last);
+      last = f;
+    }
+    last = -1;
+    for (let h = 0; h <= 6; h += 0.25) {
+      const f = skyShellFade(0.5, h * TOP, TOP);
+      expect(f).toBeGreaterThanOrEqual(last);
+      last = f;
+    }
   });
 });

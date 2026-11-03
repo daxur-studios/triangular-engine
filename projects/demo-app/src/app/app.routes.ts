@@ -106,6 +106,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'water-lod-spike-sphere',
+    loadComponent: () =>
+      import('./water-lod-spike/water-lod-spike-sphere.component').then(
+        ({ WaterLodSpikeSphereComponent }) => WaterLodSpikeSphereComponent,
+      ),
+  },
+  {
     path: 'spikes',
     loadComponent: () =>
       import('./pages/spikes-index/spikes-index.component').then(

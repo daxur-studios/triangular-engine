@@ -9,7 +9,8 @@ import {
   viewChild,
 } from '@angular/core';
 import { Color, PerspectiveCamera, Vector3 } from 'three';
-import { EngineModule, EngineService } from 'triangular-engine';
+import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
+import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import { FlatTerrainComponent } from 'triangular-engine/lod-surface';
 import { TestRunnerComponent, type TestContext, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import {
@@ -34,6 +35,7 @@ import {
   type IShoreLookAudit,
   type ITerrainReadAudit,
 } from './core/water-lod-spike-land';
+import { createWaterLodSpikeRecording } from './core/water-lod-spike-recording';
 import { runWaterLodSpikePrecisionProbe, type IPrecisionProbeRenderer } from './core/water-lod-spike-precision-probe';
 import { WATER_LOD_SPIKE_QUALITIES, waterLodSpikeQuality, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
 import { WATER_LOD_SPIKE_UNIFORMS, shoreLookAt, useBakedLand } from './core/water-lod-spike-waves';
@@ -47,6 +49,9 @@ import {
 /** The crescent gate's grid: a 5 km square around the origin at 25 m (the islands near the origin and their shores). */
 const AUDIT_HALF_M = 2_500;
 const AUDIT_STEP_M = 25;
+
+/** Width of a case thumbnail; wide enough to judge a shoreline on a review sheet, small enough to stay under the per-image limit. */
+const THUMBNAIL_WIDTH_PX = 480;
 
 /** Wave time (s) the aliasing cases freeze the water at, so every arm and the reference see the same surface. */
 const TEST_WAVE_TIME_S = 12.5;
@@ -75,12 +80,14 @@ const TEST_WAVE_TIME_S = 12.5;
       preferredRenderer: 'webgpu',
       webGpuRendererParameters: { antialias: false, reversedDepthBuffer: true },
     }),
+    provideBrowserImageCompression(),
   ],
   host: { class: 'flex-page' },
 })
 export class WaterLodSpikeComponent {
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly screenshot = inject(ScreenshotService);
   /** Plane edge length, metres (plan 080: 100 km flat plane). */
   protected readonly planeSizeM = 100_000;
   /**
@@ -104,6 +111,9 @@ export class WaterLodSpikeComponent {
    */
   readonly bakedTerrain = signal(false);
   private savedBakedTerrain: boolean | null = null;
+  /** A test case's hold on the water's depth read alone (null: it follows the land body's source). Only the cost cases set it. */
+  private readonly waterReadHeld = signal<boolean | null>(null);
+  private readonly waterReadBaked = computed(() => this.waterReadHeld() ?? this.bakedTerrain());
   /** The land body's heights: the baked texture or the analytic islands. */
   protected readonly landSource = computed(() => (this.bakedTerrain() ? this.bakedLand.source : this.landHeights));
   private readonly waterBody = viewChild<FlatTerrainComponent>('waterBody');
@@ -161,9 +171,14 @@ export class WaterLodSpikeComponent {
    * them off makes them resume the held pose when they come back); the hold re-applies the position every frame.
    */
   readonly heldView = signal<WaterLodSpikeView | null>(null);
-  /** The point the orbit controls look at: the held view's target while a test holds the camera, else the origin. */
+  /**
+   * The pose a motion case moves the camera to this frame. Unlike {@link heldView} the waves keep animating, and the pose goes in
+   * ahead of the orbit controls' own update, so the camera is moved the way a hand on the controls moves it.
+   */
+  readonly liveView = signal<WaterLodSpikeView | null>(null);
+  /** The point the orbit controls look at: the held or live view's target while a test moves the camera, else the origin. */
   protected readonly orbitTarget = computed<[number, number, number]>(() => {
-    const target = this.heldView()?.target;
+    const target = (this.heldView() ?? this.liveView())?.target;
     return target ? [target[0], target[1], target[2]] : [0, 0, 0];
   });
   /** Frame intervals (ms) collected while a performance case measures; null when not sampling. */
@@ -197,6 +212,8 @@ export class WaterLodSpikeComponent {
       }
       this.lastFrameMs = nowMs;
       this.renderedFrames++;
+      const live = this.liveView();
+      if (live) this.engine.camera.position.set(...live.position);
       // The land draws first so its depth rejects the water under it early (a group's order applies to its children).
       const landObject = this.landBody()?.terrain()?.object;
       if (landObject && landObject.renderOrder !== -1) landObject.renderOrder = -1;
@@ -204,7 +221,7 @@ export class WaterLodSpikeComponent {
       WATER_LOD_SPIKE_UNIFORMS.shore.value = this.shore() && this.land() ? 1 : 0;
       WATER_LOD_SPIKE_UNIFORMS.foam.value = this.foam() && this.land() ? 1 : 0;
       WATER_LOD_SPIKE_UNIFORMS.depthColour.value = this.depthColour() && this.land() ? 1 : 0;
-      WATER_LOD_SPIKE_UNIFORMS.landBaked.value = this.bakedTerrain() ? 1 : 0;
+      WATER_LOD_SPIKE_UNIFORMS.landBaked.value = this.waterReadBaked() ? 1 : 0;
     });
     // A held test view is re-applied every frame after the controls' tick, so nothing moves the camera off it.
     const holdSubscription = this.engine.lateUpdate$.subscribe(() => {
@@ -240,6 +257,7 @@ export class WaterLodSpikeComponent {
       },
       gpuFrameMs: () => this.engine.fpsController.gpuFrameTime(),
       setView: (view) => this.holdView(view),
+      setLiveCamera: (view) => this.holdLiveCamera(view),
       setFilter: (enabled) => this.water.setFilter(enabled),
       setTransfer: (enabled) => this.water.setTransfer(enabled),
       setPixelRatio: (ratio) => this.holdPixelRatio(ratio),
@@ -259,11 +277,17 @@ export class WaterLodSpikeComponent {
       setDepthColour: (enabled) => this.holdDepthColour(enabled),
       shoreLookAudit: () => this.auditShoreLookNow(),
       setBakedTerrain: (enabled) => this.holdBakedTerrain(enabled),
+      setWaterRead: (enabled) => this.waterReadHeld.set(enabled),
       terrainReadAudit: () => this.auditTerrainReadNow(),
       terrainReadInfo: () => ({ k: this.bakedLand.k, texelM: this.planeSizeM / 2 ** this.bakedLand.k, megabytes: this.bakedLand.megabytes, bakeMs: this.bakedLand.bakeMs }),
       coverActive: () => this.waterBody()?.terrain()?.selector.cover !== undefined,
       runPrecisionProbe: () => runWaterLodSpikePrecisionProbe(this.engine.renderer as unknown as IPrecisionProbeRenderer, String(this.environment()['backend'])),
       environment: () => this.environment(),
+      recording: () => createWaterLodSpikeRecording(this.engine.canvas, () => `Quality: ${this.qualityTier().label}`),
+      thumbnail: () => this.screenshot.capture({
+        engine: this.engine, format: 'image/webp', quality: 0.6,
+        compress: { maxWidthOrHeight: THUMBNAIL_WIDTH_PX, fileType: 'image/webp', quality: 0.6 },
+      }),
     });
     void navigator.gpu?.requestAdapter().then((adapter) => {
       this.gpuVendor = adapter?.info?.vendor || 'unknown';
@@ -438,7 +462,7 @@ export class WaterLodSpikeComponent {
       if (this.savedBakedTerrain !== null) this.bakedTerrain.set(this.savedBakedTerrain);
       this.savedBakedTerrain = null;
     }
-    WATER_LOD_SPIKE_UNIFORMS.landBaked.value = this.bakedTerrain() ? 1 : 0;
+    WATER_LOD_SPIKE_UNIFORMS.landBaked.value = this.waterReadBaked() ? 1 : 0;
   }
 
   /** The correctness gate for the baked read: the water depth from the baked texture against the analytic islands, over the 5 km grid. */
@@ -522,6 +546,25 @@ export class WaterLodSpikeComponent {
       return;
     }
     this.heldView.set(null);
+    if (this.savedPosition) {
+      camera.position.copy(this.savedPosition);
+      camera.lookAt(0, 0, 0);
+      camera.updateMatrixWorld();
+      this.savedPosition = null;
+    }
+    this.water.setAnimating(this.animating());
+  }
+
+  private holdLiveCamera(view: WaterLodSpikeView | null): void {
+    const camera = this.engine.camera;
+    if (view) {
+      this.savedPosition ??= camera.position.clone();
+      this.water.setAnimating(true);
+      this.liveView.set(view);
+      camera.position.set(...view.position);
+      return;
+    }
+    this.liveView.set(null);
     if (this.savedPosition) {
       camera.position.copy(this.savedPosition);
       camera.lookAt(0, 0, 0);

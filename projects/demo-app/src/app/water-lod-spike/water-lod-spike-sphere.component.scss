@@ -1,0 +1,92 @@
+.diagnostics {
+  background: rgb(8 14 23 / 82%);
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 0.5rem;
+  color: #dce9f5;
+  display: grid;
+  font: 12px/1.5 ui-monospace, monospace;
+  gap: 0.4rem;
+  left: 1rem;
+  max-width: 22rem;
+  padding: 0.75rem 0.9rem;
+  position: absolute;
+  top: 1rem;
+  z-index: 10;
+}
+
+/*
+ * Red frame drawn over the whole scene while a test case runs. An absolutely placed inset shadow on top of the scene
+ * (not a border or outline on it), so the scene's size and the layout around it never change. Its z-index clears the
+ * engine's own overlay layers, which would otherwise cover an outline on the scene element.
+ */
+.test-running {
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1000;
+    pointer-events: none;
+    box-shadow: inset 0 0 0 4px #e53935;
+  }
+}
+
+/* Right sidebar: the runner scrolls inside its own panel so long results stay reachable beside the scene. */
+.runner-panel {
+  align-self: flex-start;
+  box-sizing: border-box;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  padding: 0.5rem;
+  width: min(26rem, 90vw);
+}
+
+strong {
+  color: white;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+button {
+  background: rgb(255 255 255 / 8%);
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 0.3rem;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0.3rem 0.55rem;
+
+  &.active {
+    background: #3d7bd6;
+    border-color: #3d7bd6;
+    color: white;
+  }
+}
+
+.quality {
+  display: grid;
+  gap: 0.25rem;
+
+  input {
+    width: 100%;
+  }
+
+  .tiers {
+    color: #a9bccd;
+    display: flex;
+    justify-content: space-between;
+
+    .current {
+      color: white;
+      font-weight: 700;
+    }
+  }
+}
+
+p {
+  color: #a9bccd;
+  margin: 0;
+}

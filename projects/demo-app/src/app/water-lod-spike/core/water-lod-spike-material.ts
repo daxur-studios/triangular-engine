@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Fn, If, cameraPosition, clamp, color, dot, float, max, min, mix, normalize, positionWorld, pow, sqrt, sub, vec2, vec3 } from 'three/tsl';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { WATER_LOD_SPIKE_UNIFORMS, createWaterLodSpikeShadingNodes, shoreLookNode, shoreWeightNode } from './water-lod-spike-waves';
+import { WATER_LOD_SPIKE_UNIFORMS, createWaterLodSpikeShadingNodes, shoreLookFromDepth, shoreWeightFromDepth, waterDepthNode } from './water-lod-spike-waves';
 
 /** Foam colour (a little blue-white) and its strength where the foam amount is 1. */
 const FOAM_COLOUR = color('#eef6fa');
@@ -60,8 +60,6 @@ export function createWaterLodSpikeMaterial(): MeshBasicNodeMaterial {
   const sky = color('#a9c8da');
 
   const { gradient, lostXX, lostXZ, lostZZ } = createWaterLodSpikeShadingNodes(positionWorld);
-  // At the shore the waves flatten (shore weight), so the shading slope goes with them; the lost variance keeps the glint width.
-  const mean = vec2(gradient.x, gradient.z).mul(shoreWeightNode(positionWorld));
   const transfer = WATER_LOD_SPIKE_UNIFORMS.transfer.mul(WATER_LOD_SPIKE_UNIFORMS.lostScale);
   const xx = lostXX.mul(transfer);
   const xz = lostXZ.mul(transfer);
@@ -88,9 +86,16 @@ export function createWaterLodSpikeMaterial(): MeshBasicNodeMaterial {
   // than the shading of the whole slope distribution, and the weight puts it back.
   // Where the filter removed next to nothing (resolved water), every quadrature sample is the mean one: shade once.
   const result: any = Fn(() => {
-    // Foam and the shallow-to-deep colour read the water depth D once per pixel (both off: foam 0, deepness 1, no cost beyond the branch).
-    const look = shoreLookNode(positionWorld).toVar();
+    // The shore weight, the foam and the shallow-to-deep colour share one read of the water depth D per pixel (all off: no read).
+    const u = WATER_LOD_SPIKE_UNIFORMS;
+    const depth = float(0).toVar();
+    If(u.shore.greaterThan(0).or(u.foam.greaterThan(0)).or(u.depthColour.greaterThan(0)), () => {
+      depth.assign(waterDepthNode(positionWorld));
+    });
+    const look = shoreLookFromDepth(depth).toVar();
     deep = mix(shallowWater, deepWater, look.y);
+    // At the shore the waves flatten (shore weight), so the shading slope goes with them; the lost variance keeps the glint width.
+    const mean = vec2(gradient.x, gradient.z).mul(shoreWeightFromDepth(depth));
     const out = vec3(0).toVar();
     If(xx.add(zz).lessThan(NEGLIGIBLE_LOST_VARIANCE), () => {
       out.assign(shade(mean.x, mean.y).colour);

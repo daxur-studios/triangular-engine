@@ -173,23 +173,38 @@ export function waterDepthReadM(x: number, z: number): number {
  */
 export function shoreLookNode(position: any): any {
   return (Fn(() => {
-    const look = vec2(0, 1).toVar();
+    const depth = float(0).toVar();
     If(WATER_LOD_SPIKE_UNIFORMS.foam.greaterThan(0).or(WATER_LOD_SPIKE_UNIFORMS.depthColour.greaterThan(0)), () => {
-      const depth = float(SEA_LEVEL_M).sub(landReadNode(position));
-      const u = WATER_LOD_SPIKE_UNIFORMS;
-      If(u.foam.greaterThan(0), () => {
-        const edge = float(1).sub(smoothstep(0, u.foamEdgeM, depth));
-        const phase = depth.add(u.foamSpeedMS.mul(u.time)).div(u.foamSpacingM);
-        const stripe = smoothstep(0.75, 1, cos(phase.mul(2 * Math.PI)).mul(0.5).add(0.5));
-        const breakers = float(1).sub(smoothstep(u.foamEdgeM, u.foamZoneM, depth)).mul(stripe).mul(0.8);
-        look.x.assign(max(edge, breakers));
-      });
-      If(u.depthColour.greaterThan(0), () => {
-        look.y.assign(float(1).sub(exp(max(depth, 0).negate().div(u.tintScaleM))));
-      });
+      depth.assign(waterDepthNode(position));
     });
-    return look;
+    return shoreLookFromDepth(depth);
   }) as any)();
+}
+
+/** Water depth D at a plane position node: the sea level minus the land height the water reads there (baked texture or analytic). */
+export function waterDepthNode(position: any): any {
+  return float(SEA_LEVEL_M).sub(landReadNode(position));
+}
+
+/**
+ * The shore look from a depth already read: foam (x) and deepness (y), defaults 0 and 1 while their toggles are off. Call it
+ * inside a shader function (it declares variables and branches); sharing one depth read between this and
+ * {@link shoreWeightFromDepth} is what keeps the baked land to four texture loads per pixel.
+ */
+export function shoreLookFromDepth(depth: any): any {
+  const look = vec2(0, 1).toVar();
+  const u = WATER_LOD_SPIKE_UNIFORMS;
+  If(u.foam.greaterThan(0), () => {
+    const edge = float(1).sub(smoothstep(0, u.foamEdgeM, depth));
+    const phase = depth.add(u.foamSpeedMS.mul(u.time)).div(u.foamSpacingM);
+    const stripe = smoothstep(0.75, 1, cos(phase.mul(2 * Math.PI)).mul(0.5).add(0.5));
+    const breakers = float(1).sub(smoothstep(u.foamEdgeM, u.foamZoneM, depth)).mul(stripe).mul(0.8);
+    look.x.assign(max(edge, breakers));
+  });
+  If(u.depthColour.greaterThan(0), () => {
+    look.y.assign(float(1).sub(exp(max(depth, 0).negate().div(u.tintScaleM))));
+  });
+  return look;
 }
 
 /** CPU twin of {@link shoreLookNode}. */
@@ -214,11 +229,19 @@ export function shoreWeightNode(position: any): any {
   return (Fn(() => {
     const weight = float(1).toVar();
     If(WATER_LOD_SPIKE_UNIFORMS.shore.greaterThan(0), () => {
-      const depth = float(SEA_LEVEL_M).sub(landReadNode(position));
-      weight.assign(smoothstep(0, WATER_LOD_SPIKE_UNIFORMS.shoreRampM, depth));
+      weight.assign(smoothstep(0, WATER_LOD_SPIKE_UNIFORMS.shoreRampM, waterDepthNode(position)));
     });
     return weight;
   }) as any)();
+}
+
+/** Shore weight from a depth already read: 1 where the shore is off, else `smoothstep(0, ramp, D)`. Call it inside a shader function. */
+export function shoreWeightFromDepth(depth: any): any {
+  const weight = float(1).toVar();
+  If(WATER_LOD_SPIKE_UNIFORMS.shore.greaterThan(0), () => {
+    weight.assign(smoothstep(0, WATER_LOD_SPIKE_UNIFORMS.shoreRampM, depth));
+  });
+  return weight;
 }
 
 /** CPU twin of {@link shoreWeightNode}. */

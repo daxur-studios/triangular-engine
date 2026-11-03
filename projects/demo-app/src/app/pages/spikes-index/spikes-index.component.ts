@@ -102,6 +102,19 @@ export const SPIKES: readonly ISpikeItem[] = [
     runbookPath: 'docs/plans/080_lod-water.md',
     dateISO: '2026-11-01',
   },
+  {
+    id: 'water-lod-spike-sphere',
+    number: '7',
+    title: 'LOD water on a planet: water, terrain and atmosphere together (Plan 080, stage A)',
+    route: '/water-lod-spike-sphere',
+    status: 'pending',
+    hypothesis:
+      'The plane spike\'s water, on a 600 km sphere beside terrain and the atmosphere, looks right at orbit, 20 km, coast and eye height, and the three layers together fit a frame budget (water alone at most 0.5 ms GPU on the RTX 3080).',
+    description:
+      'Water and land as two standalone planetTerrain bodies and an optional planetAtmosphere. Camera-anchored wave phase for the shading, float32 phase for the vertices. The water is not an atmosphere surface yet (sky backdrop only).',
+    runbookPath: 'docs/plans/080_lod-water.md',
+    dateISO: '2026-11-03',
+  },
 ];
 
 const STATUS_LABEL: Record<SpikeStatus, string> = {

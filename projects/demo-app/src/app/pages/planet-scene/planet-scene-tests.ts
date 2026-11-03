@@ -86,5 +86,23 @@ const PLANET_SCENE_V2: TestSuite<PlanetSceneTestSettings> = {
   ],
 };
 
+/**
+ * Suite `planet-scene` v3: v2 unchanged, plus the atmosphere-off partners of the two flat-map cases. At morph 1 the terrain
+ * has been seen to go missing; with the air off the same view separates a terrain or discard fault (still missing) from a
+ * lighting or haze fault (terrain comes back).
+ */
+const PLANET_SCENE_V3: TestSuite<PlanetSceneTestSettings> = {
+  id: 'planet-scene',
+  version: 3,
+  title: 'Planet scene: v2 plus the atmosphere-off partners of the flat-map cases (Plan 059 G6f)',
+  purpose: 'performance',
+  requiresVisualReview: true,
+  scenarios: [
+    ...PLANET_SCENE_V2.scenarios,
+    still('orbit-morph-1-atmosphere-off', 'orbit · morph 1 · atmosphere off (A/B partner of orbit-morph-1)', { pose: 'orbit', morph: 1, atmosphere: false }),
+    still('ground-morph-1-atmosphere-off', '2 m eye · morph 1 · atmosphere off (A/B partner of ground-morph-1)', { pose: 'ground', morph: 1, atmosphere: false }),
+  ],
+};
+
 /** Oldest first; the final entry is "Run latest test". */
-export const PLANET_SCENE_TEST_HISTORY: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_V1, PLANET_SCENE_V2];
+export const PLANET_SCENE_TEST_HISTORY: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_V1, PLANET_SCENE_V2, PLANET_SCENE_V3];

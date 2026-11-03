@@ -18,6 +18,19 @@ import { AtmosphereSkyViewLut, type AtmosphereSkyViewOptions } from './atmospher
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/**
+ * How much of the sky shell is gone, 0 (all there) to 1 (hidden), for a planet unrolled to `morph` and a camera `skyAltitude` metres
+ * up, with the air `topAltitude` thick. The shell is a sphere's: it does not bend with the planet, so seen from above the air it
+ * would hang as a dark ghost globe behind the bending map. It dissolves over the first third of the morph there (from one to four
+ * air heights up). Close to the ground it stays whatever the morph, because the hazed horizon needs a sky behind it.
+ */
+export function skyShellFade(morph: number, skyAltitude: number, topAltitude: number): number {
+  const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+  const high = clamp01((skyAltitude / topAltitude - 1) / 3);
+  const unrolled = clamp01((morph - 0.02) / 0.3);
+  return unrolled * unrolled * (3 - 2 * unrolled) * high * high * (3 - 2 * high);
+}
+
 /** Presets that have air. A planet without one (`'none'`) needs no `PlanetAtmosphere`. */
 export type PlanetAtmospherePresetId = Exclude<AtmospherePresetId, 'none'>;
 
@@ -348,12 +361,7 @@ export class PlanetAtmosphere {
     const sun = this.sunDirection;
     binding.setSunBody(sun.x, sun.y, sun.z);
     binding.sync(camera, this.planet, backdrop);
-    // The sky is a sphere's. Close to the ground it stays (the hazed horizon needs a sky behind it, whatever the morph);
-    // it dissolves as the planet unrolls only once the camera is well above the air, from one to four air heights.
-    const aboveAir = (binding.skyAltitude.value as number) / (this.model.uTopAltitude.value as number);
-    const high = Math.min(1, Math.max(0, (aboveAir - 1) / 3));
-    const unrolled = Math.min(1, Math.max(0, (this.morph - 0.2) / 0.6));
-    const fade = unrolled * unrolled * (3 - 2 * unrolled) * high * high * (3 - 2 * high);
+    const fade = skyShellFade(this.morph, binding.skyAltitude.value as number, this.model.uTopAltitude.value as number);
     backdrop.opacity.value = 1 - fade;
     const wantSky = on && this.sky && fade < 1;
     backdrop.mesh.visible = wantSky;

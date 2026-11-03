@@ -61,7 +61,7 @@ Phases and their gates are fixed here. Packets (the chunks of work) are defined 
 | w4    | planned |
 | w5    | planned |
 
-<!-- tri:review version="1" scope-hash="00c388e269ced7e5e9aed205dbe30c4ccb7f8a6507438e9bd03c03ddcf37f149" reviewed="2026-11-02" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="00c388e269ced7e5e9aed205dbe30c4ccb7f8a6507438e9bd03c03ddcf37f149" reviewed="2026-11-03" reviewer="agent" -->
 <!-- tri:item id="Q1" kind="intent" applies-to="w0" blocks="none" state="resolved" -->
 
 - [x] Entry name: `lod-water`, approved by the owner on 2026-11-01 (ER 080, decision 1).
@@ -148,6 +148,10 @@ Packets for W0 are defined now. Packets for W1 to W5 are defined when their phas
 - Dated note, 2026-11-02 (shoreline review): w2's depth mechanism is the water depth weight on the waves, not culling; the Depth outcome, the w2 line and the testing matrix say so. Scope change recorded in ER 080, Scope history.
 - Dated note, 2026-11-02 (shoreline review, experiment 4): the spike now draws foam and a shallow-to-deep colour from `D`; no commitment changed. River mouths, per-cell terrain heights and the sphere are still open (ER 080, History).
 - Dated note, 2026-11-02 (shoreline review, experiment 5): the spike's water can read the terrain's baked height texture (the library's plane bake) for its depth, at no measurable cost; the library has no per-cell height tiles, so the review's per-cell reading is a global texture read by position, plane only. No commitment changed; the sphere and a finer texture near the shore are open (ER 080, History).
+- Dated note, 2026-11-03 (shoreline review): the spike keeps case stills and, for orbit cases, recorded clips (suite `water-lod-spike-coast-look` v1, visual review, gates only that the water and land draw); no commitment changed. Recording is opt-in from the runner, never from a launch link (ER 080, History).
+- Dated note, 2026-11-03 (shoreline review): suite `water-lod-spike-camera-quality` v1 records six clips of the camera moving (orbit, zoom, pan) and the quality changing, with the camera moved through the page's own orbit controls and the waves animating, so the owner's "the waves and terrain move with the camera after switching to Low" report can be watched. Visual review; it gates only that the water and land draw and the page keeps rendering. No commitment changed (ER 080, History).
+- Dated note, 2026-11-03 (shoreline review): ER 080 records six ideas from a public MIT-licensed ocean demo (depth-limited crest height, pinched crests, swash, crest-driven foam, a travel-time bake, glint facets). They are ideas to explore, not commitments; each would get a gate first.
+- Dated note, 2026-11-03 (water on a planet, stage A): spike 7, `/water-lod-spike-sphere`, draws the plane spike's water on a 600 km sphere beside the plane spike's islands as terrain and an optional atmosphere (the atmosphere lights and hazes the land only), with suite `water-lod-spike-sphere-cost` v1 for the cost of the three together. The suite has not been run; no commitment changed. The 0.5 ms water gate is unchanged; the 8.3 ms stack budget is a proposal of the spike (ER 080, History).
 - Plan 063 unchanged; its Q5 is used as a gate here.
 - The lod-surface README describes the hook and, later, the cylinder.
 

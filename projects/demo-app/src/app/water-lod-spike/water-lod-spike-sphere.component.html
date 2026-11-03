@@ -1,0 +1,81 @@
+<scene [showFps]="true" [class.test-running]="testing()">
+  @if (waterOn()) {
+    <planetTerrain
+      #waterBody
+      [radius]="radius"
+      [heights]="rig.heights"
+      [material]="rig.material"
+      [detailNoise]="0"
+      [sunDirection]="sun"
+      [cellPixels]="qualityTier().cellPixels"
+      [leafCap]="qualityTier().leafCap"
+    />
+  }
+  @if (landOn()) {
+    <planetTerrain
+      #landBody
+      [radius]="radius"
+      [heights]="rig.landHeights"
+      [material]="rig.landMaterial"
+      [detailNoise]="0"
+      [sunDirection]="sun"
+      [cellPixels]="qualityTier().cellPixels"
+      [leafCap]="qualityTier().leafCap"
+    />
+  }
+  <planetAtmosphere
+    preset="earth"
+    [radius]="radius"
+    [sunDirection]="sun"
+    [surfaces]="surfaces()"
+    [enabled]="atmosphereOn()"
+    [lighting]="atmosphereLighting()"
+    [haze]="atmosphereHaze()"
+  />
+
+  <ng-template portalTarget="rightSidebar" lane="content">
+    <div class="runner-panel">
+      <tri-test-runner
+        [suites]="testHistory" [adapter]="testAdapter" [available]="runnerReady()"
+        [allowAutoStart]="allowTestAutoStart" [resultSink]="true" (progressChange)="onTestProgress($event)" />
+    </div>
+  </ng-template>
+</scene>
+
+<aside class="diagnostics">
+  <strong>Water LOD spike · stage A: water on a 600 km planet</strong>
+  <span>{{ hud().backend }} · {{ hud().width }}×{{ hud().height }} · {{ hud().adapter }}@if (hud().software) { · SOFTWARE }</span>
+  <span>altitude {{ altitudeLabel() }} · draw calls: {{ drawCalls() }} · triangles: {{ triangles().toLocaleString() }}</span>
+  <div class="actions">
+    @for (p of poses; track p.id) {
+      <button [class.active]="!freeOn() && pose() === p.id" (click)="setPose(p.id)">{{ p.label }}</button>
+    }
+    <button [class.active]="freeOn()" (click)="setFreeOrbit(!freeOn())">Mouse orbit</button>
+  </div>
+  <div class="actions">
+    <button [class.active]="landOn()" (click)="toggleLand()">Land</button>
+    <button [class.active]="waterOn()" (click)="toggleWater()">Water</button>
+    <button [class.active]="atmosphereOn()" (click)="toggleAtmosphere()">Atmosphere</button>
+    <button [class.active]="atmosphereLighting()" [disabled]="!atmosphereOn()" (click)="atmosphereLighting.set(!atmosphereLighting())">Atm light</button>
+    <button [class.active]="atmosphereHaze()" [disabled]="!atmosphereOn()" (click)="atmosphereHaze.set(!atmosphereHaze())">Atm haze</button>
+    <button [class.active]="wireframe()" (click)="toggleWireframe()">Wireframe</button>
+    <button [class.active]="filter()" (click)="toggleFilter()">Filter</button>
+    <button [class.active]="animating()" (click)="toggleAnimating()">Animate</button>
+    <button [class.active]="shore()" [disabled]="!landOn()" (click)="toggleShore()">Shore weight</button>
+    <button [class.active]="foam()" [disabled]="!landOn()" (click)="toggleFoam()">Foam</button>
+    <button [class.active]="depthColour()" [disabled]="!landOn()" (click)="toggleDepthColour()">Depth colour</button>
+  </div>
+  <label class="quality">
+    <span>Quality: <strong>{{ qualityTier().label }}</strong></span>
+    <input type="range" min="0" [max]="qualities.length - 1" step="1" [value]="qualityIndex()" (input)="onQualitySlider($event)" />
+    <span class="tiers">
+      @for (tier of qualities; track tier.id) {<span [class.current]="tier.id === quality()">{{ tier.label }}</span>}
+    </span>
+    <span>footprint ×{{ qualityTier().lodBias }} · mesh {{ qualityTier().cellPixels }} px cells, {{ qualityTier().leafCap }} leaves</span>
+  </label>
+  <p>
+    The plane spike's 64-wave water on a sphere, over the plane spike's islands. The atmosphere lights and hazes the land; the
+    water gets only the sky backdrop (it is not an atmosphere surface yet). Mouse orbit: drag spins the planet, shift or right
+    drag looks, wheel zooms. Gate: suite water-lod-spike-sphere-cost.
+  </p>
+</aside>

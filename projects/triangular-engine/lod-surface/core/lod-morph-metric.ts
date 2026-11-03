@@ -63,6 +63,8 @@ export const DEFAULT_STRETCH_REFRESH_BUDGET = 300;
 const TWO_PI = 2 * Math.PI;
 /** A leaf with a pole strictly inside it is bounded by this many planet radii: more than any two points of the map are apart. */
 const TORN_REACH_RADII = 8;
+/** {@link StretchMetric.placeCamera} keeps the scene position when the unbend-and-bend round trip moves it by more than this share of its distance from the centre. */
+const CAMERA_ROUND_TRIP_TOLERANCE = 1e-3;
 /** How many chord sags of a leaf pad its bounds beyond the nine measured samples. */
 const BOUND_SAG_MARGIN = 2;
 
@@ -360,7 +362,8 @@ export class StretchMetric implements NodeGeometryHook {
    * over on the unbent globe, bent in the frame node geometry is measured in ({@link selectionPoint}). The unbend uses the map node
    * geometry was measured at, not the live one, so the camera changes only when the camera moves or the geometry is refreshed: a
    * morph animation between refreshes leaves it, and the selector's view, unchanged. Above morph 0 only; at morph 0 (no map
-   * measured) it returns `scene` as it is. Call {@link update} first in the frame.
+   * measured) it returns `scene` as it is, and so does a camera the unbend cannot invert (past the map's edge or a pole). Call
+   * {@link update} first in the frame.
    */
   placeCamera(scene: readonly number[], out: Vec3 = [0, 0, 0]): Vec3 {
     const state = this.measuredAt;
@@ -377,7 +380,17 @@ export class StretchMetric implements NodeGeometryHook {
     unit[0] = p[0] / r;
     unit[1] = p[1] / r;
     unit[2] = p[2] / r;
-    return this.selectionPoint(unit, r - state.map.radius, out);
+    this.selectionPoint(unit, r - state.map.radius, out);
+    // The round trip is exact (unbend and bend use the same map) except where the unbend clamps: a camera past the map's edge or a
+    // pole gets the nearest edge point, which can be tens of kilometres from where the mesh is drawn. The selector's frustum passes
+    // through this point, so a clamped camera would cull leaves at the screen edge that are on screen: keep the scene position then.
+    const drift = Math.hypot(out[0] - scene[0], out[1] - scene[1], out[2] - scene[2]);
+    if (drift > 1 + CAMERA_ROUND_TRIP_TOLERANCE * Math.hypot(scene[0], scene[1], scene[2])) {
+      out[0] = scene[0];
+      out[1] = scene[1];
+      out[2] = scene[2];
+    }
+    return out;
   }
 
   private pointIn(state: MapState, unit: readonly number[], heightM: number, out: Vec3, refLon?: number): Vec3 {

@@ -1,4 +1,4 @@
-import { simpleAdapter, type TestContext, type TestObservation, type TestRunAdapter, type TestSetting, type TestSuite } from 'triangular-engine/testing';
+import { simpleAdapter, type TestContext, type TestObservation, type TestRecordingCapture, type TestRunAdapter, type TestSetting, type TestSuite } from 'triangular-engine/testing';
 import {
   averageImages,
   blockResidualRms,
@@ -19,12 +19,39 @@ export interface WaterLodSpikeView {
   readonly target: readonly [number, number, number];
 }
 
+/**
+ * One point on a motion case's camera path. `at` is the fraction of the case's duration (0 to 1). The pose between points eases from
+ * one to the next. The camera sits at the view's offset from its target, turned `azimuthDeg` degrees about the vertical axis through
+ * the target and scaled by `distance` (1 is the view's own distance, 0.4 is zoomed in), with the target moved by `pan` metres (x, z).
+ */
+export interface WaterLodSpikeMotionKey {
+  readonly at: number;
+  readonly azimuthDeg: number;
+  readonly distance: number;
+  readonly pan: readonly [number, number];
+}
+
+/** A scripted camera path with quality switches, for the cases that record how the water and land look while the camera moves. */
+export interface WaterLodSpikeMotion {
+  /** The pose the path is measured from: its offset from its target is distance 1 at azimuth 0. */
+  readonly view: WaterLodSpikeView;
+  /** Camera path points, ordered by `at`; the first is at 0 and the last at 1. */
+  readonly keys: readonly WaterLodSpikeMotionKey[];
+  /** Quality tiers to switch to while the camera moves (`at` as for the keys); the case's own `quality` is the tier it starts in. */
+  readonly qualityAt?: readonly { readonly at: number; readonly quality: WaterLodSpikeQualityId }[];
+}
+
 /** Settings a W0b case applies: the spike's own material wireframe and, for the aliasing cases, a fixed view. */
 export interface WaterLodSpikeTestSettings {
   readonly wireframe: boolean;
   readonly view?: WaterLodSpikeView;
   /** 'aliasing' runs the three aliasing arms instead of timing frames; 'precision' runs the Q5 phase-precision probe. */
-  readonly measure?: 'aliasing' | 'precision' | 'land' | 'cull' | 'shore' | 'shore-look' | 'terrain-read';
+  readonly measure?: 'aliasing' | 'precision' | 'land' | 'cull' | 'shore' | 'shore-look' | 'terrain-read' | 'coast-look' | 'terrain-cost' | 'camera-quality';
+  /**
+   * Camera-quality cases: the camera moves along this path through the page's own orbit controls while the waves animate, and the
+   * quality switches along the way. These cases record a clip; nothing about the case holds the camera still.
+   */
+  readonly motion?: WaterLodSpikeMotion;
   /** Shore cases: the water body's detail noise on or off; restored afterwards. Omitted keeps the page's own setting. */
   readonly waterNoise?: boolean;
   /** Shore cases: the depth weight on the waves on or off; restored afterwards. Omitted keeps the page's own setting. */
@@ -39,6 +66,13 @@ export interface WaterLodSpikeTestSettings {
   readonly pixelRatio?: number;
   /** Quality tier for the case (waves, footprint bias, mesh density); restored afterwards. Omitted keeps the page's own tier. */
   readonly quality?: WaterLodSpikeQualityId;
+  /** Visual cases: the water and the land body read the baked terrain texture (true) or the analytic islands (false); restored afterwards. */
+  readonly bakedTerrain?: boolean;
+  /**
+   * Coast cases: after settling, the camera sweeps this many degrees around the view's target at the view's radius and height, over the
+   * case's duration. These are the cases that record a clip (the camera moving is what a clip shows that a still cannot).
+   */
+  readonly orbitDegrees?: number;
   /**
    * Aliasing cases only. true (the default) applies the shimmer, moiré, step and colour gates; 'colour' applies only the colour
    * error gate and reports the rest; false reports every metric with no gates (only the water-drawn checks remain).
@@ -63,6 +97,11 @@ export interface WaterLodSpikeTestHost {
   gpuFrameMs(): number | null;
   /** Holds the camera at `view` with the orbit controls off and the waves frozen; null hands the camera back. */
   setView(view: WaterLodSpikeView | null): void;
+  /**
+   * Moves the camera to `view` through the page's orbit controls (call it every frame to move it): the controls stay live, the waves
+   * keep animating and the pose is applied ahead of the controls' update. Null hands the camera back.
+   */
+  setLiveCamera(view: WaterLodSpikeView | null): void;
   /** Scales the renderer pixel ratio by `ratio`; null restores the one the page had. */
   setPixelRatio(ratio: number | null): void;
   /** Holds the quality tier `id` for the case; null restores the tier the page had. */
@@ -101,10 +140,16 @@ export interface WaterLodSpikeTestHost {
   shoreLookAudit(): IShoreLookAudit;
   /** The water and the land body read the terrain from the baked texture (on) or the analytic islands (off); null restores the page's own setting. */
   setBakedTerrain(enabled: boolean | null): void;
+  /** The water's depth read alone from the baked texture (on) or the analytic islands (off), whatever the land body draws; null makes it follow the land body again. */
+  setWaterRead(enabled: boolean | null): void;
   /** The correctness gate for the baked read: the water depth from the baked texture against the analytic islands, over the audit grid. */
   terrainReadAudit(): ITerrainReadAudit;
   /** What the baked terrain texture is: texture size exponent, metres per texel, size and bake time. */
   terrainReadInfo(): { readonly k: number; readonly texelM: number; readonly megabytes: number; readonly bakeMs: number };
+  /** A small picture of the canvas for the results page and review sheets; not evidence and never taken inside a timing window. */
+  thumbnail?(): Promise<Blob | undefined>;
+  /** A bounded recording of the canvas for the opt-in clip; the testing entry starts it before `measure` and stops it after. */
+  recording?(): TestRecordingCapture;
   /** Runs the Q5 phase-precision compute kernel on the page's renderer and compares it with the double reference. */
   runPrecisionProbe(): Promise<IPrecisionReport>;
   environment(): Readonly<Record<string, TestSetting>>;
@@ -528,6 +573,178 @@ const WATER_LOD_SPIKE_TERRAIN_READ_V2: TestSuite<WaterLodSpikeTestSettings> = {
   })),
 };
 
+/**
+ * A picture review of the coast at the same view and wave time: the analytic islands and the baked terrain at the top tier, then the
+ * baked terrain at High and at Low. It exists so the owner can see, without opening the page, that the baked read looks the same and
+ * what a quality change does to the coast. Each case keeps one still (case thumbnail); the gates are only that the water and the land
+ * draw. The pictures are the evidence, and a review is recorded only after someone looks at them.
+ */
+const WATER_LOD_SPIKE_COAST_LOOK_V1: TestSuite<WaterLodSpikeTestSettings> = {
+  id: 'water-lod-spike-coast-look',
+  version: 1,
+  title: 'Water LOD spike shoreline review: the coast, analytic and baked terrain across quality tiers',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: [
+    ['ultra-analytic', 'Ultra, analytic islands', 'ultra', false, 0],
+    ['ultra-baked', 'Ultra, baked terrain', 'ultra', true, 0],
+    ['high-baked', 'High, baked terrain', 'high', true, 0],
+    ['low-baked', 'Low, baked terrain', 'low', true, 0],
+    ['orbit-ultra-baked', 'Ultra, baked terrain: camera orbit (clip)', 'ultra', true, 90],
+    ['orbit-high-baked', 'High, baked terrain: camera orbit (clip)', 'high', true, 90],
+  ].map(([id, label, quality, bakedTerrain, orbitDegrees]) => ({
+    id: id as string,
+    label: label as string,
+    settings: {
+      wireframe: false,
+      measure: 'coast-look' as const,
+      land: true,
+      waterNoise: false,
+      shore: true,
+      quality: quality as WaterLodSpikeQualityId,
+      bakedTerrain: bakedTerrain as boolean,
+      ...(orbitDegrees ? { orbitDegrees: orbitDegrees as number } : {}),
+      view: { position: [300, 50, 500], target: [0, 5, -150] } as WaterLodSpikeView,
+    },
+    durationMs: orbitDegrees ? 5000 : 1000,
+    warmupMs: 500,
+  })),
+};
+
+/**
+ * Plan 080 shoreline review, the cost question behind "baked terrain takes a bit more performance" (ER 080, 2026-11-03). The
+ * terrain-read suite flips the land body and the water's depth read together, and the analytic land body draws about twice the
+ * triangles of the baked one (no per-node height range), so its cost cannot say what the read itself costs. This suite flips the two
+ * apart: four arms, the land body from the analytic islands or the baked texture, and the water's depth read from either, so every
+ * comparison of the read holds the land body (and with it the triangle count) fixed. The gate is written before the first run.
+ *
+ * Cost (GPU timestamps, 3x pixel ratio so the frame is far above the 0.1 ms timer step; the arms run in two rounds in opposite
+ * order, 3 s each after warm-up):
+ * - every arm's mean GPU frame is at least 0.5 ms, five timer steps (below that the suite cannot resolve a difference and says so);
+ * - on each land body the baked read costs at most 10 % more GPU time than the analytic read.
+ *
+ * Reported, not gated: the four means, the read's cost on each land body, the land body's cost on each read, and the triangles of
+ * each arm (the confound the comparison removes).
+ */
+const WATER_LOD_SPIKE_TERRAIN_COST_V1: TestSuite<WaterLodSpikeTestSettings> = {
+  id: 'water-lod-spike-terrain-cost',
+  version: 1,
+  title: 'Water LOD spike shoreline review: what the baked depth read costs, land body held fixed',
+  purpose: 'performance',
+  scenarios: (
+    [
+      ['coast-view', 'Coast view, 3x pixel ratio', { position: [300, 50, 500], target: [0, 5, -150] }],
+      ['down-800m', 'Looking down from 800 m, 3x pixel ratio', { position: [0, 800, -600], target: [0, 0, -600] }],
+    ] as const satisfies readonly (readonly [string, string, WaterLodSpikeView])[]
+  ).map(([id, label, view]) => ({
+    id,
+    label,
+    settings: {
+      wireframe: false,
+      measure: 'terrain-cost' as const,
+      land: true,
+      waterNoise: false,
+      shore: true,
+      pixelRatio: 3,
+      view,
+    },
+    durationMs: 1000,
+    warmupMs: 500,
+  })),
+};
+
+/**
+ * Version 2 of the cost suite: same arms, views and gates, and each arm also reports its CPU frame (the FPS panel's figure) and what
+ * the switch into it did to the page (the longest frame, and the time until the land body draws again), for a cost that is not GPU time.
+ */
+const WATER_LOD_SPIKE_TERRAIN_COST_V2: TestSuite<WaterLodSpikeTestSettings> = { ...WATER_LOD_SPIKE_TERRAIN_COST_V1, version: 2 };
+
+const MOTION_COAST_VIEW: WaterLodSpikeView = { position: [300, 50, 500], target: [0, 5, -150] };
+const MOTION_ORBIT_120: readonly WaterLodSpikeMotionKey[] = [
+  { at: 0, azimuthDeg: 0, distance: 1, pan: [0, 0] },
+  { at: 1, azimuthDeg: 120, distance: 1, pan: [0, 0] },
+];
+/** Zoom in to 0.4 of the distance, pan 200 m along x, then pull back out and pan home. */
+const MOTION_ZOOM_PAN: readonly WaterLodSpikeMotionKey[] = [
+  { at: 0, azimuthDeg: 0, distance: 1, pan: [0, 0] },
+  { at: 0.25, azimuthDeg: 0, distance: 0.4, pan: [0, 0] },
+  { at: 0.5, azimuthDeg: 0, distance: 0.4, pan: [200, 0] },
+  { at: 0.75, azimuthDeg: 0, distance: 1, pan: [200, 0] },
+  { at: 1, azimuthDeg: 0, distance: 1, pan: [0, 0] },
+];
+
+/**
+ * Plan 080 shoreline review: a clip for the owner's report that the waves, the wave crescent and the terrain seem to move with the
+ * camera after switching to Low and rotating. It exists so that someone can watch the bug rather than describe it, and says nothing
+ * about it by itself: the gates are only that the water and the land draw and the page keeps rendering, and a review is recorded after
+ * someone looks at the clips. Every case is the coast view with the island on and the baked terrain, the waves animating, and the camera
+ * moved through the page's own orbit controls (the other clip suite holds the camera and freezes the waves). Each clip writes the
+ * active quality tier in its top-left corner. The cases:
+ * - ultra-orbit: orbit 120 degrees at Ultra, the reference for what the coast looks like turning (the water and island stay put);
+ * - switch-low-then-orbit: Ultra, switch to Low a fifth of the way in, then orbit 120 degrees (the report's sequence);
+ * - low-orbit: orbit 120 degrees at Low from the start;
+ * - ultra-zoom-pan and low-zoom-pan: zoom in, pan, zoom out and pan back, at Ultra and at Low;
+ * - quality-sweep-orbit: orbit 160 degrees while the quality steps down (High, Medium, Low) every quarter.
+ * What to look for: the island and the wave pattern should stay where they are in the world as the camera moves, and the crescents on
+ * the shore should not slide with the view. About a second of frozen or blank frames after a quality switch is the pipeline compiling.
+ */
+const WATER_LOD_SPIKE_CAMERA_QUALITY_V1: TestSuite<WaterLodSpikeTestSettings> = {
+  id: 'water-lod-spike-camera-quality',
+  version: 1,
+  title: 'Water LOD spike shoreline review: clips of the camera moving and the quality changing',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: (
+    [
+      ['ultra-orbit', 'Ultra: orbit 120 degrees', 'ultra', MOTION_ORBIT_120, undefined],
+      [
+        'switch-low-then-orbit',
+        'Ultra, switch to Low, then orbit 120 degrees',
+        'ultra',
+        [
+          { at: 0, azimuthDeg: 0, distance: 1, pan: [0, 0] },
+          { at: 0.35, azimuthDeg: 0, distance: 1, pan: [0, 0] },
+          { at: 1, azimuthDeg: 120, distance: 1, pan: [0, 0] },
+        ],
+        [{ at: 0.2, quality: 'low' }],
+      ],
+      ['low-orbit', 'Low: orbit 120 degrees', 'low', MOTION_ORBIT_120, undefined],
+      ['ultra-zoom-pan', 'Ultra: zoom in, pan, zoom out, pan back', 'ultra', MOTION_ZOOM_PAN, undefined],
+      ['low-zoom-pan', 'Low: zoom in, pan, zoom out, pan back', 'low', MOTION_ZOOM_PAN, undefined],
+      [
+        'quality-sweep-orbit',
+        'Orbit 160 degrees while the quality steps from Ultra down to Low',
+        'ultra',
+        [
+          { at: 0, azimuthDeg: 0, distance: 1, pan: [0, 0] },
+          { at: 1, azimuthDeg: 160, distance: 1, pan: [0, 0] },
+        ],
+        [
+          { at: 0.25, quality: 'high' },
+          { at: 0.5, quality: 'medium' },
+          { at: 0.75, quality: 'low' },
+        ],
+      ],
+    ] as const satisfies readonly (readonly [string, string, WaterLodSpikeQualityId, readonly WaterLodSpikeMotionKey[], WaterLodSpikeMotion['qualityAt']])[]
+  ).map(([id, label, quality, keys, qualityAt]) => ({
+    id,
+    label,
+    settings: {
+      wireframe: false,
+      measure: 'camera-quality' as const,
+      land: true,
+      waterNoise: false,
+      shore: true,
+      quality,
+      bakedTerrain: true,
+      motion: { view: MOTION_COAST_VIEW, keys, ...(qualityAt ? { qualityAt } : {}) },
+    },
+    durationMs: 7000,
+    // The quality and terrain switches of the case compile pipelines; that happens before the clip starts.
+    warmupMs: 3000,
+  })),
+};
+
 /** Every version of the W0b suites, oldest first. Add a new entry when a case changes; keep old ones. */
 export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestSettings>[] = [
   WATER_LOD_SPIKE_V1,
@@ -546,6 +763,10 @@ export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestS
   WATER_LOD_SPIKE_SHORE_LOOK_V1,
   WATER_LOD_SPIKE_TERRAIN_READ_V1,
   WATER_LOD_SPIKE_TERRAIN_READ_V2,
+  WATER_LOD_SPIKE_COAST_LOOK_V1,
+  WATER_LOD_SPIKE_TERRAIN_COST_V1,
+  WATER_LOD_SPIKE_TERRAIN_COST_V2,
+  WATER_LOD_SPIKE_CAMERA_QUALITY_V1,
 ];
 
 const REFERENCE_SAMPLES = 32;
@@ -934,6 +1155,110 @@ async function settleTerrain(host: WaterLodSpikeTestHost, context: TestContext):
   await host.waitFrames(SETTLE_FRAMES, context);
 }
 
+/** Sweeps the camera `degrees` around the view's target at the view's radius and height, one step per frame, over `durationMs`. */
+async function orbitView(host: WaterLodSpikeTestHost, view: WaterLodSpikeView, degrees: number, durationMs: number, context: TestContext): Promise<void> {
+  const [px, py, pz] = view.position;
+  const [tx, , tz] = view.target;
+  const radius = Math.hypot(px - tx, pz - tz);
+  const startAngle = Math.atan2(pz - tz, px - tx);
+  const started = performance.now();
+  for (let elapsed = 0; elapsed < durationMs; elapsed = performance.now() - started) {
+    const angle = startAngle + (degrees * Math.PI / 180) * (elapsed / durationMs);
+    host.setView({ position: [tx + radius * Math.cos(angle), py, tz + radius * Math.sin(angle)], target: view.target });
+    await host.waitFrames(1, context);
+  }
+  host.setView(view);
+}
+
+/**
+ * A picture case: waits for the land body to draw after the case's quality and terrain switches, lets the frame settle, and checks that
+ * the water and the land are drawn. The case thumbnail taken after this is the evidence.
+ */
+async function measureCoastLook(host: WaterLodSpikeTestHost, scenario: { readonly durationMs: number; readonly settings: WaterLodSpikeTestSettings }, context: TestContext): Promise<TestObservation> {
+  await settleTerrain(host, context);
+  const { orbitDegrees, view } = scenario.settings;
+  if (orbitDegrees && view) await orbitView(host, view, orbitDegrees, scenario.durationMs, context);
+  const frames = await measureFrames(host, orbitDegrees ? 500 : scenario.durationMs, context, true);
+  return {
+    ...frames,
+    checks: [...(frames.checks ?? []), { name: 'land drawn', passed: host.landDrawn(), detail: `drawn ${host.landDrawn()}` }],
+  };
+}
+
+const smoothstep = (t: number): number => t * t * (3 - 2 * t);
+
+/** The camera pose `progress` (0 to 1) along a motion case's path: eased between the two keys around it. */
+export function motionPose(motion: WaterLodSpikeMotion, progress: number): WaterLodSpikeView {
+  const keys = motion.keys;
+  const at = Math.min(1, Math.max(0, progress));
+  let next = keys.findIndex((key) => key.at >= at);
+  if (next < 0) next = keys.length - 1;
+  const to = keys[next];
+  const from = keys[Math.max(0, next - 1)];
+  const span = to.at - from.at;
+  const t = span > 0 ? smoothstep((at - from.at) / span) : 1;
+  const lerp = (a: number, b: number) => a + (b - a) * t;
+  const azimuth = (lerp(from.azimuthDeg, to.azimuthDeg) * Math.PI) / 180;
+  const distance = lerp(from.distance, to.distance);
+  const target: [number, number, number] = [
+    motion.view.target[0] + lerp(from.pan[0], to.pan[0]),
+    motion.view.target[1],
+    motion.view.target[2] + lerp(from.pan[1], to.pan[1]),
+  ];
+  const { position, target: base } = motion.view;
+  const [ox, oy, oz] = [position[0] - base[0], position[1] - base[1], position[2] - base[2]];
+  const cos = Math.cos(azimuth);
+  const sin = Math.sin(azimuth);
+  return {
+    position: [target[0] + (ox * cos - oz * sin) * distance, target[1] + oy * distance, target[2] + (ox * sin + oz * cos) * distance],
+    target,
+  };
+}
+
+/**
+ * A clip case: the camera moves along the case's path through the page's orbit controls with the waves animating, and the quality
+ * switches where the case says. Reports the frame times (the longest frame is the hitch of a quality switch, whose pipelines compile)
+ * and checks only that the page kept rendering and that the water and the land are drawn at the end. The clip is the evidence.
+ */
+async function measureCameraQuality(host: WaterLodSpikeTestHost, scenario: { readonly durationMs: number; readonly settings: WaterLodSpikeTestSettings }, context: TestContext): Promise<TestObservation> {
+  const motion = scenario.settings.motion;
+  if (!motion) throw new Error('A camera-quality case needs a motion path');
+  for (let waited = 0; !host.landDrawn() && waited < 60_000; waited += 100) await context.wait(100);
+  const switches = [...(motion.qualityAt ?? [])];
+  host.beginFrameSampling();
+  host.setLiveCamera(motionPose(motion, 0));
+  await host.waitFrames(2, context);
+  const started = performance.now();
+  for (let elapsed = 0; elapsed < scenario.durationMs; elapsed = performance.now() - started) {
+    const progress = elapsed / scenario.durationMs;
+    while (switches.length > 0 && switches[0].at <= progress) host.setQuality(switches.shift()?.quality ?? null);
+    host.setLiveCamera(motionPose(motion, progress));
+    await host.waitFrames(1, context);
+  }
+  host.setLiveCamera(motionPose(motion, 1));
+  const frameMs = host.endFrameSampling();
+  const cpuMs = host.takeCpuFrameMs();
+  for (let waited = 0; !host.landDrawn() && waited < 5000; waited += 100) await context.wait(100);
+  const { drawCalls } = host.counts();
+  const longest = Math.max(0, ...frameMs);
+  return {
+    metrics: [
+      { name: 'frame interval', unit: 'ms', source: 'engine.tick$ intervals', samples: [...frameMs] },
+      { name: 'CPU frame', unit: 'ms', source: 'fpsController.cpuFrameTime (tick and render)', samples: [...cpuMs] },
+      { name: 'longest frame', unit: 'ms', source: 'engine.tick$ intervals', samples: [longest] },
+    ],
+    checks: [
+      { name: 'water body draws', passed: drawCalls > 0, detail: `draw calls ${drawCalls}` },
+      { name: 'land drawn after the path', passed: host.landDrawn(), detail: `drawn ${host.landDrawn()}` },
+      { name: `the page kept rendering (at least ${CAMERA_QUALITY_MIN_FRAMES} frames over the clip)`, passed: frameMs.length >= CAMERA_QUALITY_MIN_FRAMES, detail: `${frameMs.length} frames, longest ${longest.toFixed(0)} ms` },
+      { name: 'every quality switch was applied', passed: switches.length === 0, detail: `${switches.length} switches left` },
+    ],
+  };
+}
+
+/** Fewest frames a clip may show: a page that stalls for most of the clip (a pipeline that never compiles) fails. */
+const CAMERA_QUALITY_MIN_FRAMES = 60;
+
 /** The frame's mean luminance difference from `other`, and the share of pixels that differ by more than `levels`. */
 function frameDifference(image: ILuminanceImage, other: ILuminanceImage, levels: number): { readonly meanDiff: number; readonly share: number } {
   let sum = 0;
@@ -1015,6 +1340,95 @@ async function measureTerrainRead(host: WaterLodSpikeTestHost, context: TestCont
   };
 }
 
+/** Every arm's mean GPU frame must be at least this long (five steps of the 0.1 ms timestamp resolution) for a difference to be read. */
+const TERRAIN_COST_MIN_FRAME_MS = 0.5;
+/** On either land body the baked read may cost at most this multiple of the analytic read's GPU frame time. */
+const TERRAIN_COST_MAX_READ_RATIO = 1.1;
+
+/** One arm of the cost suite: where the land body and the water's depth read take their heights from. */
+interface ITerrainCostArm {
+  readonly id: string;
+  readonly landBaked: boolean;
+  readonly readBaked: boolean;
+}
+
+const TERRAIN_COST_ARMS: readonly ITerrainCostArm[] = [
+  { id: 'analytic land, analytic read', landBaked: false, readBaked: false },
+  { id: 'analytic land, baked read', landBaked: false, readBaked: true },
+  { id: 'baked land, analytic read', landBaked: true, readBaked: false },
+  { id: 'baked land, baked read', landBaked: true, readBaked: true },
+];
+
+/**
+ * The four arms in two rounds, the second in the opposite order so a slow drift of the machine cancels in the mean. The land body is
+ * rebuilt when its source changes, so the order keeps those switches few (three over the two rounds).
+ */
+async function measureTerrainCost(host: WaterLodSpikeTestHost, context: TestContext): Promise<TestObservation> {
+  for (let waited = 0; !host.landDrawn() && waited < 60_000; waited += 100) await context.wait(100);
+  await host.waitFrames(SETTLE_FRAMES, context);
+  const [analyticAnalytic, analyticBaked, bakedAnalytic, bakedBaked] = TERRAIN_COST_ARMS;
+  const order = [analyticAnalytic, analyticBaked, bakedAnalytic, bakedBaked, bakedBaked, bakedAnalytic, analyticBaked, analyticAnalytic];
+  const gpuMs = new Map<ITerrainCostArm, number[]>(TERRAIN_COST_ARMS.map((arm) => [arm, []]));
+  const triangles = new Map<ITerrainCostArm, number>();
+  const cpuMs = new Map<ITerrainCostArm, number[]>(TERRAIN_COST_ARMS.map((arm) => [arm, []]));
+  const hitchMs = new Map<ITerrainCostArm, number[]>(TERRAIN_COST_ARMS.map((arm) => [arm, []]));
+  const drawnMs = new Map<ITerrainCostArm, number[]>(TERRAIN_COST_ARMS.map((arm) => [arm, []]));
+  for (const arm of order) {
+    host.beginFrameSampling();
+    const flipped = performance.now();
+    host.setBakedTerrain(arm.landBaked);
+    host.setWaterRead(arm.readBaked);
+    await host.waitFrames(2, context);
+    while (!host.landDrawn() && performance.now() - flipped < 60_000) await host.waitFrames(1, context);
+    drawnMs.get(arm)?.push(performance.now() - flipped);
+    await settleTerrain(host, context);
+    hitchMs.get(arm)?.push(Math.max(0, ...host.endFrameSampling()));
+    host.takeCpuFrameMs();
+    host.beginFrameSampling();
+    gpuMs.get(arm)?.push(await gpuMeanMs(host, context));
+    host.endFrameSampling();
+    cpuMs.get(arm)?.push(mean(host.takeCpuFrameMs()));
+    triangles.set(arm, host.counts().triangles);
+  }
+  host.setWaterRead(null);
+  host.setBakedTerrain(null);
+  const means = new Map(TERRAIN_COST_ARMS.map((arm) => [arm, mean(gpuMs.get(arm) ?? [])]));
+  const at = (arm: ITerrainCostArm) => means.get(arm) ?? Number.NaN;
+  const cpuAt = (arm: ITerrainCostArm) => mean(cpuMs.get(arm) ?? []);
+  const readOnAnalyticLand = at(analyticBaked) - at(analyticAnalytic);
+  const readOnBakedLand = at(bakedBaked) - at(bakedAnalytic);
+  const landOnAnalyticRead = at(bakedAnalytic) - at(analyticAnalytic);
+  const landOnBakedRead = at(bakedBaked) - at(analyticBaked);
+  const ratioOnAnalyticLand = at(analyticBaked) / at(analyticAnalytic);
+  const ratioOnBakedLand = at(bakedBaked) / at(bakedAnalytic);
+  const shortest = Math.min(...TERRAIN_COST_ARMS.map(at));
+  const draws = host.counts();
+  return {
+    metrics: [
+      ...TERRAIN_COST_ARMS.map((arm) => ({ name: `GPU frame, ${arm.id}`, unit: 'ms', source: 'WebGPU timestamp queries, 1 s averages', samples: gpuMs.get(arm) ?? [] })),
+      ...TERRAIN_COST_ARMS.map((arm) => ({ name: `CPU frame, ${arm.id}`, unit: 'ms', source: 'fpsController.cpuFrameTime (tick and render), mean over the GPU window', samples: cpuMs.get(arm) ?? [] })),
+      ...TERRAIN_COST_ARMS.map((arm) => ({ name: `longest frame after the switch, ${arm.id}`, unit: 'ms', source: 'engine.tick$ intervals from the switch to the settled frame', samples: hitchMs.get(arm) ?? [] })),
+      ...TERRAIN_COST_ARMS.map((arm) => ({ name: `time to a drawn land body after the switch, ${arm.id}`, unit: 'ms', source: 'performance.now, at least two frames', samples: drawnMs.get(arm) ?? [] })),
+      ...TERRAIN_COST_ARMS.map((arm) => ({ name: `triangles, ${arm.id}`, unit: 'triangles', source: 'renderer.info.render.triangles', samples: [triangles.get(arm) ?? Number.NaN] })),
+      { name: 'CPU frame, baked read over analytic read, analytic land body', unit: 'ratio', source: 'means of two arms', samples: [cpuAt(analyticBaked) / cpuAt(analyticAnalytic)] },
+      { name: 'CPU frame, baked read over analytic read, baked land body', unit: 'ratio', source: 'means of two arms', samples: [cpuAt(bakedBaked) / cpuAt(bakedAnalytic)] },
+      { name: 'cost of the baked read, analytic land body', unit: 'ms', source: 'means of two arms', samples: [readOnAnalyticLand] },
+      { name: 'cost of the baked read, baked land body', unit: 'ms', source: 'means of two arms', samples: [readOnBakedLand] },
+      { name: 'cost of the baked land body, analytic read', unit: 'ms', source: 'means of two arms', samples: [landOnAnalyticRead] },
+      { name: 'cost of the baked land body, baked read', unit: 'ms', source: 'means of two arms', samples: [landOnBakedRead] },
+      { name: 'GPU frame, baked read over analytic read, analytic land body', unit: 'ratio', source: 'means of two arms', samples: [ratioOnAnalyticLand] },
+      { name: 'GPU frame, baked read over analytic read, baked land body', unit: 'ratio', source: 'means of two arms', samples: [ratioOnBakedLand] },
+    ],
+    checks: [
+      { name: 'water body draws', passed: draws.drawCalls > 0, detail: `draw calls ${draws.drawCalls}` },
+      { name: 'CPU frame time measured in every arm', passed: TERRAIN_COST_ARMS.every((arm) => Number.isFinite(cpuAt(arm))), detail: TERRAIN_COST_ARMS.map((arm) => `${cpuAt(arm).toFixed(2)} ms`).join(', ') },
+      { name: `every arm's GPU frame is at least ${TERRAIN_COST_MIN_FRAME_MS} ms, so a difference can be read`, passed: shortest >= TERRAIN_COST_MIN_FRAME_MS, detail: `shortest arm ${shortest.toFixed(3)} ms` },
+      { name: `on the analytic land body the baked read costs at most ${Math.round((TERRAIN_COST_MAX_READ_RATIO - 1) * 100)} % more GPU time`, passed: ratioOnAnalyticLand <= TERRAIN_COST_MAX_READ_RATIO, detail: `x${ratioOnAnalyticLand.toFixed(3)} (${readOnAnalyticLand.toFixed(3)} ms)` },
+      { name: `on the baked land body the baked read costs at most ${Math.round((TERRAIN_COST_MAX_READ_RATIO - 1) * 100)} % more GPU time`, passed: ratioOnBakedLand <= TERRAIN_COST_MAX_READ_RATIO, detail: `x${ratioOnBakedLand.toFixed(3)} (${readOnBakedLand.toFixed(3)} ms)` },
+    ],
+  };
+}
+
 async function measureFrames(host: WaterLodSpikeTestHost, durationMs: number, context: TestContext, gpu: boolean): Promise<TestObservation> {
   host.beginFrameSampling();
   const gpuMs: number[] = [];
@@ -1048,7 +1462,7 @@ async function measureFrames(host: WaterLodSpikeTestHost, durationMs: number, co
  * performance suite, the three aliasing arms for the aliasing suite, draw counts with checks otherwise.
  */
 export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): TestRunAdapter<WaterLodSpikeTestSettings, boolean> {
-  return simpleAdapter<WaterLodSpikeTestSettings, boolean>({
+  const adapter = simpleAdapter<WaterLodSpikeTestSettings, boolean>({
     windowModes: false,
     capture: () => host.wireframe(),
     apply: (scenario) => {
@@ -1060,10 +1474,21 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
       host.setCull(scenario.settings.cull ?? null);
       host.setWaterNoise(scenario.settings.waterNoise ?? null);
       host.setShore(scenario.settings.shore ?? null);
+      host.setBakedTerrain(scenario.settings.bakedTerrain ?? null);
     },
+    ...(host.thumbnail
+      ? {
+          thumbnail: async (_scenario: unknown, context: TestContext) => {
+            if (context.repetition > 1) return undefined;
+            const image = await host.thumbnail?.();
+            return image ? [image] : undefined;
+          },
+        }
+      : {}),
     restore: (wireframe) => {
       host.setWireframe(wireframe);
       host.setView(null);
+      host.setLiveCamera(null);
       host.setPixelRatio(null);
       host.setQuality(null);
       host.setLand(null);
@@ -1073,6 +1498,7 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
       host.setFoam(null);
       host.setDepthColour(null);
       host.setBakedTerrain(null);
+      host.setWaterRead(null);
     },
     ready: async (context) => {
       while (!host.ready()) {
@@ -1088,6 +1514,9 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
       if (scenario.settings.measure === 'shore') return measureShore(host, scenario, context);
       if (scenario.settings.measure === 'shore-look') return measureShoreLook(host, scenario, context);
       if (scenario.settings.measure === 'terrain-read') return measureTerrainRead(host, context);
+      if (scenario.settings.measure === 'coast-look') return measureCoastLook(host, scenario, context);
+      if (scenario.settings.measure === 'terrain-cost') return measureTerrainCost(host, context);
+      if (scenario.settings.measure === 'camera-quality') return measureCameraQuality(host, scenario, context);
       const observation = await measureFrames(host, scenario.durationMs, context, scenario.settings.view !== undefined);
       return {
         ...observation,
@@ -1102,4 +1531,7 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
       };
     },
   });
+  if (!host.recording) return adapter;
+  // Only the cases that move the camera record: a still shows one view, a clip shows the camera moving over the same coast.
+  return { ...adapter, recording: (scenario) => (scenario.settings.orbitDegrees || scenario.settings.motion ? host.recording?.() : undefined) };
 }

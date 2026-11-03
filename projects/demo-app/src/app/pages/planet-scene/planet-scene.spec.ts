@@ -59,12 +59,12 @@ function makeHost(override: Partial<PlanetSceneTestHost> = {}, state: { read?: (
 }
 
 describe('Plan 059 G5 planet-scene suite', () => {
-  it('is a valid history: v1 then v2, unique case ids, plain JSON settings, the planned cases', () => {
+  it('is a valid history: v1, v2 then v3, unique case ids, plain JSON settings, the planned cases', () => {
     expect(() => validateTestHistory(PLANET_SCENE_TEST_HISTORY)).not.toThrow();
-    expect(PLANET_SCENE_TEST_HISTORY.map((suite) => [suite.id, suite.version])).toEqual([['planet-scene', 1], ['planet-scene', 2]]);
-    expect(SUITE.version).toBe(2);
+    expect(PLANET_SCENE_TEST_HISTORY.map((suite) => [suite.id, suite.version])).toEqual([['planet-scene', 1], ['planet-scene', 2], ['planet-scene', 3]]);
+    expect(SUITE.version).toBe(3);
     const ids = SUITE.scenarios.map((scenario) => scenario.id);
-    expect(ids).toEqual([...V1_IDS, 'orbit-morph-0.5', 'orbit-morph-1', 'ground-morph-0.5', 'ground-morph-1', 'morph-sweep']);
+    expect(ids).toEqual([...V1_IDS, 'orbit-morph-0.5', 'orbit-morph-1', 'ground-morph-0.5', 'ground-morph-1', 'morph-sweep', 'orbit-morph-1-atmosphere-off', 'ground-morph-1-atmosphere-off']);
     expect(new Set(ids).size).toBe(ids.length);
     for (const scenario of SUITE.scenarios) {
       expect(JSON.parse(JSON.stringify(scenario.settings))).toEqual(scenario.settings);
@@ -110,7 +110,7 @@ describe('Plan 059 G5 planet-scene suite', () => {
   });
 
   it('makes each atmosphere-off case differ from its partner only in the atmosphere', () => {
-    for (const [partner, base] of [['orbit-atmosphere-off', 'orbit'], ['ground-atmosphere-off', 'ground']] as const) {
+    for (const [partner, base] of [['orbit-atmosphere-off', 'orbit'], ['ground-atmosphere-off', 'ground'], ['orbit-morph-1-atmosphere-off', 'orbit-morph-1'], ['ground-morph-1-atmosphere-off', 'ground-morph-1']] as const) {
       expect(scenarioOf(partner).settings).toEqual({ ...scenarioOf(base).settings, atmosphere: false });
       expect(scenarioOf(partner).warmupMs).toBe(scenarioOf(base).warmupMs);
       expect(scenarioOf(partner).durationMs).toBe(scenarioOf(base).durationMs);
@@ -134,13 +134,13 @@ describe('Plan 059 G5 planet-scene suite', () => {
 
   it('builds and parses launch links for the suite and for one case', () => {
     const url = buildTestLaunchUrl(BASE, SUITE, 'visible-browser', 1, 'quick');
-    expect(url).toBe(`${BASE}?testSuite=planet-scene&testVersion=2&testProfile=visible-browser&testMode=quick&testRepetitions=1&testAutoStart=1`);
-    expect(parseTestLaunch(new URL(url), PLANET_SCENE_TEST_HISTORY)?.key).toBe('planet-scene@2');
-    const batch = buildTestBatchLaunchUrl(BASE, [{ suiteId: 'planet-scene', suiteVersion: 2, scenarioId: 'orbit' }], 'visible-browser', 1, 'quick');
+    expect(url).toBe(`${BASE}?testSuite=planet-scene&testVersion=3&testProfile=visible-browser&testMode=quick&testRepetitions=1&testAutoStart=1`);
+    expect(parseTestLaunch(new URL(url), PLANET_SCENE_TEST_HISTORY)?.key).toBe('planet-scene@3');
+    const batch = buildTestBatchLaunchUrl(BASE, [{ suiteId: 'planet-scene', suiteVersion: 3, scenarioId: 'orbit' }], 'visible-browser', 1, 'quick');
     expect(batch).toContain('testCases=orbit');
-    expect(parseTestLaunch(new URL(batch), PLANET_SCENE_TEST_HISTORY)?.cases).toEqual([{ suiteId: 'planet-scene', suiteVersion: 2, scenarioId: 'orbit' }]);
+    expect(parseTestLaunch(new URL(batch), PLANET_SCENE_TEST_HISTORY)?.cases).toEqual([{ suiteId: 'planet-scene', suiteVersion: 3, scenarioId: 'orbit' }]);
     for (const scenario of SUITE.scenarios) {
-      const link = buildTestBatchLaunchUrl(BASE, [{ suiteId: 'planet-scene', suiteVersion: 2, scenarioId: scenario.id }], 'visible-browser', 1, 'quick');
+      const link = buildTestBatchLaunchUrl(BASE, [{ suiteId: 'planet-scene', suiteVersion: 3, scenarioId: scenario.id }], 'visible-browser', 1, 'quick');
       expect(parseTestLaunch(new URL(link), PLANET_SCENE_TEST_HISTORY)?.cases?.length).withContext(scenario.id).toBe(1);
     }
   });
