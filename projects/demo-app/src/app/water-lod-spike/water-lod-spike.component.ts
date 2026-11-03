@@ -21,17 +21,22 @@ import {
   COVER_MARGIN_M,
   auditShore,
   auditShoreLook,
+  auditTerrainRead,
+  bakeWaterLodSpikeLand,
+  bakedLandHeightM,
   createLandCoverHook,
   createWaterLodSpikeLand,
+  landHeightM,
   measureLeaves,
   waterCeilingM,
   type ILeafCull,
   type IShoreAudit,
   type IShoreLookAudit,
+  type ITerrainReadAudit,
 } from './core/water-lod-spike-land';
 import { runWaterLodSpikePrecisionProbe, type IPrecisionProbeRenderer } from './core/water-lod-spike-precision-probe';
 import { WATER_LOD_SPIKE_QUALITIES, waterLodSpikeQuality, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
-import { WATER_LOD_SPIKE_UNIFORMS, shoreLookAt } from './core/water-lod-spike-waves';
+import { WATER_LOD_SPIKE_UNIFORMS, shoreLookAt, useBakedLand } from './core/water-lod-spike-waves';
 import {
   createWaterLodSpikeTestAdapter,
   WATER_LOD_SPIKE_TEST_HISTORY,
@@ -78,6 +83,11 @@ export class WaterLodSpikeComponent {
   private readonly destroyRef = inject(DestroyRef);
   /** Plane edge length, metres (plan 080: 100 km flat plane). */
   protected readonly planeSizeM = 100_000;
+  /**
+   * The islands baked into the library's plane height texture (experiment 5). Made here, before the water material is built, because
+   * the water's depth read captures it; the Baked terrain button then switches the water and the land body between it and the analytic islands.
+   */
+  protected readonly bakedLand = bakeWaterLodSpikeLand(this.planeSizeM);
   protected readonly water: IWaterLodSpikeSceneHandle;
 
   readonly testHistory = WATER_LOD_SPIKE_TEST_HISTORY;
@@ -88,6 +98,14 @@ export class WaterLodSpikeComponent {
   /** Land under the water (Plan 080 w2 spike): islands from `core/water-lod-spike-land.ts`, drawn as a second body. Off by default. */
   readonly land = signal(false);
   protected readonly landHeights = createWaterLodSpikeLand();
+  /**
+   * Terrain read from the baked texture, as the library gives it, instead of the analytic islands: the land body draws the texture's
+   * texels and the water's depth (shore weight, foam, colour) reads the same ones. Off by default (experiment 5).
+   */
+  readonly bakedTerrain = signal(false);
+  private savedBakedTerrain: boolean | null = null;
+  /** The land body's heights: the baked texture or the analytic islands. */
+  protected readonly landSource = computed(() => (this.bakedTerrain() ? this.bakedLand.source : this.landHeights));
   private readonly waterBody = viewChild<FlatTerrainComponent>('waterBody');
   private readonly landBody = viewChild<FlatTerrainComponent>('landBody');
   private savedLand: boolean | null = null;
@@ -163,7 +181,9 @@ export class WaterLodSpikeComponent {
   private gpuVendor = 'unknown';
 
   constructor() {
-    this.engine.scene.background = new Color('#12181f');    this.water = createWaterLodSpikeScene(this.engine, (diagnostics) => {
+    this.engine.scene.background = new Color('#12181f');
+    useBakedLand(this.bakedLand);
+    this.water = createWaterLodSpikeScene(this.engine, (diagnostics) => {
       this.drawCalls.set(diagnostics.drawCalls);
       this.triangles.set(diagnostics.triangles);
     });
@@ -184,6 +204,7 @@ export class WaterLodSpikeComponent {
       WATER_LOD_SPIKE_UNIFORMS.shore.value = this.shore() && this.land() ? 1 : 0;
       WATER_LOD_SPIKE_UNIFORMS.foam.value = this.foam() && this.land() ? 1 : 0;
       WATER_LOD_SPIKE_UNIFORMS.depthColour.value = this.depthColour() && this.land() ? 1 : 0;
+      WATER_LOD_SPIKE_UNIFORMS.landBaked.value = this.bakedTerrain() ? 1 : 0;
     });
     // A held test view is re-applied every frame after the controls' tick, so nothing moves the camera off it.
     const holdSubscription = this.engine.lateUpdate$.subscribe(() => {
@@ -237,6 +258,9 @@ export class WaterLodSpikeComponent {
       setFoam: (enabled) => this.holdFoam(enabled),
       setDepthColour: (enabled) => this.holdDepthColour(enabled),
       shoreLookAudit: () => this.auditShoreLookNow(),
+      setBakedTerrain: (enabled) => this.holdBakedTerrain(enabled),
+      terrainReadAudit: () => this.auditTerrainReadNow(),
+      terrainReadInfo: () => ({ k: this.bakedLand.k, texelM: this.planeSizeM / 2 ** this.bakedLand.k, megabytes: this.bakedLand.megabytes, bakeMs: this.bakedLand.bakeMs }),
       coverActive: () => this.waterBody()?.terrain()?.selector.cover !== undefined,
       runPrecisionProbe: () => runWaterLodSpikePrecisionProbe(this.engine.renderer as unknown as IPrecisionProbeRenderer, String(this.environment()['backend'])),
       environment: () => this.environment(),
@@ -334,7 +358,11 @@ export class WaterLodSpikeComponent {
       let violations = 0;
       for (const t of times) {
         WATER_LOD_SPIKE_UNIFORMS.time.value = t;
-        const audit = auditShore((x, z) => source.heightAt(x, 0, z), AUDIT_HALF_M, AUDIT_STEP_M);
+        // The land is the one the land body draws: the baked texels while the baked read is on, else the analytic islands.
+        const audit = auditShore(
+          (x, z) => source.heightAt(x, 0, z), AUDIT_HALF_M, AUDIT_STEP_M, undefined, undefined,
+          this.bakedTerrain() ? (x, z) => bakedLandHeightM(this.bakedLand, x, z) : undefined,
+        );
         violations += audit.violations;
         if (audit.maxExcessM >= worst.maxExcessM) worst = audit;
       }
@@ -395,6 +423,27 @@ export class WaterLodSpikeComponent {
       WATER_LOD_SPIKE_UNIFORMS.foam.value = savedFoam;
       WATER_LOD_SPIKE_UNIFORMS.depthColour.value = savedColour;
     }
+  }
+
+  toggleBakedTerrain(): void {
+    this.bakedTerrain.update((enabled) => !enabled);
+  }
+
+  /** Puts the baked terrain read on or off for a test case (null restores the page's own setting). The uniform follows at once. */
+  private holdBakedTerrain(enabled: boolean | null): void {
+    if (enabled !== null) {
+      this.savedBakedTerrain ??= this.bakedTerrain();
+      this.bakedTerrain.set(enabled);
+    } else {
+      if (this.savedBakedTerrain !== null) this.bakedTerrain.set(this.savedBakedTerrain);
+      this.savedBakedTerrain = null;
+    }
+    WATER_LOD_SPIKE_UNIFORMS.landBaked.value = this.bakedTerrain() ? 1 : 0;
+  }
+
+  /** The correctness gate for the baked read: the water depth from the baked texture against the analytic islands, over the 5 km grid. */
+  private auditTerrainReadNow(): ITerrainReadAudit {
+    return auditTerrainRead((x, z) => landHeightM(x, z), (x, z) => bakedLandHeightM(this.bakedLand, x, z), AUDIT_HALF_M, AUDIT_STEP_M);
   }
 
   toggleCull(): void {

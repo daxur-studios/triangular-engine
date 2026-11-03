@@ -1,7 +1,19 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Fn, If, abs, cameraPosition, cos, dFdx, dFdy, dot, exp, float, length, mat3, max, mix, sin, smoothstep, sub, uniform, vec2, vec3 } from 'three/tsl';
 import type { HeightSource } from 'triangular-engine/lod-surface/core';
-import { SEA_LEVEL_M, SHORE_LOOK, landHeightNode, shoreDeepness, shoreFoam, shoreWeight, waterDepthM, type IShoreLookParams } from './water-lod-spike-land';
+import {
+  SEA_LEVEL_M,
+  SHORE_LOOK,
+  bakedLandHeightM,
+  bakedLandHeightNode,
+  landHeightNode,
+  shoreDeepness,
+  shoreFoam,
+  shoreWeight,
+  waterDepthM,
+  type IBakedLand,
+  type IShoreLookParams,
+} from './water-lod-spike-land';
 
 /**
  * Spike-local wave spectrum for plan 080 (W0b): 64 directional sines with jittered wavelengths from 300 m to 0.5 m
@@ -122,7 +134,38 @@ export const WATER_LOD_SPIKE_UNIFORMS = {
   foamSpacingM: uniform(SHORE_LOOK.spacingM),
   foamSpeedMS: uniform(SHORE_LOOK.speedMS),
   tintScaleM: uniform(SHORE_LOOK.tintScaleM),
+  /** 1: the water reads the land's height from the baked terrain texture (experiment 5). 0: from the analytic islands. Acts only if {@link useBakedLand} was called before the material built. */
+  landBaked: uniform(0),
 };
+
+/** The baked land the water's depth reads can come from; set once, before the water's material is built (the nodes capture it). */
+let bakedLand: IBakedLand | null = null;
+
+/** Makes the baked land available to the water's depth read. Call before the water material is built; `landBaked` then switches between it and the analytic islands. */
+export function useBakedLand(land: IBakedLand | null): void {
+  bakedLand = land;
+}
+
+/** Land height under a plane position node as the water reads it: the baked texture while `landBaked` is 1, else the analytic islands. */
+function landReadNode(position: any): any {
+  const baked = bakedLand;
+  if (!baked) return landHeightNode(position);
+  return (Fn(() => {
+    const height = float(0).toVar();
+    If(WATER_LOD_SPIKE_UNIFORMS.landBaked.greaterThan(0), () => {
+      height.assign(bakedLandHeightNode(baked, position));
+    }).Else(() => {
+      height.assign(landHeightNode(position));
+    });
+    return height;
+  }) as any)();
+}
+
+/** CPU twin of the depth the water reads at (x, z): the sea level minus the land height, from the baked texture while `landBaked` is 1. */
+export function waterDepthReadM(x: number, z: number): number {
+  if (bakedLand && (WATER_LOD_SPIKE_UNIFORMS.landBaked.value as number) > 0) return SEA_LEVEL_M - bakedLandHeightM(bakedLand, x, z);
+  return waterDepthM(x, z);
+}
 
 /**
  * Foam (x) and water deepness (y) at a plane position node, both from the water depth D of the land under it. Foam is 0 and
@@ -132,7 +175,7 @@ export function shoreLookNode(position: any): any {
   return (Fn(() => {
     const look = vec2(0, 1).toVar();
     If(WATER_LOD_SPIKE_UNIFORMS.foam.greaterThan(0).or(WATER_LOD_SPIKE_UNIFORMS.depthColour.greaterThan(0)), () => {
-      const depth = float(SEA_LEVEL_M).sub(landHeightNode(position));
+      const depth = float(SEA_LEVEL_M).sub(landReadNode(position));
       const u = WATER_LOD_SPIKE_UNIFORMS;
       If(u.foam.greaterThan(0), () => {
         const edge = float(1).sub(smoothstep(0, u.foamEdgeM, depth));
@@ -159,7 +202,7 @@ export function shoreLookAt(x: number, z: number): { foam: number; deepness: num
     speedMS: u.foamSpeedMS.value as number,
     tintScaleM: u.tintScaleM.value as number,
   };
-  const depth = waterDepthM(x, z);
+  const depth = waterDepthReadM(x, z);
   return {
     foam: (u.foam.value as number) > 0 ? shoreFoam(depth, u.time.value as number, look) : 0,
     deepness: (u.depthColour.value as number) > 0 ? shoreDeepness(depth, look) : 1,
@@ -171,7 +214,7 @@ export function shoreWeightNode(position: any): any {
   return (Fn(() => {
     const weight = float(1).toVar();
     If(WATER_LOD_SPIKE_UNIFORMS.shore.greaterThan(0), () => {
-      const depth = float(SEA_LEVEL_M).sub(landHeightNode(position));
+      const depth = float(SEA_LEVEL_M).sub(landReadNode(position));
       weight.assign(smoothstep(0, WATER_LOD_SPIKE_UNIFORMS.shoreRampM, depth));
     });
     return weight;
@@ -181,7 +224,7 @@ export function shoreWeightNode(position: any): any {
 /** CPU twin of {@link shoreWeightNode}. */
 export function shoreWeightAt(x: number, z: number): number {
   if ((WATER_LOD_SPIKE_UNIFORMS.shore.value as number) <= 0) return 1;
-  return shoreWeight(waterDepthM(x, z), WATER_LOD_SPIKE_UNIFORMS.shoreRampM.value as number);
+  return shoreWeight(waterDepthReadM(x, z), WATER_LOD_SPIKE_UNIFORMS.shoreRampM.value as number);
 }
 
 /** Footprint/wavelength ratio where the shading weight starts to fall, and where it reaches 0 (wavelengths of 2.9 and 1.4 pixels). */

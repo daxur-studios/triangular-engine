@@ -1,5 +1,6 @@
 import { LodSelector } from 'triangular-engine/lod-surface/core';
 import {
+  BAKED_LAND_K,
   COVER_MARGIN_M,
   ISLANDS,
   createLandCoverHook,
@@ -7,6 +8,9 @@ import {
   SHORE_LOOK,
   auditShore,
   auditShoreLook,
+  auditTerrainRead,
+  bakeWaterLodSpikeLand,
+  bakedLandHeightM,
   isDryByCentre,
   isDrySquare,
   landHeightM,
@@ -212,6 +216,44 @@ describe('water LOD spike shoreline review: foam and depth colour from the water
       expect(noFoamAtEdge.farFoam).toBeGreaterThan(0);
       expect(noFoamAtEdge.deepDeepness - noFoamAtEdge.shallowDeepness).toBe(0);
     });
+  });
+});
+
+describe('water LOD spike shoreline review: the water reads the terrain texture', () => {
+  const HALF_M = 2_500;
+  const STEP_M = 25;
+  const analytic = (x: number, z: number) => landHeightM(x, z);
+  // One bake for the specs that need the shipped size (about half a second); the coarse control bakes small.
+  const fine = bakeWaterLodSpikeLand(PLANE_M, BAKED_LAND_K);
+
+  it('holds the analytic height exactly at a texel centre and describes its texture', () => {
+    // Texel (i, j) is at x = (i / cells - 0.5) * size and z = -(j / cells - 0.5) * size (PLANE_FRAME: u = +X, v = -Z); (1,100, 900) is off the centre.
+    const x = (1_100 / 2 ** BAKED_LAND_K - 0.5) * PLANE_M;
+    const z = -(900 / 2 ** BAKED_LAND_K - 0.5) * PLANE_M;
+    expect(bakedLandHeightM(fine, x, z)).toBeCloseTo(landHeightM(x, z), 3);
+    expect(fine.k).toBe(BAKED_LAND_K);
+    expect(fine.megabytes).toBeCloseTo(((2 ** BAKED_LAND_K + 1) ** 2 * 4) / 1e6, 3);
+  });
+
+  it('keeps the water depth within a quarter of a metre of the analytic depth and flips no point away from the waterline', () => {
+    const audit = auditTerrainRead(analytic, (x, z) => bakedLandHeightM(fine, x, z), HALF_M, STEP_M);
+
+    expect(audit.points).toBeGreaterThan(40_000);
+    expect(audit.nearWaterline).toBeGreaterThan(0);
+    expect(audit.maxDepthErrorM).toBeLessThanOrEqual(0.25);
+    expect(audit.clearFlips).toBe(0);
+  });
+
+  it('control: a coarse bake (780 m texels) fails the same gate, so the gate can see a bad read', () => {
+    const coarse = bakeWaterLodSpikeLand(PLANE_M, 7);
+    const audit = auditTerrainRead(analytic, (x, z) => bakedLandHeightM(coarse, x, z), HALF_M, STEP_M);
+
+    expect(audit.maxDepthErrorM).toBeGreaterThan(0.25);
+  });
+
+  it('reads the same value at the plane edge as at the nearest texel and does not throw outside', () => {
+    expect(bakedLandHeightM(fine, PLANE_M / 2, 0)).toBeCloseTo(SEABED_M, 3);
+    expect(Number.isFinite(bakedLandHeightM(fine, PLANE_M, PLANE_M))).toBe(true);
   });
 });
 

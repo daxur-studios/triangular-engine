@@ -19,7 +19,7 @@
     <flatTerrain
       #landBody
       [size]="planeSizeM"
-      [heights]="landHeights"
+      [heights]="landSource()"
       view="shaded"
       [detailNoise]="0"
       [bounds]="false"
@@ -70,6 +70,9 @@
     </button>
     <button [class.active]="depthColour()" [disabled]="!land()" (click)="toggleDepthColour()">
       Depth colour
+    </button>
+    <button [class.active]="bakedTerrain()" [disabled]="!land()" (click)="toggleBakedTerrain()">
+      Baked terrain
     </button>
   </div>
   <label class="quality">

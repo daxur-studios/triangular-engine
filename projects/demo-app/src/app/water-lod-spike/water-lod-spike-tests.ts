@@ -9,7 +9,7 @@ import {
   type ILuminanceImage,
   type IRowRange,
 } from './core/water-lod-spike-image-metrics';
-import type { ILeafCull, IShoreAudit, IShoreLookAudit } from './core/water-lod-spike-land';
+import type { ILeafCull, IShoreAudit, IShoreLookAudit, ITerrainReadAudit } from './core/water-lod-spike-land';
 import { CONTROL_MIN_ERROR_RAD, MAX_PHASE_ERROR_RAD, type IPrecisionReport } from './core/water-lod-spike-precision';
 import { WATER_LOD_SPIKE_QUALITIES, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
 
@@ -24,7 +24,7 @@ export interface WaterLodSpikeTestSettings {
   readonly wireframe: boolean;
   readonly view?: WaterLodSpikeView;
   /** 'aliasing' runs the three aliasing arms instead of timing frames; 'precision' runs the Q5 phase-precision probe. */
-  readonly measure?: 'aliasing' | 'precision' | 'land' | 'cull' | 'shore' | 'shore-look';
+  readonly measure?: 'aliasing' | 'precision' | 'land' | 'cull' | 'shore' | 'shore-look' | 'terrain-read';
   /** Shore cases: the water body's detail noise on or off; restored afterwards. Omitted keeps the page's own setting. */
   readonly waterNoise?: boolean;
   /** Shore cases: the depth weight on the waves on or off; restored afterwards. Omitted keeps the page's own setting. */
@@ -99,6 +99,12 @@ export interface WaterLodSpikeTestHost {
   setDepthColour(enabled: boolean | null): void;
   /** The shore look gate over the audit grid with both looks on, judged against the land. */
   shoreLookAudit(): IShoreLookAudit;
+  /** The water and the land body read the terrain from the baked texture (on) or the analytic islands (off); null restores the page's own setting. */
+  setBakedTerrain(enabled: boolean | null): void;
+  /** The correctness gate for the baked read: the water depth from the baked texture against the analytic islands, over the audit grid. */
+  terrainReadAudit(): ITerrainReadAudit;
+  /** What the baked terrain texture is: texture size exponent, metres per texel, size and bake time. */
+  terrainReadInfo(): { readonly k: number; readonly texelM: number; readonly megabytes: number; readonly bakeMs: number };
   /** Runs the Q5 phase-precision compute kernel on the page's renderer and compares it with the double reference. */
   runPrecisionProbe(): Promise<IPrecisionReport>;
   environment(): Readonly<Record<string, TestSetting>>;
@@ -465,6 +471,63 @@ const WATER_LOD_SPIKE_SHORE_LOOK_V1: TestSuite<WaterLodSpikeTestSettings> = {
   ],
 };
 
+/**
+ * Plan 080 shoreline review, experiment 5 (ER 080, 2026-11-02): the water reads the terrain's own baked height texture (the
+ * library's plane bake, 49 m texels) instead of the analytic islands. The gate is written before the first run.
+ *
+ * Correctness (CPU, the 5 km audit grid at 25 m): the water depth from the texture is within 0.25 m of the analytic depth
+ * everywhere, and no point more than 1 m from the waterline changes between wet and dry.
+ *
+ * No crescents (CPU, as the shore suite): with the baked read, noise off and the shore weight on, no dry point of the baked land
+ * has water above it (tolerance 5 cm).
+ *
+ * Same picture (GPU, coast view, waves frozen): the frame with the baked read differs from the analytic frame by under 1.5
+ * levels of luminance on average, and under 0.5 % of pixels differ by more than 24 levels. The land body draws the texture's
+ * own texels in the baked frame, so this also shows the land the player sees and the land the water reads are one.
+ *
+ * Cost (GPU timestamps, coast view, analytic / baked / analytic / baked, 3 s each after warm-up): the baked read costs at most
+ * 25 % more GPU time per frame than the analytic one. Reported as well: both means, the difference, the texel size, the
+ * texture's size and the bake time.
+ */
+const WATER_LOD_SPIKE_TERRAIN_READ_V1: TestSuite<WaterLodSpikeTestSettings> = {
+  id: 'water-lod-spike-terrain-read',
+  version: 1,
+  title: 'Water LOD spike shoreline review: the water reads the terrain texture',
+  purpose: 'performance',
+  scenarios: [
+    {
+      id: 'coast-view',
+      label: 'Coast: baked terrain read against the analytic islands',
+      settings: {
+        wireframe: false,
+        measure: 'terrain-read' as const,
+        land: true,
+        waterNoise: false,
+        shore: true,
+        view: { position: [300, 50, 500], target: [0, 5, -150] } as WaterLodSpikeView,
+      },
+      durationMs: 1000,
+      warmupMs: 500,
+    },
+  ],
+};
+
+/**
+ * v2 renders the same case at three times the page's pixel ratio. v1's first run passed every correctness check but could not
+ * resolve the cost: the coast view takes about 1 ms of GPU time and the timestamp queries step in 0.1 ms, so both reads showed
+ * exactly 1.00 ms. The read is per pixel, so nine times the pixels makes it nine times larger against the timer step. The gates
+ * are v1's.
+ */
+const WATER_LOD_SPIKE_TERRAIN_READ_V2: TestSuite<WaterLodSpikeTestSettings> = {
+  ...WATER_LOD_SPIKE_TERRAIN_READ_V1,
+  version: 2,
+  title: 'Water LOD spike shoreline review: the water reads the terrain texture (at 3x pixel ratio)',
+  scenarios: WATER_LOD_SPIKE_TERRAIN_READ_V1.scenarios.map((scenario) => ({
+    ...scenario,
+    settings: { ...scenario.settings, pixelRatio: 3 },
+  })),
+};
+
 /** Every version of the W0b suites, oldest first. Add a new entry when a case changes; keep old ones. */
 export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestSettings>[] = [
   WATER_LOD_SPIKE_V1,
@@ -481,6 +544,8 @@ export const WATER_LOD_SPIKE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeTestS
   WATER_LOD_SPIKE_CULL_V1,
   WATER_LOD_SPIKE_SHORE_V1,
   WATER_LOD_SPIKE_SHORE_LOOK_V1,
+  WATER_LOD_SPIKE_TERRAIN_READ_V1,
+  WATER_LOD_SPIKE_TERRAIN_READ_V2,
 ];
 
 const REFERENCE_SAMPLES = 32;
@@ -848,6 +913,108 @@ async function measureShoreLook(
   };
 }
 
+/** Largest difference between the baked and the analytic water depth, metres (the 49 m texel's bilinear error on these islands is about 0.1 m). */
+const TERRAIN_READ_MAX_DEPTH_ERROR_M = 0.25;
+/** Largest mean luminance difference (0..255 levels) between the analytic frame and the baked frame. */
+const TERRAIN_READ_MAX_MEAN_DIFF = 1.5;
+/** A pixel counts as different from this many levels; at most {@link TERRAIN_READ_MAX_DIFF_SHARE} of them may. */
+const TERRAIN_READ_DIFF_LEVELS = 24;
+const TERRAIN_READ_MAX_DIFF_SHARE = 0.005;
+/** The baked read may cost at most this multiple of the analytic read's GPU frame time. */
+const TERRAIN_READ_MAX_COST_RATIO = 1.25;
+const TERRAIN_READ_COST_WARMUP_MS = 1500;
+const TERRAIN_READ_COST_SAMPLES = 3;
+
+const mean = (values: readonly number[]): number => (values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : Number.NaN);
+
+/** Waits for the land body to be drawn again after the heights it draws changed (the body is rebuilt), then lets the frame settle. */
+async function settleTerrain(host: WaterLodSpikeTestHost, context: TestContext): Promise<void> {
+  await host.waitFrames(5, context);
+  for (let waited = 0; !host.landDrawn() && waited < 60_000; waited += 100) await context.wait(100);
+  await host.waitFrames(SETTLE_FRAMES, context);
+}
+
+/** The frame's mean luminance difference from `other`, and the share of pixels that differ by more than `levels`. */
+function frameDifference(image: ILuminanceImage, other: ILuminanceImage, levels: number): { readonly meanDiff: number; readonly share: number } {
+  let sum = 0;
+  let over = 0;
+  const count = Math.min(image.values.length, other.values.length);
+  for (let n = 0; n < count; n++) {
+    const diff = Math.abs(image.values[n] - other.values[n]);
+    sum += diff;
+    if (diff > levels) over++;
+  }
+  return { meanDiff: sum / count, share: over / count };
+}
+
+async function gpuMeanMs(host: WaterLodSpikeTestHost, context: TestContext): Promise<number> {
+  await context.wait(TERRAIN_READ_COST_WARMUP_MS);
+  const samples: number[] = [];
+  for (let n = 0; n < TERRAIN_READ_COST_SAMPLES; n++) {
+    await context.wait(1000);
+    const sample = host.gpuFrameMs();
+    if (sample !== null) samples.push(sample);
+  }
+  return mean(samples);
+}
+
+async function measureTerrainRead(host: WaterLodSpikeTestHost, context: TestContext): Promise<TestObservation> {
+  for (let waited = 0; !host.landDrawn() && waited < 60_000; waited += 100) await context.wait(100);
+  await host.waitFrames(SETTLE_FRAMES, context);
+  const info = host.terrainReadInfo();
+  const depth = host.terrainReadAudit();
+  host.setBakedTerrain(false);
+  await settleTerrain(host, context);
+  const analyticFrame = host.readFrame(0, 0);
+  const analyticMs = [await gpuMeanMs(host, context)];
+  host.setBakedTerrain(true);
+  await settleTerrain(host, context);
+  const bakedFrame = host.readFrame(0, 0);
+  const crescents = host.shoreAudit(SHORE_AUDIT_TIMES_S);
+  const bakedMs = [await gpuMeanMs(host, context)];
+  host.setBakedTerrain(false);
+  await settleTerrain(host, context);
+  analyticMs.push(await gpuMeanMs(host, context));
+  host.setBakedTerrain(true);
+  await settleTerrain(host, context);
+  bakedMs.push(await gpuMeanMs(host, context));
+  host.setBakedTerrain(null);
+  const difference = frameDifference(bakedFrame, analyticFrame, TERRAIN_READ_DIFF_LEVELS);
+  const analytic = mean(analyticMs);
+  const baked = mean(bakedMs);
+  const ratio = baked / analytic;
+  const counts = host.counts();
+  return {
+    metrics: [
+      { name: 'texture cell size', unit: 'm', source: 'bake layout', samples: [info.texelM] },
+      { name: 'texture size', unit: 'MB', source: 'bake', samples: [info.megabytes] },
+      { name: 'bake time', unit: 'ms', source: 'CPU, one bake', samples: [info.bakeMs] },
+      { name: 'grid points compared', unit: 'points', source: 'CPU grid, 25 m', samples: [depth.points] },
+      { name: 'largest depth error, baked against analytic', unit: 'm', source: 'CPU grid', samples: [depth.maxDepthErrorM] },
+      { name: 'mean depth error', unit: 'm', source: 'CPU grid', samples: [depth.meanDepthErrorM] },
+      { name: 'wet or dry flips (all)', unit: 'points', source: 'CPU grid', samples: [depth.signFlips] },
+      { name: 'wet or dry flips more than 1 m from the waterline', unit: 'points', source: 'CPU grid', samples: [depth.clearFlips] },
+      { name: 'dry points with water above the baked land', unit: 'points', source: 'CPU, body heightAt', samples: [crescents.violations] },
+      { name: 'mean luminance difference, baked against analytic frame', unit: 'levels', source: 'canvas readback, 0..255', samples: [difference.meanDiff] },
+      { name: `pixels differing by more than ${TERRAIN_READ_DIFF_LEVELS} levels`, unit: 'ratio', source: 'canvas readback', samples: [difference.share] },
+      { name: 'GPU frame, analytic read', unit: 'ms', source: 'WebGPU timestamp queries, 1 s averages', samples: analyticMs },
+      { name: 'GPU frame, baked read', unit: 'ms', source: 'WebGPU timestamp queries, 1 s averages', samples: bakedMs },
+      { name: 'GPU frame, baked over analytic', unit: 'ratio', source: 'means of the two', samples: [ratio] },
+    ],
+    checks: [
+      { name: 'water body draws', passed: counts.drawCalls > 0, detail: `draw calls ${counts.drawCalls}` },
+      { name: 'the grid has waterline points', passed: depth.nearWaterline > 0, detail: `${depth.nearWaterline} points` },
+      { name: `baked depth within ${TERRAIN_READ_MAX_DEPTH_ERROR_M} m of the analytic depth`, passed: depth.maxDepthErrorM <= TERRAIN_READ_MAX_DEPTH_ERROR_M, detail: `worst ${depth.maxDepthErrorM.toFixed(3)} m` },
+      { name: 'no wet or dry flip more than 1 m from the waterline', passed: depth.clearFlips === 0, detail: `${depth.clearFlips} points (${depth.signFlips} flips in all)` },
+      { name: 'no crescents with the baked read (noise off, weight on)', passed: crescents.violations === 0, detail: `${crescents.violations} of ${crescents.dryPoints} dry points, worst ${crescents.maxExcessM.toFixed(3)} m` },
+      { name: `same picture: mean luminance within ${TERRAIN_READ_MAX_MEAN_DIFF} levels`, passed: difference.meanDiff <= TERRAIN_READ_MAX_MEAN_DIFF, detail: `${difference.meanDiff.toFixed(3)} levels` },
+      { name: `same picture: under ${TERRAIN_READ_MAX_DIFF_SHARE * 100} % of pixels differ by over ${TERRAIN_READ_DIFF_LEVELS} levels`, passed: difference.share <= TERRAIN_READ_MAX_DIFF_SHARE, detail: `${(difference.share * 100).toFixed(3)} %` },
+      { name: 'GPU time measured for both reads', passed: Number.isFinite(ratio), detail: `analytic ${analytic.toFixed(3)} ms, baked ${baked.toFixed(3)} ms` },
+      { name: `the baked read costs at most ${Math.round((TERRAIN_READ_MAX_COST_RATIO - 1) * 100)} % more GPU time`, passed: ratio <= TERRAIN_READ_MAX_COST_RATIO, detail: `x${ratio.toFixed(3)} (${(baked - analytic).toFixed(3)} ms)` },
+    ],
+  };
+}
+
 async function measureFrames(host: WaterLodSpikeTestHost, durationMs: number, context: TestContext, gpu: boolean): Promise<TestObservation> {
   host.beginFrameSampling();
   const gpuMs: number[] = [];
@@ -905,6 +1072,7 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
       host.setShore(null);
       host.setFoam(null);
       host.setDepthColour(null);
+      host.setBakedTerrain(null);
     },
     ready: async (context) => {
       while (!host.ready()) {
@@ -919,6 +1087,7 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
       if (scenario.settings.measure === 'cull') return measureCull(host, scenario, context);
       if (scenario.settings.measure === 'shore') return measureShore(host, scenario, context);
       if (scenario.settings.measure === 'shore-look') return measureShoreLook(host, scenario, context);
+      if (scenario.settings.measure === 'terrain-read') return measureTerrainRead(host, context);
       const observation = await measureFrames(host, scenario.durationMs, context, scenario.settings.view !== undefined);
       return {
         ...observation,

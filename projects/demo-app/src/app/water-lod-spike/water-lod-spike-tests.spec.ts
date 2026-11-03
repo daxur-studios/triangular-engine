@@ -89,6 +89,9 @@ function makeHost(overrides: Partial<WaterLodSpikeTestHost> = {}): WaterLodSpike
     setFoam: () => undefined,
     setDepthColour: () => undefined,
     shoreLookAudit: () => ({ wetPoints: 20000, edgePoints: 900, edgeGaps: 0, farFoam: 0, shallowDeepness: 0.05, deepDeepness: 0.95 }),
+    setBakedTerrain: () => undefined,
+    terrainReadAudit: () => ({ points: 40000, maxDepthErrorM: 0.1, meanDepthErrorM: 0.01, signFlips: 12, clearFlips: 0, nearWaterline: 900 }),
+    terrainReadInfo: () => ({ k: 11, texelM: 48.8, megabytes: 16.8, bakeMs: 300 }),
     environment: () => ({ backend: 'webgpu' }),
     ...overrides,
   };
@@ -598,6 +601,98 @@ describe('createWaterLodSpikeTestAdapter', () => {
       const suite = WATER_LOD_SPIKE_TEST_HISTORY.find((entry) => entry.id === 'water-lod-spike-shore-look');
       expect(suite?.version).toBe(1);
       expect(suite?.scenarios.map((scenario) => scenario.settings.measure)).toEqual(['shore-look']);
+    });
+  });
+
+  describe('terrain read case', () => {
+    const READ_SCENARIO: TestScenario<WaterLodSpikeTestSettings> = {
+      id: 'coast-view',
+      label: 'Coast',
+      settings: { wireframe: false, measure: 'terrain-read', land: true, waterNoise: false, shore: true },
+      durationMs: 1000,
+      warmupMs: 500,
+    };
+    const failed = (observation: Awaited<ReturnType<ReturnType<typeof createWaterLodSpikeTestAdapter>['measure']>>) =>
+      (observation.checks ?? []).filter((check) => !check.passed).map((check) => check.name);
+
+    /** A page whose frame and GPU time follow the baked switch: `diff` levels brighter over `share` of the frame, and `ms` per frame when baked. */
+    const readHost = (frame: { diff?: number; share?: number } = {}, bakedMs = 0.8, overrides: Partial<WaterLodSpikeTestHost> = {}) => {
+      let baked = false;
+      return makeHost({
+        setBakedTerrain: (enabled) => {
+          baked = enabled ?? false;
+        },
+        gpuFrameMs: () => (baked ? bakedMs : 0.8),
+        readFrame: (): ILuminanceImage => {
+          const values = new Float32Array(WIDTH * HEIGHT).fill(80);
+          if (baked && frame.diff) values.fill(80 + frame.diff, 0, Math.round(values.length * (frame.share ?? 1)));
+          return { width: WIDTH, height: HEIGHT, values };
+        },
+        ...overrides,
+      });
+    };
+
+    it('passes when the baked read matches the analytic one at about the same cost', async () => {
+      const host = readHost({}, 0.85);
+      const observation = await createWaterLodSpikeTestAdapter(host).measure(READ_SCENARIO, makeContext(host.calls));
+
+      expect(failed(observation)).toEqual([]);
+      expect(observation.metrics.find((metric) => metric.name === 'GPU frame, baked over analytic')?.samples[0]).toBeCloseTo(0.85 / 0.8, 3);
+    });
+
+    it('fails when the baked depth is off by more than the tolerance or flips the shore away from the waterline', async () => {
+      const host = readHost({}, 0.8, { terrainReadAudit: () => ({ points: 40000, maxDepthErrorM: 2.4, meanDepthErrorM: 0.3, signFlips: 300, clearFlips: 40, nearWaterline: 900 }) });
+      expect(failed(await createWaterLodSpikeTestAdapter(host).measure(READ_SCENARIO, makeContext(host.calls)))).toEqual([
+        'baked depth within 0.25 m of the analytic depth',
+        'no wet or dry flip more than 1 m from the waterline',
+      ]);
+    });
+
+    it('fails when crescents appear with the baked read', async () => {
+      const host = readHost({}, 0.8, { shoreAudit: () => ({ dryPoints: 9000, violations: 30, maxExcessM: 0.4, meanExcessM: 0.2 }) });
+      expect(failed(await createWaterLodSpikeTestAdapter(host).measure(READ_SCENARIO, makeContext(host.calls)))).toEqual([
+        'no crescents with the baked read (noise off, weight on)',
+      ]);
+    });
+
+    it('fails when the baked frame differs from the analytic frame', async () => {
+      const host = readHost({ diff: 40, share: 0.02 });
+      expect(failed(await createWaterLodSpikeTestAdapter(host).measure(READ_SCENARIO, makeContext(host.calls)))).toEqual([
+        'same picture: under 0.5 % of pixels differ by over 24 levels',
+      ]);
+      const shifted = readHost({ diff: 3, share: 1 });
+      expect(failed(await createWaterLodSpikeTestAdapter(shifted).measure(READ_SCENARIO, makeContext(shifted.calls)))).toEqual([
+        'same picture: mean luminance within 1.5 levels',
+      ]);
+    });
+
+    it('fails when the baked read costs much more GPU time, or no time can be measured', async () => {
+      const slow = readHost({}, 1.2);
+      expect(failed(await createWaterLodSpikeTestAdapter(slow).measure(READ_SCENARIO, makeContext(slow.calls)))).toEqual([
+        'the baked read costs at most 25 % more GPU time',
+      ]);
+      const blind = readHost({}, 0.8, { gpuFrameMs: () => null });
+      expect(failed(await createWaterLodSpikeTestAdapter(blind).measure(READ_SCENARIO, makeContext(blind.calls)))).toEqual([
+        'GPU time measured for both reads',
+        'the baked read costs at most 25 % more GPU time',
+      ]);
+    });
+
+    it('puts the page back afterwards and is in the suite history', async () => {
+      const baked: (boolean | null)[] = [];
+      const host = makeHost({ setBakedTerrain: (enabled) => baked.push(enabled) });
+      const adapter = createWaterLodSpikeTestAdapter(host);
+      const context = makeContext(host.calls);
+      const snapshot = await adapter.capture(context);
+      await adapter.restore(snapshot, context);
+
+      expect(baked).toEqual([null]);
+      const suite = WATER_LOD_SPIKE_TEST_HISTORY.find((entry) => entry.id === 'water-lod-spike-terrain-read');
+      expect(suite?.version).toBe(1);
+      expect(suite?.scenarios.map((scenario) => scenario.settings.measure)).toEqual(['terrain-read']);
+      const second = WATER_LOD_SPIKE_TEST_HISTORY.filter((entry) => entry.id === 'water-lod-spike-terrain-read').find((entry) => entry.version === 2);
+      expect(second?.scenarios.map((scenario) => scenario.settings.pixelRatio)).toEqual([3]);
+      expect(suite?.scenarios.map((scenario) => scenario.settings.pixelRatio)).toEqual([undefined]);
     });
   });
 

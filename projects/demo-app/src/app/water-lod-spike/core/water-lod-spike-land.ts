@@ -1,9 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { exp, float, vec3 } from 'three/tsl';
+import { clamp, exp, float, int, vec2, vec3 } from 'three/tsl';
 import {
+  MAX_LATTICE_STEPS,
+  bakeHeights,
+  createTextureHeightSource,
   domainPoint,
   frustumNormals,
   type CameraAxes,
+  type TextureHeightSource,
   type HeightSource,
   type LodDomain,
   type LodSelector,
@@ -179,6 +183,7 @@ export function auditShore(
   stepM: number,
   toleranceM = 0.05,
   islands: readonly IIsland[] = ISLANDS,
+  landAt: (x: number, z: number) => number = (x, z) => landHeightM(x, z, islands),
 ): IShoreAudit {
   let dry = 0;
   let violations = 0;
@@ -186,7 +191,7 @@ export function auditShore(
   let excessSum = 0;
   for (let x = -halfM; x <= halfM; x += stepM) {
     for (let z = -halfM; z <= halfM; z += stepM) {
-      const land = landHeightM(x, z, islands);
+      const land = landAt(x, z);
       if (land <= SEA_LEVEL_M) continue;
       dry++;
       const excess = waterAt(x, z) - land;
@@ -324,6 +329,102 @@ export function landHeightNode(position: any, islands: readonly IIsland[] = ISLA
     h = h.add(exp(dx.mul(dx).add(dz.mul(dz)).div(-2 * island.sigmaM * island.sigmaM)).mul(island.peakM));
   }
   return h;
+}
+
+/**
+ * The islands baked into the library's plane height texture (ER 080, shoreline review, experiment 5): what a real terrain gives
+ * the water. `source` is the `TextureHeightSource` the land's `<flatTerrain>` draws and the water reads, so both see the same
+ * texels. `bakeMs` is the CPU time of the bake and `megabytes` the texture's size.
+ */
+export interface IBakedLand {
+  readonly source: TextureHeightSource;
+  /** Side of the square the texture covers, metres. */
+  readonly sizeM: number;
+  /** Texture size exponent: 2^k texel cells per side. */
+  readonly k: number;
+  readonly bakeMs: number;
+  readonly megabytes: number;
+}
+
+/** Texture size exponent of the spike's baked land: 2^11 cells over 100 km is 49 m per texel (16.8 MB). */
+export const BAKED_LAND_K = 11;
+
+/** Bakes the islands over a `sizeM` square at 2^`k` texel cells per side. Deterministic. */
+export function bakeWaterLodSpikeLand(sizeM: number, k: number = BAKED_LAND_K, islands: readonly IIsland[] = ISLANDS): IBakedLand {
+  const began = performance.now();
+  const baked = bakeHeights({ kind: 'plane', warp: 'equal-angle', sizeM, k }, (x, _y, z) => landHeightM(x, z, islands));
+  const bakeMs = performance.now() - began;
+  return { source: createTextureHeightSource('bumps-baked', baked), sizeM, k, bakeMs, megabytes: baked.texels.byteLength / 1e6 };
+}
+
+/**
+ * TSL height of the baked land at a plane-frame position node: the library's own lattice read (four texel loads and a
+ * float32 bilinear blend), with the lattice coordinate from the position (PLANE_FRAME: u = +X, v = -Z), clamped to the texture.
+ */
+export function bakedLandHeightNode(land: IBakedLand, position: any): any {
+  const steps = MAX_LATTICE_STEPS;
+  const lattice = vec2(
+    clamp(position.x.div(land.sizeM).add(0.5).mul(steps), 0, steps),
+    clamp(position.z.negate().div(land.sizeM).add(0.5).mul(steps), 0, steps),
+  );
+  return land.source.lattice!.heightNode(int(0), lattice);
+}
+
+/** CPU twin of {@link bakedLandHeightNode}: the same texels and float32 arithmetic. */
+export function bakedLandHeightM(land: IBakedLand, x: number, z: number): number {
+  return land.source.heightAt(x, 0, z);
+}
+
+/** What {@link auditTerrainRead} finds. */
+export interface ITerrainReadAudit {
+  /** Grid points compared. */
+  readonly points: number;
+  /** Largest |D(baked) - D(analytic)| over the grid, metres. */
+  readonly maxDepthErrorM: number;
+  /** Mean of the same, metres. */
+  readonly meanDepthErrorM: number;
+  /** Points where the two disagree on wet or dry, all of them. */
+  readonly signFlips: number;
+  /** Points that disagree on wet or dry although the analytic water depth is more than `clearM` from zero: there are none unless the bake is wrong. */
+  readonly clearFlips: number;
+  /** Points whose analytic depth is within `clearM` of the waterline (the only ones allowed to flip). */
+  readonly nearWaterline: number;
+}
+
+/**
+ * The correctness gate for the baked read (CPU): over a square grid, the water depth D from the baked land against D from the
+ * analytic islands. A bilinear texture cannot be exact between its texels, so the gate is on the error in metres and on wet/dry
+ * flips away from the waterline (where a flip only moves the shore by the error divided by the slope).
+ */
+export function auditTerrainRead(
+  analyticAt: (x: number, z: number) => number,
+  bakedAt: (x: number, z: number) => number,
+  halfM: number,
+  stepM: number,
+  clearM = 1,
+): ITerrainReadAudit {
+  let points = 0;
+  let maxError = 0;
+  let errorSum = 0;
+  let flips = 0;
+  let clearFlips = 0;
+  let near = 0;
+  for (let x = -halfM; x <= halfM; x += stepM) {
+    for (let z = -halfM; z <= halfM; z += stepM) {
+      const a = SEA_LEVEL_M - analyticAt(x, z);
+      const b = SEA_LEVEL_M - bakedAt(x, z);
+      const error = Math.abs(a - b);
+      points++;
+      errorSum += error;
+      if (error > maxError) maxError = error;
+      if (Math.abs(a) <= clearM) near++;
+      if (a > 0 !== b > 0) {
+        flips++;
+        if (Math.abs(a) > clearM) clearFlips++;
+      }
+    }
+  }
+  return { points, maxDepthErrorM: maxError, meanDepthErrorM: points > 0 ? errorSum / points : 0, signFlips: flips, clearFlips, nearWaterline: near };
 }
 
 /**

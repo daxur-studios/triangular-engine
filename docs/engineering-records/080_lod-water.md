@@ -285,6 +285,33 @@ The leaf cap (4096) was hit in every view.
 
 **Not done.** River-mouth mask; breaker lines that bend with the wave direction (they are contours of `D` only); foam from the wave's own crest (whitecaps); cost of the per-pixel land read (it is the same eight exponentials as the weight, now shared by foam and colour but still computed twice, once for the weight and once for the look: `shoreLookNode` and `shoreWeightNode` each read the land); experiment 5 (per-cell terrain heights) and the sphere.
 
+### 2026-11-02 (shoreline review, experiment 5): the water reads the terrain's baked height texture
+
+**What the terrain actually gives the water.** The review's plan said "water and terrain cells share quadtree addresses, so a water cell can read the terrain's own per-cell heights". The library has no per-cell height tiles. A baked terrain is one height texture per face (the plane has one layer; `TextureHeightSource`, `lod-height-texture.ts`), `2^k + 1` texels a side, read by lattice point with a float32 bilinear blend. So the experiment reads that texture by world position instead; no quadtree address is involved.
+
+**What was built (spike only, no library file).**
+- `core/water-lod-spike-land.ts`: `bakeWaterLodSpikeLand` bakes the islands with the library's `bakeHeights` on a plane layout and wraps them with `createTextureHeightSource`; `bakedLandHeightNode` turns a plane position into a lattice coordinate (`u = +X`, `v = -Z`, clamped) and calls the source's own `lattice.heightNode`, so the water uses the library's read, not a copy; `bakedLandHeightM` is the CPU twin; `auditTerrainRead` is the correctness gate.
+- `core/water-lod-spike-waves.ts`: `useBakedLand`, the `landBaked` uniform and `landReadNode`, which `shoreWeightNode` and `shoreLookNode` now call (weight, foam and colour all read the one switchable depth); `waterDepthReadM` is the CPU twin that the twins of the weight and the look use.
+- Page: **Baked terrain** button (off by default). It switches the water's depth read and the land body's heights to the baked texture together, so what is drawn and what the water reads are the same texels. The bake is made at page start (k = 11: 2,049 texels a side, 48.8 m per texel over the 100 km plane, 16.8 MB, about 1.1 s of CPU).
+
+**Suite `water-lod-spike-terrain-read`** (gates written before the first run). v1: CPU, over the 5 km audit grid, the baked depth is within 0.25 m of the analytic depth and no point more than 1 m from the waterline flips between wet and dry; with the baked read, noise off and the weight on, no dry point of the baked land has water above it; GPU, on the coast view the baked frame differs from the analytic frame by under 1.5 levels of mean luminance and under 0.5 % of pixels differ by over 24 levels; the baked read costs at most 25 % more GPU time. v2 is the same at three times the pixel ratio (see below). Specs: 104 of 104 in the demo app's water specs, including a coarse-bake control (780 m texels fail the 0.25 m gate).
+
+**Result** (headless Chrome on the NVIDIA adapter, one run each; the GPU was busy and throttled in v2, which is reported, not a rejection):
+- Correctness, both runs: largest depth error 0.24 m (mean 0.01 m), 5 wet or dry flips of 40,401 points, none more than 1 m from the waterline, 0 crescent points with the baked read, mean luminance difference 0.55 (v1) and 0.60 (v2) levels, no pixel over 24 levels. auto=pass.
+- Cost, v1: both reads gave exactly 1.00 ms. The coast view takes about 1 ms of GPU time and the timestamp queries step in 0.1 ms, so v1 could not resolve the cost.
+- Cost, v2 (3x pixel ratio): 6.57 ms analytic, 6.63 ms baked, ratio 1.02. Four texel loads and a bilinear blend per pixel cost about the same as the eight exponentials, within the timer's noise.
+- The earlier `water-lod-spike-shore` v1 and `water-lod-spike-shore-look` v1 suites, re-run after the switch went in, give the same numbers as before (625 / 565 / 276 / 0 violations; 672 waterline points, no gap, mean luminance 79.0 / 88.3 / 84.6).
+
+**What it shows and what it does not.**
+- The water can take its depth from the terrain's own texture with no change to the shore weight, foam or colour, at no measurable cost here. That is the part of the review's plan that held.
+- The margin on the depth gate is thin: 0.24 m against 0.25 m. The error is the texture's bilinear sag, curvature times texel squared over eight, so it falls fourfold per extra `k` (about 0.06 m at k = 12) and the texture grows fourfold (67 MB). Where the land is a flat beach, 0.24 m of depth is a long way along the ground (0.24 m over a slope of 0.01 is 24 m of waterline). These islands have steep shores; a real coast may not.
+- A global texture is the limit: one resolution over the whole body, set at bake time. The review's idea of finer per-cell reads near the shore needs terrain tiles the library does not have today.
+- Only the plane is covered. On a cube sphere the water's pixel stage needs the face and lattice coordinate of a direction (the library has this in CPU form, `latticeOfPosition`, and the vertex stage gets it from its own vertex); there is no TSL form for an arbitrary position, so that is new work. Not tried.
+- Not covered: a moving camera at the shore, real terrain (this is the spike's analytic islands baked), and a texture streamed in tiles.
+- The picture check was a headless screenshot of the baked arm by me (land drawn from the texture, foam line, shallows); the owner's eye is not in it.
+
+**Not done.** Sphere and cylinder reads; the cost of the extra texture on a body that already reads several; higher `k` or a second finer texture near the shore; whether to move the bake's `k` from the terrain's own setting.
+
 ## Scope history
 
 <!-- tri:scope-history -->
