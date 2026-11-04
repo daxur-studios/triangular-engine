@@ -2,11 +2,15 @@ import type { TestContext, TestScenario } from 'triangular-engine/testing';
 import type { SpherePoseId } from './core/water-lod-spike-sphere-poses';
 import {
   SPHERE_COST_ARMS,
+  SPHERE_DENSITY_ARMS,
+  SPHERE_SPLIT_ARMS,
   SPHERE_STACK_MAX_MS,
   WATER_LOD_SPIKE_SPHERE_TEST_HISTORY,
   createWaterLodSpikeSphereTestAdapter,
   sphereCostOrder,
+  sphereSplitOrder,
   type IWaterLodSpikeSphereLayers,
+  type IWaterLodSpikeSphereVariant,
   type WaterLodSpikeSphereTestHost,
   type WaterLodSpikeSphereTestSettings,
 } from './water-lod-spike-sphere-tests';
@@ -161,6 +165,91 @@ describe('water-lod-spike sphere cost suite', () => {
     spy.and.callFake(() => (now += 20_000));
     const observation = await createWaterLodSpikeSphereTestAdapter(never as WaterLodSpikeSphereTestHost).measure(SCENARIO, makeContext());
     expect(check(observation, 'every layer draws')?.passed).toBe(false);
+  });
+
+  describe('split suite', () => {
+    const SPLIT: TestScenario<WaterLodSpikeSphereTestSettings> = { ...SCENARIO, settings: { pose: 'coast-300m', measure: 'split' } };
+
+    it('is the second suite of the history with one case per pose', () => {
+      const suite = WATER_LOD_SPIKE_SPHERE_TEST_HISTORY[1];
+      expect(suite.id).toBe('water-lod-spike-sphere-split');
+      expect(suite.scenarios.every((s) => s.settings.measure === 'split')).toBe(true);
+      expect(suite.scenarios.length).toBe(4);
+    });
+
+    it('measures the seven arms and then the seven again in the opposite order', () => {
+      const order = sphereSplitOrder().map((arm) => arm.id);
+      expect(order.length).toBe(14);
+      expect(order.slice(7)).toEqual([...SPHERE_SPLIT_ARMS].reverse().map((arm) => arm.id));
+    });
+
+    it('holds each variant, reports each arm over the land, and hands the page its own back', async () => {
+      const held: (IWaterLodSpikeSphereVariant | null)[] = [];
+      let variant: IWaterLodSpikeSphereVariant | null = null;
+      const host = makeHost({ land: 2, water: 1, atmosphere: 0 }, {
+        setWaterVariant: (v) => { held.push(v); variant = v; },
+        gpuFrameMs: () => {
+          if (!host.layers.water) return 2;
+          const v = variant as IWaterLodSpikeSphereVariant | null;
+          return 2 + (v?.quadrature === false ? 0.2 : 0.6) + (v?.depthRead === false ? 0.1 : 0.2) + (v?.quality === 'low' ? 0.1 : 0.4);
+        },
+      });
+      const observation = await createWaterLodSpikeSphereTestAdapter(host).measure(SPLIT, makeContext());
+      const cost = (id: string) => metric(observation, `cost over the land, ${id}`)?.samples[0];
+      expect(cost('full')).toBeCloseTo(1.2, 9);
+      expect(cost('cheapest')).toBeCloseTo(0.4, 9);
+      expect(cost('no quadrature')).toBeCloseTo(0.8, 9);
+      expect(metric(observation, 'GPU frame, low quality')?.samples.length).toBe(2);
+      expect(held.length).toBe(15);
+      expect(held[held.length - 1]).toBeNull();
+      expect(observation.checks?.every((c) => c.passed)).toBe(true);
+    });
+
+    it('fails the variant check on a page that cannot hold one', async () => {
+      const host = makeHost({ land: 2, water: 1, atmosphere: 0 });
+      const observation = await createWaterLodSpikeSphereTestAdapter(host).measure(SPLIT, makeContext());
+      expect(check(observation, 'hold a water variant')?.passed).toBe(false);
+    });
+  });
+
+  describe('density suite', () => {
+    const DENSITY: TestScenario<WaterLodSpikeSphereTestSettings> = { ...SCENARIO, settings: { pose: 'orbit', measure: 'density' } };
+
+    it('is the third suite of the history with one case per pose', () => {
+      const suite = WATER_LOD_SPIKE_SPHERE_TEST_HISTORY[2];
+      expect(suite.id).toBe('water-lod-spike-sphere-density');
+      expect(suite.scenarios.every((s) => s.settings.measure === 'density')).toBe(true);
+      expect(suite.scenarios.length).toBe(4);
+    });
+
+    it('starts with the empty-frame baseline and measures every arm twice, the second pass reversed', () => {
+      expect(SPHERE_DENSITY_ARMS[0].variant).toBeNull();
+      const order = sphereSplitOrder(SPHERE_DENSITY_ARMS).map((arm) => arm.id);
+      expect(order.length).toBe(SPHERE_DENSITY_ARMS.length * 2);
+      expect(order.slice(SPHERE_DENSITY_ARMS.length)).toEqual([...SPHERE_DENSITY_ARMS].reverse().map((arm) => arm.id));
+    });
+
+    it('draws the water alone, holds each variant, reports each arm over the empty frame and hands the page its own back', async () => {
+      const held: (IWaterLodSpikeSphereVariant | null)[] = [];
+      let variant: IWaterLodSpikeSphereVariant | null = null;
+      const host = makeHost({ land: 2, water: 1, atmosphere: 0 }, {
+        setWaterVariant: (v) => { held.push(v); variant = v; },
+        gpuFrameMs: () => {
+          if (!host.layers.water) return 0.1;
+          expect(host.layers.land).toBe(false);
+          const v = variant as IWaterLodSpikeSphereVariant | null;
+          return 0.1 + (v?.waves === false ? 0.2 : 1) + (v?.mesh?.leafCap === 256 ? 0 : 0.5);
+        },
+      });
+      const observation = await createWaterLodSpikeSphereTestAdapter(host).measure(DENSITY, makeContext());
+      const cost = (id: string) => metric(observation, `cost over an empty frame, ${id}`)?.samples[0];
+      expect(cost('ultra')).toBeCloseTo(1.5, 9);
+      expect(cost('ultra, no waves')).toBeCloseTo(0.7, 9);
+      expect(cost('cap 256')).toBeCloseTo(1, 9);
+      expect(held.length).toBe(SPHERE_DENSITY_ARMS.length * 2 + 1);
+      expect(held[held.length - 1]).toBeNull();
+      expect(observation.checks?.every((c) => c.passed)).toBe(true);
+    });
   });
 
   it('holds the pose for a case and hands the page its own layers and camera back afterwards', async () => {

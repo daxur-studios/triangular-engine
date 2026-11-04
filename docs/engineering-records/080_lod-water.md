@@ -461,7 +461,52 @@ Launch link (auto-starts): `http://triangular-demo.localhost:4200/water-lod-spik
 - The water body alone is 0.75 to 0.92 of the whole stack's GPU time. Its triangles equal the land's or exceed them (water 613k, 605k, 630k, 928k; land 613k, 614k, 1.33M, 1.33M).
 - The other check at every pose, "land and land + water arms are at least 0.5 ms", failed too (shortest 0.2 to 0.4 ms). That is a flaw in the suite's design and not a measurement fault: the land alone is cheaper than the floor the check demands, so the marginal cost cannot be called "readable" by that rule even where it plainly is.
 - CPU frame stayed at 0.6 to 1.5 ms. The longest frame after a layer switch reached 25 to 97 ms for the arms that add water (pipeline compile), against about 6 ms for the land alone.
-- **Not diagnosed.** The cost rises as the camera nears the water (1.5 to 3.3 ms), which points at the fragment stage (nine-sample quadrature, depth read for shore and colour) and the 64-wave vertex stage over 600k to 900k triangles. Which one dominates has not been measured. The water also draws a full-density lattice under the land, which the cover hook was meant to remove.
+- The cost rises as the camera nears the water (1.5 to 3.3 ms). The split run below measures what it is made of. The water also draws a full-density lattice under the land, which the cover hook was meant to remove.
+
+**Cost split run (2026-11-03 23:11, visible browser, RTX 3080, one repetition, `water-lod-spike-sphere-split@1`; result file `water-lod-spike-sphere-split@v1/2026-11-03T23-11-59-062Z_visible-browser_feef06dd-e3b0c442.json`).** Land with the atmosphere off, then the water in seven arms, each twice (second pass reversed). Nothing is gated. The machine again reported `gpu-busy-before-start` and `gpu-throttled` (GPU 79 % busy, 78 C), and timestamps come in 0.1 ms steps, so differences under about 0.2 ms are noise. Cost over the land, in ms:
+
+| Arm | orbit | 20 km | coast 300 m | eye 2 m |
+|---|---|---|---|---|
+| full (ultra) | 1.42 | 2.70 | 2.60 | 2.95 |
+| no quadrature | 1.35 | 2.40 | 2.33 | 2.82 |
+| no depth read | 1.40 | 2.48 | 2.68 | 3.18 |
+| plain shading (both off) | 1.33 | 2.18 | 2.32 | 2.83 |
+| low quality | 0.30 | 1.00 | 1.18 | 0.98 |
+| cheapest (low, plain) | 0.30 | 0.55 | 1.00 | 1.03 |
+
+Water triangles: 1.22M at ultra against 0.10M to 0.22M at low (the land alone is 0.61M to 1.33M).
+- **The fragment stage is not the cost.** Removing the quadrature and the depth read together saves 0.1 to 0.5 ms of 1.4 to 3.0 ms, and the eye pose, where the water fills the screen, saves 0.1. The shading is a small part, not the dominant one.
+- **Triangle count and the vertex stage are.** Dropping to the low tier (about a sixth to a tenth of the triangles) removes 1.1 to 1.9 ms at every pose and lands at 0.3 to 1.2 ms. The ultra tier's water mesh is as large as the land's or larger, and it is drawn over the whole sphere including under the land.
+- **What remains at low quality** is about 1 ms at the close poses even with plain shading, against 0.3 at orbit. That fits the 64-wave vertex stage and full-screen overdraw on top of the land, but this run does not separate them.
+- **Not diagnosed yet.** Whether the vertex waves or the overdraw is the remaining ~1 ms, and what the triangle count alone costs. The 0.5 ms gate is not met at any tier on this machine state. The hidden-under-land share was never measured, and the cost is large from orbit and at 20 km where land covers little, so the cover hook is a side issue, not the lead.
+- **Confound in the "low quality" and "cheapest" arms above.** The page gave the land body the water's quality tier, so those two arms also dropped the land's density (4096 to 256 leaves) while the baseline "land" arm kept it at ultra. Their "cost over the land" is therefore understated. The page now gives the land the ultra mesh always (`landTier`), so a rerun of the split suite is clean; the table above stands for the other five arms.
+
+### Density run (suite `water-lod-spike-sphere-density` v1, 2026-11-03 23:52, visible browser, RTX 3080)
+
+Water alone (no land, no atmosphere) at the four poses, against an empty frame (0.00 ms). Ultra; ultra with every wave off in both stages (the mesh and the plain shading only); ultra without the quadrature; 4 px cells with 1024 and with 256 leaves; 10 px cells at the ultra leaf cap; the low tier's wave bias on the ultra mesh; the high and low tiers. Each arm twice, the second pass reversed; nothing gated. Machine warnings: GPU busy before start (71%), another app measuring. Timestamps come in 0.1 ms steps.
+
+GPU ms of the water alone (triangles in thousands below):
+
+| arm | orbit | 20 km | coast 50 m | eye 2 m |
+|---|---|---|---|---|
+| ultra | 1.60 | 2.85 | 3.53 | 5.67 |
+| ultra, no waves | 1.37 | 2.25 | 2.25 | 3.80 |
+| ultra, plain (no quadrature) | 1.32 | 2.45 | 3.15 | 5.17 |
+| cap 1024 | 1.35 | 1.85 | 2.35 | 2.93 |
+| cap 256 | 0.50 | 1.40 | 1.63 | 1.85 |
+| cells 10 px, cap 4096 | 0.50 | 2.70 | 3.50 | 5.43 |
+| bias 4 | 1.25 | 2.60 | 3.50 | 5.67 |
+| high | 0.90 | 1.70 | 2.30 | 2.78 |
+| low | 0.50 | 1.00 | 1.70 | 1.57 |
+
+Triangles (k), ultra / cap 1024 / cap 256 / low: orbit 613 / 524 / 131 / 109; 20 km 605 / 166 / 53 / 53; coast 611 / 178 / 57 / 57; eye 928 / 271 / 58 / 58.
+
+- **The triangle count is the largest cost, with no land.** The flat ultra mesh with every wave off costs 1.4, 2.3, 2.3 and 3.8 ms. Cutting the leaf cap to 1024 saves 0.25, 1.0, 1.2 and 2.7 ms; to 256, 1.1, 1.5, 1.9 and 3.8 ms.
+- **The wave work is second and grows as the camera nears:** ultra minus no-waves is 0.2, 0.6, 1.3 and 1.9 ms. It is mostly the vertex stage: the wave bias (fragment gate only) changes nothing at the close poses, while the quadrature is 0.3 to 0.5 ms at every pose.
+- **A floor remains with a small mesh:** about 1.0 ms at 20 km and 1.6 to 1.9 ms at the two close poses with 53k to 58k triangles. Fragment cost over a screen full of water, or the vertex stage's fixed cost, is the next thing to separate.
+- **Open question:** the leaf cap does not bound the triangle count the way its name says at orbit (cap 1024 still draws 524k of 613k triangles). Read the selector before choosing a default.
+- **Cells of 10 px alone do nothing at 20 km and closer:** the mesh there is cap-limited, not cell-limited. The cap is the control that works.
+- **The 0.5 ms gate is not met by any arm except at orbit** (cap 256, 10 px cells and low, all 0.50 there). Hidden-under-land water was not part of this run and is not the cause: the land was off.
 
 ## Scope history
 

@@ -17,11 +17,15 @@ import {
   createWaterLodSpikeSphereTestAdapter,
   WATER_LOD_SPIKE_SPHERE_TEST_HISTORY,
   type IWaterLodSpikeSphereLayers,
+  type IWaterLodSpikeSphereVariant,
   type WaterLodSpikeSphereTestSettings,
 } from './water-lod-spike-sphere-tests';
 
 const FOV_DEG = 60;
 const THUMBNAIL_WIDTH_PX = 480;
+/** Density suite "no waves" arm: a cell size and a footprint bias so large that the spacing filter and the footprint gate drop every wave. */
+const NO_WAVES_CELL_PIXELS = 1e5;
+const NO_WAVES_LOD_BIAS = 1e5;
 const SOFTWARE = /swiftshader|llvmpipe|software|basic render|microsoft basic/i;
 
 interface RendererLike {
@@ -97,7 +101,14 @@ export class WaterLodSpikeSphereComponent {
   readonly quality = signal<WaterLodSpikeQualityId>('ultra');
   /** Mouse orbit: the canvas drags, looks and zooms the camera. Off by default. */
   readonly freeOn = signal(false);
-  protected readonly qualityTier = computed(() => waterLodSpikeQuality(this.quality()));
+  /** The water's tier: the slider's, with the mesh inputs of a held density variant in place of the tier's. */
+  protected readonly qualityTier = computed(() => {
+    const tier = waterLodSpikeQuality(this.quality());
+    const mesh = this.heldVariant()?.mesh;
+    return mesh ? { ...tier, cellPixels: mesh.cellPixels, leafCap: mesh.leafCap } : tier;
+  });
+  /** The land's mesh: always the ultra tier's, so a water quality change (or a test arm) never changes the land's cost. */
+  protected readonly landTier = waterLodSpikeQuality('ultra');
   protected readonly qualityIndex = computed(() => WATER_LOD_SPIKE_QUALITIES.findIndex((tier) => tier.id === this.quality()));
   readonly drawCalls = signal(0);
   readonly triangles = signal(0);
@@ -116,6 +127,9 @@ export class WaterLodSpikeSphereComponent {
   /** A test case's holds; null while the page's own settings stand. */
   private readonly heldPose = signal<SpherePoseId | null>(null);
   private savedLayers: IWaterLodSpikeSphereLayers | null = null;
+  /** The split suite's water variant while it holds one, and the page's own quality tier to hand back. */
+  private readonly heldVariant = signal<IWaterLodSpikeSphereVariant | null>(null);
+  private savedQuality: WaterLodSpikeQualityId | null = null;
 
   private renderedFrames = 0;
   private frameTimes: number[] | null = null;
@@ -184,6 +198,7 @@ export class WaterLodSpikeSphereComponent {
       ready: () => this.runnerReady(),
       setPose: (id) => this.heldPose.set(id),
       setLayers: (layers) => this.holdLayers(layers),
+      setWaterVariant: (variant) => this.holdWaterVariant(variant),
       drawn: () => ({
         land: this.landOn() && this.landBody()?.terrain()?.object.visible === true,
         water: this.waterOn() && this.waterBody()?.terrain()?.object.visible === true,
@@ -314,6 +329,24 @@ export class WaterLodSpikeSphereComponent {
     this.quality.set(id);
   }
 
+  /**
+   * Holds the water at a split-suite variant (null restores the page's own): the quadrature (`transfer` uniform), the depth read
+   * (shore, foam and depth colour together) and the quality tier. `update` reads `heldVariant` for the depth read each tick.
+   */
+  private holdWaterVariant(variant: IWaterLodSpikeSphereVariant | null): void {
+    if (variant && this.savedQuality === null) this.savedQuality = this.quality();
+    this.heldVariant.set(variant);
+    this.rig.setTransfer(variant ? variant.quadrature : true);
+    this.setQuality(variant ? variant.quality : (this.savedQuality ?? this.quality()));
+    if (!variant) this.savedQuality = null;
+    // Density suite: the tier's uniforms set above, then the variant's own bias, and no waves = every wave filtered out in both stages.
+    if (variant?.lodBias !== undefined) this.rig.uniforms.lodBias.value = variant.lodBias;
+    if (variant?.waves === false) {
+      this.rig.uniforms.cellPixels.value = NO_WAVES_CELL_PIXELS;
+      this.rig.uniforms.lodBias.value = NO_WAVES_LOD_BIAS;
+    }
+  }
+
   /** Puts the layers as a test case asks (null restores what the page had). */
   private holdLayers(layers: IWaterLodSpikeSphereLayers | null): void {
     if (layers) {
@@ -367,9 +400,11 @@ export class WaterLodSpikeSphereComponent {
     if (this.freeOn()) this.attachFreeListeners();
     const rig = this.rig;
     const landOn = this.landOn();
-    rig.setShore(this.shore() && landOn);
-    rig.setFoam(this.foam() && landOn);
-    rig.setDepthColour(this.depthColour() && landOn);
+    const held = this.heldVariant();
+    const depthRead = held ? held.depthRead : true;
+    rig.setShore(this.shore() && landOn && depthRead);
+    rig.setFoam(this.foam() && landOn && depthRead);
+    rig.setDepthColour(this.depthColour() && landOn && depthRead);
 
     const view = this.currentView();
     const up = groundUp(view);

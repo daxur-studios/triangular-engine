@@ -629,7 +629,9 @@ type MutableFrame = { -readonly [K in keyof MorphFrame]: MorphFrame[K] };
 type MutableAnchor = { -readonly [K in keyof MorphAnchor<number>]: MorphAnchor<number>[K] };
 
 /** Scratch of {@link computeMorphFrame}: it runs synchronously, so one set per module is enough. */
-const FRAME_UNBENT = { lon: 0, lat: 0, height: 0, position: [0, 0, 0] as Vec3 };
+/** {@link computeMorphFrame} keeps the scene position as the unbent camera when the unbend-and-bend round trip moves it by more than this share of its distance from the centre. */
+const MORPH_FRAME_ROUND_TRIP_TOLERANCE = 1e-3;
+const FRAME_UNBENT ={ lon: 0, lat: 0, height: 0, position: [0, 0, 0] as Vec3 };
 const FRAME_XY: [number, number] = [0, 0];
 const FRAME_GROUND = { position: [0, 0, 0] as Vec3, normal: [0, 0, 0] as Vec3 };
 const FRAME_POLE_UP = newPoleOrigin();
@@ -693,6 +695,23 @@ export function computeMorphFrame(
   camBody[2] = scene[2];
   const camMap = bodyToMap(map, camBody, f.camMap as Vec3);
   const unbent = unbendPosition(map, camBody, FRAME_UNBENT);
+  // The unbend is exact (unbend and bend use the same map) except where it clamps: a camera past the map's edge or over a pole gets
+  // the nearest edge point or the pole itself. A pole has no longitude, so an anchor there collapses every vertex onto one meridian:
+  // keep the scene position as the unbent camera then (the metric's `placeCamera` does the same for the selector).
+  const [rx, ry] = morphMapXY(unbent.lon, unbent.lat, map, FRAME_XY);
+  const back = bendPointInto(rx, ry, k, unbent.height, FRAME_GROUND).position;
+  if (Math.hypot(back[0] - camMap[0], back[1] - camMap[1], back[2] - camMap[2]) > 1 + MORPH_FRAME_ROUND_TRIP_TOLERANCE * Math.hypot(camMap[0], camMap[1], camMap[2])) {
+    const r = Math.hypot(camBody[0], camBody[1], camBody[2]) || 1;
+    const ux = camBody[0] / r;
+    const uy = camBody[1] / r;
+    const uz = camBody[2] / r;
+    unbent.lon = Math.atan2(ux * basis.right[0] + uy * basis.right[1] + uz * basis.right[2], ux * basis.forward[0] + uy * basis.forward[1] + uz * basis.forward[2]);
+    unbent.lat = Math.asin(Math.max(-1, Math.min(1, ux * basis.up[0] + uy * basis.up[1] + uz * basis.up[2])));
+    unbent.height = r - R;
+    unbent.position[0] = camBody[0];
+    unbent.position[1] = camBody[1];
+    unbent.position[2] = camBody[2];
+  }
   const lambdaC = unbent.lon;
   const selectorCamera = f.selectorCamera as Vec3;
   selectorCamera[0] = unbent.position[0];

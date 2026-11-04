@@ -5,7 +5,7 @@ import { NEXT_TEST, type NextTestMode, type NextTestScenario } from './next-test
 export interface CloudTestSettings {
   readonly kind: 'static' | 'flyby';
   readonly preset: string;
-  readonly volumes: 1 | 4 | 12;
+  readonly volumes: number;
   readonly mode: NextTestMode;
   readonly scale: number;
   readonly steps: number;
@@ -78,6 +78,21 @@ function cloudRounds(preset: string): TestScenario<CloudTestSettings>[] {
   });
 }
 
+/**
+ * Plan 051 Phase 6 stress test: a planet covered by noise volumes. Per view, clouds off (the baseline the cost is taken
+ * against), then 12, 90 and 180 volumes (90 = about half the globe, 180 = a full tiling), proxies, haze off, still sun.
+ */
+function globeCoverScenarios(): TestScenario<CloudTestSettings>[] {
+  return ['globe orbit', 'globe mid', 'ground'].flatMap((preset) =>
+    [0, 12, 90, 180].map((volumes): TestScenario<CloudTestSettings> => ({
+      id: `${preset.replace(' ', '-')}-${volumes === 0 ? 'off' : volumes}`,
+      label: `${preset}, ${volumes === 0 ? 'clouds off' : `${volumes} volumes`}`,
+      durationMs: 4000, warmupMs: 2000,
+      settings: { ...CLOUD_TEST_DEFAULTS, preset, volumes: volumes === 0 ? 12 : volumes, mode: 'proxy', clouds: volumes !== 0, atmosphereLighting: true },
+    })),
+  );
+}
+
 /** Append new suites/versions at the end. Run latest resolves the final entry exactly once at launch. */
 export const CLOUD_TEST_HISTORY: readonly TestSuite<CloudTestSettings>[] = [
   {
@@ -98,5 +113,11 @@ export const CLOUD_TEST_HISTORY: readonly TestSuite<CloudTestSettings>[] = [
     expectedGpuVendor: 'nvidia',
     ablation: { feature: 'clouds', metrics: ['gpuWholeRender'] },
     scenarios: ['outside', 'inside', 'horizon'].flatMap(cloudRounds),
+  },
+  {
+    id: 'cloud-globe-cover', version: 1,
+    title: 'Planet cover stress test: clouds off vs 12 / 90 / 180 noise volumes, from orbit, mid altitude and the ground',
+    purpose: 'performance', requiresVisualReview: true,
+    scenarios: globeCoverScenarios(),
   },
 ];

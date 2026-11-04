@@ -20,6 +20,7 @@ import {
 } from 'triangular-engine/atmosphere';
 import { CloudVolume, CloudVolumeAtmosphereLighting, CloudVolumeBakeScheduler, CloudVolumeScreenPass } from 'triangular-engine/cloud-volumes';
 import { GpuTimer } from './gpu-timer';
+import { CloudNoiseShell } from './cloud-noise-shell';
 import { installCloudReplayProbe } from './cloud-replay-probe';
 
 /**
@@ -58,7 +59,16 @@ const PRESETS: readonly CameraPreset[] = [
   // Arc length s in metres along the great circle through the main volume; looking ahead along it.
   { label: 'horizon', arc: { s: -1500, altitude: 200, pitchDeg: -3 } },
   { label: 'ground', arc: { s: -450, altitude: 45, pitchDeg: 1 } },
+  // Whole-planet views for the 90 / 180 volume cover (offsets are from the main volume; the planet centre is 2250 m below it).
+  { label: 'globe orbit', offset: [0, 1500, 6000], target: [0, -2250, 0] },
+  { label: 'globe mid', offset: [0, 1400, 2200], target: [0, -300, -600] },
 ];
+/** Volumes in the whole-planet cover: about one 600 m volume per 600 m of cloud-altitude surface (a 2 km planet). */
+const GLOBE_CANDIDATES = 180;
+/** A smooth hash-free 3D value in [-1, 1] over the unit sphere, for the coverage ranking. */
+function coverageNoise(d: Vector3): number {
+  return Math.sin(d.x * 3.1 + 1.3) * Math.sin(d.y * 2.7 + 2.1) + Math.sin(d.z * 3.4 + 0.7) * Math.cos(d.x * 2.2 - d.y * 1.9);
+}
 const UP = new Vector3(0, 1, 0);
 /** Position and heading on the great circle (the y-z plane) at arc length `s` metres from the main volume. */
 function arcPose(s: number, altitude: number): { position: Vector3; pitch: number } {
@@ -183,6 +193,14 @@ interface CloudTestSnapshot {
           @for (n of volumeCounts; track n) {
             <button (click)="setVolumeCount(n)" [class.active]="volumeCount() === n">{{ n }}</button>
           }
+          @for (n of globeCounts; track n) {
+            <button (click)="setVolumeCount(n)" [class.active]="volumeCount() === n">{{ n }} cover</button>
+          }
+        </p>
+        <p class="label">Planet cover (3D noise shell, no volumes)</p>
+        <p class="row">
+          <button (click)="setNoiseShell(true)" [class.active]="noiseShellOn()">noise shell on</button>
+          <button (click)="setNoiseShell(false)" [class.active]="!noiseShellOn()">off</button>
         </p>
         <p class="label">Source (Phase 5)</p>
         <p class="row">
@@ -465,9 +483,13 @@ export class CloudVolumesLabPageComponent {
   }
   readonly presets = PRESETS;
   readonly volumeCounts = [1, 4, 12];
+  /** Whole-planet cover sizes (Plan 051 Phase 6 stress test), kept out of the legacy matrix loops. */
+  readonly globeCounts = [90, 180];
 
   readonly presetLabel = signal('outside');
   readonly cloudsOn = signal(true);
+  readonly noiseShellOn = signal(false);
+  private noiseShell?: CloudNoiseShell;
   readonly rebakeEveryFrame = signal(false);
   /** Atlas bands rebaked per frame across volumes; 0 finishes every bake in the frame it is queued (step 5 off). */
   readonly bakeBudget = signal(1);
@@ -532,6 +554,8 @@ export class CloudVolumesLabPageComponent {
   private readonly right = new Vector3();
   private readonly move = new Vector3();
   private readonly extras: CloudVolume[] = [];
+  /** The whole-planet cover (Plan 051 Phase 6 stress test): noise volumes on a Fibonacci spiral, ranked by coverage noise. */
+  private readonly globe: CloudVolume[] = [];
   private flyby: { t0: number; duration: number; samples: number[]; done: () => void } | undefined;
   private screenPass: CloudVolumeScreenPass | undefined;
   private screenPipeline: ReturnType<CloudVolumeScreenPass['asEngineRenderPipeline']> | undefined;
@@ -585,6 +609,7 @@ export class CloudVolumesLabPageComponent {
       }
       this.stepFlyby();
       this.updateCamera(delta);
+      this.noiseShell?.update(this.engine.camera.position, this.sunWorld, performance.now() / 1000);
       this.applyAtmosphereLighting();
       const renderer: any = this.engine.renderer;
       if (!renderer?.initialized) return;
@@ -657,6 +682,7 @@ export class CloudVolumesLabPageComponent {
     }) : undefined;
     this.destroyRef.onDestroy(() => {
       this.pageDisposed = true;
+      this.noiseShell?.dispose();
       this.runnerReady.set(false);
       stepsChanged.unsubscribe();
       testErrors.unsubscribe();
@@ -694,7 +720,7 @@ export class CloudVolumesLabPageComponent {
   private readTestSettings(): CloudTestSettings {
     return {
       ...CLOUD_TEST_DEFAULTS,
-      preset: this.presetLabel(), volumes: this.volumeCount() as 1 | 4 | 12, mode: this.cloudMode(),
+      preset: this.presetLabel(), volumes: this.volumeCount(), mode: this.cloudMode(),
       scale: this.renderScale(), steps: this.steps(), animateSun: this.animateSun(), bakeBudget: this.bakeBudget(),
       rebakeEveryFrame: this.rebakeEveryFrame(), spinWarp: this.spinWarp(), spinAngle: this.spinAngle, clouds: this.cloudsOn(),
       atmosphereLighting: this.atmosphereLighting(), haze: this.cloudHaze(),
@@ -813,17 +839,28 @@ export class CloudVolumesLabPageComponent {
     this.computeMs.set('n/a');
   }
 
+  setNoiseShell(on: boolean): void {
+    if (on && !this.noiseShell) {
+      this.noiseShell = new CloudNoiseShell({ planetRadius: PLANET_RADIUS, baseAltitude: 150, thickness: 320 });
+      this.engine.scene.add(this.noiseShell.mesh);
+    }
+    this.noiseShellOn.set(on);
+    if (this.noiseShell) this.noiseShell.mesh.visible = on;
+    if (on) this.setClouds(false);
+  }
+
   setClouds(on: boolean): void {
     this.cloudsOn.set(on);
     this.syncVolumes();
   }
 
   private allVolumes(): CloudVolume[] {
-    return [this.volume, ...this.extras];
+    return [this.volume, ...this.extras, ...this.globe];
   }
 
   private activeVolumes(): CloudVolume[] {
-    return this.allVolumes().slice(0, this.volumeCount());
+    if (this.volumeCount() > 12) return this.globe.slice(0, this.volumeCount());
+    return [this.volume, ...this.extras].slice(0, this.volumeCount());
   }
 
   setDrift(speed: number): void {
@@ -847,9 +884,48 @@ export class CloudVolumesLabPageComponent {
 
   /** 1, 4 or 12 volumes along the great circle through the main one, at alternating heights (the low ones cross the ground). */
   setVolumeCount(n: number): void {
-    while (this.extras.length < n - 1) this.createExtra(this.extras.length + 1);
+    if (n > 12) this.ensureGlobe();
+    else while (this.extras.length < n - 1) this.createExtra(this.extras.length + 1);
     this.volumeCount.set(n);
     this.syncVolumes();
+  }
+
+  /** Builds all candidate cover volumes once, lowest-coverage last, so `n` active volumes are the `n` cloudiest places. */
+  private ensureGlobe(): void {
+    if (this.globe.length) return;
+    const centreRadius = PLANET_RADIUS + 250;
+    const candidates = Array.from({ length: GLOBE_CANDIDATES }, (_, i) => {
+      const y = 1 - (2 * (i + 0.5)) / GLOBE_CANDIDATES;
+      const ring = Math.sqrt(1 - y * y);
+      const phi = i * Math.PI * (3 - Math.sqrt(5));
+      const dir = new Vector3(Math.cos(phi) * ring, y, Math.sin(phi) * ring);
+      return { dir, noise: coverageNoise(dir), i };
+    }).sort((a, b) => b.noise - a.noise);
+    for (const { dir, i } of candidates) {
+      // 64^3 density keeps 180 volumes near 90 MB of atlases; the lab's single volume stays 128^3.
+      // Wider than the spacing (about 600 m) so neighbours overlap, and a low threshold so the box is mostly cloud.
+      const volume = new CloudVolume({ size: new Vector3(800, 240, 800), densitySize: 64 });
+      volume.uNoiseThreshold.value = 0.12;
+      volume.uNoiseGain.value = 4;
+      volume.uNoiseSeed.value = i * 3.7;
+      volume.uExtinction.value = this.extinction();
+      volume.uMarchSteps.value = this.steps();
+      volume.uJitter.value = this.jitterOn() ? 1 : 0;
+      volume.uPhaseFloor.value = this.brightPhase() ? 0.3 : 0;
+      volume.alwaysRebakeLight = this.rebakeEveryFrame();
+      volume.setFetchEnabled(this.fetchOn());
+      volume.forceHidden = this.hiddenOn();
+      volume.mesh.position.copy(dir).multiplyScalar(centreRadius);
+      volume.mesh.quaternion
+        .setFromUnitVectors(UP, dir)
+        .multiply(new Quaternion().setFromAxisAngle(UP, i * 2.399));
+      this.rememberPose(volume);
+      volume.noiseDriftPerSecond = this.noiseDrift();
+      volume.noiseRefreshSeconds = this.noiseRefresh;
+      this.globe.push(volume);
+    }
+    this.applySpin();
+    this.applySun();
   }
 
   private createExtra(k: number): void {

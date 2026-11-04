@@ -10,7 +10,7 @@ export interface NextTestScenario {
   readonly kind: 'flyby' | 'static';
   /** Seconds of fly-by, or of settling for `static`. Default 12 / about 2. */
   readonly seconds?: number;
-  readonly volumes?: 1 | 4 | 12;
+  readonly volumes?: number;
   readonly mode?: NextTestMode;
   /** Canvas render scale of the screen pass: 1 or 0.5. */
   readonly scale?: number;

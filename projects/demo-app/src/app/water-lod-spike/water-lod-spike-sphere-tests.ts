@@ -1,10 +1,27 @@
 import { simpleAdapter, type TestContext, type TestObservation, type TestRunAdapter, type TestSetting, type TestSuite } from 'triangular-engine/testing';
+import type { WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
 import type { SpherePoseId } from './core/water-lod-spike-sphere-poses';
 
 /** What a sphere water case sets and measures. */
 export interface WaterLodSpikeSphereTestSettings {
   readonly pose: SpherePoseId;
-  readonly measure: 'cost';
+  /** `cost`: the layer arms. `split`: the water's own shading parts on the land. `density`: the water alone, mesh density and wave work. */
+  readonly measure: 'cost' | 'split' | 'density';
+}
+
+/** What of the water's cost is switched off or lowered in one split arm. */
+export interface IWaterLodSpikeSphereVariant {
+  /** True: the 3 x 3 quadrature over the lost slope covariance; false: one sample at the mean slope. */
+  readonly quadrature: boolean;
+  /** True: shore weight, foam and depth colour on (one analytic land read per pixel); false: none of them. */
+  readonly depthRead: boolean;
+  readonly quality: WaterLodSpikeQualityId;
+  /** Density suite: the mesh inputs (`cellPixels`, `leafCap`) in place of the tier's, with the tier's wave filter bias kept. */
+  readonly mesh?: { readonly cellPixels: number; readonly leafCap: number };
+  /** Density suite: false turns every wave off in both stages (the vertex spacing filter and the fragment footprint gate drop them all), leaving the mesh and the plain shading. */
+  readonly waves?: boolean;
+  /** Density suite: replaces the tier's wave filter bias (`lodBias`). */
+  readonly lodBias?: number;
 }
 
 /** What is switched on in one cost arm. */
@@ -25,6 +42,11 @@ export interface WaterLodSpikeSphereTestHost {
    * come back), the atmosphere is `enabled` or not (no recompile). Null restores the page's own settings.
    */
   setLayers(layers: IWaterLodSpikeSphereLayers | null): void;
+  /**
+   * Holds the water at a variant (split suite): quadrature, depth read and quality tier. Null restores the page's own settings.
+   * A quality change rebuilds the water mesh, so the caller settles before it measures.
+   */
+  setWaterVariant?(variant: IWaterLodSpikeSphereVariant | null): void;
   /** What draws now: a body counts once its pipeline is compiled and it is visible; the atmosphere counts while enabled. */
   drawn(): IWaterLodSpikeSphereLayers;
   counts(): { readonly drawCalls: number; readonly triangles: number };
@@ -82,8 +104,114 @@ const WATER_LOD_SPIKE_SPHERE_COST_V1: TestSuite<WaterLodSpikeSphereTestSettings>
   })),
 };
 
+/**
+ * Suite `water-lod-spike-sphere-split` v1 (Plan 080): what the water's own cost is made of. The cost suite v1 found the water at
+ * 1.6 to 3.3 ms against the 0.5 ms gate; this one takes the water apart on the land (atmosphere off), at the same four poses:
+ *
+ * - land: the baseline, no water
+ * - full: the water as the page ships it (ultra quality, 3 x 3 quadrature, shore, foam and depth colour)
+ * - no quadrature: one sample at the mean slope instead of nine
+ * - no depth read: no shore weight, foam or depth colour (no land read per pixel)
+ * - plain shading: both of the above off
+ * - low quality: the `low` tier (larger cells, fewer leaves, earlier wave fade) with the full shading
+ * - cheapest: low quality and plain shading
+ *
+ * If the plain-shading arm is near the full one, the fragment stage is not the cost; if the low-quality arm is, the triangle count
+ * and the vertex stage are not. Each arm is read like the cost suite's (three one-second windows after a warm-up, two rounds, the
+ * second in the opposite order). Nothing is gated; every arm's GPU and CPU frame, triangles and the cost over the land are reported.
+ * Checks only that the water draws in each arm and that GPU time is measured.
+ */
+const WATER_LOD_SPIKE_SPHERE_SPLIT_V1: TestSuite<WaterLodSpikeSphereTestSettings> = {
+  id: 'water-lod-spike-sphere-split',
+  version: 1,
+  title: 'Water on a planet: what the water\'s cost is made of (quadrature, depth read, mesh density)',
+  purpose: 'performance',
+  scenarios: POSES.map(([pose, label]) => ({
+    id: pose,
+    label,
+    settings: { pose, measure: 'split' as const },
+    durationMs: 1000,
+    warmupMs: 500,
+  })),
+};
+
+/**
+ * Suite `water-lod-spike-sphere-density` v1 (Plan 080): what the water costs on its own, with no land and no atmosphere. The split
+ * suite v1 showed the pixel shading is not the main cost at any pose, and the cost is large from orbit (where land covers little),
+ * so the mesh and the vertex stage are the suspects. This one varies them one at a time at the four poses, water alone:
+ *
+ * - nothing: an empty frame, the baseline
+ * - ultra: the tier the page ships (4 px cells, 4096 leaves)
+ * - ultra, no waves: the ultra mesh with every wave off in both stages (a flat sphere at ultra density)
+ * - ultra, plain: ultra with the quadrature off
+ * - cap 1024 / cap 256: ultra's 4 px cells with fewer leaves
+ * - cells 10 px: ultra's leaf cap with 10 px cells (cell-limited rather than cap-limited)
+ * - bias 4: ultra's mesh with the low tier's wave filter bias (waves fade earlier)
+ * - high, low: the tiers
+ *
+ * If the no-waves arm is near ultra, the triangle count is the cost; if it is near nothing, the wave work is. Each arm is read
+ * like the cost suite's. Nothing is gated; GPU and CPU frame, triangles and the cost over the empty frame are reported.
+ */
+const WATER_LOD_SPIKE_SPHERE_DENSITY_V1: TestSuite<WaterLodSpikeSphereTestSettings> = {
+  id: 'water-lod-spike-sphere-density',
+  version: 1,
+  title: 'Water on a planet, alone: mesh density against wave work',
+  purpose: 'performance',
+  scenarios: POSES.map(([pose, label]) => ({
+    id: pose,
+    label,
+    settings: { pose, measure: 'density' as const },
+    durationMs: 1000,
+    warmupMs: 500,
+  })),
+};
+
 /** The suites of the sphere water page, oldest first. */
-export const WATER_LOD_SPIKE_SPHERE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeSphereTestSettings>[] = [WATER_LOD_SPIKE_SPHERE_COST_V1];
+export const WATER_LOD_SPIKE_SPHERE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeSphereTestSettings>[] = [
+  WATER_LOD_SPIKE_SPHERE_COST_V1,
+  WATER_LOD_SPIKE_SPHERE_SPLIT_V1,
+  WATER_LOD_SPIKE_SPHERE_DENSITY_V1,
+];
+
+/** One arm of the split suite: land only, or land and water at a variant. */
+export interface ISphereSplitArm {
+  readonly id: string;
+  /** Null: the land alone. */
+  readonly variant: IWaterLodSpikeSphereVariant | null;
+}
+
+const FULL_WATER: IWaterLodSpikeSphereVariant = { quadrature: true, depthRead: true, quality: 'ultra' };
+
+export const SPHERE_SPLIT_ARMS: readonly ISphereSplitArm[] = [
+  { id: 'land', variant: null },
+  { id: 'full', variant: FULL_WATER },
+  { id: 'no quadrature', variant: { ...FULL_WATER, quadrature: false } },
+  { id: 'no depth read', variant: { ...FULL_WATER, depthRead: false } },
+  { id: 'plain shading', variant: { ...FULL_WATER, quadrature: false, depthRead: false } },
+  { id: 'low quality', variant: { ...FULL_WATER, quality: 'low' } },
+  { id: 'cheapest', variant: { quadrature: false, depthRead: false, quality: 'low' } },
+];
+
+/** The order the split arms are measured in: all, then all again in the opposite order. */
+export function sphereSplitOrder(arms: readonly ISphereSplitArm[] = SPHERE_SPLIT_ARMS): readonly ISphereSplitArm[] {
+  return [...arms, ...[...arms].reverse()];
+}
+
+const ULTRA_WATER: IWaterLodSpikeSphereVariant = { quadrature: true, depthRead: true, quality: 'ultra' };
+
+/** The density suite's arms; the first (no water) is the empty-frame baseline. The land is off in all of them. */
+export const SPHERE_DENSITY_ARMS: readonly ISphereSplitArm[] = [
+  { id: 'nothing', variant: null },
+  { id: 'ultra', variant: ULTRA_WATER },
+  { id: 'ultra, no waves', variant: { ...ULTRA_WATER, quadrature: false, waves: false } },
+  { id: 'ultra, plain', variant: { ...ULTRA_WATER, quadrature: false } },
+  { id: 'cap 1024', variant: { ...ULTRA_WATER, mesh: { cellPixels: 4, leafCap: 1024 } } },
+  { id: 'cap 256', variant: { ...ULTRA_WATER, mesh: { cellPixels: 4, leafCap: 256 } } },
+  { id: 'cells 10 px', variant: { ...ULTRA_WATER, mesh: { cellPixels: 10, leafCap: 4096 } } },
+  { id: 'bias 4', variant: { ...ULTRA_WATER, lodBias: 4 } },
+  { id: 'high', variant: { ...ULTRA_WATER, quality: 'high' } },
+  { id: 'low', variant: { ...ULTRA_WATER, quality: 'low' } },
+];
 
 /** The plan 080 water gate: the water's marginal GPU cost on the terrain, milliseconds. */
 export const SPHERE_WATER_MAX_MARGINAL_MS = 0.5;
@@ -187,6 +315,64 @@ async function measureCost(host: WaterLodSpikeSphereTestHost, context: TestConte
 }
 
 /**
+ * Measures a list of water variants whose first arm has no water (the baseline), each twice (the second pass reversed). `land` is
+ * whether the land draws in every arm; the baseline is then the land alone, else an empty frame.
+ */
+async function measureVariants(
+  host: WaterLodSpikeSphereTestHost,
+  context: TestContext,
+  arms: readonly ISphereSplitArm[],
+  land: boolean,
+): Promise<TestObservation> {
+  const setVariant = host.setWaterVariant?.bind(host);
+  await host.waitFrames(SETTLE_FRAMES, context);
+  const gpuMs = new Map<ISphereSplitArm, number[]>(arms.map((arm) => [arm, []]));
+  const cpuMs = new Map<ISphereSplitArm, number[]>(arms.map((arm) => [arm, []]));
+  const triangles = new Map<ISphereSplitArm, number>();
+  const drawnAll = new Map<ISphereSplitArm, boolean>(arms.map((arm) => [arm, true]));
+  const baseline = land ? 'the land' : 'an empty frame';
+  for (const arm of sphereSplitOrder(arms)) {
+    const layers: IWaterLodSpikeSphereLayers = { land, water: arm.variant !== null, atmosphere: false };
+    host.setLayers(layers);
+    setVariant?.(arm.variant);
+    const flipped = performance.now();
+    await host.waitFrames(2, context);
+    while (!drawsAll(host.drawn(), layers) && performance.now() - flipped < DRAWN_TIMEOUT_MS) await host.waitFrames(1, context);
+    if (!drawsAll(host.drawn(), layers)) drawnAll.set(arm, false);
+    await host.waitFrames(SETTLE_FRAMES, context);
+    host.beginFrameSampling();
+    gpuMs.get(arm)?.push(await gpuMeanMs(host, context));
+    host.endFrameSampling();
+    cpuMs.get(arm)?.push(mean(host.takeCpuFrameMs()));
+    triangles.set(arm, host.counts().triangles);
+  }
+  setVariant?.(null);
+  host.setLayers(null);
+  const gpu = (arm: ISphereSplitArm): number => mean(gpuMs.get(arm) ?? []);
+  const [base, ...waterArms] = arms;
+  const undrawn = arms.filter((arm) => drawnAll.get(arm) !== true).map((arm) => arm.id);
+  return {
+    metrics: [
+      ...arms.map((arm) => ({ name: `GPU frame, ${arm.id}`, unit: 'ms', source: 'WebGPU timestamp queries, 1 s averages, two rounds', samples: gpuMs.get(arm) ?? [] })),
+      ...arms.map((arm) => ({ name: `CPU frame, ${arm.id}`, unit: 'ms', source: 'fpsController.cpuFrameTime (tick and render), mean over the GPU window', samples: cpuMs.get(arm) ?? [] })),
+      ...arms.map((arm) => ({ name: `triangles, ${arm.id}`, unit: 'triangles', source: 'renderer.info.render.triangles', samples: [triangles.get(arm) ?? Number.NaN] })),
+      ...waterArms.map((arm) => ({ name: `cost over ${baseline}, ${arm.id}`, unit: 'ms', source: 'means of two arms', samples: [gpu(arm) - gpu(base)] })),
+    ],
+    checks: [
+      { name: 'the water draws in every water arm and the land in all', passed: undrawn.length === 0, detail: undrawn.length === 0 ? 'all drawn' : `not drawn in: ${undrawn.join(', ')}` },
+      { name: 'GPU time measured in every arm', passed: arms.every((arm) => Number.isFinite(gpu(arm))), detail: arms.map((arm) => `${gpu(arm).toFixed(2)} ms`).join(', ') },
+      { name: 'the host can hold a water variant', passed: setVariant !== undefined, detail: setVariant ? 'yes' : 'the page has no setWaterVariant' },
+    ],
+  };
+}
+
+const measureSplit = (host: WaterLodSpikeSphereTestHost, context: TestContext): Promise<TestObservation> =>
+  measureVariants(host, context, SPHERE_SPLIT_ARMS, true);
+
+const measureDensity = (host: WaterLodSpikeSphereTestHost, context: TestContext): Promise<TestObservation> =>
+  measureVariants(host, context, SPHERE_DENSITY_ARMS, false);
+
+/**
  * Testing adapter for the sphere water page: holds the pose and the layer set the case asks for, waits for the page to draw, and
  * measures the cost arms (see {@link WATER_LOD_SPIKE_SPHERE_TEST_HISTORY}). Nothing here switches `<scene>`'s wireframe.
  */
@@ -206,12 +392,19 @@ export function createWaterLodSpikeSphereTestAdapter(host: WaterLodSpikeSphereTe
       : {}),
     restore: () => {
       host.setPose(null);
+      host.setWaterVariant?.(null);
       host.setLayers(null);
     },
     ready: async (context) => {
       while (!host.ready()) await context.wait(100);
     },
     environment: () => host.environment(),
-    measure: async (_scenario, context): Promise<TestObservation> => measureCost(host, context),
+    measure: async (scenario, context): Promise<TestObservation> => {
+      switch (scenario.settings.measure) {
+        case 'split': return measureSplit(host, context);
+        case 'density': return measureDensity(host, context);
+        default: return measureCost(host, context);
+      }
+    },
   });
 }
