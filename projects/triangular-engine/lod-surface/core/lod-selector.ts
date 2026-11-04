@@ -101,6 +101,14 @@ export interface SelectorSettings {
    * many pixels of turn late.
    */
   readonly frustumSlackPx?: number;
+  /**
+   * Sphere domains only, needs {@link cull} (absent or false: off). Leaves wholly behind the horizon, seen from the camera, are not
+   * drawn: the body is solid below `sizeM - heightBoundM`, so nothing behind its tangent cone can be seen. Like the frustum it
+   * decides only the drawn set (`stats.drawn`), never the selection or the leaf budget, and it errs toward drawing (the node's
+   * bounding sphere, its highest point, and a margin for {@link cameraSlack}). It is off while a {@link NodeGeometryHook} is
+   * installed (a bent surface has another horizon) and while {@link LodSelector.setHorizonSuppressed} says so.
+   */
+  readonly horizonCull?: boolean;
 }
 
 /** The camera as the selector sees it, rewritten in place every frame. */
@@ -219,6 +227,8 @@ export interface SelectorStats {
   unmet: number;
   capHit: boolean;
   deepestLevel: number;
+  /** Selected leaves the horizon cull left out of the drawn set (they may also be outside the frustum). 0 with the cull off. */
+  horizonHidden: number;
   /**
    * Stale nodes measured again in this pass (at most the hook's `refreshBudget`); first measurements of new nodes are not
    * counted. 0 when `select` returned early.
@@ -308,7 +318,7 @@ export class LodSelector {
   /** Leaves after {@link select}, as node indices, with their edge masks; drawn leaves first (`stats.drawn`). */
   readonly leaves: Int32Array;
   readonly masks: Uint8Array;
-  readonly stats: SelectorStats = { leaves: 0, drawn: 0, covered: 0, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0, geometryMeasured: 0, geometryStale: 0 };
+  readonly stats: SelectorStats = { leaves: 0, drawn: 0, covered: 0, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0, horizonHidden: 0, geometryMeasured: 0, geometryStale: 0 };
   /** Most nodes one tree can hold. */
   private readonly treeCapacity: number;
   private readonly heap: Int32Array;
@@ -356,6 +366,13 @@ export class LodSelector {
   private readonly coverCache: Uint8Array;
   /** 1 for a node of the current tree that is covered and inside the frustum (counted in {@link SelectorStats.covered}). */
   private readonly hidden: Uint8Array;
+  /** 1 for a node of the current tree that lies wholly behind the horizon (see {@link SelectorSettings.horizonCull}). */
+  private readonly beyond: Uint8Array;
+  /** The caller turned the horizon cull off for now (a bent surface): {@link setHorizonSuppressed}. */
+  private horizonSuppressed = false;
+  /** This view's horizon test is on, with its camera direction (3), the occluder radius, the tangent-cone angle, the angle margin and the tangent angle's cosine. */
+  private horizonOn = false;
+  private readonly horizon = new Float64Array(7);
   /** Nodes measured again because their geometry was stale (first measurements not counted): the cost of {@link invalidateGeometry}. */
   geometryRefreshes = 0;
   /** Stale re-measures this rebuild may still make: the hook's budget, less those made so far (`Infinity` without a budget). */
@@ -399,6 +416,7 @@ export class LodSelector {
     this.coverStamp = new Int32Array(capacity).fill(-1);
     this.coverCache = new Uint8Array(capacity);
     this.hidden = new Uint8Array(capacity);
+    this.beyond = new Uint8Array(capacity);
     this.hot = new Float64Array(capacity * HOT);
     this.live = new Uint8Array(capacity);
     this.freeBlocks = new Int32Array(capacity >> 2);
@@ -448,6 +466,16 @@ export class LodSelector {
     this.invalidateCover();
   }
 
+  /**
+   * Turns the horizon cull ({@link SelectorSettings.horizonCull}) off or on again without a new selector, for a surface that is
+   * bent for a while (the globe-to-map morph above 0). A change rebuilds the tree on the next {@link select}.
+   */
+  setHorizonSuppressed(suppressed: boolean): void {
+    if (suppressed === this.horizonSuppressed) return;
+    this.horizonSuppressed = suppressed;
+    this.hasViewKey = false;
+  }
+
   /** The installed cover hook, if any. */
   get cover(): NodeCoverHook | undefined {
     return this.coverHook;
@@ -476,6 +504,7 @@ export class LodSelector {
     this.version++;
     this.frame++;
     this.pixelScale = Math.max(this.settings.cellPixels, PIXEL_FLOOR) * view.pixelAngle;
+    this.prepareHorizon();
     this.heapSize = 0;
     const stats = this.stats;
     stats.splits = 0;
@@ -530,6 +559,50 @@ export class LodSelector {
     // A boosted retention can reach the cap before requests that are still queued; those requests went unmet.
     if (stats.unmet > 0) stats.capHit = true;
     this.collectLeaves();
+  }
+
+  /**
+   * Sets this view's horizon test (the camera is the view key's, already updated): the tangent cone of the solid ball of radius
+   * `sizeM - heightBoundM` seen from the camera. Off when the camera is not outside that ball.
+   */
+  private prepareHorizon(): void {
+    this.horizonOn = false;
+    const { horizonCull, cull, domain, heightBoundM, cameraSlack = 0 } = this.settings;
+    if (horizonCull !== true || !cull || this.horizonSuppressed || domain.kind !== 'sphere' || this.geometryHook !== undefined) return;
+    const key = this.viewKey;
+    const d = Math.hypot(key[0], key[1], key[2]);
+    const ball = domain.sizeM - heightBoundM;
+    if (!(ball > 0) || d <= ball) return;
+    const tangent = Math.sqrt(d * d - ball * ball);
+    // The tree is kept while the camera moves less than moveSlack, and the tangent point is at least `tangent` away: that move turns
+    // the node's direction and the horizon each by at most moveSlack / tangent.
+    const moveSlack = cameraSlack * (d - ball);
+    const h = this.horizon;
+    h[0] = key[0] / d;
+    h[1] = key[1] / d;
+    h[2] = key[2] / d;
+    h[3] = ball;
+    h[4] = Math.acos(ball / d);
+    h[5] = (2 * moveSlack) / Math.max(tangent, 1);
+    h[6] = ball / d;
+    this.horizonOn = true;
+  }
+
+  /** True when the node's bounding sphere lies wholly behind the horizon cone of the current view (see {@link prepareHorizon}). */
+  private behindHorizon(centreX: number, centreY: number, centreZ: number, radius: number): boolean {
+    const h = this.horizon;
+    const length = Math.hypot(centreX, centreY, centreZ);
+    // Quick out: a node's nearest point is at least this angle from the camera direction, which must pass the tangent angle to hide.
+    const cosine = (centreX * h[0] + centreY * h[1] + centreZ * h[2]) / Math.max(length, 1e-9);
+    // Not even the node's centre is past the tangent angle (cosine of the angle at or above the tangent's): in view, no trig needed.
+    if (cosine >= h[6]) return false;
+    const half = Math.asin(Math.min(1, radius / Math.max(length, 1e-9)));
+    const angle = Math.acos(Math.max(-1, Math.min(1, cosine))) - half - h[5];
+    if (angle <= h[4]) return false;
+    // A point at distance rho from the centre of the body is hidden only beyond the tangent angle plus acos(ball / rho); the node's
+    // highest point is the least hidden.
+    const highest = length + radius;
+    return angle > h[4] + Math.acos(Math.min(1, h[3] / highest));
   }
 
   /** True when the view equals the last one selected for (then the tree is already right); otherwise remembers it. */
@@ -624,7 +697,9 @@ export class LodSelector {
     let culled = 0;
     let covered = 0;
     let deepest = 0;
+    let beyondHorizon = 0;
     const hidden = this.hidden;
+    const beyond = this.beyond;
     // Split nodes of this tree that were (kept) or were not (opened) split in the last one.
     let kept = 0;
     let opened = 0;
@@ -656,6 +731,7 @@ export class LodSelector {
         culledMasks[culled++] = mask;
       }
       if (level[node] > deepest) deepest = level[node];
+      beyondHorizon += beyond[node];
     }
     for (let k = 0; k < culled; k++) {
       leaves[drawn + k] = culledLeaves[k];
@@ -665,6 +741,7 @@ export class LodSelector {
     this.stats.covered = covered;
     this.stats.leaves = drawn + culled;
     this.stats.deepestLevel = deepest;
+    this.stats.horizonHidden = beyondHorizon;
     this.stats.newSplits = opened;
     this.stats.merges = this.openLast - kept;
     this.stats.visibleNewSplits = visibleOpened;
@@ -767,7 +844,7 @@ export class LodSelector {
     const geometryVersion = this.geometryVersion;
     const stats = this.stats;
     const coverHook = this.coverHook;
-    const { coverStamp, coverCache, hidden } = this;
+    const { coverStamp, coverCache, hidden, beyond, horizonOn } = this;
     const coverVersion = this.coverVersion;
     for (let node = first; node < first + count; node++) {
       active[n++] = node;
@@ -799,11 +876,15 @@ export class LodSelector {
       // new place: a node that has not been measured again is never culled, or it blinks out of the view for the refresh's passes.
       const outside = cull && !staleGeometry && (key[3] * x + key[4] * y + key[5] * z < -r || key[6] * x + key[7] * y + key[8] * z < -r || key[9] * x + key[10] * y + key[11] * z < -r || key[12] * x + key[13] * y + key[14] * z < -r);
       hidden[node] = 0;
+      // Behind the horizon: drawn like a node outside the frustum, but it still asks for splits (the horizon is not a selection input).
+      const far = horizonOn && !staleGeometry && this.behindHorizon(hot[h], hot[h + 1], hot[h + 2], r);
+      beyond[node] = far ? 1 : 0;
       if (outside && cullInSelection === true) {
         visible[node] = 0;
         priority[node] = 0;
         continue;
       }
+      const notDrawn = outside || far;
       if (coverHook !== undefined) {
         // Asked once per node and cover generation; the answer is the camera's business no more than the node's geometry is.
         if (coverStamp[node] !== coverVersion) {
@@ -814,12 +895,12 @@ export class LodSelector {
           // Not drawn and not asking: a covered leaf takes no budget, wherever the camera looks.
           visible[node] = 0;
           priority[node] = 0;
-          hidden[node] = outside ? 0 : 1;
+          hidden[node] = notDrawn ? 0 : 1;
           continue;
         }
       }
       // Default: the split request ignores the frustum; it only decides whether the leaf is drawn.
-      visible[node] = outside ? 0 : 1;
+      visible[node] = notDrawn ? 0 : 1;
       let value = 0;
       if (mode === 'fixed') {
         const nodeLevel = level[node];

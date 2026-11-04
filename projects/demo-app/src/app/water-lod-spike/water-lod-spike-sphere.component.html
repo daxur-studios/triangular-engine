@@ -9,6 +9,7 @@
       [sunDirection]="sun"
       [cellPixels]="qualityTier().cellPixels"
       [leafCap]="qualityTier().leafCap"
+      [horizonCull]="horizonCull()"
     />
   }
   @if (landOn()) {
@@ -21,6 +22,7 @@
       [sunDirection]="sun"
       [cellPixels]="landTier.cellPixels"
       [leafCap]="landTier.leafCap"
+      [horizonCull]="horizonCull()"
     />
   }
   <planetAtmosphere
@@ -58,6 +60,7 @@
     <button [class.active]="atmosphereOn()" (click)="toggleAtmosphere()">Atmosphere</button>
     <button [class.active]="atmosphereLighting()" [disabled]="!atmosphereOn()" (click)="atmosphereLighting.set(!atmosphereLighting())">Atm light</button>
     <button [class.active]="atmosphereHaze()" [disabled]="!atmosphereOn()" (click)="atmosphereHaze.set(!atmosphereHaze())">Atm haze</button>
+    <button [class.active]="horizonOn()" (click)="horizonOn.set(!horizonOn())">Horizon cull</button>
     <button [class.active]="wireframe()" (click)="toggleWireframe()">Wireframe</button>
     <button [class.active]="filter()" (click)="toggleFilter()">Filter</button>
     <button [class.active]="animating()" (click)="toggleAnimating()">Animate</button>

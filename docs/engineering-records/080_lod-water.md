@@ -504,9 +504,43 @@ Triangles (k), ultra / cap 1024 / cap 256 / low: orbit 613 / 524 / 131 / 109; 20
 - **The triangle count is the largest cost, with no land.** The flat ultra mesh with every wave off costs 1.4, 2.3, 2.3 and 3.8 ms. Cutting the leaf cap to 1024 saves 0.25, 1.0, 1.2 and 2.7 ms; to 256, 1.1, 1.5, 1.9 and 3.8 ms.
 - **The wave work is second and grows as the camera nears:** ultra minus no-waves is 0.2, 0.6, 1.3 and 1.9 ms. It is mostly the vertex stage: the wave bias (fragment gate only) changes nothing at the close poses, while the quadrature is 0.3 to 0.5 ms at every pose.
 - **A floor remains with a small mesh:** about 1.0 ms at 20 km and 1.6 to 1.9 ms at the two close poses with 53k to 58k triangles. Fragment cost over a screen full of water, or the vertex stage's fixed cost, is the next thing to separate.
-- **Open question:** the leaf cap does not bound the triangle count the way its name says at orbit (cap 1024 still draws 524k of 613k triangles). Read the selector before choosing a default.
+- **The leaf cap does bound the mesh (answered by reading the selector, see "Horizon cull" below):** a leaf is a 16 x 16 patch, 512 triangles, so cap 1024 is at most 524k triangles and 4096 is 2.1M. At orbit ultra selects only 822 leaves (613k triangles), so cap 1024 trims 20 % there, and every leaf under the cap was drawn.
 - **Cells of 10 px alone do nothing at 20 km and closer:** the mesh there is cap-limited, not cell-limited. The cap is the control that works.
 - **The 0.5 ms gate is not met by any arm except at orbit** (cap 256, 10 px cells and low, all 0.50 there). Hidden-under-land water was not part of this run and is not the cause: the land was off.
+
+### Horizon cull (2026-11-04; code and specs, then measured on the GPU: see "Measured" below)
+
+**Measured (suite `water-lod-spike-sphere-horizon@v1`, visible RTX 3080, run 2026-11-04T20:32, noisy: a game client used the GPU, so treat 0.1 ms as the noise floor).** GPU ms, water alone, 600 km planet:
+
+| arm | orbit | 20 km | coast 300 m | eye 2 m |
+| --- | --- | --- | --- | --- |
+| ultra, no cull | 1.50 | 3.00 | 3.90 | 6.43 |
+| ultra, cull | 1.40 | 2.80 | 3.80 | 6.13 |
+| cap 1024, cull | 1.40 | 1.90 | 2.53 | 3.70 |
+| cap 512, cull | 0.70 | 1.80 | 2.17 | 3.10 |
+| cap 256, cull | 0.50 | 1.50 | 2.00 | 2.50 |
+| cap 64, cull | 0.40 | 1.50 | 1.50 | 0.90 |
+| high (cull) | 1.40 | 1.60 | 2.40 | 3.73 |
+| low (cull) | 0.50 | 1.50 | 1.70 | 2.53 |
+| ultra, no waves, cull | 1.40 | 2.10 | 3.10 | 4.77 |
+
+Triangles drawn, ultra no cull vs cull: 734k → 433k at orbit, 573k → 397k at 20 km, 593k → 521k at the coast, 905k → 844k at 2 m.
+
+- The cull removes up to 41% of the triangles from orbit but only 7–10% close up, and the GPU time falls only 0.1–0.3 ms (3–7%). It is correct and cheap but not the big lever.
+- The leaf cap is the lever: at 2 m, cap 1024 is 3.7 ms against 6.1 ms for ultra's 4096. High is already cap-bound at 1024 leaves close up (same triangle count as the cap-1024 arm), so lowering ultra to 1024 would make ultra and high nearly equal close up.
+- The wave math costs about 1.3 ms at 2 m (6.13 vs 4.77 without waves) and 0.7 ms at the coast; triangle count is the larger cost. A mesh of almost nothing (cap 64) still costs 0.4–1.5 ms.
+- Decision pending a visual check: lower ultra's cap (candidate 2048, then 1024) and keep high at 1024 or 512.
+- Done (2026-11-04): the sphere page's ultra tier is now 2048 leaves (`WATER_LOD_SPIKE_SPHERE_QUALITIES`); the plane spike's table is unchanged, and the land stays at 4096. Earlier sphere suites' "ultra" arms mean 4096 leaves.
+- Done (2026-11-04): stills suite `water-lod-spike-sphere-stills` v1 (functional, visual review pending): land, water and atmosphere at 4096, 2048 and 1024 water leaves at the four poses, the wave clock held at 20 s so only the mesh differs, one 1280 px still per case. Run on the visible RTX 3080 (noisy load: a game client was running, GPU 75/97%), all checks pass. Whole-stack GPU frame (ms, noisy run, so read the steps rather than the absolute values) at 4096 / 2048 / 1024 leaves: orbit 1.9 / 1.9 / 1.9; 20 km 3.1 / 2.4 / 2.1; coast 50 m 3.0 / 2.5 / 2.3; 2 m eye 3.9 / 3.3 / 2.9. At orbit the cap does not bind (identical triangles at 4096 and 2048). A 4096-versus-2048 difference image of the stills is scattered noise with no shapes or banding (mean absolute difference about 0.8 to 1.0 of 255, the same size as WebP encoding noise). The owner's visual judgement of the stills is still open; no review was recorded.
+  - Rerun: [stills suite](http://triangular-demo.localhost:4200/water-lod-spike-sphere?testSuite=water-lod-spike-sphere-stills&testVersion=1&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1).
+
+**What the selector does.** Reading `lod-selector.ts`: selection is by distance alone, the frustum only decides which selected leaves are drawn, and nothing culled leaves behind the planet. The leaf cap counts them, and they ran the water's 64-wave vertex stage before the depth test threw them away.
+
+**What was added.** `SelectorSettings.horizonCull` (sphere domains, needs `cull`; `<planetTerrain [horizonCull]>`, default off): a leaf whose bounding sphere lies wholly beyond the tangent cone of the solid ball `sizeM - heightBoundM`, with its highest point and a margin for the camera slack, is left out of the drawn set (`stats.horizonHidden`, `stats.drawn`). Like the frustum, it never changes the selection or the budget. It is off while a geometry hook is installed and while the globe-to-map morph is above 0 (`setHorizonSuppressed`). Specs (`lod-selector-horizon.spec.ts`): the selected leaves are identical with and without it; for five altitudes (2 m to 6,371 km), four directions and two height bounds, every sampled point of every culled leaf is hidden by the ball (counted, 0 violations); off when suppressed, bent, inside the body, without `cull`, and by default. All 416 lod-surface specs run: 413 pass; the 3 failures are the morph specs that already failed before this change.
+
+**How much it hides, by leaf count (600 km planet, camera at one direction, probe run in the specs' headless Chrome):** with cap 4096, 17 % at 2 m, 28 % at 300 m, 31 % at 2 km, 33 % at 20 km, 34 % at 100 km, 21 % at orbit; with cap 1024, 10 to 25 %; with cap 256, 7 to 12 %. That is a third at most, not the half I first estimated: the leaves get coarser with distance, so the far side is covered by few big leaves, and the ones that straddle the horizon stay. A leaf is 512 triangles whatever its level, so the share of leaves is the share of triangles drawn.
+
+**Measuring it.** Suite `water-lod-spike-sphere-horizon` v1 (water alone, four poses): the shipped ultra without the cull, ultra with it, the cull with caps 1024, 512, 256 and 64 (64 is the floor), the high and low tiers, and ultra with no waves. The page has a "Horizon cull" button, on by default, so the cost suite's `land + water` arms now run with the cull on (the v1 results were without it); the density and split arms hold their variants without it, and only the horizon suite's arms turn it on.
 
 ## Scope history
 

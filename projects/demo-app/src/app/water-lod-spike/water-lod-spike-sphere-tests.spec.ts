@@ -3,12 +3,16 @@ import type { SpherePoseId } from './core/water-lod-spike-sphere-poses';
 import {
   SPHERE_COST_ARMS,
   SPHERE_DENSITY_ARMS,
+  SPHERE_HORIZON_ARMS,
   SPHERE_SPLIT_ARMS,
   SPHERE_STACK_MAX_MS,
+  SPHERE_STILL_LEAF_CAPS,
+  SPHERE_STILL_WAVE_TIME_S,
   WATER_LOD_SPIKE_SPHERE_TEST_HISTORY,
   createWaterLodSpikeSphereTestAdapter,
   sphereCostOrder,
   sphereSplitOrder,
+  sphereStillVariant,
   type IWaterLodSpikeSphereLayers,
   type IWaterLodSpikeSphereVariant,
   type WaterLodSpikeSphereTestHost,
@@ -249,6 +253,112 @@ describe('water-lod-spike sphere cost suite', () => {
       expect(held.length).toBe(SPHERE_DENSITY_ARMS.length * 2 + 1);
       expect(held[held.length - 1]).toBeNull();
       expect(observation.checks?.every((c) => c.passed)).toBe(true);
+    });
+  });
+
+  describe('horizon suite', () => {
+    const HORIZON: TestScenario<WaterLodSpikeSphereTestSettings> = { ...SCENARIO, settings: { pose: 'orbit', measure: 'horizon' } };
+
+    it('is the fourth suite of the history with one case per pose', () => {
+      const suite = WATER_LOD_SPIKE_SPHERE_TEST_HISTORY[3];
+      expect(suite.id).toBe('water-lod-spike-sphere-horizon');
+      expect(suite.scenarios.every((s) => s.settings.measure === 'horizon')).toBe(true);
+      expect(suite.scenarios.length).toBe(4);
+    });
+
+    it('starts with the empty frame, then the ultra tier as shipped without the cull, and every other arm has it', () => {
+      expect(SPHERE_HORIZON_ARMS[0].variant).toBeNull();
+      expect(SPHERE_HORIZON_ARMS[1].variant?.horizon).toBeUndefined();
+      for (const arm of SPHERE_HORIZON_ARMS.slice(2)) expect(arm.variant?.horizon).withContext(arm.id).toBe(true);
+      const order = sphereSplitOrder(SPHERE_HORIZON_ARMS).map((arm) => arm.id);
+      expect(order.slice(SPHERE_HORIZON_ARMS.length)).toEqual([...SPHERE_HORIZON_ARMS].reverse().map((arm) => arm.id));
+    });
+
+    it('draws the water alone and reports the cost of each arm over the empty frame', async () => {
+      let variant: IWaterLodSpikeSphereVariant | null = null;
+      const host = makeHost({ land: 2, water: 1, atmosphere: 0 }, {
+        setWaterVariant: (v) => { variant = v; },
+        gpuFrameMs: () => {
+          if (!host.layers.water) return 0.1;
+          expect(host.layers.land).toBe(false);
+          const v = variant as IWaterLodSpikeSphereVariant | null;
+          return 0.1 + (v?.horizon === true ? 0.7 : 1);
+        },
+      });
+      const observation = await createWaterLodSpikeSphereTestAdapter(host).measure(HORIZON, makeContext());
+      const cost = (id: string) => metric(observation, `cost over an empty frame, ${id}`)?.samples[0];
+      expect(cost('ultra')).toBeCloseTo(1, 9);
+      expect(cost('ultra, horizon')).toBeCloseTo(0.7, 9);
+      expect(observation.checks?.every((c) => c.passed)).toBe(true);
+    });
+  });
+
+  describe('stills suite', () => {
+    const suite = WATER_LOD_SPIKE_SPHERE_TEST_HISTORY[4];
+    const STILL: TestScenario<WaterLodSpikeSphereTestSettings> = {
+      id: 'coast-300m-2048',
+      label: 'Coast, 2048 leaves',
+      settings: { pose: 'coast-300m', measure: 'stills', leafCap: 2048 },
+      durationMs: 1000,
+      warmupMs: 500,
+    };
+
+    it('is a visual-review suite with one case per pose and leaf cap, grouped by pose', () => {
+      expect(suite.id).toBe('water-lod-spike-sphere-stills');
+      expect(suite.version).toBe(1);
+      expect(suite.purpose).toBe('functional');
+      expect(suite.requiresVisualReview).toBe(true);
+      expect(SPHERE_STILL_LEAF_CAPS).toEqual([4096, 2048, 1024]);
+      expect(suite.scenarios.length).toBe(12);
+      expect(new Set(suite.scenarios.map((s) => s.id)).size).toBe(12);
+      expect(suite.scenarios.slice(0, 3).map((s) => [s.settings.pose, s.settings.leafCap])).toEqual([['orbit', 4096], ['orbit', 2048], ['orbit', 1024]]);
+      expect(suite.scenarios.every((s) => s.settings.measure === 'stills')).toBe(true);
+    });
+
+    it('holds the full stack at the case\'s leaf cap with the horizon cull and a fixed wave clock, and leaves it up for the picture', async () => {
+      const variants: (IWaterLodSpikeSphereVariant | null)[] = [];
+      const times: (number | null)[] = [];
+      const host = makeHost({ land: 2, water: 1, atmosphere: 1 }, {
+        setWaterVariant: (v) => { variants.push(v); },
+        holdWaveTime: (t) => { times.push(t); },
+      });
+      const observation = await createWaterLodSpikeSphereTestAdapter(host).measure(STILL, makeContext());
+      expect(host.layers).toEqual({ land: true, water: true, atmosphere: true });
+      expect(variants).toEqual([sphereStillVariant(2048)]);
+      expect(variants[0]?.horizon).toBe(true);
+      expect(variants[0]?.mesh).toEqual({ cellPixels: 4, leafCap: 2048 });
+      expect(times).toEqual([SPHERE_STILL_WAVE_TIME_S]);
+      expect(metric(observation, 'water leaf cap')?.samples).toEqual([2048]);
+      expect(metric(observation, 'GPU frame, land, water and atmosphere')?.samples[0]).toBeCloseTo(4, 9);
+      expect(observation.checks?.every((c) => c.passed)).toBe(true);
+    });
+
+    it('fails the settled check when the triangle count changes during the window', async () => {
+      let triangles = 1000;
+      const host = makeHost({ land: 2, water: 1, atmosphere: 1 }, {
+        setWaterVariant: () => undefined,
+        holdWaveTime: () => undefined,
+        counts: () => ({ drawCalls: 3, triangles: (triangles += 100) }),
+      });
+      const observation = await createWaterLodSpikeSphereTestAdapter(host).measure(STILL, makeContext());
+      expect(check(observation, 'settled')?.passed).toBe(false);
+    });
+
+    it('fails the host check when the page cannot hold a variant or the wave clock', async () => {
+      const observation = await createWaterLodSpikeSphereTestAdapter(makeHost({ land: 2, water: 1, atmosphere: 1 })).measure(STILL, makeContext());
+      expect(check(observation, 'can hold')?.passed).toBe(false);
+    });
+
+    it('takes the still, not the thumbnail, for a stills case, and gives the wave clock back on restore', async () => {
+      const still = new Blob(['still']);
+      const thumb = new Blob(['thumb']);
+      const times: (number | null)[] = [];
+      const host = makeHost({ land: 2, water: 1, atmosphere: 1 }, { thumbnail: async () => thumb, still: async () => still, holdWaveTime: (t) => { times.push(t); } });
+      const adapter = createWaterLodSpikeSphereTestAdapter(host);
+      expect(await adapter.thumbnail?.(STILL, makeContext())).toEqual([still]);
+      expect(await adapter.thumbnail?.(SCENARIO, makeContext())).toEqual([thumb]);
+      await adapter.restore(await adapter.capture(makeContext()), makeContext());
+      expect(times).toEqual([null]);
     });
   });
 

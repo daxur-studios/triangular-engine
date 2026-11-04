@@ -60,6 +60,11 @@ export interface LodTerrainSettings {
   readonly hysteresis: number;
   /** Draw only leaves inside the view frustum (selection itself does not depend on it). */
   readonly cull: boolean;
+  /**
+   * Sphere only, needs `cull`: also leave out leaves wholly behind the planet's horizon (`SelectorSettings.horizonCull`). It is
+   * off while the globe-to-map morph is above 0. Default off.
+   */
+  readonly horizonCull?: boolean;
   /** Material to draw with instead of the built-in debug material; see `LodSurfaceMeshOptions.material`. */
   readonly material?: NodeMaterial;
   /**
@@ -196,6 +201,7 @@ export class LodTerrainBody {
     this.selector = new LodSelector({
       domain, patchCells: settings.patchCells, mode: 'distance', fixedLevel: 5, cellPixels: Math.max(PIXEL_FLOOR, settings.cellPixels),
       leafCap: settings.leafCap, heightBoundM: this.source.boundM, cull: settings.cull, hysteresis: settings.hysteresis,
+      ...(settings.horizonCull === true ? { horizonCull: true } : {}),
       cameraSlack: CAMERA_SLACK, frustumSlackPx: FRUSTUM_SLACK_PX,
       ...(this.source.nodeRange ? { heightRanges: { nodeRange: this.source.nodeRange.bind(this.source) } } : {}),
     });
@@ -369,6 +375,8 @@ export class LodTerrainBody {
     // Above morph 0 the surface is bent while the selector's bounds describe the globe: by default nothing is culled (a zero frustum
     // never rejects a node) and the selector sees the camera over the unbent globe. With bent bounds it sees the bent camera.
     const morphing = this.settings.morph === true && this.surface.morphState.morph > 0;
+    // The horizon is the globe's: above morph 0 the surface is bent, so the cull waits.
+    this.selector.setHorizonSuppressed(morphing);
     if (this.stretch) this.placeStretchCamera(position, view);
     else if (morphing && this.morphCulling === 'off') {
       this.frustum.fill(0);

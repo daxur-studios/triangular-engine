@@ -330,7 +330,7 @@ export class LodSurfaceLabPageComponent {
   readonly runnerReady = signal(false);
   readonly runnerBusy = signal(false);
   readonly hud = signal({ backend: 'starting', width: 0, height: 0, adapter: 'adapter unknown', software: false });
-  readonly stats = signal<SelectorStats>({ leaves: 0, drawn: 0, covered: 0, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0, geometryMeasured: 0, geometryStale: 0 });
+  readonly stats = signal<SelectorStats>({ leaves: 0, drawn: 0, covered: 0, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0, horizonHidden: 0, geometryMeasured: 0, geometryStale: 0 });
   readonly selectionMs = signal(0);
   readonly altitudeLabel = signal('');
   readonly probeResult = signal('');

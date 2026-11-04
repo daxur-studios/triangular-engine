@@ -9,7 +9,7 @@ import {
   PLANET_RADIUS_M, freeDrag, freeLook, freeZoom, groundUp, nearPlaneFor, resolvePlanetCamera, sceneSunDirection, type PlanetView,
 } from '../pages/planet-scene/planet-camera';
 import { createWaterLodSpikeSphereScene, type IWaterLodSpikeSphereSceneHandle } from './core/create-water-lod-spike-sphere-scene';
-import { WATER_LOD_SPIKE_QUALITIES, waterLodSpikeQuality, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
+import { WATER_LOD_SPIKE_SPHERE_QUALITIES, waterLodSpikeQuality, waterLodSpikeSphereQuality, type WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
 import { SPHERE_POSES, spherePoseView, type SpherePoseId } from './core/water-lod-spike-sphere-poses';
 import { WATER_SPHERE_RADIUS_M, sphereLandHeightM } from './core/water-lod-spike-sphere-land';
 import { sphereWaterHeightM } from './core/water-lod-spike-sphere-waves';
@@ -23,6 +23,9 @@ import {
 
 const FOV_DEG = 60;
 const THUMBNAIL_WIDTH_PX = 480;
+/** Stills suite: the picture sizes tried, largest first, and the byte limit a kept picture must fit (a little under the receiver's 64 KB). */
+const STILL_ATTEMPTS: readonly (readonly [width: number, quality: number])[] = [[1280, 0.8], [1024, 0.75], [800, 0.7], [640, 0.6], [480, 0.6]];
+const STILL_MAX_BYTES = 62 * 1024;
 /** Density suite "no waves" arm: a cell size and a footprint bias so large that the spacing filter and the footprint gate drop every wave. */
 const NO_WAVES_CELL_PIXELS = 1e5;
 const NO_WAVES_LOD_BIAS = 1e5;
@@ -78,7 +81,7 @@ export class WaterLodSpikeSphereComponent {
   protected readonly sun = sceneSunDirection();
   protected readonly rig: IWaterLodSpikeSphereSceneHandle;
   protected readonly poses = SPHERE_POSES;
-  protected readonly qualities = WATER_LOD_SPIKE_QUALITIES;
+  protected readonly qualities = WATER_LOD_SPIKE_SPHERE_QUALITIES;
 
   readonly testHistory = WATER_LOD_SPIKE_SPHERE_TEST_HISTORY;
   /** Autostart from a launch link is a dev-only convenience; the owner's dev server is in dev mode. */
@@ -103,13 +106,20 @@ export class WaterLodSpikeSphereComponent {
   readonly freeOn = signal(false);
   /** The water's tier: the slider's, with the mesh inputs of a held density variant in place of the tier's. */
   protected readonly qualityTier = computed(() => {
-    const tier = waterLodSpikeQuality(this.quality());
+    const tier = waterLodSpikeSphereQuality(this.quality());
     const mesh = this.heldVariant()?.mesh;
     return mesh ? { ...tier, cellPixels: mesh.cellPixels, leafCap: mesh.leafCap } : tier;
   });
+  /** The page's switch for leaving out leaves behind the planet's horizon. On by default. */
+  readonly horizonOn = signal(true);
+  /** What both bodies get: the page's switch, or, while a test holds a water variant, the variant's own (absent: off, as before the cull existed). */
+  protected readonly horizonCull = computed(() => {
+    const held = this.heldVariant();
+    return held ? held.horizon === true : this.horizonOn();
+  });
   /** The land's mesh: always the ultra tier's, so a water quality change (or a test arm) never changes the land's cost. */
   protected readonly landTier = waterLodSpikeQuality('ultra');
-  protected readonly qualityIndex = computed(() => WATER_LOD_SPIKE_QUALITIES.findIndex((tier) => tier.id === this.quality()));
+  protected readonly qualityIndex = computed(() => WATER_LOD_SPIKE_SPHERE_QUALITIES.findIndex((tier) => tier.id === this.quality()));
   readonly drawCalls = signal(0);
   readonly triangles = signal(0);
   readonly altitudeLabel = signal('');
@@ -226,10 +236,19 @@ export class WaterLodSpikeSphereComponent {
         while (this.renderedFrames < start + count) await context.wait(16);
       },
       environment: () => this.environment(),
+      holdWaveTime: (seconds) => {
+        if (seconds === null) {
+          this.rig.setAnimating(this.animating());
+          return;
+        }
+        this.rig.setAnimating(false);
+        this.rig.setTime(seconds);
+      },
       thumbnail: () => this.screenshot.capture({
         engine: this.engine, format: 'image/webp', quality: 0.6,
         compress: { maxWidthOrHeight: THUMBNAIL_WIDTH_PX, fileType: 'image/webp', quality: 0.6 },
       }),
+      still: () => this.captureStill(),
     });
     this.rig.setShore(true);
     this.rig.setFoam(true);
@@ -271,6 +290,18 @@ export class WaterLodSpikeSphereComponent {
     };
     (globalThis as unknown as { __waterLodSphere?: typeof hook }).__waterLodSphere = hook;
     this.destroyRef.onDestroy(() => { delete (globalThis as unknown as { __waterLodSphere?: typeof hook }).__waterLodSphere; });
+  }
+
+  /** The largest WebP of the canvas that fits the receiver's per-image limit (width and quality step down until it does), or undefined if none does. */
+  private async captureStill(): Promise<Blob | undefined> {
+    for (const [width, quality] of STILL_ATTEMPTS) {
+      const image = await this.screenshot.capture({
+        engine: this.engine, format: 'image/webp', quality,
+        compress: { maxWidthOrHeight: width, fileType: 'image/webp', quality },
+      });
+      if (image && image.size <= STILL_MAX_BYTES) return image;
+    }
+    return undefined;
   }
 
   onTestProgress(progress: TestProgress | null): void {
@@ -320,7 +351,7 @@ export class WaterLodSpikeSphereComponent {
 
   /** Picks a quality tier from the slider (an index into the tiers, best first). */
   onQualitySlider(event: Event): void {
-    const tier = WATER_LOD_SPIKE_QUALITIES[Number((event.target as HTMLInputElement).value)];
+    const tier = WATER_LOD_SPIKE_SPHERE_QUALITIES[Number((event.target as HTMLInputElement).value)];
     if (tier) this.setQuality(tier.id);
   }
 

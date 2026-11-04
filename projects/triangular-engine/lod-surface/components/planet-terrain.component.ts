@@ -88,6 +88,11 @@ export class PlanetTerrainComponent {
   readonly hysteresis = input<number>(TERRAIN_DEFAULTS.hysteresis);
   /** Draw only the selected leaves inside the camera's frustum. Default on. */
   readonly cull = input(true);
+  /**
+   * Also leave out leaves wholly behind the planet's horizon (needs `cull`): they are hidden by the planet anyway, so this saves
+   * their vertex work, most from orbit. Off while the globe-to-map morph is above 0. Default off.
+   */
+  readonly horizonCull = input(false);
   /** `'equal-angle'` (default) or `'none'` cube warp. Baked heights must have been made with the same one. */
   readonly warp = input<CubeWarp>('equal-angle');
   /**
@@ -194,6 +199,7 @@ export class PlanetTerrainComponent {
           patchCells: this.patchCells(),
           hysteresis: this.hysteresis(),
           cull: this.cull(),
+          ...(this.horizonCull() ? { horizonCull: true } : {}),
           ...(material ? { material } : {}),
         },
         sunDirection: this.sunDirection() ?? this.context?.sunDirection() ?? DEFAULT_SUN,

@@ -26,6 +26,22 @@ export const WATER_LOD_SPIKE_QUALITIES: readonly IWaterLodSpikeQuality[] = [
   { id: 'low', label: 'Low', lodBias: 4, cellPixels: 10, leafCap: 256 },
 ];
 
+/**
+ * The sphere page's tiers: the same table with ultra at 2048 leaves. The horizon suite (ER 080) measured 6.1 ms at 2 m for
+ * 4096 leaves and 3.7 ms for 1024, so the cap is the lever; 2048 is the first step down. The plane spike keeps
+ * {@link WATER_LOD_SPIKE_QUALITIES} as measured.
+ */
+export const WATER_LOD_SPIKE_SPHERE_QUALITIES: readonly IWaterLodSpikeQuality[] = WATER_LOD_SPIKE_QUALITIES.map((tier) =>
+  tier.id === 'ultra' ? { ...tier, leafCap: 2048 } : tier,
+);
+
+/** The sphere page's tier with this id; throws for an id the table does not have. */
+export function waterLodSpikeSphereQuality(id: WaterLodSpikeQualityId): IWaterLodSpikeQuality {
+  const quality = WATER_LOD_SPIKE_SPHERE_QUALITIES.find((entry) => entry.id === id);
+  if (!quality) throw new Error(`Unknown water quality: ${id}`);
+  return quality;
+}
+
 /** The tier with this id; throws for an id the table does not have. */
 export function waterLodSpikeQuality(id: WaterLodSpikeQualityId): IWaterLodSpikeQuality {
   const quality = WATER_LOD_SPIKE_QUALITIES.find((entry) => entry.id === id);

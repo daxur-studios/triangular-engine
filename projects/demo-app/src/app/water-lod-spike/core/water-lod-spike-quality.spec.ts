@@ -1,4 +1,4 @@
-import { WATER_LOD_SPIKE_QUALITIES, waterLodSpikeQuality } from './water-lod-spike-quality';
+import { WATER_LOD_SPIKE_QUALITIES, WATER_LOD_SPIKE_SPHERE_QUALITIES, waterLodSpikeQuality, waterLodSpikeSphereQuality } from './water-lod-spike-quality';
 
 describe('water LOD spike quality tiers', () => {
   it('makes the best tier the tuned filter at the default mesh', () => {
@@ -15,6 +15,15 @@ describe('water LOD spike quality tiers', () => {
       expect(worse.lodBias).toBeGreaterThan(better.lodBias);
       expect(worse.cellPixels).toBeGreaterThanOrEqual(better.cellPixels);
       expect(worse.leafCap).toBeLessThan(better.leafCap);
+    }
+  });
+
+  it('gives the sphere page ultra at 2048 leaves and leaves the other tiers as they are', () => {
+    expect(waterLodSpikeSphereQuality('ultra').leafCap).toBe(2048);
+    expect(waterLodSpikeSphereQuality('ultra').cellPixels).toBe(4);
+    for (const tier of WATER_LOD_SPIKE_QUALITIES.slice(1)) expect(waterLodSpikeSphereQuality(tier.id)).toEqual(tier);
+    for (let i = 1; i < WATER_LOD_SPIKE_SPHERE_QUALITIES.length; i++) {
+      expect(WATER_LOD_SPIKE_SPHERE_QUALITIES[i].leafCap).toBeLessThan(WATER_LOD_SPIKE_SPHERE_QUALITIES[i - 1].leafCap);
     }
   });
 

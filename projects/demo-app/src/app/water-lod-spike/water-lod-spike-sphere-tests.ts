@@ -1,12 +1,17 @@
-import { simpleAdapter, type TestContext, type TestObservation, type TestRunAdapter, type TestSetting, type TestSuite } from 'triangular-engine/testing';
+import { simpleAdapter, type TestContext, type TestObservation, type TestRunAdapter, type TestScenario, type TestSetting, type TestSuite } from 'triangular-engine/testing';
 import type { WaterLodSpikeQualityId } from './core/water-lod-spike-quality';
 import type { SpherePoseId } from './core/water-lod-spike-sphere-poses';
 
 /** What a sphere water case sets and measures. */
 export interface WaterLodSpikeSphereTestSettings {
   readonly pose: SpherePoseId;
-  /** `cost`: the layer arms. `split`: the water's own shading parts on the land. `density`: the water alone, mesh density and wave work. */
-  readonly measure: 'cost' | 'split' | 'density';
+  /**
+   * `cost`: the layer arms. `split`: the water's own shading parts on the land. `density`: the water alone, mesh density and wave
+   * work. `horizon`: the cull and the leaf cap. `stills`: one picture of the whole stack at one leaf cap (`leafCap`).
+   */
+  readonly measure: 'cost' | 'split' | 'density' | 'horizon' | 'stills';
+  /** Stills suite: the water's leaf cap for this case. */
+  readonly leafCap?: number;
 }
 
 /** What of the water's cost is switched off or lowered in one split arm. */
@@ -22,6 +27,11 @@ export interface IWaterLodSpikeSphereVariant {
   readonly waves?: boolean;
   /** Density suite: replaces the tier's wave filter bias (`lodBias`). */
   readonly lodBias?: number;
+  /**
+   * Horizon suite: true draws only the leaves in front of the planet's horizon (`<planetTerrain [horizonCull]>`). A held variant
+   * without it draws all of them, as the earlier suites measured, whatever the page's own switch says.
+   */
+  readonly horizon?: boolean;
 }
 
 /** What is switched on in one cost arm. */
@@ -58,8 +68,15 @@ export interface WaterLodSpikeSphereTestHost {
   /** GPU frame time (ms, one-second average from timestamp queries), or null when unsupported. */
   gpuFrameMs(): number | null;
   waitFrames(count: number, context: TestContext): Promise<void>;
+  /**
+   * Holds the wave clock still at this time (seconds) so stills of different settings show the same waves; null hands the clock back
+   * to the page's own (running or paused, as the page had it).
+   */
+  holdWaveTime?(seconds: number | null): void;
   /** A small picture of the canvas for the results page; never taken inside a timing window. */
   thumbnail?(): Promise<Blob | undefined>;
+  /** The largest picture of the canvas that fits the receiver's per-image limit (the stills suite's evidence); never taken inside a timing window. */
+  still?(): Promise<Blob | undefined>;
   environment(): Readonly<Record<string, TestSetting>>;
 }
 
@@ -166,11 +183,67 @@ const WATER_LOD_SPIKE_SPHERE_DENSITY_V1: TestSuite<WaterLodSpikeSphereTestSettin
   })),
 };
 
+/**
+ * Suite `water-lod-spike-sphere-horizon` v1 (Plan 080): what leaving out the leaves behind the planet's horizon saves, and what a
+ * smaller leaf cap saves on top, water alone. The density run found a leaf is 512 triangles, the cap counts leaves behind the
+ * planet too, and nothing culled them. Arms: the shipped ultra without the cull (the density run's arm), ultra with it, then
+ * the cull with leaf caps 1024, 512, 256 and 64 (64 is the floor: almost no mesh left), the high and low tiers, and ultra with no
+ * waves. Each arm is read like the density suite's. Nothing is gated; the triangles and the cost over an empty frame are reported.
+ */
+const WATER_LOD_SPIKE_SPHERE_HORIZON_V1: TestSuite<WaterLodSpikeSphereTestSettings> = {
+  id: 'water-lod-spike-sphere-horizon',
+  version: 1,
+  title: 'Water on a planet, alone: leaves behind the horizon and the leaf cap',
+  purpose: 'performance',
+  scenarios: POSES.map(([pose, label]) => ({
+    id: pose,
+    label,
+    settings: { pose, measure: 'horizon' as const },
+    durationMs: 1000,
+    warmupMs: 500,
+  })),
+};
+
+/** The water's leaf caps the stills suite compares: the old ultra, the new ultra, and the next step down. */
+export const SPHERE_STILL_LEAF_CAPS: readonly number[] = [4096, 2048, 1024];
+/** The wave clock of every still (seconds), so the same pose shows the same waves at every cap. */
+export const SPHERE_STILL_WAVE_TIME_S = 20;
+const STILL_COUNT_SETTLE_MS = 3000;
+
+/**
+ * Suite `water-lod-spike-sphere-stills` v1 (Plan 080): does the water look the same at 2048 leaves as at 4096? One still per pose
+ * and leaf cap (4096, 2048, 1024) of the whole stack (land, water and atmosphere, the horizon cull on), with the wave clock held at one
+ * time so the only difference between two stills of a pose is the water's mesh. The land stays at 4096 leaves. The largest picture
+ * that fits the receiver's 64 KB limit is kept per case. Each case also reports the GPU frame of the whole stack and the triangles, so
+ * the saving at each cap is read off the same run.
+ *
+ * Checks: every layer draws, and the triangle count is steady over the measuring window (the mesh has settled). The look is for
+ * a reviewer: `requiresVisualReview` is set and nothing is accepted automatically.
+ */
+const WATER_LOD_SPIKE_SPHERE_STILLS_V1: TestSuite<WaterLodSpikeSphereTestSettings> = {
+  id: 'water-lod-spike-sphere-stills',
+  version: 1,
+  title: 'Water on a planet: stills of the whole stack at 4096, 2048 and 1024 water leaves',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: POSES.flatMap(([pose, label]) =>
+    SPHERE_STILL_LEAF_CAPS.map((leafCap) => ({
+      id: `${pose}-${leafCap}`,
+      label: `${label}, ${leafCap} leaves`,
+      settings: { pose, measure: 'stills' as const, leafCap },
+      durationMs: 1000,
+      warmupMs: 500,
+    })),
+  ),
+};
+
 /** The suites of the sphere water page, oldest first. */
 export const WATER_LOD_SPIKE_SPHERE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeSphereTestSettings>[] = [
   WATER_LOD_SPIKE_SPHERE_COST_V1,
   WATER_LOD_SPIKE_SPHERE_SPLIT_V1,
   WATER_LOD_SPIKE_SPHERE_DENSITY_V1,
+  WATER_LOD_SPIKE_SPHERE_HORIZON_V1,
+  WATER_LOD_SPIKE_SPHERE_STILLS_V1,
 ];
 
 /** One arm of the split suite: land only, or land and water at a variant. */
@@ -211,6 +284,23 @@ export const SPHERE_DENSITY_ARMS: readonly ISphereSplitArm[] = [
   { id: 'bias 4', variant: { ...ULTRA_WATER, lodBias: 4 } },
   { id: 'high', variant: { ...ULTRA_WATER, quality: 'high' } },
   { id: 'low', variant: { ...ULTRA_WATER, quality: 'low' } },
+];
+
+const HORIZON_ULTRA: IWaterLodSpikeSphereVariant = { ...ULTRA_WATER, horizon: true };
+const capped = (leafCap: number): IWaterLodSpikeSphereVariant => ({ ...HORIZON_ULTRA, mesh: { cellPixels: 4, leafCap } });
+
+/** The horizon suite's arms; the first (no water) is the empty-frame baseline. The land is off in all of them. */
+export const SPHERE_HORIZON_ARMS: readonly ISphereSplitArm[] = [
+  { id: 'nothing', variant: null },
+  { id: 'ultra', variant: ULTRA_WATER },
+  { id: 'ultra, horizon', variant: HORIZON_ULTRA },
+  { id: 'cap 1024, horizon', variant: capped(1024) },
+  { id: 'cap 512, horizon', variant: capped(512) },
+  { id: 'cap 256, horizon', variant: capped(256) },
+  { id: 'cap 64, horizon', variant: capped(64) },
+  { id: 'high, horizon', variant: { ...HORIZON_ULTRA, quality: 'high' } },
+  { id: 'low, horizon', variant: { ...HORIZON_ULTRA, quality: 'low' } },
+  { id: 'ultra, no waves, horizon', variant: { ...HORIZON_ULTRA, quadrature: false, waves: false } },
 ];
 
 /** The plan 080 water gate: the water's marginal GPU cost on the terrain, milliseconds. */
@@ -372,6 +462,54 @@ const measureSplit = (host: WaterLodSpikeSphereTestHost, context: TestContext): 
 const measureDensity = (host: WaterLodSpikeSphereTestHost, context: TestContext): Promise<TestObservation> =>
   measureVariants(host, context, SPHERE_DENSITY_ARMS, false);
 
+const measureHorizon = (host: WaterLodSpikeSphereTestHost, context: TestContext): Promise<TestObservation> =>
+  measureVariants(host, context, SPHERE_HORIZON_ARMS, false);
+
+/** The water as the stills suite holds it: the shipped ultra shading with the horizon cull and the case's leaf cap, 4 px cells. */
+export function sphereStillVariant(leafCap: number): IWaterLodSpikeSphereVariant {
+  return { ...ULTRA_WATER, horizon: true, mesh: { cellPixels: 4, leafCap } };
+}
+
+/**
+ * Puts the whole stack up at one leaf cap and measures it, leaving it up: the case's picture is taken after this returns, and
+ * `restore` hands the page its own settings back.
+ */
+async function measureStills(host: WaterLodSpikeSphereTestHost, context: TestContext, leafCap: number): Promise<TestObservation> {
+  const layers: IWaterLodSpikeSphereLayers = { land: true, water: true, atmosphere: true };
+  const setVariant = host.setWaterVariant?.bind(host);
+  await host.waitFrames(SETTLE_FRAMES, context);
+  host.holdWaveTime?.(SPHERE_STILL_WAVE_TIME_S);
+  host.setLayers(layers);
+  setVariant?.(sphereStillVariant(leafCap));
+  const flipped = performance.now();
+  await host.waitFrames(2, context);
+  while (!drawsAll(host.drawn(), layers) && performance.now() - flipped < DRAWN_TIMEOUT_MS) await host.waitFrames(1, context);
+  const drawnAll = drawsAll(host.drawn(), layers);
+  await host.waitFrames(SETTLE_FRAMES, context);
+  // The page refreshes its triangle count twice a second, so wait past a refresh before the first read (the mesh also rebuilds for a moment after a cap change).
+  await context.wait(STILL_COUNT_SETTLE_MS);
+  const before = host.counts();
+  host.beginFrameSampling();
+  const gpuMs = await gpuMeanMs(host, context);
+  host.endFrameSampling();
+  host.takeCpuFrameMs();
+  const after = host.counts();
+  return {
+    metrics: [
+      { name: 'GPU frame, land, water and atmosphere', unit: 'ms', source: 'WebGPU timestamp queries, 1 s averages after a warm-up', samples: [gpuMs] },
+      { name: 'triangles', unit: 'triangles', source: 'renderer.info.render.triangles', samples: [after.triangles] },
+      { name: 'draw calls', unit: 'calls', source: 'renderer.info.render', samples: [after.drawCalls] },
+      { name: 'water leaf cap', unit: 'leaves', source: 'the case setting', samples: [leafCap] },
+    ],
+    checks: [
+      { name: 'the land, the water and the atmosphere all draw', passed: drawnAll, detail: drawnAll ? `draw calls ${after.drawCalls}` : 'a layer did not draw in time' },
+      { name: 'the mesh has settled: the triangle count did not change over the window', passed: before.triangles === after.triangles, detail: `${before.triangles} before, ${after.triangles} after` },
+      { name: 'GPU time measured', passed: Number.isFinite(gpuMs), detail: `${gpuMs.toFixed(2)} ms` },
+      { name: 'the host can hold a water variant and the wave clock', passed: setVariant !== undefined && host.holdWaveTime !== undefined, detail: setVariant && host.holdWaveTime ? 'yes' : 'the page lacks setWaterVariant or holdWaveTime' },
+    ],
+  };
+}
+
 /**
  * Testing adapter for the sphere water page: holds the pose and the layer set the case asks for, waits for the page to draw, and
  * measures the cost arms (see {@link WATER_LOD_SPIKE_SPHERE_TEST_HISTORY}). Nothing here switches `<scene>`'s wireframe.
@@ -381,11 +519,12 @@ export function createWaterLodSpikeSphereTestAdapter(host: WaterLodSpikeSphereTe
     windowModes: false,
     capture: () => true,
     apply: (scenario) => host.setPose(scenario.settings.pose),
-    ...(host.thumbnail
+    ...(host.thumbnail || host.still
       ? {
-          thumbnail: async (_scenario: unknown, context: TestContext) => {
+          thumbnail: async (scenario: TestScenario<WaterLodSpikeSphereTestSettings>, context: TestContext) => {
             if (context.repetition > 1) return undefined;
-            const image = await host.thumbnail?.();
+            const take = scenario.settings.measure === 'stills' && host.still ? host.still : host.thumbnail;
+            const image = await take?.call(host);
             return image ? [image] : undefined;
           },
         }
@@ -393,6 +532,7 @@ export function createWaterLodSpikeSphereTestAdapter(host: WaterLodSpikeSphereTe
     restore: () => {
       host.setPose(null);
       host.setWaterVariant?.(null);
+      host.holdWaveTime?.(null);
       host.setLayers(null);
     },
     ready: async (context) => {
@@ -403,6 +543,8 @@ export function createWaterLodSpikeSphereTestAdapter(host: WaterLodSpikeSphereTe
       switch (scenario.settings.measure) {
         case 'split': return measureSplit(host, context);
         case 'density': return measureDensity(host, context);
+        case 'horizon': return measureHorizon(host, context);
+        case 'stills': return measureStills(host, context, scenario.settings.leafCap ?? SPHERE_STILL_LEAF_CAPS[1]);
         default: return measureCost(host, context);
       }
     },
