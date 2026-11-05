@@ -289,6 +289,26 @@ Plan 050's existing occlusion slot.
      flash sequence repeats for screenshots.
    - **Gate:** the engine lights the cloud from within as it passes; flashes light the storm from inside, with no
      whole-cloud blink; GPU cost noted per light.
+   - **Noise shell (owner's request, 2026-11-05): a planet fully covered by continuous 3D clouds.** This is option D above, which
+     this plan rejected on cost, so it has to meet the same rules as the volumes, not sit beside them. The first spike
+     (`cloud-noise-shell.ts`, lab only) broke them: procedural noise per step instead of a baked lookup, a hardcoded sun
+     colour instead of the atmosphere (no orange at dusk, against G2), and no test suite or GPU timing. Rules from here on:
+     - **Same lighting as the volumes (G2):** sun colour and sky light from the atmosphere, same shading formula. Two
+       table reads per cloud sample: the shell crosses the terminator, and a single read per ray (tried) lit night
+       cloud with the colour of the day side on grazing rays, which showed as a hard dark arc inside the limb.
+     - **Bake, then look up:** the density is a tiling noise texture baked once, with wind as a coordinate offset. A second
+       read of the same texture adds the fine detail; sun taps skip it.
+     - **Measured with `triangular-engine/testing`:** suites `cloud-shell-look` (ground, horizon, mid, orbit at noon, dusk,
+       night, for visual review) and `cloud-shell-cost` (A/B against nothing, GPU timestamps).
+     - **Baseline, procedural noise, 2026-11-05 (headless, noisy, GPU reported throttled, so read as relative):** net
+       10.6 ms ground, 13.4 ms horizon, 2.8 ms mid, 1.4 ms orbit, against G6's 1.5 typical and 2.5 worst.
+     - **Baked noise with atmosphere light, 2026-11-05 (same conditions):** net 1.4 ms ground, 1.5 ms horizon, 0.3 ms mid,
+       0.2 ms orbit.
+     - **Owner's run, visible browser on the RTX 3080 Laptop at 2538x1308, 2026-11-05 (spread ±0.001 ms, summary showed no
+       warnings):** net 1.54 ms ground, 1.70 ms horizon, 0.44 ms mid, 0.27 ms orbit. All inside the 2.5 ms worst case; ground
+       and horizon are just over the 1.5 ms typical figure. The owner has not yet reviewed the look.
+     - **Gate:** ground, horizon, mid and orbit net of the baseline within G6 on a clean run; orange at dusk, dark night side,
+       no cutting or double arc, accepted by the owner from the look suite.
 8. **Tiers, telemetry, docs:**
    - quality tiers;
    - a `clouds` telemetry section (Plan 048);

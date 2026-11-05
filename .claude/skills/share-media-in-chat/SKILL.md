@@ -7,6 +7,8 @@ description: Claude Code only. Send test captures (contact sheets, GIFs, MP4s, s
 
 This applies to Claude Code in the Claude desktop app and sessions the owner follows from another device. Other IDEs and agents have their own ways; do not assume this works there.
 
+The shared [multi-client skill](../../../projects/triangular-engine/.agents/skills/share-media-in-chat/SKILL.md) preserves this Claude method and documents Codex's absolute-path Markdown media embed, with phone MP4 playback confirmed on 2026-11-05. It ships in the engine package as `skills/share-media-in-chat/SKILL.md` for consumer repositories. Keep using the Claude tool below in this client.
+
 ## How
 
 1. Make the file (FFmpeg, or `triangular testing media gif | contact-sheet`). Save it inside the session folders or the scratchpad directory.

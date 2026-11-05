@@ -49,5 +49,6 @@ tags: [plans, index]
 | [LOD Water](/docs/plans/080_lod-water.md) | planned | [ER 080](/docs/engineering-records/080_lod-water.md) |
 | [Body tint for meshes in atmosphere](/docs/plans/081_body-tint.md) | planned | [ER 081](/docs/engineering-records/081_body-tint.md) |
 | [Fast Cross-Repo Library Development and Sync](/docs/plans/082_fast-library-sync.md) | in_progress | [ER 082](/docs/engineering-records/082_fast-library-sync.md) |
+| [Addressable Visual Evidence and Shot Plans](/docs/plans/083_addressable-visual-evidence.md) | planned | [ER 083](/docs/engineering-records/083_addressable-visual-evidence.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

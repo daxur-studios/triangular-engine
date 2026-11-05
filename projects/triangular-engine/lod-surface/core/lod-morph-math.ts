@@ -213,7 +213,7 @@ export interface MorphAnchor<T = any> {
   /** The bend's up at the anchor, and the anchor's ground point minus the bent camera, both in the map frame. */
   upA: V3<T>;
   garel: V3<T>;
-  /** 1 when the pole stage may be used (morph above 0), else 0. */
+  /** 1 when the pole stage may be used (morph above 0), 2 when the anchor is on a pole and every vertex must use it, else 0. */
   poleOn: T;
   /** `sign - sA` for the pole nearer the anchor (sign +1 for the basis' up pole, -1 for the down pole), exact: `1 - sA` or `-(1 + sA)`. */
   poleDs: T;
@@ -343,7 +343,10 @@ export function p2Position(
 ): P2Result {
   const fromAnchor = anchorAngles(L, A, du);
   const fromPole = poleAngles(L, A, dup);
-  const nearer = L.select(L.lt(dot3(dup, dup), dot3(du, du)), L.c(1), L.c(0)).mul(A.poleOn);
+  // poleOn 2: the anchor is on a pole and has no longitude, so every vertex takes the pole's offsets.
+  const forced = L.select(L.lt(L.c(1.5), A.poleOn), L.c(1), L.c(0));
+  const closer = L.select(L.lt(dot3(dup, dup), dot3(du, du)), L.c(1), L.c(0));
+  const nearer = L.max(closer, forced).mul(L.select(L.lt(L.c(0.5), A.poleOn), L.c(1), L.c(0)));
   const usedPole = L.select(L.lt(L.c(0.5), nearer), L.c(1), L.c(0));
   const pick = (a: any, b: any): any => L.select(L.lt(L.c(0.5), usedPole), b, a);
   const ds = pick(fromAnchor.ds, fromPole.ds);

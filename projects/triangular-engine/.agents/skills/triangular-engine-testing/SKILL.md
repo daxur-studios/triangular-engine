@@ -198,7 +198,7 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   The receiver validates WebM/MP4 signatures and serves saved sidecars through `/video?file=` with byte ranges. Run JSON
   and agent summaries contain metadata and filenames, never media bytes. `<tri-test-results>` uses a native player with
   `preload="none"`. Do not send or read the video through an agent vision/audio path when the user's goal is only to
-  provide a clickable playback artifact; point the person to the saved path/URL instead.
+  provide a playback artifact; use the client's delivery method in [share-media-in-chat](../share-media-in-chat/SKILL.md).
 - **Choose media for the visual question.** Use separate evidence for separate claims when their framing or review
   goal differs. A full-body walk/orbit sheet and a face-detail/expression sheet should normally be titled and reviewed
   separately. Close-ups of shader details need app-provided focus bounds derived from the shader's controlling data;
@@ -221,7 +221,9 @@ diagnostic measurements; a runnable link is not an accepted baseline.
     explicitly link a rendered case to a named reference, view and focus target. Do not ask a vision agent to infer the
     target from a large unlabelled sheet.
 - **Present media to the user by purpose.** In the handoff, show a GIF only as a motion preview when the current chat
-  supports it; link the unchanged WebM separately when the user needs audio or full playback quality. Show labeled
+  supports it; share the source video for audio or full playback quality. Read [share-media-in-chat](../share-media-in-chat/SKILL.md):
+  Codex uses `![Video](<absolute-path-to-video.mp4>)`; Claude uses its available `SendUserFile` tool. Codex phone playback
+  was confirmed for H.264/AAC MP4, not every WebM codec; preserve the WebM source if making a compatibility derivative. Show labeled
   contact sheets for still comparison, view coverage or close-up detail, with separate sheets for different claims
   such as walking and facial expressions. Do not call selected-frame contact sheets full sprite atlases. If inline
   display is unavailable, provide the absolute artifact path and size instead of claiming it was displayed.

@@ -631,6 +631,9 @@ type MutableAnchor = { -readonly [K in keyof MorphAnchor<number>]: MorphAnchor<n
 /** Scratch of {@link computeMorphFrame}: it runs synchronously, so one set per module is enough. */
 /** {@link computeMorphFrame} keeps the scene position as the unbent camera when the unbend-and-bend round trip moves it by more than this share of its distance from the centre. */
 const MORPH_FRAME_ROUND_TRIP_TOLERANCE = 1e-3;
+
+/** An anchor whose horizontal part `cos(lat)` is below this is on a pole (about 0.6 m on a 600 km planet): it has no usable longitude. */
+const ANCHOR_ON_POLE_COS = 1e-7;
 const FRAME_UNBENT ={ lon: 0, lat: 0, height: 0, position: [0, 0, 0] as Vec3 };
 const FRAME_XY: [number, number] = [0, 0];
 const FRAME_GROUND = { position: [0, 0, 0] as Vec3, normal: [0, 0, 0] as Vec3 };
@@ -726,9 +729,16 @@ export function computeMorphFrame(
   anchorDir[1] = anchor.cube[1] / cubeLength;
   anchorDir[2] = anchor.cube[2] / cubeLength;
   const sA = dot(anchorDir, basis.up);
-  const v1 = dot(anchorDir, basis.forward);
-  const v2 = dot(anchorDir, basis.right);
+  let v1 = dot(anchorDir, basis.forward);
+  let v2 = dot(anchorDir, basis.right);
   const cA = Math.hypot(v1, v2);
+  // An anchor on a pole has no horizontal direction, so no longitude to measure a vertex's against. Give it a fixed one (forward, lon 0)
+  // and send every vertex through the pole stage (`poleOn` 2), whose offsets are from the pole itself.
+  const anchorOnPole = cA < ANCHOR_ON_POLE_COS && map.morph > 0;
+  if (anchorOnPole) {
+    v1 = 1;
+    v2 = 0;
+  }
   const lam0 = Math.atan2(v2, v1);
   const lamA = lam0 + TWO_PI * Math.round((lambdaC - lam0) / TWO_PI);
   const phiA = Math.atan2(sA, cA);
@@ -794,7 +804,7 @@ export function computeMorphFrame(
   values.opsA = opsA;
   values.vA1 = v1;
   values.vA2 = v2;
-  values.nA2 = v1 * v1 + v2 * v2;
+  values.nA2 = anchorOnPole ? 0 : v1 * v1 + v2 * v2;
   values.lamA = lamA;
   values.thA = thA;
   values.tA = tA;
@@ -807,7 +817,7 @@ export function computeMorphFrame(
   values.cosAA = Math.cos(aA);
   values.sinBA = Math.sin(bA);
   values.cosBA = Math.cos(bA);
-  values.poleOn = map.morph > 0 ? 1 : 0;
+  values.poleOn = map.morph > 0 ? (anchorOnPole ? 2 : 1) : 0;
   values.poleDs = sign === 1 ? omsA : -opsA;
 
   outlineOfInto(lamA, yA, map, f.outline);

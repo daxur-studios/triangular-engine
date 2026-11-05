@@ -737,3 +737,32 @@ Frame times are about 7x lower than the earlier integrated-GPU runs, which is co
 
 ### Fix: sun colour snapped off like a light bulb at the horizon
 Reported by eye while changing the sun elevation (with or without haze or sky backdrop). Cause: the atmosphere's sun transmittance is exactly 0 once the planet blocks the sun, and the lighting reads it once per volume at the volume's centre, so a volume's light went from orange to black in one step. Fix in `CloudVolumeAtmosphereLighting`: sample just above the volume's horizon and fade the colour over about 4 degrees below it (smoothstep). New spec checks no step larger than 0.25 while sweeping the sun, and 0 on the night side. 13 of 13 cloud-volumes specs pass. Confirmed smooth by eye. Remaining pop sources: a volume that straddles the terminator still flips as a whole (per-volume light), and a rebake at 1 band/frame shows old and new light side by side.
+
+
+## 2026-11-05: Noise shell brought under the plan's rules
+
+The owner asked for a planet fully covered by continuous noise clouds. The first version (`cloud-noise-shell.ts`, lab only) was built beside the tested path and ignored the plan's rules: procedural noise per step (the plan's "bake, then look up" rule), a hardcoded sun colour (no orange at dusk, against G2), and no suite or GPU timing. Its "160 fps" was a frame rate, which the plan already says proves nothing. The shell is also option D, which the plan had rejected on cost.
+
+### Changed
+- **Noise:** a 128^3 one-byte tiling cube baked once on the CPU (`bakeShellNoise`), read with trilinear filtering. A second read at 8x scale adds the fine octaves; sun taps skip it. Wind is a coordinate offset. The plain-TypeScript twin now computes the same noise, not a statistical match.
+- **Light:** sun colour and sky light from `AtmosphereGpuModel`, with the volumes' shading formula and terminator fade, read per cloud sample. One read per ray was tried first: on this 2 km planet a grazing ray crosses from day into night, so night cloud took the day side's colour and a hard dark arc showed inside the limb.
+- **Tests:** suites `cloud-shell-look` (four views at noon, dusk, night; v2 adds the sky) and `cloud-shell-cost` (A/B against nothing). The lab's adapter now saves thumbnails, and the shell's clock is held during a run so reruns match.
+
+### Measured
+`cloud-shell-cost@v1`, headless hardware, `--noisy`, median of `gpuWholeRender`, net of the same-run A arm. Runs were on the same machine under load (a game client running, `gpu-throttled` warned), so read these as relative, not as a clean hardware number.
+
+| view | procedural | baked, atmosphere light | G6 |
+|---|---|---|---|
+| ground | 10.6 ms | 1.4 ms | typical 1.5, worst 2.5 |
+| horizon | 13.4 ms | 1.5 ms | |
+| globe mid | 2.8 ms | 0.3 ms | |
+| globe orbit | 1.4 ms | 0.2 ms | |
+
+The summary rejected the ground A/B on arm B's spread (first round 1.19 ms, then 1.52). The whole-planet cover of 180 volumes costs about the same from orbit but read as separate tiles.
+
+The owner then ran the suite in a visible browser (`2026-11-05T19-13-48-292Z_visible-browser`): RTX 3080 Laptop, 2538x1308, spread ±0.001 ms, no warnings in the summary. Net of the same-run A arm: 1.54 ms ground, 1.70 ms horizon, 0.44 ms mid, 0.27 ms orbit. All are inside the 2.5 ms worst case; ground and horizon are just over the 1.5 ms typical figure. This replaces the headless numbers above as the shell's cost. It isn't comparable with them, because the profile differs.
+
+### Open
+- Whether ground and horizon, at 1.54 and 1.70 ms, count against G6's typical or worst figure.
+- The owner's visual review. Still to judge: blur close to the ground (56 m voxels), a thin bright line along the planet's limb at dusk, and a thin arc near the limb in the globe mid views.
+- Not built: aerial perspective haze on the shell, the altitude cross-fade with volumes, and moving this out of the lab into `triangular-engine/cloud-volumes`.

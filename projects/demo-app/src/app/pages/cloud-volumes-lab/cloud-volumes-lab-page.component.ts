@@ -21,6 +21,7 @@ import {
 import { CloudVolume, CloudVolumeAtmosphereLighting, CloudVolumeBakeScheduler, CloudVolumeScreenPass } from 'triangular-engine/cloud-volumes';
 import { GpuTimer } from './gpu-timer';
 import { CloudNoiseShell } from './cloud-noise-shell';
+import { CLOUD_SHELL_LAB } from './cloud-noise-shell-density';
 import { installCloudReplayProbe } from './cloud-replay-probe';
 
 /**
@@ -440,6 +441,7 @@ export class CloudVolumesLabPageComponent {
     apply: (scenario) => this.applyTestSettings(scenario.settings),
     ready: (context) => this.waitForTestRender(context),
     measure: (scenario, context) => this.measureTestScenario(scenario, context),
+    thumbnail: async (_scenario, context) => (context.repetition > 1 ? undefined : [await this.captureThumbnail(context.signal)]),
     restore: async (snapshot, context) => {
       if (this.pageDisposed) return;
       this.flyby = undefined;
@@ -609,7 +611,8 @@ export class CloudVolumesLabPageComponent {
       }
       this.stepFlyby();
       this.updateCamera(delta);
-      this.noiseShell?.update(this.engine.camera.position, this.sunWorld, performance.now() / 1000);
+      // A held clock during a test run, so a rerun draws the same clouds.
+      this.noiseShell?.update(this.engine.camera.position, this.sunWorld, this.runnerBusy() ? 0 : performance.now() / 1000);
       this.applyAtmosphereLighting();
       const renderer: any = this.engine.renderer;
       if (!renderer?.initialized) return;
@@ -726,6 +729,7 @@ export class CloudVolumesLabPageComponent {
       atmosphereLighting: this.atmosphereLighting(), haze: this.cloudHaze(),
       sunElevation: this.sunElevation(), sunAzimuth: this.sunAzimuth(), extinction: this.extinction(),
       jitter: this.jitterOn(), fetch: this.fetchOn(), hidden: this.hiddenOn(), skyBackdrop: this.skyBackdrop(),
+      noiseShell: this.noiseShellOn(),
     };
   }
 
@@ -763,6 +767,8 @@ export class CloudVolumesLabPageComponent {
     this.setAtmosphereLighting(settings.atmosphereLighting);
     this.setCloudHaze(settings.haze);
     this.setSkyBackdrop(settings.skyBackdrop);
+    // The shell switches the volumes off when it comes on, so the scenario's own clouds setting goes second.
+    this.setNoiseShell(settings.noiseShell);
     this.setClouds(settings.clouds);
     this.applyPreset(preset);
   }
@@ -815,6 +821,26 @@ export class CloudVolumesLabPageComponent {
     } finally { stop(); if (sampler.isActive) sampler.stop(); }
   }
 
+  /** One still of the case for the results page. Rendered and read in this task: a WebGPU canvas is only readable until it ends. */
+  private async captureThumbnail(signal: AbortSignal): Promise<Blob> {
+    const canvas = this.engine.canvas;
+    this.engine.render(this.engine.fpsController.lastRenderTime, true);
+    const width = Math.min(720, canvas.width);
+    const small = document.createElement('canvas');
+    small.width = width;
+    small.height = Math.max(1, Math.round((canvas.height * width) / canvas.width));
+    const context = small.getContext('2d');
+    if (context) {
+      // The canvas is transparent where nothing was drawn, which an image viewer shows as white.
+      context.fillStyle = '#000';
+      context.fillRect(0, 0, small.width, small.height);
+      context.drawImage(canvas, 0, 0, small.width, small.height);
+    }
+    if (signal.aborted) throw signal.reason;
+    return new Promise<Blob>((resolve, reject) =>
+      small.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not encode the thumbnail'))), 'image/webp', 0.6));
+  }
+
   applyPreset(preset: CameraPreset): void {
     this.presetLabel.set(preset.label);
     if (preset.arc) {
@@ -840,8 +866,15 @@ export class CloudVolumesLabPageComponent {
   }
 
   setNoiseShell(on: boolean): void {
-    if (on && !this.noiseShell) {
-      this.noiseShell = new CloudNoiseShell({ planetRadius: PLANET_RADIUS, baseAltitude: 150, thickness: 320 });
+    if (on && !this.noiseShell && this.skyProfile) {
+      // A floor just above the ground with eroded bases; see CLOUD_SHELL_LAB for why it is not higher.
+      this.noiseShell = new CloudNoiseShell({
+        planetRadius: PLANET_RADIUS,
+        baseAltitude: CLOUD_SHELL_LAB.baseAltitude,
+        thickness: CLOUD_SHELL_LAB.thickness,
+        atmosphere: this.skyProfile,
+      });
+      this.noiseShell.atmosphereLighting.value = this.atmosphereLighting() ? 1 : 0;
       this.engine.scene.add(this.noiseShell.mesh);
     }
     this.noiseShellOn.set(on);
@@ -1041,6 +1074,7 @@ export class CloudVolumesLabPageComponent {
 
   setAtmosphereLighting(on: boolean): void {
     this.atmosphereLighting.set(on);
+    if (this.noiseShell) this.noiseShell.atmosphereLighting.value = on ? 1 : 0;
     if (!on) {
       for (const volume of this.allVolumes()) {
         volume.uSunColor.value.set(1, 1, 1);

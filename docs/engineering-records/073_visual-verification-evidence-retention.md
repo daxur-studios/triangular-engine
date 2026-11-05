@@ -137,6 +137,16 @@ The owner agreed to begin a focused capsule character studio. The UI and local c
 
 **Disposition.** These are exploratory design examples, not approved implementation scope or a fixed taxonomy. The first studio prototype should test a small combination spanning wardrobe, role equipment and one anatomy extension before a shared engine extension API is considered.
 
+## 2026-11-05 — Codex phone media delivery and cross-repository discovery
+
+**User evidence.** The owner confirmed a generated UI walkthrough MP4 embedded in a Codex chat from the Windows laptop plays on their phone. This updates earlier phone-video failures recorded in ER 072; it does not retrospectively validate those older clips. The successful clip was approximately 12.5 seconds, 1280x800, H.264/AAC, about 199 kB. Listening quality and Antigravity playback were not confirmed.
+
+**Method.** Codex's assistant response uses a Markdown media embed with an absolute local path, such as `![Demo](D:/workspace/app/artifacts/demo.mp4)`. No separate upload tool, hosted URL or local video server was used for the handoff. Claude continues using its available `SendUserFile` tool. Sharing the artifact is separate from inspecting its contents or recording a visual-review verdict.
+
+**Discovery.** Added the generic `share-media-in-chat` skill under the engine's existing packaged `.agents/skills/` directory; the existing ng-package asset glob ships it at `skills/share-media-in-chat/SKILL.md`. Linked it from root AGENTS.md, main/testing skills, testing README and the existing Claude-only skill. A personal Codex skill and user-level AGENTS.md pointer cover unrelated repos on this agent machine without requiring an engine dependency. Consumers on other machines need updated package guidance or equivalent personal setup. No package was rebuilt/published, existing archives were not rewritten, and no runtime API or retention policy changed.
+
+**Checks.** The new shared skill, modified main/testing skills and existing Claude skill pass skill validation; the initial default-Windows-encoding error on the testing skill was resolved by running the validator with Python `-X utf8`. Edited tracked documents pass `git diff --check`. Confirmed the existing ng-package asset configuration includes the new skill directory. The repository-wide records check reports a stale review in unrelated `docs/plans/081_body-tint.md`; this task did not edit or refresh that plan. No runtime tests or library build were needed for this documentation-only change.
+
 ## Scope history
 
 <!-- tri:scope-history -->

@@ -139,6 +139,38 @@ describe('lod-morph pole zone: float32 emulation, a vertex 1 m to 1 km from the 
   });
 });
 
+describe('lod-morph pole zone: a camera exactly over the pole', () => {
+  for (const morph of [0.5, 1]) {
+    it(`places vertices around the pole as the reference does, in doubles and float32 (morph ${morph})`, () => {
+      const c: PoleCase = { radius: 600_000, morph, centre: [0, 0] };
+      const domain = sphereDomain(c.radius);
+      const map = testMap(c.radius, c.morph, 'equal-earth', 0, 0);
+      const { face, u, v } = poleOnAFace(c);
+      const frame = testFrame(map, domain, sceneCameraAt(map, 0.4, Math.PI / 2, 2));
+      expect(frame.values.poleOn).toBe(2);
+      expect(Math.hypot(frame.values.vA1, frame.values.vA2)).toBeGreaterThan(0.5);
+      for (const lib of [DOUBLE_LIB, FLOAT32_LIB]) {
+        const lifted = liftFrame(lib, frame);
+        for (const rho of RHOS) {
+          for (const angle of [0.3, 2, 4.4]) {
+            const k = rho / unitMetres(c.radius);
+            const t = latticeVector(face, Math.round(u + k * Math.cos(angle)), Math.round(v + k * Math.sin(angle)));
+            const unit = directionOfT(t, domain);
+            const lon = Math.atan2(dot(unit, map.basis.right), dot(unit, map.basis.forward));
+            const sigma = lon >= 0 ? 1 : -1;
+            const leafLon = unwrapToSide(lon, sigma).lon;
+            const got = evaluateVertex(lib, frame, lifted, domain, t, sigma, 2, leafLon);
+            const exact = exactRel(frame, domain, t, sigma, 2, leafLon);
+            const error = Math.hypot(got.rel[0] - exact[0], got.rel[1] - exact[1], got.rel[2] - exact[2]);
+            expect(got.usedPole).toBeTrue();
+            expect(error).toBeLessThan(lib === DOUBLE_LIB ? 1e-5 + (3e-16 * c.radius * c.radius) / rho : 0.06 + 2e-6 * Math.hypot(...exact));
+          }
+        }
+      }
+    });
+  }
+});
+
 describe('lod-morph pole zone: seams', () => {
   for (const c of CASES) {
     it(`a vertex's position depends only on its lattice point and the frame, not on the leaf that draws it: ${label(c)}`, () => {

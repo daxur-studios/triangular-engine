@@ -62,6 +62,7 @@ in this repository. Each entry's TSDoc also shows in IDE hovers.
 | CPU/GPU/worker data transport                    | `gpu-data-flow/README.md`                                            |
 | Water, terrain, scatter                          | `water/README.md`, `terrain/README.md`, `scatter/README.md`          |
 | Browser test runner                              | `testing/README.md`, plus the `triangular-engine-testing` skill       |
+| Share videos/stills in agent chats               | The `share-media-in-chat` skill (source: `../share-media-in-chat/SKILL.md`; installed: `skills/share-media-in-chat/SKILL.md`) |
 | Development map viewer                           | `development-map/README.md`                                           |
 
 ---

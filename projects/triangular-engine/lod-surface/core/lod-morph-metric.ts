@@ -3,6 +3,7 @@ import { cubeComponent, cubeLattice, latticeSteps } from './lod-lattice';
 import {
   bendPointInto, createMorphMap, morphMapXY, newMorphMap, projectionBasis, setMorphWeights, unbendPosition, type MorphBasis, type MorphMap, type MorphProjection,
 } from './lod-morph-frame';
+import { POLE_FAN_DEFAULT_RAYS } from './lod-morph-fan';
 import { PIXEL_FLOOR, maxLevelFor, type LodSelector, type NodeGeometry, type NodeGeometryHook } from './lod-selector';
 
 /**
@@ -67,6 +68,13 @@ const TORN_REACH_RADII = 8;
 const CAMERA_ROUND_TRIP_TOLERANCE = 1e-3;
 /** How many chord sags of a leaf pad its bounds beyond the nine measured samples. */
 const BOUND_SAG_MARGIN = 2;
+/**
+ * A leaf whose longest morphed edge is more than this many times its shortest is a strip: its cells count as at most that many times
+ * the shortest edge. Near a pole of the projection every leaf maps to a strip as wide as a sizeable part of the map whatever its level
+ * (its longitudes do not shrink with it), so splitting never narrows it, and its short side is below a pixel: without the limit the
+ * pole's neighbourhood splits to the deepest level (about 2,000 of the 4,096 leaves at the orbit pose) for no visible gain.
+ */
+export const STRIP_ASPECT_LIMIT = 32;
 
 /** The default projection basis (centre 0, 0), resolved once: the map functions below take it when they are given no other. */
 const DEFAULT_BASIS = projectionBasis(0, 0);
@@ -483,6 +491,7 @@ export class StretchMetric implements NodeGeometryHook {
     }
     // Longest morphed edge and the largest sag of a morphed edge midpoint (or of the centre) from the chord (or the corner mean).
     let leafEdge = 0;
+    let shortEdge = Infinity;
     let sag = 0;
     let meanX = 0;
     let meanY = 0;
@@ -495,7 +504,9 @@ export class StretchMetric implements NodeGeometryHook {
       const dx = pos[pa] - pos[pb];
       const dy = pos[pa + 1] - pos[pb + 1];
       const dz = pos[pa + 2] - pos[pb + 2];
-      leafEdge = Math.max(leafEdge, Math.hypot(dx, dy, dz));
+      const edgeLength = Math.hypot(dx, dy, dz);
+      leafEdge = Math.max(leafEdge, edgeLength);
+      shortEdge = Math.min(shortEdge, edgeLength);
       const m = (MID + e) * 3;
       sag = Math.max(sag, Math.hypot(pos[m] - (pos[pa] + pos[pb]) / 2, pos[m + 1] - (pos[pa + 1] + pos[pb + 1]) / 2, pos[m + 2] - (pos[pa + 2] + pos[pb + 2]) / 2));
       const own = (CORNER + ca === poleSlot ? POLE_OWN : CORNER + ca) * 3;
@@ -504,11 +515,15 @@ export class StretchMetric implements NodeGeometryHook {
       meanZ += pos[own + 2] / 4;
     }
     sag = Math.max(sag, Math.hypot(pos[0] - meanX, pos[1] - meanY, pos[2] - meanZ));
+    let poleWidth = 0;
+    let sansPole = leafEdge;
     if (poleSlot >= 0) {
       // The pole corner is a whole edge of the map: the leaf is that wide there, and the chain above never walks it.
       const a = POLE_X * 3;
       const b = POLE_Y * 3;
-      leafEdge = Math.max(leafEdge, Math.hypot(pos[a] - pos[b], pos[a + 1] - pos[b + 1], pos[a + 2] - pos[b + 2]));
+      poleWidth = Math.hypot(pos[a] - pos[b], pos[a + 1] - pos[b + 1], pos[a + 2] - pos[b + 2]);
+      sansPole = leafEdge;
+      leafEdge = Math.max(leafEdge, poleWidth);
     }
     // Bounds, from the centre outwards: the largest distance, the largest distance along and across the normal, and the largest tilt of a sample normal.
     const cx = pos[0];
@@ -563,7 +578,16 @@ export class StretchMetric implements NodeGeometryHook {
     out.leafEdge = leafEdge;
     const cellEdge = leafEdge / this.patchCells;
     const cellSag = sag / (this.patchCells * this.patchCells);
-    out.cellEdge = Math.max(cellEdge, (cellSag * this.cellPixels) / STRETCH_SAG_PX) * (1 + this.stalePad);
+    // The pole edge is drawn by the pole fan, whose rays do not depend on the leaf's level: splitting the leaf does not narrow it, so
+    // it counts at the width of one ray, not of one cell (else the leaves at the pole corner split to the deepest level, at both poles).
+    const fanned = poleWidth > 0 ? Math.max(sansPole / this.patchCells, poleWidth / POLE_FAN_DEFAULT_RAYS) : cellEdge;
+    // The strip limit also caps the sag term: near a pole the longitude of an edge midpoint differs from the endpoints' mean by a
+    // share of the strip's width at every level, so the sag does not shrink with the leaf either.
+    // Leaves a few cells from the pole are wide on every side, so the aspect limit does not bind: they map to the same tens of
+    // kilometres at every level. Their cell counts at most STRIP_ASPECT_LIMIT times the leaf's own size on the sphere.
+    const sphereLeaf = (Math.PI / 2) * state.map.radius * size;
+    const stripCell = (STRIP_ASPECT_LIMIT * Math.min(shortEdge, sphereLeaf)) / this.patchCells;
+    out.cellEdge = Math.min(Math.max(fanned, (cellSag * this.cellPixels) / STRETCH_SAG_PX), stripCell) * (1 + this.stalePad);
   }
 
   /** The `pos` offset of corner `c` as one end of the edge towards corner `other`: the pole corner takes the longitude of that meridian edge. */

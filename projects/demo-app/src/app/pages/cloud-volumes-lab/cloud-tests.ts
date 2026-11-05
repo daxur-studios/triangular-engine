@@ -24,13 +24,15 @@ export interface CloudTestSettings {
   readonly fetch: boolean;
   readonly hidden: boolean;
   readonly skyBackdrop: boolean;
+  /** The planet-wide noise shell (`CloudNoiseShell`) instead of the volumes. */
+  readonly noiseShell: boolean;
 }
 
 export const CLOUD_TEST_DEFAULTS: CloudTestSettings = {
   kind: 'static', preset: 'outside', volumes: 1, mode: 'proxy', scale: 1, steps: 24,
   animateSun: false, bakeBudget: 1, rebakeEveryFrame: false, spinWarp: 0, spinAngle: 0, clouds: true,
   atmosphereLighting: true, haze: false, sunElevation: 35, sunAzimuth: 40,
-  extinction: 0.02, jitter: true, fetch: true, hidden: false, skyBackdrop: false,
+  extinction: 0.02, jitter: true, fetch: true, hidden: false, skyBackdrop: false, noiseShell: false,
 };
 
 function migrateScenario(scenario: NextTestScenario, index: number): TestScenario<CloudTestSettings> {
@@ -93,6 +95,40 @@ function globeCoverScenarios(): TestScenario<CloudTestSettings>[] {
   );
 }
 
+/** The views the shell has to hold up from: inside the layer, under it, at the limb and from orbit. */
+const SHELL_VIEWS = ['ground', 'horizon', 'globe mid', 'globe orbit'];
+
+/**
+ * Plan 051 G6 for the noise shell: alternating rounds with nothing (A) and the shell (B) at a still camera and a still
+ * clock, so B - A is the shell alone on the same frames. Budget: typical 1.5 ms, worst 2.5 ms over the baseline.
+ */
+function shellCostRounds(preset: string): TestScenario<CloudTestSettings>[] {
+  return Array.from({ length: AB_ROUNDS * 2 }, (_, index) => {
+    const on = index % 2 === 1;
+    const round = Math.floor(index / 2) + 1;
+    return {
+      id: `${preset.replace(' ', '-')}-shell-${on ? 'on' : 'off'}-${round}`, label: `${preset}, shell ${on ? 'on' : 'off'}, round ${round}`,
+      durationMs: 4000, warmupMs: 2000,
+      settings: { ...CLOUD_TEST_DEFAULTS, preset, clouds: false, noiseShell: on },
+      ablation: { group: preset, arm: on ? 'B' : 'A' },
+    };
+  });
+}
+
+/** What the shell has to look like: every view by day, then the dusk and night sides. An observer judges these. */
+function shellLookScenarios(skyBackdrop = false): TestScenario<CloudTestSettings>[] {
+  const light = [
+    { name: 'noon', sunElevation: 60 },
+    { name: 'dusk', sunElevation: 4 },
+    { name: 'night', sunElevation: -20 },
+  ];
+  return SHELL_VIEWS.flatMap((preset) => light.map(({ name, sunElevation }): TestScenario<CloudTestSettings> => ({
+    id: `${preset.replace(' ', '-')}-${name}`, label: `${preset}, ${name}`,
+    durationMs: 300, warmupMs: 1000,
+    settings: { ...CLOUD_TEST_DEFAULTS, preset, clouds: false, noiseShell: true, sunElevation, skyBackdrop },
+  })));
+}
+
 /** Append new suites/versions at the end. Run latest resolves the final entry exactly once at launch. */
 export const CLOUD_TEST_HISTORY: readonly TestSuite<CloudTestSettings>[] = [
   {
@@ -119,5 +155,25 @@ export const CLOUD_TEST_HISTORY: readonly TestSuite<CloudTestSettings>[] = [
     title: 'Planet cover stress test: clouds off vs 12 / 90 / 180 noise volumes, from orbit, mid altitude and the ground',
     purpose: 'performance', requiresVisualReview: true,
     scenarios: globeCoverScenarios(),
+  },
+  {
+    id: 'cloud-shell-look', version: 1,
+    title: 'Noise shell look: ground, horizon, mid and orbit at noon, dusk and night',
+    purpose: 'functional', requiresVisualReview: true,
+    scenarios: shellLookScenarios(),
+  },
+  {
+    id: 'cloud-shell-cost', version: 1,
+    title: 'Noise shell A/B against G6: nothing (A) vs shell (B), ground, horizon, mid and orbit',
+    purpose: 'performance',
+    expectedGpuVendor: 'nvidia',
+    ablation: { feature: 'noise shell', metrics: ['gpuWholeRender'] },
+    scenarios: SHELL_VIEWS.flatMap(shellCostRounds),
+  },
+  {
+    id: 'cloud-shell-look', version: 2,
+    title: 'Noise shell look against the sky: ground, horizon, mid and orbit at noon, dusk and night',
+    purpose: 'functional', requiresVisualReview: true,
+    scenarios: shellLookScenarios(true),
   },
 ];
