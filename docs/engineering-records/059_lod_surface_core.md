@@ -2075,3 +2075,16 @@ Built by Haiku 5.5 agents from briefs; reviewed here. Nothing seen on a GPU.
 - **Plan changes (dated notes, earlier text kept):** the plan's D14 "Part superseded" note; the M2 row; milestone step 4 is struck through; the cliff-detail item 1 and the step 4 mention in the 1-ABAB section are marked dropped.
 - **Consequence:** the file conflict this criterion was to cause (its change to `lod-selector.ts` against the water core work) no longer exists. Water core packets do not wait for it. M6 cliff detail is unchanged in scope; it now has no slope criterion to rely on, and its own design still needs checking when it starts.
 - **Earlier entries unchanged.** The slope mentions in the 2026-10 entries (for example the canyon's "slope term" note) stand as history.
+
+## 2026-11-05: Morph spike status, audited: precision proven, frame cost never measured
+
+Audit of the `/lod-surface-morph-spike` page against its own record (parts 1 to 4, suite v6). The spikes index marks it `passed`; that label is stronger than the evidence.
+
+- **Proven.** Vertex jitter outside the pole zone: judged max 0.063 px against a naive control (median 8.2 px, suite v6, visible run 2026-11-03). The cut for a centred projection: 0 holes, 286 duplicates. The pole fan closes the tilted-centre holes (rim within 1 px).
+- **Not proven or open.**
+  - Pole zone: within about 1 km of the projection pole, vertices are off by up to 9,471 px at morph 1 (`poleZoneMaxErrPx`). That zone is excluded from the judged metric.
+  - The cause of the tilted-centre holes was never diagnosed; the fan closes them.
+  - Frame and GPU cost: `performanceVerdict` is `not-run` on all spike runs. The only timings are CPU pole-fan builds (8 to 32 ms).
+  - Not tested: bent-bound culling, normals and shading under morph, equirectangular, a fan leaf straddling the cut, the owner's visual check.
+- **Built on top.** G6a to G6m ported the spike's bend, cut, stretch metric and pole fan into the library; G6d and G6e were checked on headless WebGL only. The `planet-scene` morph-1 refinement runaway (scale-invariant pole strips, 2026-11-05 work) and its unexplained GPU cost (scene pass 4.15 ms at morph 1 against 1.04 ms at morph 0) sit exactly in what the spike did not measure.
+- **Decision.** The spike counts as precision-proven, not finished. Next: a morph frame-cost case and a pole-zone case in the spike's suite on the RTX, then the same numbers against `planet-scene`.

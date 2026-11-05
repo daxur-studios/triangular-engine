@@ -6,6 +6,8 @@ export * from './test-helpers';
 export * from './test-cpu-bench';
 export * from './test-thumbnails';
 export * from './test-recordings';
+export * from './test-frame-sidecar';
+export * from './test-frame-burn-in';
 export * from './test-ablation';
 export * from './test-performance';
 export * from './test-machine';

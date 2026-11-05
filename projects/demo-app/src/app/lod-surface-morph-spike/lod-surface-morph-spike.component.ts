@@ -39,7 +39,7 @@ const DEVICE_WAIT_SAMPLES = 10;
 
 /** The slice of the renderer the page's test environment reads. */
 interface RendererLike {
-  readonly backend?: { readonly isWebGPUBackend?: boolean; readonly device?: { readonly adapterInfo?: unknown } };
+  readonly backend?: { readonly isWebGPUBackend?: boolean; readonly device?: { readonly adapterInfo?: unknown; readonly features?: { has(name: string): boolean } } };
   readonly domElement?: { readonly width: number; readonly height: number };
 }
 
@@ -133,6 +133,8 @@ export class LodSurfaceMorphSpikeComponent {
    */
   private readonly rendererReady = signal(false);
   private deviceWaits = 0;
+  private renderedFrames = 0;
+  private readonly renderCallbacks = new Set<(renderedAt: number) => void>();
   /** The scene has drawn a frame, so a probe has a renderer and a compiled pipeline. */
   readonly sceneReady = computed(() => this.diagnostics() !== undefined && this.rendererReady());
   readonly testAdapter: TestRunAdapter<MorphSpikeTestSettings, MorphSpikeState>;
@@ -157,7 +159,19 @@ export class LodSurfaceMorphSpikeComponent {
       runFanProbe: (options) => this.runFanProbe(options),
       runFanRebuild: (options) => this.runFanRebuild(options),
       environment: () => this.testEnvironment(),
+      renderedFrames: () => this.renderedFrames,
+      frame: () => this.diagnostics(),
+      onRenderComplete: (callback) => { this.renderCallbacks.add(callback); return () => this.renderCallbacks.delete(callback); },
+      isSampling: () => this.engine.fpsController.frameSampler.isActive,
+      startSampling: () => this.engine.fpsController.frameSampler.start(),
+      gpuSamplesSoFar: () => this.engine.fpsController.frameSampler.gpuSamples,
+      stopSampling: () => this.engine.fpsController.frameSampler.stop(),
     };
+    const rendered = this.engine.renderComplete$.subscribe(({ renderedAt }) => {
+      this.renderedFrames++;
+      for (const callback of this.renderCallbacks) callback(renderedAt);
+    });
+    this.destroyRef.onDestroy(() => rendered.unsubscribe());
     this.testAdapter = createMorphSpikeTestAdapter(host);
     const api: LodMorphSpikeWindowApi = {
       lastProbe: [],
@@ -197,6 +211,7 @@ export class LodSurfaceMorphSpikeComponent {
       devicePixelRatio: globalThis.devicePixelRatio ?? 1,
       'gpu.deviceReady': renderer.backend?.device !== undefined,
       'gpu.adapterInfoPresent': renderer.backend?.device?.adapterInfo !== undefined,
+      'gpu.timestampQuery': renderer.backend?.device?.features ? renderer.backend.device.features.has('timestamp-query') : null,
     };
   }
 

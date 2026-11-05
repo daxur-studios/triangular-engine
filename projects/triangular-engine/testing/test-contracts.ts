@@ -1,4 +1,5 @@
 import type { AblationArm, AblationResult, AblationStatistic } from './test-ablation';
+import type { TestFrameSidecar } from './test-frame-sidecar';
 
 /** JSON-compatible setting values keep launch inputs and results portable between applications. */
 export type TestSetting = string | number | boolean | null;
@@ -376,6 +377,11 @@ export interface TestRecordingArtifact {
   readonly width: number;
   readonly height: number;
   readonly audio: boolean;
+  /**
+   * The per-frame sidecar, when the host burned frame numbers into the clip (see `createTestFrameLog`). It is sent with the
+   * clip and stored beside it; the result JSON keeps only its row count.
+   */
+  readonly frames?: TestFrameSidecar;
 }
 
 /** Host-owned recorder handle. `dispose` must stop every stream track and release temporary canvases/nodes. */
@@ -393,6 +399,10 @@ export interface TestRecordingReference {
   readonly width: number;
   readonly height: number;
   readonly audio: boolean;
+  /** Rows in the clip's per-frame sidecar, when it has one. The rows themselves stay out of the result JSON. */
+  readonly frames?: number;
+  /** The sidecar's file name relative to the receiver's output folder, set by the receiver when it stores the sidecar. */
+  readonly sidecar?: string;
 }
 
 /** One case's video data for the receiver. Pixel/audio data is kept out of the serializable run result. */

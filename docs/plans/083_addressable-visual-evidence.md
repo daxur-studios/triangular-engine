@@ -60,7 +60,7 @@ from pixels. Notes on a frame stay with the run instead of vanishing with the ch
 
 | Phase           | State   |
 | --------------- | ------- |
-| aev-frame-map   | planned |
+| aev-frame-map   | in_progress |
 | aev-moments     | planned |
 | aev-agent-links | planned |
 | aev-shot-plans  | planned |

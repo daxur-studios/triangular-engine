@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { EventEmitter } from 'node:events';
 import { baselineFromRun } from './triangular-test-baseline.mjs';
-import { caseSummaries, computeFingerprint, createReceiver, loadConfig, MACHINE_PATH, receiverRoot, SINK_PATH } from './triangular-test-receiver.mjs';
+import { caseSummaries, computeFingerprint, createReceiver, loadConfig, MACHINE_PATH, receiverRoot, SINK_PATH, validateFrameSidecar } from './triangular-test-receiver.mjs';
 import {
   attachMachine, createMachineMonitor, distribution, machineWarnings, OTHER_APP_MEASURING, parseGpuLine, summarizeCapture, systemProbe, systemSampler,
 } from './triangular-test-machine.mjs';
@@ -405,6 +405,73 @@ test('recordings are bounded sidecars with metadata-only results and a range-ena
   assert.equal(range.headers.get('content-range'), `bytes 0-3/${bytes.length}`);
   assert.ok(Buffer.from(await range.arrayBuffer()).equals(bytes.subarray(0, 4)));
   assert.equal((await fetch(url, { headers: { range: 'bytes=999-' } })).status, 416);
+});
+
+const frameSidecar = (overrides = {}) => ({ schemaVersion: 1, shot: 's1', fps: 24, truncated: false,
+  frames: [{ frame: 0, clipTimeMs: 0, frameTimeMs: 1000, camera: { position: [1, 2, 3], target: [0, 0, 0] }, state: { quality: 'High' }, extra: 'dropped' },
+    { frame: 1, clipTimeMs: 41.5 }], ...overrides });
+
+test('validateFrameSidecar keeps only the contract fields and names the first broken rule', () => {
+  const ok = validateFrameSidecar(frameSidecar());
+  assert.equal(ok.reason, undefined);
+  assert.deepEqual(ok.sidecar.frames[0], { frame: 0, clipTimeMs: 0, frameTimeMs: 1000, camera: { position: [1, 2, 3], target: [0, 0, 0] }, state: { quality: 'High' } });
+  assert.match(validateFrameSidecar(frameSidecar({ schemaVersion: 2 })).reason, /unknown sidecar version/);
+  assert.match(validateFrameSidecar(frameSidecar({ shot: '' })).reason, /shot name/);
+  assert.match(validateFrameSidecar(frameSidecar({ fps: 0 })).reason, /fps/);
+  assert.match(validateFrameSidecar(frameSidecar({ truncated: 'no' })).reason, /truncated/);
+  assert.match(validateFrameSidecar(frameSidecar({ frames: [] })).reason, /rows are not 1 to 600/);
+  assert.match(validateFrameSidecar(frameSidecar({ frames: Array.from({ length: 601 }, (_, i) => ({ frame: i, clipTimeMs: i })) })).reason, /rows are not 1 to 600/);
+  assert.match(validateFrameSidecar(frameSidecar({ frames: [{ frame: 0, clipTimeMs: 0 }, { frame: 2, clipTimeMs: 50 }] })).reason, /row 1 is not numbered 1 in order/);
+  assert.match(validateFrameSidecar(frameSidecar({ frames: [{ frame: 0, clipTimeMs: 50 }, { frame: 1, clipTimeMs: 40 }] })).reason, /goes back/);
+  assert.match(validateFrameSidecar(frameSidecar({ frames: [{ frame: 0, clipTimeMs: 0, camera: { position: [1, 'x', 3], target: [0, 0, 0] } }] })).reason, /camera/);
+  assert.match(validateFrameSidecar(frameSidecar({ frames: [{ frame: 0, clipTimeMs: 0, state: { 'bad name': 1 } }] })).reason, /invalid state name/);
+  assert.match(validateFrameSidecar(frameSidecar({ frames: [{ frame: 0, clipTimeMs: 0, state: { flag: null } }] })).reason, /not a short string/);
+  assert.match(validateFrameSidecar(frameSidecar({ frames: [{ frame: 0, clipTimeMs: 0, state: { label: 'x'.repeat(65) } }] })).reason, /not a short string/);
+  assert.match(validateFrameSidecar(frameSidecar(), { maxSidecarBytes: 40 }).reason, /is over 0 KB/);
+});
+
+test('frame sidecars are stored beside their clip and referenced by name; invalid ones are dropped with a reason and the clip is kept', async (t) => {
+  const root = repo();
+  const { server, base } = await listening(root, { ...loadConfig(root), maxRecordingBytes: 1000, maxSidecarBytes: 2000 });
+  t.after(() => server.closeAllConnections() ?? server.close());
+  const body = run('frames-run', '2026-10-18T10:00:00Z');
+  const sibling = (id) => ({ ...body.cases[0], scenario: { id, label: id.toUpperCase() } });
+  body.cases.push(sibling('s2'), sibling('s3'), sibling('s4'), sibling('s5'));
+  const clip = (caseId, bytes = webm(64)) => recordingUpload(caseId, bytes);
+  body.recordingUploads = [
+    { ...clip('s1'), sidecar: frameSidecar() },
+    { ...clip('s2'), sidecar: frameSidecar({ frames: [{ frame: 0, clipTimeMs: 0 }, { frame: 2, clipTimeMs: 50 }] }) },
+    { ...clip('s3'), sidecar: frameSidecar({ frames: [{ frame: 0, clipTimeMs: 0, camera: { position: [Number.NaN, 0, 0], target: [0, 0, 0] } }] }) },
+    { ...clip('s4'), sidecar: frameSidecar({ frames: Array.from({ length: 100 }, (_, i) => ({ frame: i, clipTimeMs: i, state: { label: 'y'.repeat(40) } })) }) },
+    { ...clip('s5', webm(1600)), sidecar: frameSidecar() },
+  ];
+  const saved = await (await fetch(base, { method: 'POST', body: JSON.stringify(body) })).json();
+  assert.equal(saved.ok, true);
+  // Four clips are kept (s1 with its sidecar, s2-s4 without); s5's clip is over the clip limit and is dropped.
+  assert.deepEqual(saved.recordings.map((r) => r.case), ['s1', 's2', 's3', 's4']);
+  const text = saved.dropped.join('\n');
+  assert.match(text, /s2: frame sidecar dropped, row 1 is not numbered 1 in order/);
+  assert.match(text, /s3: frame sidecar dropped, row 0 has a camera that is not two finite vectors/);
+  assert.match(text, /s4: frame sidecar dropped, \d+ KB is over 2 KB/);
+  assert.match(text, /s5: recording dropped, over 1 KB/);
+  assert.doesNotMatch(text, /s5: frame sidecar/);
+
+  const [row] = readFileSync(join(root, 'artifacts/test-runs/index.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  const stored = JSON.parse(readFileSync(join(root, 'artifacts/test-runs', row.file), 'utf8'));
+  const kept = stored.cases.find((c) => c.scenario.id === 's1').recordings[0];
+  assert.equal(kept.frames, 2);
+  assert.match(kept.sidecar, /\/s1-r1-0\.frames\.json$/);
+  const onDisk = JSON.parse(readFileSync(join(root, 'artifacts/test-runs', kept.sidecar), 'utf8'));
+  assert.deepEqual(onDisk, { schemaVersion: 1, shot: 's1', fps: 24, truncated: false, frames: [
+    { frame: 0, clipTimeMs: 0, frameTimeMs: 1000, camera: { position: [1, 2, 3], target: [0, 0, 0] }, state: { quality: 'High' } },
+    { frame: 1, clipTimeMs: 41.5 }] });
+  const s2 = stored.cases.find((c) => c.scenario.id === 's2');
+  assert.equal(s2.recordings[0].frames, undefined);
+  assert.equal(s2.recordings[0].sidecar, undefined);
+  assert.match(s2.limitations.join('\n'), /frame sidecar dropped/);
+  assert.equal(stored.cases.find((c) => c.scenario.id === 's5').recordings, undefined);
+  // The result JSON keeps metadata only: no rows, no camera values.
+  assert.doesNotMatch(readFileSync(join(root, 'artifacts/test-runs', row.file), 'utf8'), /"clipTimeMs"|"camera"/);
 });
 
 test('read routes serve the index, one result and one image, and refuse anything outside the output folder', async (t) => {

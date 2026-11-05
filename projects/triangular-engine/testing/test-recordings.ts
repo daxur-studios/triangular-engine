@@ -1,4 +1,5 @@
 import type { TestCaseRecording, TestRecordingArtifact, TestRecordingCapture, TestRecordingReference } from './test-contracts';
+import { MAX_TEST_FRAME_SIDECAR_BYTES, MAX_TEST_FRAME_SIDECAR_ROWS, type TestFrameSidecar } from './test-frame-sidecar';
 
 /** A single diagnostic clip is capped at 1 MiB. */
 export const MAX_TEST_RECORDING_BYTES = 1024 * 1024;
@@ -96,6 +97,25 @@ export interface KeptTestRecording {
   readonly notes: readonly string[];
 }
 
+/**
+ * Keeps a clip's per-frame sidecar only within its row and byte limits. Over a limit the clip is still kept, without its
+ * sidecar, and the reason is a visible note on the case.
+ */
+function keepSidecar(frames: TestFrameSidecar | undefined, notes: string[]): TestFrameSidecar | undefined {
+  if (!frames) return undefined;
+  if (frames.frames.length > MAX_TEST_FRAME_SIDECAR_ROWS) {
+    notes.push(`Frame sidecar dropped: ${frames.frames.length} rows is over ${MAX_TEST_FRAME_SIDECAR_ROWS}`);
+    return undefined;
+  }
+  const bytes = new TextEncoder().encode(JSON.stringify(frames)).length;
+  if (bytes > MAX_TEST_FRAME_SIDECAR_BYTES) {
+    notes.push(`Frame sidecar dropped: ${Math.round(bytes / 1024)} KB is over ${MAX_TEST_FRAME_SIDECAR_BYTES / 1024} KB`);
+    return undefined;
+  }
+  if (frames.truncated) notes.push(`Frame sidecar incomplete: frames after row ${MAX_TEST_FRAME_SIDECAR_ROWS} were not logged`);
+  return frames;
+}
+
 /** Applies case/run budgets and metadata checks without failing the functional test. */
 export function keepTestRecording(recording: TestRecordingArtifact, usedBytes = 0): KeptTestRecording {
   const notes: string[] = [];
@@ -111,6 +131,7 @@ export function keepTestRecording(recording: TestRecordingArtifact, usedBytes = 
   } else if (usedBytes + recording.blob.size > MAX_RUN_TEST_RECORDING_BYTES) {
     notes.push(`Recording dropped: the run's ${MAX_RUN_TEST_RECORDING_BYTES / 1024 / 1024} MB video budget is used up`);
   } else {
+    const frames = keepSidecar(recording.frames, notes);
     const reference: TestRecordingReference = {
       mimeType: recording.mimeType,
       bytes: recording.blob.size,
@@ -118,8 +139,10 @@ export function keepTestRecording(recording: TestRecordingArtifact, usedBytes = 
       width: recording.width,
       height: recording.height,
       audio: recording.audio,
+      ...(frames ? { frames: frames.frames.length } : {}),
     };
-    return { recording, reference, bytes: recording.blob.size, notes };
+    const { frames: _sidecar, ...clip } = recording;
+    return { recording: frames ? { ...clip, frames } : clip, reference, bytes: recording.blob.size, notes };
   }
   return { bytes: 0, notes };
 }
@@ -134,6 +157,8 @@ export interface TestRecordingUpload {
   readonly height: number;
   readonly audio: boolean;
   readonly data: string;
+  /** The clip's per-frame sidecar, sent as JSON beside the clip and validated by the receiver. */
+  readonly sidecar?: TestFrameSidecar;
 }
 
 async function toBase64(blob: Blob): Promise<string> {
@@ -158,6 +183,7 @@ export async function encodeTestRecordingUploads(entries: readonly TestCaseRecor
       height: recording.height,
       audio: recording.audio,
       data: await toBase64(recording.blob),
+      ...(recording.frames ? { sidecar: recording.frames } : {}),
     });
   }
   return out;

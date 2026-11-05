@@ -312,6 +312,36 @@ diagnostic and functional-only. Artifacts use a separate bounded upload, receive
 allowlisted `/video?file=` read route. The saved JSON and copied agent summary contain filenames and metadata, never
 the clip bytes. A failed/oversized upload is visible as a case limitation.
 
+### Frame numbers and the per-frame sidecar
+
+A host that wants a reviewer to point at an exact frame burns its numbers into the clip and logs one row per frame:
+
+```ts
+import { createTestFrameLog, drawFrameBurnIn } from 'triangular-engine/testing';
+
+const log = createTestFrameLog({ shot: scenario.id, fps: 24 });
+// For each frame copied into the clip canvas, after the host's own overlays:
+const row = log.record(clipTimeMs, { frameTimeMs, camera: { position, target }, state: { quality: 'High' } });
+if (row) drawFrameBurnIn(paint, row.frame, { shot: scenario.id, width, height });
+// In stop(): return { ...artifact, frames: log.sidecar() } so the sidecar travels with the clip.
+```
+
+`drawFrameBurnIn` writes a readable `shot · f0096` label in the bottom-left corner and a 17-cell black/white strip in the
+bottom-right corner that encodes the frame number (`frameBurnInLayout`, `readFrameBurnIn`). The strip lets a decoded clip
+resolve to a number without reading text. A sidecar row has the frame number (from 0, in drawing order), `clipTimeMs`
+(milliseconds from the recording start to the copy), optional `frameTimeMs` (the host's clock when drawn), optional camera
+`position` and `target`, and optional short host `state` values such as a quality tier. `log.record` throws for a non-finite or
+decreasing clip time and for values outside the contract. A sidecar holds at most 600 rows; later frames are not logged and the
+sidecar says `truncated`.
+
+The sidecar is sent beside the clip in the same bounded upload. The receiver validates it (numbering in order, finite times and
+vectors, the key and value limits, a 64 KB size) and stores it as `<case>-r<rep>-0.frames.json` beside the clip. The case's saved
+reference then carries `frames` (the row count) and `sidecar` (the file name); the result JSON never holds the rows. A sidecar that
+fails a check is dropped with a visible limitation and the clip is kept. A clip over its own limit is dropped with its sidecar, and the
+limitation says why. Clip times are measured, not `frame / fps`: a frame can be drawn late, and the engine's clock advances by at most
+0.1 s per tick, so compare the two clocks rather than assuming one. Burned-in numbers are the reliable way to name a frame. Measured
+gaps for the water-lod spike are recorded in the Engineering Record for [Plan 083](../../../docs/plans/083_addressable-visual-evidence.md).
+
 ## Choose and report visual evidence
 
 Choose media for the claim being reviewed. One test run can produce several focused derivatives; do not combine views with very different scale or purpose just to make one sheet.

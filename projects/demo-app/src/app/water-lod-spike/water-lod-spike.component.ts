@@ -12,7 +12,7 @@ import { Color, PerspectiveCamera, Vector3 } from 'three';
 import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
 import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import { FlatTerrainComponent } from 'triangular-engine/lod-surface';
-import { TestRunnerComponent, type TestContext, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
+import { TestRunnerComponent, type TestContext, type TestFrameSample, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import {
   createWaterLodSpikeScene,
   type IWaterLodSpikeSceneHandle,
@@ -181,6 +181,18 @@ export class WaterLodSpikeComponent {
     const target = (this.heldView() ?? this.liveView())?.target;
     return target ? [target[0], target[1], target[2]] : [0, 0, 0];
   });
+  /**
+   * What a recorded clip's frame records beside its burned-in number: the engine clock (milliseconds), the camera position and
+   * the orbit target, and the quality tier. Read on every copied frame, so it reflects the frame that was drawn.
+   */
+  private frameSample(): TestFrameSample {
+    const position = this.engine.camera.position;
+    return {
+      frameTimeMs: this.engine.elapsedTime$.value * 1000,
+      camera: { position: [position.x, position.y, position.z], target: this.orbitTarget() },
+      state: { quality: this.qualityTier().label },
+    };
+  }
   /** Frame intervals (ms) collected while a performance case measures; null when not sampling. */
   private frameTimes: number[] | null = null;
   private cpuTimes: number[] | null = null;
@@ -283,7 +295,11 @@ export class WaterLodSpikeComponent {
       coverActive: () => this.waterBody()?.terrain()?.selector.cover !== undefined,
       runPrecisionProbe: () => runWaterLodSpikePrecisionProbe(this.engine.renderer as unknown as IPrecisionProbeRenderer, String(this.environment()['backend'])),
       environment: () => this.environment(),
-      recording: () => createWaterLodSpikeRecording(this.engine.canvas, () => `Quality: ${this.qualityTier().label}`),
+      recording: (shot) => createWaterLodSpikeRecording(this.engine.canvas, {
+        shot,
+        label: () => `Quality: ${this.qualityTier().label}`,
+        sample: () => this.frameSample(),
+      }),
       thumbnail: () => this.screenshot.capture({
         engine: this.engine, format: 'image/webp', quality: 0.6,
         compress: { maxWidthOrHeight: THUMBNAIL_WIDTH_PX, fileType: 'image/webp', quality: 0.6 },

@@ -148,8 +148,11 @@ export interface WaterLodSpikeTestHost {
   terrainReadInfo(): { readonly k: number; readonly texelM: number; readonly megabytes: number; readonly bakeMs: number };
   /** A small picture of the canvas for the results page and review sheets; not evidence and never taken inside a timing window. */
   thumbnail?(): Promise<Blob | undefined>;
-  /** A bounded recording of the canvas for the opt-in clip; the testing entry starts it before `measure` and stops it after. */
-  recording?(): TestRecordingCapture;
+  /**
+   * A bounded recording of the canvas for the opt-in clip; the testing entry starts it before `measure` and stops it after.
+   * `shot` is the case id, burned into each frame and stored in the clip's per-frame sidecar.
+   */
+  recording?(shot: string): TestRecordingCapture;
   /** Runs the Q5 phase-precision compute kernel on the page's renderer and compares it with the double reference. */
   runPrecisionProbe(): Promise<IPrecisionReport>;
   environment(): Readonly<Record<string, TestSetting>>;
@@ -1533,5 +1536,5 @@ export function createWaterLodSpikeTestAdapter(host: WaterLodSpikeTestHost): Tes
   });
   if (!host.recording) return adapter;
   // Only the cases that move the camera record: a still shows one view, a clip shows the camera moving over the same coast.
-  return { ...adapter, recording: (scenario) => (scenario.settings.orbitDegrees || scenario.settings.motion ? host.recording?.() : undefined) };
+  return { ...adapter, recording: (scenario) => (scenario.settings.orbitDegrees || scenario.settings.motion ? host.recording?.(scenario.id) : undefined) };
 }

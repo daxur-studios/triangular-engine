@@ -50,5 +50,6 @@ tags: [plans, index]
 | [Body tint for meshes in atmosphere](/docs/plans/081_body-tint.md) | planned | [ER 081](/docs/engineering-records/081_body-tint.md) |
 | [Fast Cross-Repo Library Development and Sync](/docs/plans/082_fast-library-sync.md) | in_progress | [ER 082](/docs/engineering-records/082_fast-library-sync.md) |
 | [Addressable Visual Evidence and Shot Plans](/docs/plans/083_addressable-visual-evidence.md) | planned | [ER 083](/docs/engineering-records/083_addressable-visual-evidence.md) |
+| [Cat Space Program: Operation Moon Boop](/docs/plans/084_cat-space-program.md) | planned | [ER 084](/docs/engineering-records/084_cat-space-program.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

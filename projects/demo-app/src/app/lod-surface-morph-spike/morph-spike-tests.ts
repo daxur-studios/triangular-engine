@@ -13,9 +13,10 @@ export interface MorphSpikeTestSettings {
   /**
    * `precision`: the GPU vertex precision probe (`runProbe`); `crack`: the crack probe (`runCrackProbe`); `fan-precision` (v6): the vertex-stage
    * pole fan's positions read back from the GPU against a double reference (`runFanProbe`); `fan-rebuild` (v6): the scripted camera move and
-   * morph change that counts the fan's rebuilds (`runFanRebuild`).
+   * morph change that counts the fan's rebuilds (`runFanRebuild`); `frame-cost` (v7): the page's own live frames at one pose and morph, timed
+   * on the GPU (a window, not a probe: `radii[0]`, `morphs[0]` and `views[0]` give the state, the stretch metric and the vertex-stage fan draw it).
    */
-  readonly kind: 'precision' | 'crack' | 'fan-precision' | 'fan-rebuild';
+  readonly kind: 'precision' | 'crack' | 'fan-precision' | 'fan-rebuild' | 'frame-cost';
   readonly radii: readonly number[];
   readonly morphs: readonly number[];
   /** The poses: the crack probe's views, or the precision probe's 2 m poses. */
@@ -267,8 +268,37 @@ const MORPH_SPIKE_V6: TestSuite<MorphSpikeTestSettings> = {
   ],
 };
 
+const frameCost = (id: string, label: string, view: MorphPoseId, morph: number): TestScenario<MorphSpikeTestSettings> => ({
+  id, label,
+  settings: {
+    ...CRACK_BASE, kind: 'frame-cost', radii: [600_000], morphs: [morph], views: [view], matrix: false, lodMetric: 'stretch',
+    poleFan: true, fanMode: 'vertex', fanRays: 1024,
+  },
+  warmupMs: 500, durationMs: 4000,
+});
+
+/**
+ * v7: the v6 scenarios unchanged, plus the frame cost the spike never measured (the 2026-11-05 audit in Engineering Record 059): the page's own
+ * live frames timed on the GPU at R = 600 km with the stretch metric and the vertex-stage pole fan, at the orbit view over the map at morph 0,
+ * 0.5 and 1, and at the 200 m pole view at morph 0.5 and 1 (the pole zone the precision metric excludes). They report the GPU scene pass,
+ * the leaves and the triangles; the spike has no budget for them yet, so they are evidence, not a gate.
+ */
+const MORPH_SPIKE_V7: TestSuite<MorphSpikeTestSettings> = {
+  ...MORPH_SPIKE_V6,
+  version: 7,
+  purpose: 'performance',
+  scenarios: [
+    ...MORPH_SPIKE_V6.scenarios,
+    frameCost('frame-orbit-map-m0', 'Frame cost: orbit over the map, morph 0 (the globe)', 'orbit-map', 0),
+    frameCost('frame-orbit-map-m05', 'Frame cost: orbit over the map, morph 0.5', 'orbit-map', 0.5),
+    frameCost('frame-orbit-map-m1', 'Frame cost: orbit over the map, morph 1 (the flat map)', 'orbit-map', 1),
+    frameCost('frame-pole-200m-m05', 'Frame cost: pole view at 200 m, morph 0.5 (the pole fan close up)', 'pole-200m', 0.5),
+    frameCost('frame-pole-200m-m1', 'Frame cost: pole view at 200 m, morph 1 (the pole fan close up)', 'pole-200m', 1),
+  ],
+};
+
 /** Every version of the suite, oldest first. */
-export const MORPH_SPIKE_TEST_HISTORY: readonly TestSuite<MorphSpikeTestSettings>[] = [MORPH_SPIKE_V1, MORPH_SPIKE_V2, MORPH_SPIKE_V3, MORPH_SPIKE_V4, MORPH_SPIKE_V5, MORPH_SPIKE_V6];
+export const MORPH_SPIKE_TEST_HISTORY: readonly TestSuite<MorphSpikeTestSettings>[] = [MORPH_SPIKE_V1, MORPH_SPIKE_V2, MORPH_SPIKE_V3, MORPH_SPIKE_V4, MORPH_SPIKE_V5, MORPH_SPIKE_V6, MORPH_SPIKE_V7];
 
 /** How many rows a crack scenario's probe run returns (mirrors `runCrackProbe`'s case list). */
 export function expectedCrackCases(settings: MorphSpikeTestSettings): number {

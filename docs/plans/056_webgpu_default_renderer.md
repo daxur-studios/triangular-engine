@@ -10,7 +10,7 @@ performance: []
 
 # Plan 056: WebGPURenderer as the Default Renderer
 
-Status: **in progress**. On 2026-10-31 a small part of Phase 1 was implemented: explicit WebGPU selection retains `WebGPURenderer` and startup errors are reported. The default has not changed; the remaining phases and fallback validation are still open.
+Status: **in progress**. On 2026-10-31 a small part of Phase 1 was implemented: explicit WebGPU selection retains `WebGPURenderer` and startup errors are reported. On 2026-11-01 recreated WebGPU renderers (logarithmic depth buffer) now initialize, and the resolution subscription is no longer duplicated (see the record). The default has not changed; device loss (D6), dev-mode warnings, Phase 0 and the remaining phases are still open.
 Evidence: [Runbook 056](/docs/runbook/056_webgpu_default_renderer.md).
 [Plan 065](/docs/plans/065_composite_cell_planet.md) proposes pulling six Phase 0–1 items forward so one consumer
 game route can opt into `WebGPURenderer` before Phase 6.

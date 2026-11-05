@@ -24,10 +24,11 @@ function row(change: Partial<CrackRow> = {}): CrackRow {
 }
 
 describe('morph spike test suite', () => {
-  it('is a functional suite with unique scenario ids and plain JSON settings', () => {
+  it('is the v7 suite (v1 to v6 are functional) with unique scenario ids and plain JSON settings', () => {
     expect(suite.id).toBe(MORPH_SPIKE_SUITE_ID);
-    expect(suite.version).toBe(6);
-    expect(suite.purpose).toBe('functional');
+    expect(suite.version).toBe(7);
+    expect(suite.purpose).toBe('performance');
+    expect(MORPH_SPIKE_TEST_HISTORY.slice(0, 6).every((v) => v.purpose === 'functional')).toBeTrue();
     const ids = suite.scenarios.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ['precision', 'crack-cut', 'crack-orbit-map', 'crack-mid', 'crack-pole-200m', 'crack-controls', 'crack-tilted']) expect(ids).toContain(id);
@@ -53,7 +54,7 @@ describe('morph spike test suite', () => {
 
   it('adds the pole fan scenarios in v4 and leaves v1 to v3 without a fan', () => {
     const [v1, v2, v3] = MORPH_SPIKE_TEST_HISTORY;
-    expect(MORPH_SPIKE_TEST_HISTORY.map((s) => s.version)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(MORPH_SPIKE_TEST_HISTORY.map((s) => s.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     for (const old of [v1, v2, v3]) expect(old.scenarios.some((s) => s.settings.poleFan)).toBeFalse();
     for (const old of v3.scenarios) expect(suite.scenarios.map((s) => s.id)).toContain(old.id);
     const fan = scenario('crack-pole-200m-fan').settings;
@@ -105,7 +106,7 @@ describe('morph spike test suite', () => {
   it('builds an autostart launch link for the exact version', () => {
     const url = new URL(buildTestLaunchUrl('http://triangular-demo.localhost:4200/lod-surface-morph-spike', suite, 'headless-hardware', 1));
     expect(url.searchParams.get('testSuite')).toBe('lod-surface-morph');
-    expect(url.searchParams.get('testVersion')).toBe('6');
+    expect(url.searchParams.get('testVersion')).toBe('7');
     expect(url.searchParams.get('testAutoStart')).toBe('1');
   });
 
@@ -272,9 +273,31 @@ describe('morph spike test adapter', () => {
       runFanProbe: async (o) => { options.push(o); return []; },
       runFanRebuild: async (o) => { options.push(o); return []; },
       environment: () => ({ backend: 'webgpu' }),
+      renderedFrames: () => 0,
+      frame: () => undefined,
+      onRenderComplete: () => () => undefined,
+      startSampling: () => undefined,
+      stopSampling: () => { throw new Error('no sampling'); },
+      isSampling: () => false,
+      gpuSamplesSoFar: () => [],
     };
     return { host, applied, options };
   }
+
+  it('v7 frame-cost scenarios apply the case state to the page and are timed windows', async () => {
+    const s = scenario('frame-pole-200m-m1');
+    const { host, applied } = fakeHost([]);
+    const adapter = createMorphSpikeTestAdapter(host);
+    expect(suite.version).toBe(7);
+    expect(suite.purpose).toBe('performance');
+    expect(adapter.windowModes).toBeTrue();
+    expect(s.settings.kind).toBe('frame-cost');
+    await adapter.apply(s, context);
+    expect(applied[0]).toEqual(jasmine.objectContaining({ radiusM: 600_000, morph: 1, poseId: 'pole-200m', lodMetric: 'stretch', poleFan: true, fanMode: 'vertex', leafCap: 4096 }));
+    expect(suite.scenarios.filter((x) => x.settings.kind === 'frame-cost').map((x) => x.id)).toEqual([
+      'frame-orbit-map-m0', 'frame-orbit-map-m05', 'frame-orbit-map-m1', 'frame-pole-200m-m05', 'frame-pole-200m-m1',
+    ]);
+  });
 
   it('passes the scenario settings to the crack probe and restores the page state', async () => {
     const s = scenario('crack-pole-200m-stretch');
@@ -341,15 +364,16 @@ describe('suite v6: the vertex-stage pole fan', () => {
   const v5Ids = v5.scenarios.map((s) => s.id);
 
   it('keeps every v5 scenario unchanged and adds the vertex-stage fan scenarios', () => {
-    expect(suite.version).toBe(6);
-    expect(suite.scenarios.slice(0, v5.scenarios.length)).toEqual(v5.scenarios);
-    const added = suite.scenarios.slice(v5.scenarios.length).map((s) => s.id);
+    const v6 = MORPH_SPIKE_TEST_HISTORY[5];
+    expect(v6.version).toBe(6);
+    expect(v6.scenarios.slice(0, v5.scenarios.length)).toEqual(v5.scenarios);
+    const added = v6.scenarios.slice(v5.scenarios.length).map((s) => s.id);
     expect(added).toEqual([
       'crack-pole-200m-fan-vertex', 'crack-tilted-fan-vertex', 'crack-orbit-map-fan-vertex', 'crack-mid-fan-vertex', 'crack-cut-fan-vertex',
       'fan-vertex-precision', 'fan-vertex-rebuilds',
     ]);
     for (const id of added) expect(v5Ids).not.toContain(id);
-    for (const s of suite.scenarios) expect(JSON.parse(JSON.stringify(s.settings))).toEqual(s.settings as unknown as object);
+    for (const s of v6.scenarios) expect(JSON.parse(JSON.stringify(s.settings))).toEqual(s.settings as unknown as object);
   });
 
   it('draws the vertex-stage crack cases like the CPU fan cases, under the same judge, with only the fan type changed', () => {
@@ -465,4 +489,5 @@ describe('fan rebuild observation', () => {
     expect(check(fanRebuildObservation(silent, settings), 'Control').passed).toBeFalse();
     expect(check(fanRebuildObservation(rows().slice(1), settings), 'The run covered every mode').passed).toBeFalse();
   });
+
 });

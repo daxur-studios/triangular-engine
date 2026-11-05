@@ -21,10 +21,13 @@ export const MAX_RUN_IMAGE_BYTES = 2 * 1024 * 1024;
 /** One short test recording remains small enough for the bounded JSON upload. */
 export const MAX_RECORDING_BYTES = 1024 * 1024;
 export const MAX_RUN_RECORDING_BYTES = 5 * 1024 * 1024;
+/** A clip's per-frame sidecar (`testing/test-frame-sidecar.ts`): row and byte limits, matching the page's limits. */
+export const MAX_RECORDING_SIDECAR_ROWS = 600;
+export const MAX_RECORDING_SIDECAR_BYTES = 64 * 1024;
 const DEFAULTS = {
   port: DEFAULT_PORT, outputDir: 'artifacts/test-runs', fingerprintPaths: ['projects'], maxBytes: 20 * 1024 * 1024, machineSampling: true, gpuIndex: 0,
   maxImageBytes: MAX_IMAGE_BYTES, maxRunImageBytes: MAX_RUN_IMAGE_BYTES,
-  maxRecordingBytes: MAX_RECORDING_BYTES, maxRunRecordingBytes: MAX_RUN_RECORDING_BYTES,
+  maxRecordingBytes: MAX_RECORDING_BYTES, maxRunRecordingBytes: MAX_RUN_RECORDING_BYTES, maxSidecarBytes: MAX_RECORDING_SIDECAR_BYTES,
 };
 
 export function loadConfig(root) {
@@ -186,9 +189,62 @@ export function storeThumbnails(config, dir, prefix, stem, result, uploads) {
   return { byCase, dropped };
 }
 
+const FRAME_STATE_NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,31}$/;
+const isVector3 = (v) => Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(n));
+
+/**
+ * Checks a clip's per-frame sidecar against the producer contract in `testing/test-frame-sidecar.ts` and rebuilds it from
+ * the known fields only, so nothing unexpected is stored. Returns `{ sidecar, bytes }` or `{ reason }`. Rows must be
+ * numbered 0, 1, 2 in order with non-decreasing clip times; the total must fit `config.maxSidecarBytes`.
+ */
+export function validateFrameSidecar(value, config = DEFAULTS) {
+  const bad = (reason) => ({ reason });
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return bad('not a frame sidecar');
+  if (value.schemaVersion !== 1) return bad('unknown sidecar version');
+  if (typeof value.shot !== 'string' || value.shot.length < 1 || value.shot.length > 64) return bad('the shot name is not 1 to 64 characters');
+  if (!Number.isFinite(value.fps) || value.fps <= 0 || value.fps > 120) return bad('fps is not above 0 and at most 120');
+  if (typeof value.truncated !== 'boolean') return bad('truncated is not a boolean');
+  if (!Array.isArray(value.frames) || value.frames.length === 0 || value.frames.length > MAX_RECORDING_SIDECAR_ROWS) return bad(`rows are not 1 to ${MAX_RECORDING_SIDECAR_ROWS}`);
+  const frames = [];
+  let last = 0;
+  for (let i = 0; i < value.frames.length; i++) {
+    const row = value.frames[i];
+    if (!row || typeof row !== 'object' || row.frame !== i) return bad(`row ${i} is not numbered ${i} in order`);
+    if (!Number.isFinite(row.clipTimeMs) || row.clipTimeMs < last) return bad(`row ${i} has a clip time that is not finite or goes back`);
+    last = row.clipTimeMs;
+    if (row.frameTimeMs !== undefined && !Number.isFinite(row.frameTimeMs)) return bad(`row ${i} has a frame time that is not finite`);
+    let camera;
+    if (row.camera !== undefined) {
+      if (!row.camera || typeof row.camera !== 'object' || !isVector3(row.camera.position) || !isVector3(row.camera.target)) return bad(`row ${i} has a camera that is not two finite vectors`);
+      camera = { position: [...row.camera.position], target: [...row.camera.target] };
+    }
+    let state;
+    if (row.state !== undefined) {
+      if (!row.state || typeof row.state !== 'object' || Array.isArray(row.state)) return bad(`row ${i} has a state that is not an object`);
+      const keys = Object.keys(row.state);
+      if (keys.length > 16) return bad(`row ${i} keeps more than 16 state values`);
+      state = {};
+      for (const key of keys) {
+        const v = row.state[key];
+        if (!FRAME_STATE_NAME.test(key)) return bad(`row ${i} has an invalid state name`);
+        const ok = typeof v === 'string' ? v.length <= 64 : typeof v === 'number' ? Number.isFinite(v) : typeof v === 'boolean';
+        if (!ok) return bad(`row ${i} state ${key} is not a short string, finite number or boolean`);
+        state[key] = v;
+      }
+    }
+    frames.push({ frame: i, clipTimeMs: row.clipTimeMs, ...(row.frameTimeMs !== undefined ? { frameTimeMs: row.frameTimeMs } : {}),
+      ...(camera ? { camera } : {}), ...(state ? { state } : {}) });
+  }
+  const sidecar = { schemaVersion: 1, shot: value.shot, fps: value.fps, truncated: value.truncated, frames };
+  const bytes = Buffer.byteLength(JSON.stringify(sidecar));
+  if (bytes > config.maxSidecarBytes) return bad(`${Math.round(bytes / 1024)} KB is over ${Math.round(config.maxSidecarBytes / 1024)} KB`);
+  return { sidecar, bytes };
+}
+
 /**
  * Decodes bounded video sidecars, validates the claimed container against its signature, and stores files beside the
- * result. The result JSON retains only metadata and relative file names.
+ * result. The result JSON retains only metadata and relative file names. A clip's frame sidecar is kept with it when it
+ * validates and fits the run's recording budget; otherwise the clip is kept without it and a note says why.
  */
 export function storeRecordings(config, dir, prefix, stem, result, uploads) {
   const byCase = new Map();
@@ -222,6 +278,18 @@ export function storeRecordings(config, dir, prefix, stem, result, uploads) {
       const file = `${prefix}/${stem}/${name}`;
       const reference = { file, mimeType: upload.mimeType, bytes: bytes.length, durationMs: upload.durationMs,
         width: upload.width, height: upload.height, audio: upload.audio };
+      if (upload.sidecar !== undefined) {
+        const key = `${upload.case}#${upload.repetition}`;
+        const checked = validateFrameSidecar(upload.sidecar, config);
+        if (checked.reason) dropped.push({ key, text: `${label}: frame sidecar dropped, ${checked.reason}` });
+        else if (total + checked.bytes > config.maxRunRecordingBytes) dropped.push({ key, text: `${label}: frame sidecar dropped, the run's recording budget is used up` });
+        else {
+          const sidecarName = `${safe(upload.case)}-r${upload.repetition}-${upload.index}.frames.json`;
+          writeFileSync(join(dir, stem, sidecarName), JSON.stringify(checked.sidecar));
+          total += checked.bytes;
+          Object.assign(reference, { frames: checked.sidecar.frames.length, sidecar: `${prefix}/${stem}/${sidecarName}` });
+        }
+      }
       const key = `${upload.case}#${upload.repetition}`;
       byCase.set(key, [...(byCase.get(key) ?? []), reference]);
       files.push({ case: upload.case, repetition: upload.repetition, ...reference });
