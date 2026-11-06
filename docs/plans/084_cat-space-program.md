@@ -8,46 +8,56 @@ record: /docs/engineering-records/084_cat-space-program.md
 map_schema: 1
 document_id: plan-084
 initiative_id: "cat-space-program"
-performance: []
+performance:
+  - id: moon-boop-functional-v1
+    url: http://triangular-demo.localhost:4200/cat-space-program?testSuite=moon-boop-functional&testVersion=1&testProfile=headless-hardware&testMode=standard&testRepetitions=1&testAutoStart=1
+    status: functional-pass-visual-review-pending
 ---
 
 # Plan 084: Cat Space Program: Operation Moon Boop
 
-Status: **planned**. Evidence and decisions: [ER 084](/docs/engineering-records/084_cat-space-program.md).
+Status: **implemented; human visual/play acceptance pending**. Evidence: [ER 084](/docs/engineering-records/084_cat-space-program.md).
 
 <!-- tri:scope -->
-
 ## Intended outcome
 
-Describe the user-visible or developer-visible result. State important constraints and what is out of scope.
+A playable, short incremental game at `/cat-space-program`: attract capsule cats, collect them with exactly one capsule human, and stack 18 cats to boop a nearby Moon. Angular controls and Three.js targets use the same game actions. Faster shoes and carrying capacity replace additional collectors. This bounds the actor count; it is not a measured performance guarantee.
+
+Keep game logic page-owned and deterministic. Use existing procedural actors and engine scene/tick/portal facilities. Keep source recording, edited video timing and simulation time distinct. No changes to engine public APIs or the concurrent addressable-evidence work are required. Full physics stacking, flight, persistence, offline production and multiple humans are out of scope.
 
 ## Phases and acceptance
 
-- **phase-id** — Work in this phase. Acceptance: observable conditions that demonstrate the result.
+- **playable-loop** — Three bounded cat sources, one collector, manual stacking, speed/capacity upgrades, pause/reset, scenario presets and Moon victory. Acceptance: production, collection and purchases obey resource accounting; a complete round is playable without debug commands; cat population is capped and actors are disposed on reset/navigation.
+- **scene-controls** — Discoverable route/card, camera overview/follow/tower views, scene picking and optional target highlight. Acceptance: scene and Angular controls dispatch the same supported actions; a page-owned automation surface exposes state, actions, readiness and targets without scene traversal; no conflicting input during tests.
+- **repeatable-evidence** — Model checks, a functional testing-entry adapter and browser walkthrough. Acceptance: production/batch timing, no overspending, collector upgrades, cap/victory, pause/reset and restoration/cancel are checked; the running route and hub link are verified. Visual acceptance remains separately pending.
+- **recording-proof** — A short continuous recording with an explicitly accelerated repetitive segment. Acceptance: retain source and timing metadata; export a playable MP4 with a speed indicator, normal-speed interactions and cached Daxur narration. Mark the producer as a demo-local proof, not a shipped Stop Motion continuous-capture API.
 
 ## Relationships
 
-<!-- Add only links that have a defined relation; omit this placeholder line when there are none. -->
+- related-to: [/docs/plans/079_playable-capsule-human-sandbox.md](/docs/plans/079_playable-capsule-human-sandbox.md)
+- related-to: [/docs/plans/083_addressable-visual-evidence.md](/docs/plans/083_addressable-visual-evidence.md)
 <!-- /tri:scope -->
 
 ## Current phase status
 
-| Phase    | State   |
-| -------- | ------- |
-| phase-id | planned |
+| Phase | State |
+| --- | --- |
+| playable-loop | done |
+| scene-controls | done |
+| repeatable-evidence | done |
+| recording-proof | done |
 
-<!-- tri:review version="1" scope-hash="pending" reviewed="2026-11-05" reviewer="agent" -->
-<!-- tri:item id="Q1" kind="intent" applies-to="phase-id" blocks="phase-id" state="open" -->
-
-- [ ] State one consequential question or assumption in concrete terms.
-  - Why it matters: describe what changes if this is interpreted differently.
-  - Next action: state who investigates, decides, or records the answer.
-    <!-- /tri:item -->
-    <!-- /tri:review -->
+<!-- tri:review version="1" scope-hash="bcce22cb59774cc4f175f2eafba0f86f64ed4994bfef82ab33c3f58608528ed5" reviewed="2026-11-05" reviewer="agent" -->
+<!-- /tri:review -->
 
 ## Delivery progress
 
-Record dated milestones, evidence and material changes in the linked Engineering Record.
+2026-11-05: User authorized the Cat Space Program POC and suggested a single human for performance. Use one collector with shoes/capacity upgrades, bounded cat population and stationary stacked cats. No scope baseline is established.
 
-Scope history in the Engineering Record is append-only. Confirm a specific baseline only after
-explicit developer confirmation; document review and checked boxes do not imply confirmation.
+2026-11-05 (implementation): Playable route/card, one collector, cat production, upgrades, fixed-step model, named targets/actions, camera modes and optional focus box are implemented. Ten Node model checks and the browser walkthrough pass. The shared functional suite completed all three cases with automated pass, performance not run and visual review pending. A demo-local continuous recording proof produced a narrated MP4 with 3x/5x segments; final overlay/export verification is in progress. See the ER for evidence and limitations.
+
+[Run the exact functional suite](http://triangular-demo.localhost:4200/cat-space-program?testSuite=moon-boop-functional&testVersion=1&testProfile=headless-hardware&testMode=standard&testRepetitions=1&testAutoStart=1).
+
+2026-11-05 (recording proof): Final output is 34.73 seconds, H.264/yuv420p with AAC narration, 1,426,555 bytes. Its 54.55-second source, timestamped JPEG frames and segment mapping are retained. The 3x and 5x sections change footage playback, not simulation speed. Inspected the contact sheet and the focus-box close-up; listening and user play/visual acceptance remain pending. All implementation phases are done. Keep this pair intact for the maintainer to commit before any archival.
+
+2026-11-06 (recording follow-up): Owner confirmed HEVC phone playback and requested compact delivery by default. The local recorder now offers HEVC by default with a H.264 override, timed cursor approaches and retained pointer samples. A new 42.004-second narrated clip is 1,333,868 bytes. The headless paced-input check passed; the first-approach montage shows intermediate pointer positions. Full motion/listening review remains separate. See the append-only ER for the retry and exact evidence.

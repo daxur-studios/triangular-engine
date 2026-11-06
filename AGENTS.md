@@ -63,7 +63,7 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 
 ## Browser tests and their results
 
-- To deliver generated media in chat, read `projects/triangular-engine/.agents/skills/share-media-in-chat/SKILL.md`: Codex uses an absolute-path Markdown media embed; Claude uses its available `SendUserFile` tool. Codex phone MP4 playback was confirmed on 2026-11-05. The skill also ships at `node_modules/triangular-engine/skills/share-media-in-chat/SKILL.md` for consumers; delivery is separate from content review.
+- To deliver generated media in chat, read `projects/triangular-engine/.agents/skills/share-media-in-chat/SKILL.md`: Codex and Antigravity use an absolute-path Markdown media embed; Claude uses its available `SendUserFile` tool. Codex phone MP4 playback was confirmed on 2026-11-05; Antigravity inline playback was confirmed on 2026-11-06. The skill also ships at `node_modules/triangular-engine/skills/share-media-in-chat/SKILL.md` for consumers; delivery is separate from content review.
 - Before adding or changing a page integration with `triangular-engine/testing`
   (including `<tri-test-runner>` and its game adapter), writing or extending a browser
   test suite, or reading its results, read `projects/triangular-engine/testing/README.md`

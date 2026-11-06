@@ -1,0 +1,303 @@
+<div class="mission-shell" data-testid="moon-boop" [attr.data-ready]="ready()">
+  <header class="mission-header">
+    <a routerLink="/" aria-label="Back to examples">← Examples</a>
+    <div class="brand">
+      <span class="brand-icon">✦</span>
+      <div>
+        <span class="eyebrow">A HIGHLY QUESTIONABLE SPACE AGENCY</span>
+        <h1>Cat Space Program<span>Operation Moon Boop</span></h1>
+      </div>
+    </div>
+    <span class="round-chip">ONE HUMAN. MANY CATS.</span>
+  </header>
+  <main class="mission-layout">
+    <aside class="mission-panel">
+      <section class="goal-card" [class.victory]="ui().won">
+        <span class="eyebrow">MISSION 001</span>
+        <h2>{{ ui().won ? "Moon booped." : "Build a very tall cat." }}</h2>
+        <p>
+          {{
+            ui().won
+              ? "A triumph of purrseverance. Please do not tell the physicists."
+              : "Attract cats. Stack cats. Gently boop the Moon. No rockets required."
+          }}
+        </p>
+        <div class="goal-numbers">
+          <strong data-testid="tower-count"
+            >{{ stacked() }}<small> / {{ goal }}</small></strong
+          ><span>cats closer to<br />scientific greatness</span>
+        </div>
+        <progress
+          [value]="stacked()"
+          [max]="goal"
+          aria-label="Cats stacked toward the Moon"
+        ></progress>
+      </section>
+      <div class="wallet">
+        <span>✧ Treat budget</span
+        ><strong data-testid="treats">{{ ui().treats }}</strong>
+      </div>
+      <fieldset [disabled]="testBusy()" class="game-controls">
+        <section class="collector-card">
+          <div class="section-heading">
+            <span>01 / MISSION SPECIALIST</span
+            ><span class="pill">1 human</span>
+          </div>
+          <h3>Chief Cat Wrangler</h3>
+          <p>
+            One dedicated human. Increasingly unreasonable responsibilities.
+          </p>
+          <button
+            class="primary"
+            (click)="act('collector')"
+            [disabled]="ui().won || ui().paused"
+            data-testid="collector-toggle"
+          >
+            {{ ui().auto ? "Park collector" : "Start collecting cats" }}
+          </button>
+          <div class="collector-stats">
+            <span>{{ game.speed | number: "1.1-1" }} m/s</span
+            ><span
+              >{{ game.capacity }} cat{{ game.capacity > 1 ? "s" : "" }} per
+              trip</span
+            >
+          </div>
+          <div class="upgrade-grid">
+            <button
+              (click)="act('shoes')"
+              [disabled]="
+                ui().treats < cost('shoes') ||
+                ui().shoes >= 3 ||
+                ui().paused ||
+                ui().won
+              "
+            >
+              <strong>Zoomies shoes</strong
+              ><small>{{
+                ui().shoes >= 3
+                  ? "Maximum zoom"
+                  : cost("shoes") + " treats · faster walks"
+              }}</small>
+            </button>
+            <button
+              (click)="act('basket')"
+              [disabled]="
+                ui().treats < cost('basket') ||
+                ui().basket >= 2 ||
+                ui().paused ||
+                ui().won
+              "
+            >
+              <strong>Cat headroom</strong
+              ><small>{{
+                ui().basket >= 2
+                  ? "Maximum cats"
+                  : cost("basket") + " treats · +1 per trip"
+              }}</small>
+            </button>
+          </div>
+        </section>
+        <section class="source-list">
+          <div class="section-heading">
+            <span>02 / CAT ACQUISITION</span
+            ><span>{{ waiting() }} waiting</span>
+          </div>
+          <button
+            class="source-row"
+            [class.selected]="selected() === 'catnip'"
+            (click)="act('select', 'catnip')"
+          >
+            <span class="source-icon green">♧</span
+            ><span
+              ><strong>Catnip garden</strong
+              ><small
+                >1 cat / 7 sec · next
+                {{ remaining("catnip") | number: "1.0-0" }}s</small
+              ></span
+            ><span class="live-indicator"></span>
+          </button>
+          <div class="source-block">
+            <button
+              class="source-row"
+              [class.selected]="selected() === 'food'"
+              (click)="act('select', 'food')"
+            >
+              <span class="source-icon peach">◡</span
+              ><span
+                ><strong>Wet-food bowl</strong
+                ><small>{{ ui().food }} portions · 1 cat / 3 sec</small></span
+              ></button
+            ><button
+              class="small-buy"
+              (click)="act('food')"
+              [disabled]="
+                ui().treats < 8 || ui().food > 8 || ui().paused || ui().won
+              "
+            >
+              Refill · 8 treats
+            </button>
+          </div>
+          <div class="source-block">
+            <button
+              class="source-row"
+              [class.selected]="selected() === 'nursery'"
+              (click)="act('select', 'nursery')"
+            >
+              <span class="source-icon lilac">✿</span
+              ><span
+                ><strong>Kitten nursery</strong
+                ><small>{{
+                  ui().nursery
+                    ? "6 kittens in " +
+                      (remaining("nursery") | number: "1.0-0") +
+                      "s"
+                    : "Six tiny astronauts per batch"
+                }}</small></span
+              ></button
+            ><button
+              class="small-buy"
+              (click)="act('nursery')"
+              [disabled]="
+                ui().nursery || ui().treats < 24 || ui().paused || ui().won
+              "
+            >
+              {{ ui().nursery ? "Nursery open" : "Open · 24 treats" }}
+            </button>
+          </div>
+        </section>
+        <button
+          class="manual-stack"
+          (click)="act('stack')"
+          [disabled]="waiting() === 0 || ui().paused || ui().won"
+        >
+          ↑ Stack one waiting cat <small>+4 treats</small>
+        </button>
+        <details class="setup">
+          <summary>Starting conditions & repeatable tests</summary>
+          <p>Changing a starting condition resets this round.</p>
+          <div class="scenario-buttons">
+            @for (scenario of scenarios; track scenario.id) {
+              <button
+                [attr.aria-pressed]="ui().scenario === scenario.id"
+                (click)="act('reset', scenario.id)"
+                [title]="scenario.description"
+              >
+                {{ scenario.label }}
+              </button>
+            }
+          </div>
+        </details>
+      </fieldset>
+      <details class="tests">
+        <summary>Run functional checks</summary>
+        <tri-test-runner
+          [suites]="suites"
+          [adapter]="adapter"
+          [available]="ready()"
+          [allowAutoStart]="allowAutoStart"
+          (progressChange)="onProgress($event)"
+        />
+      </details>
+    </aside>
+    <section class="viewport" aria-label="Cat Space Program 3D scene">
+      <scene [showFps]="true"
+        ><orbitControls
+          [cameraPosition]="cameraPosition()"
+          [target]="cameraTarget()"
+          [isActive]="!testBusy()" /><ambientLight
+          [intensity]="1.6" /><directionalLight
+          [position]="[5, 12, 8]"
+          [intensity]="2.6" /><directionalLight
+          [position]="[-7, 6, -4]"
+          [intensity]="1.4"
+      /></scene>
+      <ng-template portalTarget="overlay" lane="topStart"
+        ><div class="scene-title">
+          <span class="live-dot"></span> LIVE FROM THE CATOSPHERE
+          <small>Simulation {{ ui().time | number: "1.0-0" }}s</small>
+        </div></ng-template
+      >
+      <ng-template portalTarget="overlay" lane="topEnd" [order]="10"
+        ><div class="scene-tools">
+          <button
+            (click)="act('pause')"
+            [disabled]="testBusy()"
+            [attr.aria-pressed]="ui().paused"
+          >
+            {{ ui().paused ? "Resume" : "Pause" }}</button
+          ><button (click)="act('reset')" [disabled]="testBusy()">
+            New round
+          </button>
+        </div></ng-template
+      >
+      <ng-template portalTarget="overlay" lane="bottomStart"
+        ><div class="camera-controls" role="group" aria-label="Camera view">
+          <button
+            [attr.aria-pressed]="view() === 'overview'"
+            (click)="act('camera', 'overview')"
+            [disabled]="testBusy()"
+          >
+            Overview</button
+          ><button
+            [attr.aria-pressed]="view() === 'collector'"
+            (click)="act('camera', 'collector')"
+            [disabled]="testBusy()"
+          >
+            Follow human</button
+          ><button
+            [attr.aria-pressed]="view() === 'tower'"
+            (click)="act('camera', 'tower')"
+            [disabled]="testBusy()"
+          >
+            Moon cam
+          </button>
+        </div></ng-template
+      >
+      <ng-template portalTarget="overlay" lane="bottomEnd" [order]="10"
+        ><button
+          class="highlight-toggle"
+          (click)="act('highlights')"
+          [attr.aria-pressed]="highlights()"
+          [disabled]="testBusy()"
+        >
+          {{ highlights() ? "Hide" : "Show" }} focus box
+        </button></ng-template
+      >
+      <ng-template portalTarget="overlay" lane="center">
+        @if (highlight(); as box) {
+          <svg
+            class="focus-overlay"
+            [attr.width]="viewport().width"
+            [attr.height]="viewport().height"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <rect
+              [attr.x]="box.x"
+              [attr.y]="box.y"
+              [attr.width]="box.width"
+              [attr.height]="box.height"
+              rx="0.5"
+            />
+          </svg>
+        }
+      </ng-template>
+      <ng-template portalTarget="overlay" lane="topCenter">
+        @if (ui().won) {
+          <div class="victory-banner" role="status">
+            <span>✦ MISSION ACCOMPLISHED ✦</span
+            ><strong>One giant boop for catkind.</strong>
+          </div>
+        }
+      </ng-template>
+    </section>
+  </main>
+  <footer class="mission-footer">
+    <span class="mission-message" role="status">{{ ui().message }}</span
+    ><span
+      >{{ counts().calls }} draws · {{ counts().triangles | number }} triangles
+      <span class="muted">/ diagnostic counts</span></span
+    >
+  </footer>
+</div>

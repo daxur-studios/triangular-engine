@@ -78,6 +78,11 @@ export const CATEGORIES: readonly DemoCategory[] = [
 
 export const DEMOS: readonly DemoItem[] = [
   {
+    id: 'cat-space-program', number: '084', title: 'Cat Space Program · Moon Boop', route: '/cat-space-program',
+    categoryId: 'core', tier: 'lab', createdAt: '2026-11-05', entryPoints: ['characters', 'procedural', 'testing'], package: 'triangular-engine/characters + procedural + testing',
+    description: 'An incremental cat-stacking mission: one capsule human, catnip, food, six-kitten batches and a nearby Moon. Semantic scene actions, functional checks and narrated recording experiments.',
+  },
+  {
     id: 'character-studio', number: '20f', title: 'Capsule Character Studio', route: '/character-studio',
     categoryId: 'core', tier: 'lab', createdAt: '2026-10-31', entryPoints: ['characters', 'procedural'], package: 'triangular-engine/characters + procedural',
     description: 'A focused procedural capsule human and cat studio with editable character presets, appearance controls, expressions, and motion preview.',

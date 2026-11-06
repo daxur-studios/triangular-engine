@@ -2,6 +2,10 @@ import { Routes } from '@angular/router';
 
 export const routes: Routes = [
   {
+    path: 'cat-space-program',
+    loadComponent: () => import('./pages/cat-space-program/cat-space-program-page.component').then(m => m.CatSpaceProgramPageComponent),
+  },
+  {
     path: 'illustrative-cell-planet',
     loadComponent: () => import('./pages/illustrative-cell-planet/illustrative-cell-planet-page.component').then(m => m.IllustrativeCellPlanetPageComponent),
   },

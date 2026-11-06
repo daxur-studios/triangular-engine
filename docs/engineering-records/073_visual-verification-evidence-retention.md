@@ -147,6 +147,12 @@ The owner agreed to begin a focused capsule character studio. The UI and local c
 
 **Checks.** The new shared skill, modified main/testing skills and existing Claude skill pass skill validation; the initial default-Windows-encoding error on the testing skill was resolved by running the validator with Python `-X utf8`. Edited tracked documents pass `git diff --check`. Confirmed the existing ng-package asset configuration includes the new skill directory. The repository-wide records check reports a stale review in unrelated `docs/plans/081_body-tint.md`; this task did not edit or refresh that plan. No runtime tests or library build were needed for this documentation-only change.
 
+## 2026-11-06 — Antigravity chat video delivery confirmed
+
+**User evidence.** The owner confirmed inline video playback in Antigravity chat from the Windows machine using the Markdown image/media embed with the absolute file URI/path (e.g. `![Camera Proximity Sweep](file:///D:/code/triangular-workspace/.../camera-proximity-sweep-r1-0.mobile.mp4)`). This confirms Antigravity shares the same local absolute path embed method as Codex, rendering without requiring a custom HTML `<agent-embed>` widget or loading video bytes into model context.
+
+**Documentation.** Updated `projects/triangular-engine/.agents/skills/share-media-in-chat/SKILL.md`, `triangular-engine-testing/SKILL.md`, `testing/README.md`, and workspace root `AGENTS.md` to document that both Codex and Antigravity use the standard absolute-path Markdown embed for inline playback.
+
 ## Scope history
 
 <!-- tri:scope-history -->

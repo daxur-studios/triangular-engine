@@ -222,8 +222,8 @@ diagnostic measurements; a runnable link is not an accepted baseline.
     target from a large unlabelled sheet.
 - **Present media to the user by purpose.** In the handoff, show a GIF only as a motion preview when the current chat
   supports it; share the source video for audio or full playback quality. Read [share-media-in-chat](../share-media-in-chat/SKILL.md):
-  Codex uses `![Video](<absolute-path-to-video.mp4>)`; Claude uses its available `SendUserFile` tool. Codex phone playback
-  was confirmed for H.264/AAC MP4, not every WebM codec; preserve the WebM source if making a compatibility derivative. Show labeled
+  Codex and Antigravity use `![Video](<absolute-path-to-video.mp4>)`; Claude uses its available `SendUserFile` tool. Codex phone playback
+  was confirmed for H.264/AAC MP4 on 2026-11-05; Antigravity chat playback was confirmed on 2026-11-06 (not every WebM codec; preserve the WebM source if making a compatibility derivative). Show labeled
   contact sheets for still comparison, view coverage or close-up detail, with separate sheets for different claims
   such as walking and facial expressions. Do not call selected-frame contact sheets full sprite atlases. If inline
   display is unavailable, provide the absolute artifact path and size instead of claiming it was displayed.
