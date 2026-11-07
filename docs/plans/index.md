@@ -51,5 +51,6 @@ tags: [plans, index]
 | [Fast Cross-Repo Library Development and Sync](/docs/plans/082_fast-library-sync.md) | in_progress | [ER 082](/docs/engineering-records/082_fast-library-sync.md) |
 | [Addressable Visual Evidence and Shot Plans](/docs/plans/083_addressable-visual-evidence.md) | planned | [ER 083](/docs/engineering-records/083_addressable-visual-evidence.md) |
 | [Cat Space Program: Operation Moon Boop](/docs/plans/084_cat-space-program.md) | implemented-review-pending | [ER 084](/docs/engineering-records/084_cat-space-program.md) |
+| [Moon Boop cat care and treat guns](/docs/plans/085_moon-boop-cat-care.md) | implemented; owner review pending | [ER 085](/docs/engineering-records/085_moon-boop-cat-care.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

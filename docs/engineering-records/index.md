@@ -52,3 +52,4 @@ Records `001`–`042` keep their historical formats; new work uses reciprocal pl
 | [Fast Cross-Repo Library Development and Sync](/docs/engineering-records/082_fast-library-sync.md) | [PLAN-082](/docs/plans/082_fast-library-sync.md) |
 | [Addressable Visual Evidence and Shot Plans](/docs/engineering-records/083_addressable-visual-evidence.md) | [PLAN-083](/docs/plans/083_addressable-visual-evidence.md) |
 | [Cat Space Program: Operation Moon Boop](/docs/engineering-records/084_cat-space-program.md) | [PLAN-084](/docs/plans/084_cat-space-program.md) |
+| [Moon Boop cat care and treat guns](/docs/engineering-records/085_moon-boop-cat-care.md) | [PLAN-085](/docs/plans/085_moon-boop-cat-care.md) |

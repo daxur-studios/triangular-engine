@@ -14,6 +14,7 @@ import {
   Box3,
   BufferGeometry,
   Color,
+  CanvasTexture,
   CylinderGeometry,
   Group,
   Mesh,
@@ -21,6 +22,8 @@ import {
   MeshStandardMaterial,
   Raycaster,
   SphereGeometry,
+  Sprite,
+  SpriteMaterial,
   TorusGeometry,
   Vector2,
   Vector3,
@@ -43,11 +46,22 @@ import {
   SOURCE_PERIOD,
   SOURCE_POSITION,
   SCENARIOS,
+  TOWER_STEP,
+  CARE_AFTER,
+  DEPARTURE_SECONDS,
   type BoopScenario,
+  type BoopUpgrade,
   type CatSource,
 } from './moon-boop-game';
 
-type CameraView = 'overview' | 'collector' | 'tower';
+type CameraView = 'overview' | 'collector' | 'tower' | 'care';
+type CheckKind =
+  | 'collection'
+  | 'pause'
+  | 'nursery'
+  | 'petting'
+  | 'departure'
+  | 'treats';
 type GameAction =
   | 'stack'
   | 'collector'
@@ -56,6 +70,9 @@ type GameAction =
   | 'basket'
   | 'food'
   | 'nursery'
+  | 'pet'
+  | 'care'
+  | 'gun'
   | 'reset'
   | 'select'
   | 'camera'
@@ -98,8 +115,9 @@ const LABELS: Record<string, string> = {
   collector: 'Mission specialist',
   tower: 'Cat launch tower',
   moon: 'The Moon',
+  'gun-1': 'Golden snack cannon',
+  'gun-2': 'Mint snack cannon',
 };
-const TOWER_STEP = 0.53;
 const MOON_Y = 11.35;
 const COLORS = [
   '#f4bc77',
@@ -133,11 +151,35 @@ export class CatSpaceProgramPageComponent {
   readonly waiting = computed(
     () => this.ui().cats.filter((c) => c.place === 'waiting').length,
   );
+  readonly needy = computed(() =>
+    this.ui()
+      .cats.filter(
+        (c) =>
+          c.place === 'stacked' &&
+          this.ui().time - c.caredAt + 1e-9 >= CARE_AFTER,
+      )
+      .sort((a, b) => a.caredAt - b.caredAt || a.id - b.id),
+  );
+  readonly humanStatus = computed(() => {
+    const c = this.ui().collector;
+    return {
+      idle: 'Ready for duty',
+      outbound: 'Collecting cats',
+      loading: 'Loading basket',
+      returning: 'Bringing cats home',
+      unloading: 'Stacking cats',
+      approaching: 'Walking to cat lift',
+      ascending: `Going up to Cat ${c.catId}`,
+      petting: `Petting Cat ${c.catId}`,
+      descending: 'Coming back down',
+    }[c.phase];
+  });
   readonly selected = signal('tower');
   readonly highlights = signal(false);
   readonly view = signal<CameraView>('overview');
   readonly ready = signal(false);
   readonly testBusy = signal(false);
+  readonly testsOpen = signal(false);
   readonly allowAutoStart = isDevMode();
   readonly cameraPosition = signal<[number, number, number]>([15, 12, 19]);
   readonly cameraTarget = signal<[number, number, number]>([0, 4.3, 0]);
@@ -146,6 +188,31 @@ export class CatSpaceProgramPageComponent {
   readonly counts = signal({ calls: 0, triangles: 0 });
   private readonly root = new Group();
   private readonly cats = new Map<number, CapsuleCatActor>();
+  private readonly careBadges = new Map<number, Sprite>();
+  private readonly departureDiscs = new Map<number, Mesh>();
+  private readonly discGeometry = new CylinderGeometry(0.45, 0.5, 0.08, 16);
+  private readonly discMaterial = new MeshStandardMaterial({
+    color: '#c3b9f3',
+    emissive: '#746ba6',
+    emissiveIntensity: 0.35,
+  });
+  private readonly badgeMaterials = new Map<string, SpriteMaterial>();
+  private readonly guns: { root: Group; barrel: Group }[] = [];
+  private readonly shots = new Map<number, Mesh>();
+  private readonly treatGeometry = new SphereGeometry(0.14, 8, 6);
+  private readonly treatMaterial = new MeshStandardMaterial({
+    color: '#ffdb72',
+    emissive: '#e8ae39',
+    emissiveIntensity: 0.6,
+  });
+  private readonly lift = new Mesh(
+    new CylinderGeometry(0.46, 0.46, 0.1, 16),
+    new MeshStandardMaterial({
+      color: '#9fc7df',
+      emissive: '#579ab8',
+      emissiveIntensity: 0.3,
+    }),
+  );
   private readonly objects = new Map<string, Group | Mesh>();
   private readonly human = new CapsuleCharacterActor({
     dna: ALL_CAPSULE_CHARACTER_PRESETS[0],
@@ -176,15 +243,16 @@ export class CatSpaceProgramPageComponent {
       'basket',
       'food',
       'nursery',
+      'pet',
+      'care',
+      'gun',
       'reset',
       'select',
       'camera',
       'highlights',
     ],
   };
-  readonly suites: readonly TestSuite<{
-    kind: 'collection' | 'pause' | 'nursery';
-  }>[] = [
+  readonly suites: readonly TestSuite<{ kind: CheckKind }>[] = [
     {
       id: 'moon-boop-functional',
       version: 1,
@@ -212,18 +280,54 @@ export class CatSpaceProgramPageComponent {
         },
       ],
     },
+    {
+      id: 'moon-boop-care',
+      version: 1,
+      title: 'Moon Boop · pets, safe departures and twin treat guns',
+      purpose: 'functional',
+      requiresVisualReview: true,
+      scenarios: [
+        {
+          id: 'human-pet',
+          label: 'Human pets the requested cat',
+          durationMs: 16000,
+          settings: { kind: 'petting' },
+        },
+        {
+          id: 'middle-departure',
+          label: 'Middle cat leaves safely; tower closes the gap',
+          durationMs: 16000,
+          settings: { kind: 'departure' },
+        },
+        {
+          id: 'twin-treats',
+          label: 'Two guns care for eight distinct cats',
+          durationMs: 22000,
+          settings: { kind: 'treats' },
+        },
+      ],
+    },
   ];
-  readonly adapter: TestRunAdapter<
-    { kind: 'collection' | 'pause' | 'nursery' },
-    PageSnapshot
-  > = {
+  readonly adapter: TestRunAdapter<{ kind: CheckKind }, PageSnapshot> = {
     capture: () => this.snapshot(),
     apply: (scenario) => {
+      const kind = scenario.settings.kind;
       this.game.reset(
-        scenario.settings.kind === 'nursery' ? 'kittens' : 'garden',
+        kind === 'nursery'
+          ? 'kittens'
+          : kind === 'collection' || kind === 'pause'
+            ? 'garden'
+            : kind,
       );
       if (scenario.settings.kind === 'collection') this.game.toggleAuto();
       if (scenario.settings.kind === 'pause') this.game.state.paused = true;
+      if (kind === 'petting') this.game.petCat(4);
+      if (kind === 'treats') {
+        this.game.buy('gun');
+        this.game.buy('gun');
+      }
+      if (['petting', 'departure', 'treats'].includes(kind))
+        this.setCamera('care');
       this.sync();
     },
     ready: (context) => this.waitRendered(context.signal),
@@ -233,11 +337,7 @@ export class CatSpaceProgramPageComponent {
         await context.wait(scenario.durationMs);
       else
         await this.waitGame(
-          () =>
-            scenario.settings.kind === 'collection'
-              ? this.game.stacked > 0
-              : this.game.state.cats.filter((c) => c.source === 'nursery')
-                  .length === 6,
+          () => this.checkTransition(scenario.settings.kind),
           context.signal,
           scenario.durationMs,
         );
@@ -249,18 +349,11 @@ export class CatSpaceProgramPageComponent {
           {
             name: 'Expected game transition',
             passed:
-              kind === 'collection'
-                ? this.game.stacked > 0
-                : kind === 'pause'
-                  ? JSON.stringify(before) ===
-                    JSON.stringify(this.game.snapshot())
-                  : s.cats.filter((c) => c.source === 'nursery').length === 6,
-            detail:
-              kind === 'collection'
-                ? `${this.game.stacked} delivered`
-                : kind === 'pause'
-                  ? 'Full model snapshot unchanged while paused'
-                  : `${s.cats.filter((c) => c.source === 'nursery').length} nursery cats`,
+              kind === 'pause'
+                ? JSON.stringify(before) ===
+                  JSON.stringify(this.game.snapshot())
+                : this.checkTransition(kind),
+            detail: `${kind}: ${this.game.stacked} stacked, ${s.pets} pets, ${s.treatHits} treat hits, ${s.departures} safe departures`,
           },
           {
             name: 'One collector and bounded population',
@@ -284,6 +377,7 @@ export class CatSpaceProgramPageComponent {
     this.createWorld();
     this.human.root.scale.setScalar(0.75);
     this.root.add(this.human.root);
+    this.root.add(this.lift);
     this.objects.set('collector', this.human.root);
     this.objects.set('tower', this.towerTarget);
     this.root.add(this.towerTarget);
@@ -341,8 +435,15 @@ export class CatSpaceProgramPageComponent {
       this.cats.clear();
       this.human.root.removeFromParent();
       this.human.dispose();
-      const geometries = new Set<BufferGeometry>(),
-        materials = new Set<Material>();
+      for (const material of this.badgeMaterials.values()) {
+        material.map?.dispose();
+        material.dispose();
+      }
+      const geometries = new Set<BufferGeometry>([
+          this.treatGeometry,
+          this.discGeometry,
+        ]),
+        materials = new Set<Material>([this.treatMaterial, this.discMaterial]);
       this.root.traverse((o) => {
         if (o instanceof Mesh) {
           geometries.add(o.geometry);
@@ -362,21 +463,28 @@ export class CatSpaceProgramPageComponent {
     let result = true;
     if (action === 'stack')
       result = this.game.stackCat(value ? Number(value) : undefined);
-    else if (action === 'collector') this.game.toggleAuto();
+    else if (action === 'collector') result = this.game.toggleAuto();
+    else if (action === 'care') result = this.game.toggleCare();
+    else if (action === 'pet')
+      result = this.game.petCat(value ? Number(value) : undefined);
     else if (action === 'pause')
       this.game.state.paused = !this.game.state.paused;
-    else if (['shoes', 'basket', 'food', 'nursery'].includes(action))
-      result = this.game.buy(action as 'shoes' | 'basket' | 'food' | 'nursery');
+    else if (['shoes', 'basket', 'food', 'nursery', 'gun'].includes(action))
+      result = this.game.buy(action as BoopUpgrade);
     else if (action === 'reset') {
       if (value && !SCENARIOS.some((s) => s.id === value)) return false;
       this.game.reset(value as BoopScenario | undefined);
       this.selected.set('tower');
-      this.setCamera('overview');
+      this.setCamera(
+        ['petting', 'departure', 'treats'].includes(this.game.state.scenario)
+          ? 'care'
+          : 'overview',
+      );
     } else if (action === 'select') {
       if (!value || !this.objects.has(value)) return false;
       this.selected.set(value);
     } else if (action === 'camera') {
-      if (!['overview', 'collector', 'tower'].includes(value ?? ''))
+      if (!['overview', 'collector', 'tower', 'care'].includes(value ?? ''))
         return false;
       this.setCamera(value as CameraView);
     } else if (action === 'highlights') this.highlights.set(!this.highlights());
@@ -391,7 +499,7 @@ export class CatSpaceProgramPageComponent {
     this.ui();
     return Math.max(0, SOURCE_PERIOD[source] - this.game.state.clocks[source]);
   }
-  cost(upgrade: 'shoes' | 'basket' | 'food' | 'nursery'): number {
+  cost(upgrade: BoopUpgrade): number {
     this.ui();
     return this.game.cost(upgrade);
   }
@@ -408,8 +516,8 @@ export class CatSpaceProgramPageComponent {
     if (this.view() === 'collector') {
       const c = this.game.state.collector;
       if (this.frames % 6 === 0) {
-        this.cameraTarget.set([c.x, 0.8, c.z]);
-        this.cameraPosition.set([c.x + 5, 4, c.z + 6]);
+        this.cameraTarget.set([c.x, c.y + 0.8, c.z]);
+        this.cameraPosition.set([c.x + 5, c.y + 4, c.z + 6]);
       }
     }
     this.uiElapsed += step;
@@ -432,6 +540,11 @@ export class CatSpaceProgramPageComponent {
         actor.dispose();
         this.cats.delete(id);
         this.objects.delete(`cat-${id}`);
+        this.careBadges.get(id)?.removeFromParent();
+        this.careBadges.delete(id);
+        this.departureDiscs.get(id)?.removeFromParent();
+        this.departureDiscs.delete(id);
+        if (this.selected() === `cat-${id}`) this.selected.set('tower');
       }
     }
     let towerIndex = 0,
@@ -458,6 +571,13 @@ export class CatSpaceProgramPageComponent {
         this.cats.set(cat.id, actor);
         this.root.add(actor.root);
         this.objects.set(`cat-${cat.id}`, actor.root);
+        const badge = new Sprite(this.badgeMaterial('PET ME!', '#ffcc78'));
+        badge.scale.set(1.15, 0.42, 1);
+        this.careBadges.set(cat.id, badge);
+        this.root.add(badge);
+        const disc = new Mesh(this.discGeometry, this.discMaterial);
+        this.departureDiscs.set(cat.id, disc);
+        this.root.add(disc);
       }
       const previous = actor.root.userData['place'];
       actor.root.userData['place'] = cat.place;
@@ -471,8 +591,21 @@ export class CatSpaceProgramPageComponent {
         // A short visible settle, then no per-frame rig update for stacked cats.
         if (previous !== 'stacked')
           actor.root.position.copy(goal.clone().add(new Vector3(0, 0.6, 0)));
-        actor.root.position.lerp(goal, dt ? Math.min(1, dt * 10) : 1);
+        actor.root.position.lerp(
+          goal,
+          dt ? (s.paused ? 0 : Math.min(1, dt * 8)) : 1,
+        );
         actor.root.rotation.y = index % 2 ? Math.PI / 2 : -Math.PI / 2;
+      } else if (cat.place === 'departing') {
+        const p = Math.min(1, (s.time - cat.departure!.at) / DEPARTURE_SECONDS);
+        const height = 0.35 + cat.departure!.level * TOWER_STEP;
+        actor.root.position.set(
+          -Math.min(1, p * 5) * 1.5 - Math.max(0, p - 0.65) * 9,
+          height * (1 - Math.min(1, Math.max(0, p - 0.2) / 0.45)),
+          2.4 + p,
+        );
+        actor.root.rotation.y = -Math.PI / 2;
+        if (!s.paused) actor.update(dt);
       } else if (cat.place === 'carried') {
         const index = carriedIndex++;
         actor.root.position.set(
@@ -498,14 +631,52 @@ export class CatSpaceProgramPageComponent {
         if (!s.paused && !s.won && this.frames % 3 === cat.id % 3)
           actor.update(dt * 3);
       }
+      const badge = this.careBadges.get(cat.id)!;
+      const recentlyCared =
+        cat.careBy !== 'arrival' && s.time - cat.caredAt < 2;
+      badge.visible =
+        cat.place === 'departing' ||
+        this.game.needsCare(cat) ||
+        (cat.place === 'stacked' && recentlyCared);
+      badge.material =
+        cat.place === 'departing'
+          ? this.badgeMaterial('SOFA BREAK', '#c7cfff')
+          : recentlyCared
+            ? this.badgeMaterial('PURR ♥', '#b9ecb3')
+            : this.badgeMaterial('PET ME!', '#ffcc78');
+      badge.position
+        .copy(actor.root.position)
+        .add(new Vector3(-0.85, cat.place === 'departing' ? 0.7 : 0.32, 0));
+      const disc = this.departureDiscs.get(cat.id)!;
+      disc.visible = cat.place === 'departing';
+      disc.position.copy(actor.root.position).add(new Vector3(0, -0.04, 0));
     }
     const c = s.collector;
     const dx = c.x - this.human.root.position.x,
       dz = c.z - this.human.root.position.z;
     if (Math.hypot(dx, dz) > 0.0001)
       this.human.root.rotation.y = Math.atan2(dx, dz);
-    this.human.root.position.set(c.x, 0, c.z);
-    const walking = c.phase === 'outbound' || c.phase === 'returning';
+    this.human.root.position.set(c.x, c.y, c.z);
+    const caring = [
+      'approaching',
+      'ascending',
+      'petting',
+      'descending',
+    ].includes(c.phase);
+    if (caring) this.human.root.rotation.y = -Math.PI / 2;
+    this.human.setHandAction(
+      'right',
+      c.phase === 'petting' ? 'reach' : 'none',
+      c.phase === 'petting'
+        ? { x: 0, y: 1.45 + Math.sin(s.time * 14) * 0.08, z: 1.05 }
+        : undefined,
+    );
+    this.lift.visible = caring;
+    this.lift.position.set(c.x, c.y - 0.03, c.z);
+    const walking =
+      c.phase === 'outbound' ||
+      c.phase === 'returning' ||
+      c.phase === 'approaching';
     this.human.setLocomotion(walking ? 'walk' : 'idle', this.game.speed / 1.6);
     if (!s.paused && !s.won) this.human.update(dt);
     this.towerTarget.position.set(
@@ -520,6 +691,105 @@ export class CatSpaceProgramPageComponent {
     );
     for (const [source, material] of this.sourceMaterials)
       material.emissiveIntensity = source === this.selected() ? 0.6 : 0.15;
+    this.syncTreats();
+  }
+
+  private badgeMaterial(text: string, color: string): SpriteMaterial {
+    let material = this.badgeMaterials.get(text);
+    if (material) return material;
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 88;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#16283bea';
+    ctx.beginPath();
+    ctx.roundRect(2, 2, 252, 84, 20);
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.font = 'bold 31px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 128, 44);
+    material = new SpriteMaterial({
+      map: new CanvasTexture(canvas),
+      depthTest: false,
+    });
+    this.badgeMaterials.set(text, material);
+    return material;
+  }
+  private syncTreats(): void {
+    const s = this.game.state;
+    for (const [id, mesh] of this.shots)
+      if (!s.shots.some((shot) => shot.id === id)) {
+        mesh.removeFromParent();
+        this.shots.delete(id);
+      }
+    for (let i = 0; i < this.guns.length; i++) {
+      const gun = this.guns[i];
+      gun.root.visible = i < s.guns;
+      const shot = s.shots.find((shot) => shot.gun === i);
+      const cat = shot && this.cats.get(shot.catId);
+      gun.barrel.lookAt(
+        cat
+          ? cat.root.position.clone().add(new Vector3(0, 0.35, 0))
+          : new Vector3(0, 3, 2.4),
+      );
+    }
+    for (const shot of s.shots) {
+      let mesh = this.shots.get(shot.id);
+      if (!mesh) {
+        mesh = new Mesh(this.treatGeometry, this.treatMaterial);
+        this.shots.set(shot.id, mesh);
+        this.root.add(mesh);
+      }
+      const cat = this.cats.get(shot.catId);
+      if (!cat) continue;
+      const p = Math.min(
+        1,
+        (s.time - shot.firedAt) / (shot.arrivesAt - shot.firedAt),
+      );
+      const start = new Vector3(shot.gun === 0 ? -2.4 : 2.8, 0.85, 3.6);
+      mesh.position.copy(
+        start.lerp(cat.root.position.clone().add(new Vector3(0, 0.4, 0)), p),
+      );
+      mesh.position.y += Math.sin(p * Math.PI) * 0.7;
+      mesh.scale.setScalar(1 + Math.sin(p * Math.PI) * 0.3);
+    }
+  }
+
+  private checkTransition(kind: CheckKind): boolean {
+    const s = this.game.state;
+    if (kind === 'collection') return this.game.stacked > 0;
+    if (kind === 'nursery')
+      return s.cats.filter((c) => c.source === 'nursery').length === 6;
+    if (kind === 'petting')
+      return (
+        s.cats.find((c) => c.id === 4)?.careBy === 'human' &&
+        s.pets === 1 &&
+        s.collector.phase === 'idle'
+      );
+    if (kind === 'departure')
+      return (
+        s.departures === 1 &&
+        !s.cats.some((c) => c.id === 4) &&
+        s.cats
+          .filter((c) => c.place === 'stacked')
+          .map((c) => c.id)
+          .join(',') === '1,2,3,5,6'
+      );
+    if (kind === 'treats')
+      return (
+        s.guns === 2 &&
+        s.treatHits === 8 &&
+        s.departures === 0 &&
+        s.cats
+          .filter((c) => c.place === 'stacked')
+          .every((c) => c.careBy === 'treat')
+      );
+    return false;
   }
 
   private createWorld(): void {
@@ -545,6 +815,42 @@ export class CatSpaceProgramPageComponent {
     add(new CylinderGeometry(8, 7.5, 0.65, 64), '#354c53', [0, -0.38, 0]);
     add(new CylinderGeometry(8.05, 8.05, 0.06, 64), '#6b8e79', [0, -0.02, 0]);
     add(new CylinderGeometry(1.1, 1.25, 0.3, 32), '#b6b9d2', [0, 0.13, 2.4]);
+    for (let i = 0; i < 2; i++) {
+      const root = new Group(),
+        barrel = new Group(),
+        color = i === 0 ? '#f5b866' : '#82dfdc';
+      root.position.set(i === 0 ? -2.4 : 2.8, 0, 3.6);
+      const base = new Mesh(
+        new CylinderGeometry(0.5, 0.65, 0.3, i === 0 ? 16 : 6),
+        material(color),
+      );
+      base.position.y = 0.2;
+      root.add(base);
+      const stem = new Mesh(
+        new CylinderGeometry(0.13, 0.2, 0.6, 12),
+        material('#b2c1d3'),
+      );
+      stem.position.y = 0.5;
+      root.add(stem);
+      barrel.position.y = 0.85;
+      const tube = new Mesh(
+        new CylinderGeometry(0.18, 0.27, 0.9, 12),
+        material(color),
+      );
+      tube.rotation.x = Math.PI / 2;
+      tube.position.z = 0.25;
+      barrel.add(tube);
+      const muzzle = new Mesh(
+        new TorusGeometry(0.2, 0.05, 6, 16),
+        material('#fff0c5'),
+      );
+      muzzle.position.z = 0.7;
+      barrel.add(muzzle);
+      root.add(barrel);
+      this.root.add(root);
+      this.guns.push({ root, barrel });
+      this.objects.set(`gun-${i + 1}`, root);
+    }
     const towerProxy = new Mesh(
       new CylinderGeometry(0.8, 0.8, 1, 12),
       new MeshStandardMaterial({ visible: false }),
@@ -667,13 +973,17 @@ export class CatSpaceProgramPageComponent {
     } else if (view === 'tower') {
       this.cameraPosition.set([8, 8, 17]);
       this.cameraTarget.set([0, 5.7, 2.4]);
+    } else if (view === 'care') {
+      this.cameraPosition.set([5.2, 4.8, 10]);
+      this.cameraTarget.set([0, 2.0, 2.4]);
     }
   }
   private bounds(id: string): TargetBounds | null {
     const object = this.objects.get(id),
       camera = this.engine.camera$.value,
       canvas = this.engine.canvas;
-    if (!object || !camera || !canvas?.clientWidth) return null;
+    if (!object || !object.visible || !camera || !canvas?.clientWidth)
+      return null;
     object.updateWorldMatrix(true, true);
     const box = new Box3().setFromObject(object),
       points: Vector3[] = [];
@@ -709,13 +1019,15 @@ export class CatSpaceProgramPageComponent {
       this.engine.camera,
     );
     const hits = [...this.objects]
+      .filter(([, object]) => object.visible)
       .flatMap(([id, object]) =>
         this.raycaster
           .intersectObject(object, true)
           .map((hit) => ({ id, distance: hit.distance })),
       )
       .sort((a, b) => a.distance - b.distance);
-    const hit = hits[0];
+    // The invisible tower selection proxy must not swallow actual cat/gun clicks.
+    const hit = hits.find((hit) => hit.id !== 'tower') ?? hits[0];
     if (!hit) return;
     if (
       hit.id.startsWith('cat-') &&
@@ -723,7 +1035,15 @@ export class CatSpaceProgramPageComponent {
         ?.place === 'waiting'
     )
       this.act('stack', hit.id.slice(4));
-    else this.act('select', hit.id);
+    else if (
+      hit.id.startsWith('cat-') &&
+      this.game.state.cats.some(
+        (c) => c.id === Number(hit.id.slice(4)) && this.game.needsCare(c),
+      )
+    ) {
+      this.act('select', hit.id);
+      this.act('pet', hit.id.slice(4));
+    } else this.act('select', hit.id);
   }
   private snapshot(): PageSnapshot {
     return {

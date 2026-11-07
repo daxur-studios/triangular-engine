@@ -19,7 +19,7 @@
           {{
             ui().won
               ? "A triumph of purrseverance. Please do not tell the physicists."
-              : "Attract cats. Stack cats. Gently boop the Moon. No rockets required."
+              : "Stack cats. Keep them purring. Gently boop the Moon."
           }}
         </p>
         <div class="goal-numbers">
@@ -95,6 +95,66 @@
                   : cost("basket") + " treats · +1 per trip"
               }}</small>
             </button>
+          </div>
+        </section>
+        <section class="care-card" aria-label="Cat care">
+          <div class="section-heading">
+            <span>THE PURR DEPARTMENT</span
+            ><span>{{ ui().guns }} / 2 guns</span>
+          </div>
+          <h3>{{ needy().length }} cats need care</h3>
+          <p>
+            Pet or feed within 18s of a request. Missed cats take a safe sofa
+            break.
+          </p>
+          <div class="care-buttons">
+            <button
+              (click)="act('pet')"
+              [disabled]="
+                !needy().length ||
+                ui().requestedCat !== null ||
+                ui().paused ||
+                ui().won
+              "
+              data-testid="pet-next"
+            >
+              Pet neediest cat
+            </button>
+            <button
+              (click)="act('care')"
+              [attr.aria-pressed]="ui().humanCare"
+              [disabled]="ui().paused || ui().won"
+            >
+              Human care {{ ui().humanCare ? "on" : "off" }}
+            </button>
+          </div>
+          <button
+            class="gun-buy"
+            (click)="act('gun')"
+            [disabled]="
+              ui().guns >= 2 ||
+              ui().treats < cost('gun') ||
+              ui().paused ||
+              ui().won
+            "
+            data-testid="buy-gun"
+          >
+            <strong>{{
+              ui().guns === 0
+                ? "Buy treat gun"
+                : ui().guns === 1
+                  ? "Add second treat gun"
+                  : "Twin treat guns online"
+            }}</strong>
+            <small>{{
+              ui().guns < 2
+                ? cost("gun") + " treats · automatic cat care"
+                : "Gold + mint · separate targets"
+            }}</small>
+          </button>
+          <div class="care-totals">
+            {{ ui().pets }} head pats · {{ ui().treatHits }} snacks caught ·
+            {{ ui().departures }} sofa breaks
           </div>
         </section>
         <section class="source-list">
@@ -188,35 +248,70 @@
           </div>
         </details>
       </fieldset>
-      <details class="tests">
-        <summary>Run functional checks</summary>
-        <tri-test-runner
-          [suites]="suites"
-          [adapter]="adapter"
-          [available]="ready()"
-          [allowAutoStart]="allowAutoStart"
-          (progressChange)="onProgress($event)"
-        />
-      </details>
+      <button
+        class="tests"
+        (click)="testsOpen.set(!testsOpen())"
+        [attr.aria-expanded]="testsOpen()"
+      >
+        Run functional checks
+      </button>
     </aside>
     <section class="viewport" aria-label="Cat Space Program 3D scene">
       <scene [showFps]="true"
         ><orbitControls
           [cameraPosition]="cameraPosition()"
           [target]="cameraTarget()"
-          [isActive]="!testBusy()" /><ambientLight
-          [intensity]="1.6" /><directionalLight
+          [isActive]="!testBusy()"
+        /><ambientLight [intensity]="1.6" /><directionalLight
           [position]="[5, 12, 8]"
-          [intensity]="2.6" /><directionalLight
-          [position]="[-7, 6, -4]"
-          [intensity]="1.4"
-      /></scene>
+          [intensity]="2.6"
+        /><directionalLight [position]="[-7, 6, -4]" [intensity]="1.4" />
+        <ng-template portalTarget="rightSidebar" lane="content">
+          <div class="test-panel" [hidden]="!testsOpen() && !testBusy()">
+            <tri-test-runner
+              [suites]="suites"
+              [adapter]="adapter"
+              [available]="ready()"
+              [allowAutoStart]="allowAutoStart"
+              (progressChange)="onProgress($event)"
+            />
+          </div>
+        </ng-template>
+      </scene>
       <ng-template portalTarget="overlay" lane="topStart"
         ><div class="scene-title">
           <span class="live-dot"></span> LIVE FROM THE CATOSPHERE
           <small>Simulation {{ ui().time | number: "1.0-0" }}s</small>
         </div></ng-template
       >
+      <ng-template portalTarget="overlay" lane="topStart" [order]="10">
+        <div class="care-hud" data-testid="care-status">
+          <strong>{{ humanStatus() }}</strong>
+          <span
+            >{{ ui().guns }} treat guns · {{ needy().length }} care
+            requests</span
+          >
+          @if (ui().requestedCat !== null) {
+            <span>Next head pat: Cat {{ ui().requestedCat }}</span>
+          }
+          @for (cat of needy().slice(0, 3); track cat.id) {
+            <button
+              (click)="act('pet', '' + cat.id)"
+              [disabled]="
+                testBusy() ||
+                ui().paused ||
+                ui().won ||
+                ui().requestedCat !== null ||
+                ui().collector.catId === cat.id
+              "
+              [attr.aria-label]="'Pet Cat ' + cat.id"
+            >
+              Cat {{ cat.id }} ·
+              {{ game.careRemaining(cat) | number: "1.0-0" }}s to sofa break
+            </button>
+          }
+        </div>
+      </ng-template>
       <ng-template portalTarget="overlay" lane="topEnd" [order]="10"
         ><div class="scene-tools">
           <button
@@ -249,7 +344,13 @@
             (click)="act('camera', 'tower')"
             [disabled]="testBusy()"
           >
-            Moon cam
+            Moon cam</button
+          ><button
+            [attr.aria-pressed]="view() === 'care'"
+            (click)="act('camera', 'care')"
+            [disabled]="testBusy()"
+          >
+            Care cam
           </button>
         </div></ng-template
       >
