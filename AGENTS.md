@@ -101,6 +101,10 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 
 The package README, `projects/triangular-engine/docs/` and each entry's `<entry>/README.md` describe the current consumer API. Treat `instructions/summary.md` and old engineering records as historical context unless they explicitly describe a current workflow. For repository documentation coverage and drift tracking, see `docs/engineering-records/029_token_map_usage_guide.md`.
 
+## Demo walkthrough recordings
+
+For narrated UI/game videos, read `node_modules/@daxur-studios/stop-motion-ui/skills/adopt-stop-motion-capture/SKILL.md`. Use `defineVideo` for continuous gameplay and `defineDemo` for reconstructed screenshots. The demo recipe `tools/scene-tests/moon-boop.video.mjs` illustrates the installed API. Await paced pointer helpers, keep input/speech at 1x and label accelerated waits. This development tool does not modify the engine testing recorder or its result-artifact contract.
+
 ## Local package archives
 
 All local `.tgz` files go under `/ignore/packages/`, and `/ignore/` must be gitignored.

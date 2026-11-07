@@ -31,18 +31,23 @@ node tools/scene-tests/moon-boop-check.mjs
 
 The shared runner (under Run functional checks) owns suite `moon-boop-functional@1`: collector delivery, paused state and six-kitten production. Its adapter captures/restores the previous round and view, waits on rendered game conditions, and cooperates with cancellation. Visual review remains pending after automated completion. These are functional checks, not performance measurements.
 
-## Continuous recording proof
+## Packaged continuous recording
 
-`tools/scene-tests/record-moon-boop.mjs` is an explicit demo-local prototype for the Stop Motion integration direction. It uses the already-served app, headless Chrome CDP screencasting, timestamped JPEG frames and FFmpeg. It retains the H.264 continuous source MP4, original frame times, pointer track, final game state, segment/source/output mapping and edited MP4 under ignored `ignore/moon-boop-videos/<run>/`. Final delivery defaults to HEVC/hvc1 CRF 28; `--codec h264` selects compatibility output. A synthetic pointer follows actual browser input. The demo-local `paced-mouse.mjs` helper starts real/drawn positions together and moves for 0.5–1.1 seconds before clicking at arrival, rather than relying on unpaced Playwright step counts. Source footage is accelerated at 3x/5x with baked-in indicators; pointer interactions and narration remain at 1x. Game sound is not recorded in this proof.
-
-For narration, supply a directory containing intro.wav, collector.wav, kittens.wav and victory.wav, generated using the supported Daxur Gemini speech command. Probe lengths before recording; authored holds allow each speech clip to finish. Daxur owns credentials and text/voice caching.
+The demo now uses the installed `@daxur-studios/stop-motion-ui` dev dependency and `tools/scene-tests/moon-boop.video.mjs`. The recipe contains game actions/readiness and six named segments; the package owns staged CDP capture, paced input, captions/speed labels, speech timing and final encoding. This is a consumer of a generic recorder, independent of testing result recordings and Plan 083 frame-identity contracts.
 
 ```sh
-node tools/scene-tests/record-moon-boop.mjs <speech-directory>
-node tools/scene-tests/record-moon-boop.mjs <speech-directory> --codec h264
-node --test tools/scene-tests/paced-mouse.spec.mjs
+node tools/scene-tests/record-moon-boop.mjs ignore/moon-boop-speech
+node tools/scene-tests/record-moon-boop.mjs --silent
+npx --no-install stop-motion-ui run tools/scene-tests/moon-boop.video.mjs --out ignore/moon-boop-videos --json
+npx --no-install stop-motion-ui render ignore/moon-boop-videos/run-ABC/scenario --out ignore/moon-boop-videos --codec h264 --json
 ```
 
-Requires installed Chrome and FFmpeg/FFprobe on PATH. The current proof uses the Windows Segoe UI font. It starts no server. Capture sources and derived videos are diagnostic/presentation artifacts, never hardware timing evidence. This does not implement a continuous backend in the Stop Motion package or modify the testing recorder budgets. Keep Plan 083 frame-sidecar work independent; this proof records CDP source timestamps, not its frame-identity contract.
+The convenience launcher retains the prior speech-directory/codec arguments. Supplied speech uses intro.wav, collector.wav, kittens.wav and victory.wav. Without a directory the recipe uses the package Daxur Gemini adapter and its text/voice cache; `--silent` skips speech entirely. The direct CLI can also use `--narration off`. `MOON_BOOP_SPEECH_DIR` supplies existing clips for the direct command. Generated text and deterministic setup belong in this app-owned recipe.
+
+Install/restore the ignored local archive referenced by package.json before running; see the repository local-package convention. The recipe uses installed headless Chrome with WebGPU arguments and the already-served app, starting no server. `result.json` identifies the final video, preview, transcript and timeline mapping. Source JPEGs and their real timestamps remain under `scenario/recording.json`; there is no intermediate source MP4 or extra lossy encode. Game sound is not captured. Final output defaults to compact HEVC/hvc1; use `--codec h264` for compatibility.
+
+Keep pointer input and narration at 1x. The kitten countdown and gathering callbacks wait on game state, with captured footage accelerated 3x/5x and labeled visibly. Simulation speed is unchanged and source wall time remains distinct from game time. All video helpers are awaited: the real and synthetic pointer begin together and glide to controls before pressing. Old demo-local paced-mouse files remain as historical proof code and are no longer imported by the recording recipe.
+
+For future recordings, read `node_modules/@daxur-studios/stop-motion-ui/skills/adopt-stop-motion-capture/SKILL.md`. Capture and previews support functional/visual review; they establish no hardware performance claim.
 
 Plan and evidence: [Plan 084](../../../../../../../docs/plans/084_cat-space-program.md), [ER 084](../../../../../../../docs/engineering-records/084_cat-space-program.md).

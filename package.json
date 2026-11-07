@@ -71,6 +71,7 @@
     "@angular/build": "^20.3.23",
     "@angular/cli": "^20.3.23",
     "@angular/compiler-cli": "^20.3.23",
+    "@daxur-studios/stop-motion-ui": "file:ignore/packages/daxur-studios-stop-motion-ui-0.3.0-04d4fc93.tgz",
     "@dimforge/rapier3d-compat": "^0.18.0",
     "@playwright/test": "^1.55.0",
     "@pmndrs/vanilla": "^1.24.1",

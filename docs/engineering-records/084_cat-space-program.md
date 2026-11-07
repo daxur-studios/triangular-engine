@@ -93,3 +93,23 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 <!-- tri:scope-baseline state="unconfirmed" -->
 <!-- /tri:scope-baseline -->
 <!-- /tri:scope-history -->
+
+## 2026-11-06 — Package recipe adoption started
+
+The owner accepted the smoother pilot and requested use from other repositories. Replace the local recording/export implementation with a recipe importing the installed generic package. A convenience launcher retains the previous command and supplied-speech directory option; without supplied clips the recipe uses the package Daxur adapter. This is a development dependency for the demo, not an engine runtime dependency or integration with testing result recordings. Earlier demo-local proof evidence remains historical. Source JPEGs replace the intermediate source MP4, avoiding another lossy encode; the package retains source and output timing.
+
+## 2026-11-06 — Installed recipe verified
+
+Installed final archive `ignore/packages/daxur-studios-stop-motion-ui-0.3.0-04d4fc93.tgz` as a dev dependency, SHA256 `20F71FC826C051A8E0AC2C7115E285CF14B25AA59C8A196F85E2AAC187C8911E`. Npm initially failed on the existing Three 0.187/postprocessing peer range; `--legacy-peer-deps` allowed installation preserving those versions. Unrelated edits remain intact. No public engine API changed.
+
+`node tools/scene-tests/record-moon-boop.mjs ignore/moon-boop-speech` ran the installed `defineVideo` recipe. Initial startup retained a blank failure screenshot while the owned app rebuilt; daemon status confirmed success and retry worked. No server was started. `run-AxqEpp/scenario/recording.json` retains 59.195 seconds, 786 JPEGs, 237 pointer samples, four supplied cached speech clips and six segments. Assertions confirmed victory with 18 stacked cats; no new TTS call was made.
+
+The isolated package trial found a static-frame interval export bug and added a regression/fix before the final snapshot. Upgraded the demo to it, then ran the installed CLI `render ignore/moon-boop-videos/run-AxqEpp/scenario --out ignore/moon-boop-videos --json`. Final `run-HodOuK/demo.mp4`: 42.867 seconds, 1440x960 at 30 fps, HEVC/hvc1 limited-range yuv420p and AAC, 1,400,410 bytes. Mapping/transcript are adjacent; source JPEGs replace the intermediate source MP4. Source, edited and simulation time remain distinct. Input/speech use 1x; waits/travel use labeled 3x and 5x footage.
+
+All six generic package tests, bundle/declaration checks, skill validation and installed scratch example passed. `npm run build:triangular-engine` passed all entry points (32.6 seconds). Inspected the source contact sheet, full game frame and six decoded final-video segment samples: captions, badges, focus/follow view and victory are present. New-export motion/listening acceptance remains separate; no performance claim is made. Repository-wide record validation still reports the pre-existing stale Plan 081 review; the changed Plan 084 review is fresh. Leave the full pair for maintainer commit before archival.
+
+## 2026-11-06 - Remote operation rehearsal
+
+After the owner switched to remote access, reran the installed recipe with `node tools/scene-tests/record-moon-boop.mjs ignore/moon-boop-speech`. The existing daemon reported a successful built app, and no server was started. The run asserted victory with 18 stacked cats and reused all four supplied speech clips without TTS requests. Output: `ignore/moon-boop-videos/run-wntDpQ/demo.mp4`, 43 seconds, 1440x960 at 30 fps, HEVC/hvc1 yuv420p with AAC narration, 1,397,241 bytes; 798 retained source frames. Inspected the source contact sheet; full motion, listening and this remote playback remain for owner review. This is functional evidence, not performance evidence.
+
+The installed CLI doctor initially found its matching bundled Chromium missing, although the recipe used installed Chrome successfully. Installed Chromium and headless shell through the recorder's own resolved Playwright CLI (`install chromium`); rerunning doctor passed ffmpeg, ffprobe, renderer and Chromium 158.0.8127.18 checks. No code or dependency changes, staging or commits were made by this rehearsal.
