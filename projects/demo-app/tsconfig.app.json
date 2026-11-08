@@ -86,6 +86,9 @@
       "triangular-engine/navigation": [
         "projects/triangular-engine/navigation/public-api"
       ],
+      "triangular-engine/crowd-navigation": [
+        "projects/triangular-engine/crowd-navigation/public-api"
+      ],
       "triangular-engine/procedural": [
         "projects/triangular-engine/procedural/public-api"
       ],

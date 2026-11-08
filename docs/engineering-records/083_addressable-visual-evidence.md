@@ -92,8 +92,32 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
   pts), and the container-vs-draw difference per frame. The script used for the synthetic check is kept in the agent scratch folder
   and its method is described here, not in the repository.
 
-**Plan status.** `aev-frame-map` stays `in_progress`. The record, sidecar, receiver validation and specs are done. Real-clip evidence
-(burned numbers that resolve on a real clip, the Q2 measurement and the visible size-limit case on a real run) is still missing.
+**Q2 measured on real clips (2026-11-06).** Headless Chrome drove the runner page on the served demo, with **Record short video** ticked,
+suite `water-lod-spike-camera-quality`: 6 clips, 6 sidecars, result `2026-11-06T14-23-15-095Z_visible-browser_747079b6-e3b0c442`
+(640x360, VP9, 24 fps, SwiftShader/headless, so timing here is not hardware timing). The method above was run on four of the six clips
+(the other two failed in the scratch script only because ffmpeg wrote a warning into its output while summarizing; not a clip problem).
+
+| Clip | Decoded | Strips read | Unresolved / mismatched | Requested-vs-drawn gap, median / p95 / max | Container-vs-draw, median |
+| --- | --- | --- | --- | --- | --- |
+| ultra-orbit | 144 | 143 | 0 / 0 | 14.2 / 282.3 / 532.3 ms | -6.5 ms |
+| low-orbit | 154 | 153 | 0 / 0 | 18.2 / 72.8 / 74.7 ms | -0.9 ms |
+| low-zoom-pan | 149 | 148 | 0 / 0 | 18.0 / 72.6 / 77.0 ms | -0.8 ms |
+| ultra-zoom-pan | 153 | 152 | 0 / 0 | 16.5 / 39.4 / 41.4 ms | -1.4 ms |
+
+- Every burned number that could be read resolved to a sidecar row, in order. One strip per clip is unreadable (the first frame).
+- A requested clip time lands on a frame drawn about 15-20 ms earlier at the median, and up to about 80 ms earlier typically. One clip
+  stalled once (532 ms at the 1000 ms request). So **time alone identifies a frame only to about one to two frames, and not at all
+  across a stall; the burned number is the source of truth**, as planned. WebCodecs stepped capture is not needed for this purpose.
+- The sidecar holds 166 rows but the clip decodes 144-154 frames: 13-23 rows are for frames the recorder did not encode (the tail),
+  so a row must be looked up by the burned number, never by position.
+- The strip stays legible at 450 kbps VP9 on all 4 measured clips.
+
+**Not yet shown on a real run:** the visible over-limit case. Specs cover it (row and byte limits drop the sidecar with a note and keep
+the clip; the receiver rejects bad sidecars), but no real run was produced that hit a limit.
+
+**Plan status.** `aev-frame-map` set to `done` on 2026-11-06 at the owner's request to wrap up before time away, with the over-limit
+case evidenced by specs only (see above), not by a real run. Revert the plan row to `in_progress` if a real over-limit run is wanted.
+Plan item Q2 is left open for the owner's review (its measurement is above); no review marker was refreshed.
 
 ## Scope history
 

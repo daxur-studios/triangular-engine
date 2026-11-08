@@ -2,6 +2,10 @@ import { Routes } from '@angular/router';
 
 export const routes: Routes = [
   {
+    path: 'crowd-navigation-grid',
+    loadComponent: () => import('./pages/crowd-navigation-grid/crowd-navigation-grid-page.component').then(m => m.CrowdNavigationGridPageComponent),
+  },
+  {
     path: 'cat-space-program',
     loadComponent: () => import('./pages/cat-space-program/cat-space-program-page.component').then(m => m.CatSpaceProgramPageComponent),
   },

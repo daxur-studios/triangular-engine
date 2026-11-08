@@ -39,6 +39,7 @@
               "projects/triangular-engine/animals/**/*.spec.ts",
               "projects/triangular-engine/characters/**/*.spec.ts",
               "../navigation/**/*.spec.ts",
+              "../crowd-navigation/**/*.spec.ts",
               "../water/**/*.spec.ts",
               "../terrain/**/*.spec.ts",
               "../scatter/**/*.spec.ts",
@@ -123,6 +124,16 @@
             "polyfills": ["zone.js", "zone.js/testing"],
             "browsers": "ChromeHeadless",
             "include": ["../cloud-volumes/**/*.spec.ts"]
+          }
+        },
+        "test-crowd-navigation": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "watch": false,
+            "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
+            "polyfills": ["zone.js", "zone.js/testing"],
+            "browsers": "ChromeHeadless",
+            "include": ["../crowd-navigation/**/*.spec.ts"]
           }
         },
         "test-navigation": {

@@ -78,6 +78,11 @@ export const CATEGORIES: readonly DemoCategory[] = [
 
 export const DEMOS: readonly DemoItem[] = [
   {
+    id: 'crowd-navigation-grid', number: '086', title: 'Crowd Navigation Grid Layers', route: '/crowd-navigation-grid',
+    categoryId: 'core', tier: 'lab', createdAt: '2026-11-07', entryPoints: ['crowd-navigation'], package: 'triangular-engine/crowd-navigation',
+    description: 'A generated island turned into a navigation grid: slope cost, structure, road and territory layers, flags, composed cost and clearance by unit class, drawn as switchable terrain overlays.',
+  },
+  {
     id: 'cat-space-program', number: '084', title: 'Cat Space Program · Moon Boop', route: '/cat-space-program',
     categoryId: 'core', tier: 'lab', createdAt: '2026-11-05', entryPoints: ['characters', 'procedural', 'testing'], package: 'triangular-engine/characters + procedural + testing',
     description: 'An incremental cat-stacking mission: one capsule human, catnip, food, six-kitten batches and a nearby Moon. Semantic scene actions, functional checks and narrated recording experiments.',

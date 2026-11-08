@@ -1,0 +1,59 @@
+<div class="page-shell">
+  <main class="play-area" aria-label="Crowd navigation grid layers">
+    <scene [showFps]="true">
+      <orbitControls
+        [cameraPosition]="[0, 330, 380]"
+        [target]="[0, 0, 0]"
+        [near]="1"
+        [far]="6000"
+      />
+      <ambientLight [intensity]="1.6" />
+      <directionalLight [position]="[200, 300, 120]" [intensity]="1.6" />
+    </scene>
+
+    <ng-template portalTarget="overlay" lane="topStart">
+      <div class="panel">
+        <a class="back-link" routerLink="/">← Examples</a>
+        <strong>Navigation grid layers</strong>
+        <span class="muted"
+          >{{ gridSize }} × {{ gridSize }} cells at 1 m · built in
+          {{ buildMs() }} ms</span
+        >
+        <div class="buttons" role="group" aria-label="Overlay">
+          @for (o of overlays; track o.id) {
+            <button
+              type="button"
+              [class.active]="overlay() === o.id"
+              [attr.aria-pressed]="overlay() === o.id"
+              (click)="selectOverlay(o.id)"
+            >
+              {{ o.label }}
+            </button>
+          }
+        </div>
+        <button type="button" class="gate" (click)="toggleGate()">
+          {{ gateOpen() ? "Close gate" : "Open gate" }}
+          @if (editMs() > 0) {
+            <small>({{ editMs() | number: "1.1-2" }} ms edit)</small>
+          }
+        </button>
+      </div>
+    </ng-template>
+
+    <ng-template portalTarget="overlay" lane="bottomStart">
+      <div class="panel legend">
+        <strong>Legend</strong>
+        @for (entry of legend(); track entry.label) {
+          <span class="swatch"
+            ><i [style.background]="entry.color"></i>{{ entry.label }}</span
+          >
+        }
+        <span class="muted"
+          >Passable cells: villager {{ passable().villager | number }} ·
+          catapult {{ passable().catapult | number }} · creature
+          {{ passable().creature | number }}</span
+        >
+      </div>
+    </ng-template>
+  </main>
+</div>

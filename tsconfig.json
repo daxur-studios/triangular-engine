@@ -75,6 +75,7 @@
         "triangular-engine/characters": ["projects/triangular-engine/characters/public-api"],
         "triangular-engine/characters/three": ["projects/triangular-engine/characters/three/public-api"],
         "triangular-engine/navigation": ["projects/triangular-engine/navigation/public-api"],
+        "triangular-engine/crowd-navigation": ["projects/triangular-engine/crowd-navigation/public-api"],
         "triangular-engine/procedural": ["projects/triangular-engine/procedural/public-api"],
         "triangular-engine/celestial": [
           "projects/triangular-engine/celestial/public-api"

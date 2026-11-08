@@ -87,8 +87,9 @@ declare global {
   providers: [
     EngineService.provide({
       showFPS: true,
+      gpuTiming: true,
       preferredRenderer: 'webgpu',
-      webGpuRendererParameters: { antialias: false, reversedDepthBuffer: true },
+      webGpuRendererParameters: { antialias: false, trackTimestamp: true, reversedDepthBuffer: true },
     }),
   ],
   host: { class: 'flex-page' },

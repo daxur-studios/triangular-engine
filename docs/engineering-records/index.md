@@ -53,3 +53,4 @@ Records `001`–`042` keep their historical formats; new work uses reciprocal pl
 | [Addressable Visual Evidence and Shot Plans](/docs/engineering-records/083_addressable-visual-evidence.md) | [PLAN-083](/docs/plans/083_addressable-visual-evidence.md) |
 | [Cat Space Program: Operation Moon Boop](/docs/engineering-records/084_cat-space-program.md) | [PLAN-084](/docs/plans/084_cat-space-program.md) |
 | [Moon Boop cat care and treat guns](/docs/engineering-records/085_moon-boop-cat-care.md) | [PLAN-085](/docs/plans/085_moon-boop-cat-care.md) |
+| [Island crowd navigation](/docs/engineering-records/086_island-crowd-navigation.md) | [PLAN-086](/docs/plans/086_island-crowd-navigation.md) |
