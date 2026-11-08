@@ -296,6 +296,111 @@ build at 2,048 x 2,048 is accepted for now and revisited in worker-scale; a chea
 intra-sector cost follows from the forward one, cost(j→i) = cost(i→j) − cost[j] + cost[i]). Carried forward: one
 portal per open run, approximate corridor cost.
 
+### 2026-11-08 — sector-fields: lazy flow fields, cache and crowd simulation (implementation, awaiting review)
+
+Built in `triangular-engine/crowd-navigation` (still worker-safe: no Angular, three.js or engine-root imports; the
+built bundle `dist/triangular-engine/fesm2022/triangular-engine-crowd-navigation.mjs` has no imports at all).
+
+Files:
+
+- `core/nav-flow.ts` (`NavFlowCache`, `NavFlowField`, `NavSectorField`, `NavFlowDirection`, `NavFlowStats`,
+  `NavFlowBuildRecord`, `NavFlowCacheOptions`, `NavFlowEnsureResult`), `core/nav-crowd.ts` (`NavCrowd`,
+  `NavCrowdOptions`, `NavCrowdStats`, `NavAgentState`), `core/nav-flow.spec.ts`, `core/nav-crowd.spec.ts`,
+  `public-api.ts`, entry `README.md` (new section), package README row, `docs/entry-points.md` row and `CHANGELOG.md`.
+- Demo `/crowd-navigation-grid`: `nav-flow-overlay.ts` (new: built-sector tint and arrow line vertices),
+  `crowd-navigation-grid-page.component.ts/.html/.scss` (Crowd panel in the `topCenter` portal lane).
+
+Design as built:
+
+- Field layout: per (goal cell, unit class) a `NavFlowField` holds a sparse array of per-sector `NavSectorField`s.
+  A sector field is a `Float32Array` cost-to-goal (sum of entered cell costs, diagonals times sqrt 2; `Infinity`
+  where unreached) and an `Int8Array` direction pair per cell (-127..127). The direction is the downhill gradient
+  over the passable neighbours (`sum of gain / len^2 * step`, normalised), which reads neighbour values across the
+  shared edge from the downstream field; blocked, unreached and goal cells have `0, 0`.
+- Build: `ensure(field, x, y, maxBuilds)` runs `findAbstractPath` from the agent's cell and walks the corridor from
+  the goal end back, building sectors that have no field. Each build is a multi-source Dijkstra over the composed
+  `cost`, same move rules as the sector graph (8-neighbour, no corner cutting, passability by clearance for the
+  class). Seeds: the goal cell in the goal sector; for every other sector the **whole shared edge**, each edge cell
+  taking `min(downstream cost + cost of the entered downstream cell * step)` over its passable neighbours in the
+  downstream sector. This avoids funnelling to the single portal of an open run (a spec checks that cells far from the
+  portal row still head straight east).
+- Re-entry: a sector is built once per field with the first corridor's downstream neighbour. If the corridor leaves and
+  re-enters a sector (a wall splits it and the opening is in the next sector), or the start cell is unreached in an
+  existing sector whose downstream differs, that sector is rebuilt seeded from both neighbours (`downstreams`).
+- Cache: one `Map` of (goal cell * 3 + class) to `NavFlowField` handles plus one `Set` of sector entries. Each entry
+  stores the `NavSectorGraph.versions[sector]` it was built from, a build id, its downstream sectors, build time and a
+  `lastUsed` clock. `sync()` (cheap compare of `versions`) marks entries stale on a version mismatch, propagates
+  staleness to entries seeded from stale ones, drops them and clears the unreachable-start memo. `ensure` calls it, as
+  does every crowd step. LRU: `maxSectorFields` (default 512, about 24 KB per 64 x 64 sector); eviction scans for the
+  smallest `lastUsed` (never the entry just built); `touch(field)` refreshes a field, which the crowd does per step.
+  Stats: requests, hits, builds, invalidations, evictions, total/last/max build ms, cached count, plus a ring log
+  (`recentBuilds`, 256) of (sector, ms, goal, class).
+- Sampling: `NavFlowField.sample(x, y, out)` blends the four surrounding cell centres bilinearly; cells with no
+  direction are skipped and the remaining weights renormalised, so blending never leans into a wall.
+- Crowd: structure of arrays (`posX/posY/velX/velY` Float32, `goalId` Int32, `unitClass`/`state` Uint8), units are
+  cells and cells per second. `step(dt)` (fixed 0.05 s by default; `advance(seconds)` accumulates fixed steps):
+  sync, arrival test (straight distance within `arrivalRadius` 3), sample or `ensure` (budget `maxBuildsPerStep`),
+  spatial hash rebuilt per step by counting sort (bucket max(4, separationRadius) cells, 3 x 3 buckets queried),
+  velocity pass reading start-of-step positions, then an integration pass (per-axis moves tested with
+  `grid.isPassable`, displacement clamped to 0.9 cell). Separation: linear falloff push from neighbours closer than
+  `separationRadius` (1), summed, capped at length 1, weighted `separationStrength` 0.6 of top speed 4 cells/s, accel
+  limit 16. Arrived agents are frozen and not in the hash. Spawn uses a seeded mulberry32; no `Math.random`.
+- Demo: Crowd panel (Run/Pause, Respawn, Flow arrows, x1/x4/x16, three goal presets, double-click on the terrain to set
+  a goal) and HUD (arrived, moving, waiting, step ms, sim seconds, cached sector fields, builds, last and total build
+  ms). Crowd: one `InstancedMesh` of capsules coloured by state. Overlay: sectors with a built field are tinted green
+  in the data texture, and a `LineSegments` draws one arrow per 5 cells in built sectors (three segments per arrow),
+  rebuilt only when the cache stats change. The simulation runs on the main thread.
+
+Results:
+
+- Tests: `npm run test:triangular-engine:crowd-navigation` (headless, single run): 55 of 55 passed (37 earlier plus 18
+  new). New specs, flow (11): every reached cell's direction points downhill and blocked cells have none; classes
+  route through the gap they fit (villager through the 2-cell gap, catapult through the 11-cell opening, creature
+  unreachable); whole-edge seeding; only corridor sectors built with a per-sector build record; wall-split sector
+  re-entry; bilinear sampling (centre, midpoint, quarter point, renormalising over a dropped cell, outside grid);
+  version invalidation after a `rebuildSectors` edit (the middle sector and, transitively, the sector seeded from it
+  drop, the goal sector stays; lazy rebuild with the new version); hits; build budget; LRU eviction order with
+  `touch`; rebuild after eviction. Crowd (7): one agent around a building; spawn refusal; separation; unreachable
+  state then arrival after a gap is opened (sync); determinism (two runs, 300 agents, 400 steps, identical typed arrays;
+  a different seed differs); the 1,000-villager scenario; per-step build budget.
+- 1,000-villager scenario: the demo island (512 x 512, seed 7, maxHeight 45, featureSize 170) with a 2-cell-thick
+  wall across the whole island and a 9-cell opening, villagers spawned in a 28 x 28 area west of the wall, one goal
+  east of it (corridor of 7 sectors). All 1,000 arrived in 1,920 steps (96 s simulated), no agent ever in a blocked
+  cell (checked every 10 steps and at the end). 11 sector fields built in 13.9 ms total, per sector 1.2 to 1.4 ms (min /
+  median / max). Step time 0.75 ms mean, 18.8 ms max (the max is the step that built the fields). Headless Chrome on the
+  development machine, software rendering not involved (unit specs); a second run of the same spec with a closer
+  goal (3-sector corridor): 867 steps, 0.71 ms mean, 6 fields in 11.1 ms.
+- Library build: `npm run build:triangular-engine` succeeded; the crowd-navigation bundle has no `@angular`,
+  `ɵɵngDeclare` or `three` imports.
+- Demo checked in headless Chromium (SwiftShader, so slower than hardware) at the served URL after the rebuild
+  (`daxur app status` ok): no console errors or warnings through Run, zoom, x16 and arrival. At x4 with rendering:
+  5 sector fields built in 39 to 64 ms total (last 2.2 to 7.4 ms), step 1.5 to 3.2 ms, all 1,000 arrived after 56 s
+  simulated. Screenshots in `artifacts/crowd-navigation/`: `crowd-start.png`, `crowd-mid.png`, `fields-arrows.png`,
+  `crowd-arrived.png`. This is not a human visual review; the arrows screenshot is zoomed close to the goal.
+
+Deviations and open points:
+
+- Fields are per sector per goal with a single (or re-entry double) downstream, so agents whose cell cannot reach that
+  downstream within their own sector are marked unreachable even if a route exists through other neighbours of the
+  sector. No such case arose in the specs or the demo; fixing it needs a second field variant per sector.
+- Arrived agents are frozen and left out of the hash, so 1,000 villagers stack inside the arrival radius. Arrival uses the
+  straight distance (a goal right behind a thin wall is reachable from the other side).
+- Agents standing in a cell that an edit later blocks are not moved out; the specs only edit empty cells.
+- Territory and faction cost are still not applied (fields use `grid.cost`).
+- Open for the developer: unit scale (cells per second; default top speed 4), whether arrival should leave agents
+  spread (queue or ring around the goal), whether the double-click goal gesture is acceptable, and whether the next
+  phase should add the worker wrapper before multi-source fields.
+
+### 2026-11-08 — sector-fields accepted (developer)
+
+Agent review: specs rerun headless (55 of 55), the library build succeeded and the crowd-navigation bundle still has
+no Angular or three.js imports; `NavCrowd.step` (arrival, sampling with lazy `ensure`, counting-sort hash, separation,
+per-axis integration) read with no defects found. Screenshots of the start, mid-route, flow arrows and arrival were
+sent to the developer, who accepted the phase on 2026-11-08 and asked to start goals-edits. Decisions carried into
+goals-edits: keep the plan's order (worker after goals-edits); arrival spreading around the goal (no stacking) and
+moving agents out of newly blocked cells are part of goals-edits; one portal per open run, the single-downstream
+sector field, unit scale (cells, top speed 4) and the double-click goal gesture stay as they are for now.
+
 ## Scope history
 
 <!-- tri:scope-history -->

@@ -13,7 +13,7 @@ performance: []
 
 # Plan 086: Island crowd navigation
 
-Status: **in progress** (grid-layers and sectors-portals done; sector-fields in progress). Evidence and decisions: [ER 086](/docs/engineering-records/086_island-crowd-navigation.md).
+Status: **in progress** (grid-layers, sectors-portals and sector-fields done; goals-edits in progress). Evidence and decisions: [ER 086](/docs/engineering-records/086_island-crowd-navigation.md).
 
 <!-- tri:scope -->
 
@@ -57,8 +57,8 @@ determinism (see Q2). The existing `triangular-engine/navigation` entry stays un
 | --------------- | ----------- |
 | grid-layers     | done        |
 | sectors-portals | done        |
-| sector-fields   | in_progress |
-| goals-edits     | planned     |
+| sector-fields   | done        |
+| goals-edits     | in_progress |
 | worker-scale    | planned     |
 | crowd-rendering | planned     |
 | unit-classes    | planned     |

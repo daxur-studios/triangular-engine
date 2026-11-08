@@ -3,7 +3,8 @@
 Worker-safe navigation grid for island crowds (Plan 086). Phase `grid-layers` turns a heightfield into Uint8 cost
 layers, a flag layer and a clearance field. Phase `sectors-portals` adds 64-cell sectors with portals per unit class and
 an abstract path query on top (see [Sectors, portals and the abstract query](#sectors-portals-and-the-abstract-query)).
-Later phases add flow fields.
+Phase `sector-fields` adds lazy per-sector flow fields and a crowd simulation (see
+[Flow fields and the crowd](#flow-fields-and-the-crowd)).
 
 ```ts
 import {
@@ -140,6 +141,68 @@ sectors.versions[s]; // per-sector counter, bumped on rebuild
 Measured by the spec in headless Chrome on the development machine, on the 2,048 x 2,048 generated island (1,024
 sectors, about 1,160 portals per class): the build takes about 4 s (one-off; run it in a worker), an abstract query
 about 2 ms, and a rebuild after a windowed edit tens of milliseconds. These are not guarantees.
+
+## Flow fields and the crowd
+
+`NavFlowCache` builds flow fields lazily on a `NavSectorGraph`, and `NavCrowd` moves agents along them.
+
+```ts
+import { NavCrowd, NavFlowCache } from 'triangular-engine/crowd-navigation';
+
+const crowd = new NavCrowd(sectors, { capacity: 1000, seed: 7 });
+const goal = crowd.addGoal(1800, 1500);
+crowd.spawnRandom(1000, { x: 100, y: 100, width: 40, height: 40 }, goal); // seeded, passable cells only
+crowd.step(); // or crowd.advance(frameSeconds): fixed steps, remainder carried
+crowd.posX[i]; crowd.posY[i]; crowd.state[i]; // typed arrays in cells; NavAgentState
+crowd.cache.stats; // builds, hits, evictions, totalBuildMs, lastBuildMs, maxBuildMs
+crowd.cache.recentBuilds; // per-sector build times of the latest builds
+
+// Without the crowd:
+const cache = new NavFlowCache(sectors, { maxSectorFields: 512 });
+const field = cache.field(1800, 1500, 'villager'); // one field per (goal cell, class)
+cache.ensure(field, startX, startY); // builds the missing corridor sectors, goal end first
+field.sample(x + 0.5, y + 0.5, out); // bilinear direction at a position in cells
+```
+
+- **Lazy, per sector.** `ensure(field, x, y)` runs `findAbstractPath` from the start cell and builds the sectors of
+  the corridor that have no field yet, starting at the goal sector and walking back. Nothing outside the corridor is
+  built. `maxBuilds` caps a call so a frame stays short; the next call continues.
+- **Per-sector field.** A multi-source Dijkstra over the composed `cost` (8-neighbour, diagonals cost sqrt 2, no corner
+  cutting, passability by clearance for the class). The goal sector is seeded at the goal cell. Every other sector is
+  seeded from the **whole shared edge** of its downstream sector's field (each edge cell takes the cheapest
+  `downstream cost + entered cost`), so agents spread along an open edge instead of funnelling to its single portal.
+  Each sector stores a `Float32` cost-to-goal and an `Int8` direction pair per cell: the downhill gradient over the
+  passable neighbours, quantised to -127..127. Blocked, unreached and goal cells have no direction.
+- **Cache key and versions.** Fields are keyed by (goal cell, unit class) and stored per sector with the
+  `NavSectorGraph.versions` entry they were built from. `sync()` (called by `ensure` and by every crowd step) drops
+  fields whose sector was rebuilt, and fields that were seeded from a dropped one; they are rebuilt lazily on the next
+  access. A global LRU (`maxSectorFields`, default 512, about 24 KB per 64 x 64 sector) evicts the least recently used
+  sector fields across all goals; `touch(field)` marks a field used (the crowd does this every step).
+- **Re-entry.** A sector is built once per field, from the downstream neighbour of the first corridor that needed it.
+  When a corridor leaves a sector and re-enters it (a wall splits the sector and the opening is in the next one), the
+  sector is rebuilt seeded from both neighbours.
+- **Sampling.** `field.sample(x, y, out)` blends the four surrounding cell-centre directions bilinearly; cells without a
+  direction (blocked, unreached, unbuilt) are left out and the weights renormalised, so the result never leans into a
+  wall. Positions are continuous cell coordinates (cell `i` covers `[i, i + 1)`).
+- **Crowd step.** Per fixed step: `sync()`; agents without a direction ask `ensure` for their corridor (up to
+  `maxBuildsPerStep`); a uniform spatial hash is rebuilt with a counting sort into typed arrays; each moving agent
+  takes the bilinear flow direction plus a soft separation push from agents closer than `separationRadius` (capped at
+  `separationStrength` of top speed, so the flow always wins), changes velocity within `maxAccel`, and moves one axis at
+  a time. A move into a cell the class cannot stand in is cancelled on that axis, so agents slide along walls and never
+  end inside a blocked cell. Agents within `arrivalRadius` of the goal centre are marked arrived, frozen and left out of
+  the hash. States: `NavAgentState.Moving`, `Arrived`, `Waiting` (no field yet) and `Unreachable` (retried when sector
+  versions change).
+- **Determinism.** Spawning uses a seeded PRNG (`seed`); the step uses no `Math.random`. The same seed and step sequence
+  give identical positions (the spec compares two runs).
+- **Limits.** There is one field per sector per goal, so an agent whose cell cannot reach the sector's downstream
+  neighbour (a walled-in pocket) is marked unreachable. Arrival uses the straight distance, so a goal right behind a thin
+  wall can be reached from the other side. Agents standing in a cell that an edit blocks are not moved out yet.
+  Territory cost is not applied. There is no worker wrapper yet; the simulation is plain typed-array code and runs
+  wherever it is called.
+
+Measured by the specs in headless Chrome on the development machine: one 64 x 64 sector field builds in about 1.2 to
+1.6 ms, and 1,000 villagers cross the generated 512 x 512 island (a wall with a 9-cell opening between them, 11 sector
+fields built) in about 1,900 steps of 0.05 s with a mean step of 0.7 ms. These are not guarantees.
 
 ## Island generator
 

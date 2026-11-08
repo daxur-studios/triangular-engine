@@ -83,6 +83,70 @@
       </div>
     </ng-template>
 
+    <ng-template portalTarget="overlay" lane="topCenter">
+      <div class="panel crowd">
+        <strong>Crowd flow fields · {{ crowdSize | number }} villagers</strong>
+        <div class="buttons" role="group" aria-label="Crowd run">
+          <button
+            type="button"
+            class="run"
+            [class.active]="crowdRunning()"
+            [attr.aria-pressed]="crowdRunning()"
+            (click)="toggleCrowdRunning()"
+          >
+            {{ crowdRunning() ? "Pause" : "Run" }}
+          </button>
+          <button type="button" class="reset" (click)="resetCrowd()">Respawn</button>
+          <button
+            type="button"
+            class="flow"
+            [class.active]="showFlow()"
+            [attr.aria-pressed]="showFlow()"
+            (click)="toggleFlow()"
+          >
+            Flow arrows
+          </button>
+        </div>
+        <div class="buttons" role="group" aria-label="Simulation speed">
+          @for (s of simSpeeds; track s) {
+            <button
+              type="button"
+              [class.active]="simSpeed() === s"
+              [attr.aria-pressed]="simSpeed() === s"
+              (click)="setSimSpeed(s)"
+            >
+              ×{{ s }}
+            </button>
+          }
+        </div>
+        <div class="buttons" role="group" aria-label="Goal">
+          @for (g of goalPresets(); track g.id) {
+            <button type="button" [class.active]="goalLabel() === g.label" (click)="selectGoal(g.id)">
+              {{ g.label }}
+            </button>
+          }
+        </div>
+        <span class="muted">Goal: {{ goalLabel() }} (double-click the terrain to set one)</span>
+        <span class="hud"
+          >Arrived {{ crowdHud().arrived | number }} / {{ crowdSize | number }} · moving
+          {{ crowdHud().moving | number }} · waiting {{ crowdHud().waiting | number }}
+          @if (crowdHud().unreachable > 0) {
+            · unreachable {{ crowdHud().unreachable | number }}
+          }
+        </span>
+        <span class="hud"
+          >Step {{ crowdHud().stepMs | number: "1.2-2" }} ms · sim
+          {{ crowdHud().simSeconds | number: "1.0-0" }} s</span
+        >
+        <span class="hud"
+          >Fields: {{ crowdHud().cachedFields }} sectors cached ·
+          {{ crowdHud().builds }} built · last
+          {{ crowdHud().lastBuildMs | number: "1.2-2" }} ms · total
+          {{ crowdHud().totalBuildMs | number: "1.1-1" }} ms</span
+        >
+      </div>
+    </ng-template>
+
     <ng-template portalTarget="overlay" lane="bottomStart">
       <div class="panel legend">
         <strong>Legend</strong>
@@ -107,6 +171,12 @@
             ><i style="background: rgb(255 150 30 / 50%)"></i>corridor sector</span
           >
         }
+        <span class="swatch"
+          ><i style="background: rgb(60 230 140 / 45%)"></i>sector with a built flow field</span
+        >
+        <span class="swatch"
+          ><i style="background: #7df9ff"></i>flow arrow (every 5 cells)</span
+        >
         <span class="muted"
           >Passable cells: villager {{ passable().villager | number }} ·
           catapult {{ passable().catapult | number }} · creature
