@@ -207,6 +207,95 @@ Deviations and notes:
 - The generated island is smooth with few steep cells; slope overlays show only small steep patches near the centre.
 - `generateIslandHeightfield` lives in the core entry as a test/demo utility.
 
+### 2026-11-08 — grid-layers accepted (developer)
+
+Agent review: specs rerun headless (22 of 22), clearance code read, the built bundle for the entry has no Angular
+declarations, and the entry was added to the worker-safe list in `projects/triangular-engine/AGENTS.md`. A narrated
+walkthrough of the demo (`tools/scene-tests/crowd-navigation-grid.video.mjs`, Stop Motion UI with Gemini speech) and
+stills of the clearance, composed-cost and flags overlays were sent to the developer, who accepted the phase on
+2026-11-08 and asked to start sectors-portals. Known limits carried forward: the smooth island makes the slope overlay
+sparse, and cells outside the grid count as free for clearance.
+
+### 2026-11-08 — sectors-portals: sectors, portals and abstract query (implementation, awaiting review)
+
+Built in `triangular-engine/crowd-navigation` (still worker-safe: no Angular, three.js or engine-root imports).
+
+Files:
+
+- `core/nav-sectors.ts` (`NavSectorGraph`, `NavPortal`, `NavPortalLink`, `NavAbstractPath`, `NavAbstractFailure`,
+  `NavSectorOptions`, `NAV_UNIT_CLASSES`), `core/nav-heap.ts` (internal typed-array binary heap, not exported),
+  `core/nav-sectors.spec.ts`, `public-api.ts`, entry `README.md` (new section), package README row,
+  `docs/entry-points.md` row and `CHANGELOG.md`.
+- Demo `/crowd-navigation-grid`: `nav-sector-overlay.ts` (new), `crowd-navigation-grid-page.component.ts/.html`.
+
+Design as built:
+
+- Sectors are `sectorSize` (default 64) squares indexed row-major; edge sectors are clipped. Per unit class the graph
+  keeps a portal pool (structure of arrays, ids recycled), the portals of each sector's east and south edge, and per
+  sector the nodes (`portalId * 2 + side`, one cell in each sector of a portal) with an n x n Float32 intra-cost matrix.
+- Portal: a maximal run of cell pairs along a shared edge where both cells are passable for the class
+  (`isPassable` rule: not BLOCKED and clearance at or above the threshold); one portal at the run's centre pair. A
+  portal is two nodes joined by a crossing edge that costs the entered cell.
+- Intra-sector links: bounded Dijkstra from each node over the composed `cost`, 8-neighbour, diagonals cost sqrt 2,
+  no corner cutting, restricted to the sector. A flood fill labels connected regions first so each search stops when
+  every node of its region is settled. Costs are directed (stepping into a cell costs its `cost`); the goal side of a
+  query uses a reverse search so the cost is exact for that direction.
+- Query: `findAbstractPath(startX, startY, goalX, goalY, unitClass)`. Start (forward) and goal (reverse) are connected
+  to the portal nodes of their sectors by one local search each; a same-sector direct cost is a candidate. A
+  connected-component id per node (recomputed after every rebuild with union-find) rejects unreachable goals before
+  the A*. The A* uses an octile heuristic scaled by `floor(16 * roadMinFactor)` (6 by default), which is admissible.
+  Returns `{ found, cost, sectors, portals }` plus `failure` (`start-blocked`, `goal-blocked`, `disconnected`).
+- Rebuild: `rebuildSectors(dirtyRect)` recomputes the four edges of every touched sector for every class. Touched
+  sectors always rebuild their links; a neighbour rebuilds only if the portals on the shared edge changed. Versions
+  (`Uint32Array`, 1 after a full build) bump for exactly the returned sectors.
+
+Results:
+
+- Tests: `npm run test:triangular-engine:crowd-navigation` (headless, single run): 37 of 37 passed (22 earlier plus 15
+  new). New specs: portal extraction (one gap, wall, 2-cell gap villager only, run splitting); villagers through a gap
+  that catapults and creatures cannot pass; creatures routed the long way when a wide opening exists; straight-line
+  cost; single sector; blocked and disconnected failures; partial edge sectors (70 x 50 with 32-cell sectors); a
+  2,048 x 2,048 island corridor (non-empty, ends in the start and goal sectors, consecutive sectors are neighbours);
+  interior edit rebuilds exactly one sector; a border edit bumps only the changed sectors; 25 random edits equal a
+  full rebuild (portals, links and query costs); a gate opening and closing makes a creature route appear and vanish.
+- Library build: `npm run build:triangular-engine` succeeded.
+- Timings, 2,048 x 2,048 island (seed 7, maxHeight 45, featureSize 170), headless Chrome on the development machine:
+  grid build 0.85 s in this run (0.27 s in the grid-layers spec; the first run in a spec file is slower), sector graph
+  build 3.9 s for 1,024 sectors, abstract query 2.2 to 2.4 ms (24-sector corridor, 23 portals), warm repeat the same.
+  The 3.9 s build is dominated by one bounded Dijkstra per portal node per sector; it is a one-off and belongs in the
+  worker, but it is the number to beat if start-up matters.
+- Portal counts: 2,048 island 1,161 villager, 1,158 catapult, 1,135 creature. Demo island (512 x 512, 64 sectors, wall
+  across the island, gate closed): 89 villager, 89 catapult, 88 creature; the sector graph builds in about 230 to 240
+  ms there. A gate toggle rebuilds 2 of 64 sectors in 15 to 32 ms.
+- Demo checked in headless Chromium at the served URL after the rebuild: no console errors across the sequence below.
+  Screenshots in `artifacts/crowd-navigation/`: `sectors-villager.png`, `sectors-creature-closed.png`,
+  `sectors-creature.png`, `corridor-villager.png`, `corridor-creature-closed.png` (no route), `corridor-creature.png`
+  (route through the opened gate). This is not a human visual review.
+
+Deviations and open points:
+
+- The demo wall now runs across the whole island and the gate is 17 cells tall (was a 56-cell wall and a 3-cell gate),
+  because otherwise units walk around the wall and a gate could never be the only wide route. Opening the gate makes
+  the creature (and catapult) corridor appear; closing removes it. The 2-cell gap stays villager only.
+- Portals are one per run, even for a 64-cell open edge. Long open edges might want two portals (HPA* style) for
+  better corridors; kept simple until sector-fields shows whether it matters.
+- Path cost is approximate (paths stay inside a sector between portals) and `sectors` removes only consecutive
+  duplicates, so a corridor may in principle list a sector twice. Territory and faction cost are not applied.
+- Neighbour sectors are rebuilt (and versioned) only when their shared edge portals change; a touched sector always
+  rebuilds. The rectangle must be the one `NavGrid` edits return (it includes the clearance halo).
+- Open for the developer: whether a 4 s build at 2,048 x 2,048 is acceptable until the worker phase, or whether to
+  speed it up now (for example, one Dijkstra per region with shared targets, or bucket queues).
+
+### 2026-11-08 — sectors-portals accepted (developer)
+
+Agent review: specs rerun headless (37 of 37), the query, edge-update, intra-link, local-search and component code
+read with no defects found (the scaled octile heuristic stays admissible), and the built entry bundle still has no
+Angular or three.js imports. Screenshots of the villager portals and of the creature corridor with the gate closed
+and open were sent to the developer, who accepted the phase on 2026-11-08 and asked to start sector-fields. The 3.9 s
+build at 2,048 x 2,048 is accepted for now and revisited in worker-scale; a cheap halving is known (the reverse
+intra-sector cost follows from the forward one, cost(j→i) = cost(i→j) − cost[j] + cost[i]). Carried forward: one
+portal per open run, approximate corridor cost.
+
 ## Scope history
 
 <!-- tri:scope-history -->

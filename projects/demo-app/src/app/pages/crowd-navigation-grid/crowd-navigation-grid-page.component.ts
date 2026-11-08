@@ -26,19 +26,28 @@ import {
   generateIslandHeightfield,
   NavFlag,
   NavGrid,
+  NavSectorGraph,
   NAV_CLEARANCE_THRESHOLDS,
+  type NavAbstractPath,
   type NavUnitClass,
 } from 'triangular-engine/crowd-navigation';
 import { fillOverlay, NAV_OVERLAYS, type NavOverlayId } from './nav-overlays';
+import { drawSectorOverlay, NAV_CLASS_COLORS } from './nav-sector-overlay';
 
 /** Cells along each side of the rendered demo island (1 m cells). */
 const GRID_SIZE = 512;
 
+/** The unit classes the sector overlay and corridor can be shown for. */
+const UNIT_CLASSES: readonly NavUnitClass[] = ['villager', 'catapult', 'creature'];
+
 /**
- * Plan 086, phase grid-layers. Builds a {@link NavGrid} from a generated island, stamps a few
+ * Plan 086, phases grid-layers and sectors-portals. Builds a {@link NavGrid} from a generated island, stamps a few
  * example buildings, a wall with a gap and a gate, a road and two territories, and draws any layer
  * as a data texture on the terrain mesh. The grid is 512 x 512 cells at 1 m (the 2,048 x 2,048
- * size is only built in the spec/benchmark).
+ * size is only built in the spec/benchmark). A wall runs across the whole island, so the 2-cell gap
+ * (villagers only) and the 17-cell gate are its only crossings. The Sectors toggle draws the 64-cell
+ * sector borders and the portals of the selected unit class; the corridor shows the abstract path
+ * between two fixed points as highlighted sectors and rebuilds when the gate changes.
  */
 @Component({
   selector: 'app-crowd-navigation-grid-page',
@@ -56,12 +65,24 @@ export class CrowdNavigationGridPageComponent {
   readonly overlay = signal<NavOverlayId>('terrain');
   readonly legend = computed(() => NAV_OVERLAYS.find((o) => o.id === this.overlay())?.legend ?? []);
   readonly gateOpen = signal(false);
+  readonly unitClasses = UNIT_CLASSES;
+  readonly unitClass = signal<NavUnitClass>('villager');
+  readonly showSectors = signal(true);
+  readonly showCorridor = signal(true);
+  readonly sectorBuildMs = signal(0);
+  readonly rebuildInfo = signal('');
+  readonly portalCounts = signal<Record<NavUnitClass, number>>({ villager: 0, catapult: 0, creature: 0 });
+  readonly corridorText = signal('');
+  readonly classColors = NAV_CLASS_COLORS;
   readonly gridSize = GRID_SIZE;
   readonly buildMs = signal(0);
   readonly editMs = signal(0);
   readonly passable = signal<Record<NavUnitClass, number>>({ villager: 0, catapult: 0, creature: 0 });
 
   private readonly grid: NavGrid;
+  private sectors!: NavSectorGraph;
+  /** Nominal demo endpoints west and east of the wall (set by `stampExamples`). */
+  private nominal = { start: { x: 0, y: 0 }, goal: { x: 0, y: 0 } };
   private readonly pixels = new Uint8Array(GRID_SIZE * GRID_SIZE * 4);
   private readonly texture: DataTexture;
   private readonly gate = { x: 0, y: 0, width: 2, height: 3 };
@@ -79,6 +100,10 @@ export class CrowdNavigationGridPageComponent {
     this.grid = NavGrid.fromHeightfield(heightfield);
     this.buildMs.set(Math.round(performance.now() - t0));
     this.stampExamples();
+    const t1 = performance.now();
+    this.sectors = NavSectorGraph.build(this.grid);
+    this.sectorBuildMs.set(Math.round(performance.now() - t1));
+    this.updatePortalCounts();
 
     this.texture = new DataTexture(this.pixels, GRID_SIZE, GRID_SIZE, RGBAFormat, UnsignedByteType);
     this.texture.colorSpace = SRGBColorSpace;
@@ -109,13 +134,78 @@ export class CrowdNavigationGridPageComponent {
     const open = !this.gateOpen();
     this.gateOpen.set(open);
     const t0 = performance.now();
-    this.grid.setGateOpen(this.gate, open);
+    const dirty = this.grid.setGateOpen(this.gate, open);
     this.editMs.set(performance.now() - t0);
+    const t1 = performance.now();
+    const rebuilt = this.sectors.rebuildSectors(dirty);
+    this.rebuildInfo.set(
+      `${rebuilt.length} of ${this.sectors.sectorCount} sectors rebuilt in ${(performance.now() - t1).toFixed(1)} ms`,
+    );
+    this.updatePortalCounts();
     this.redraw();
+  }
+
+  selectClass(c: NavUnitClass): void {
+    this.unitClass.set(c);
+    this.redraw();
+  }
+
+  toggleSectors(): void {
+    this.showSectors.update((v) => !v);
+    this.redraw();
+  }
+
+  toggleCorridor(): void {
+    this.showCorridor.update((v) => !v);
+    this.redraw();
+  }
+
+  private updatePortalCounts(): void {
+    this.portalCounts.set({
+      villager: this.sectors.portalCount('villager'),
+      catapult: this.sectors.portalCount('catapult'),
+      creature: this.sectors.portalCount('creature'),
+    });
+  }
+
+  /** The nearest cell to a nominal point that the class can stand in (square spiral search). */
+  private nearestPassable(x: number, y: number, c: NavUnitClass): { x: number; y: number } {
+    for (let r = 0; r < 64; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          if (this.grid.isPassable(x + dx, y + dy, c)) return { x: x + dx, y: y + dy };
+        }
+      }
+    }
+    return { x, y };
   }
 
   private redraw(): void {
     fillOverlay(this.grid, this.overlay(), this.pixels);
+    const c = this.unitClass();
+    const start = this.nearestPassable(this.nominal.start.x, this.nominal.start.y, c);
+    const goal = this.nearestPassable(this.nominal.goal.x, this.nominal.goal.y, c);
+    let path: NavAbstractPath | undefined;
+    if (this.showCorridor()) {
+      const t0 = performance.now();
+      path = this.sectors.findAbstractPath(start.x, start.y, goal.x, goal.y, c);
+      const ms = performance.now() - t0;
+      this.corridorText.set(
+        path.found
+          ? `${c}: corridor of ${path.sectors.length} sectors, ${path.portals.length} portals, cost ${Math.round(path.cost)} (${ms.toFixed(2)} ms)`
+          : `${c}: no route between the points (${ms.toFixed(2)} ms)`,
+      );
+    } else {
+      this.corridorText.set('');
+    }
+    drawSectorOverlay(this.sectors, this.grid, this.pixels, {
+      unitClass: c,
+      showSectors: this.showSectors(),
+      path,
+      start: this.showCorridor() ? start : undefined,
+      goal: this.showCorridor() ? goal : undefined,
+    });
     this.texture.needsUpdate = true;
     const counts: Record<NavUnitClass, number> = { villager: 0, catapult: 0, creature: 0 };
     const { flags, clearance } = this.grid;
@@ -155,11 +245,16 @@ export class CrowdNavigationGridPageComponent {
     g.stampStructure(at(4, 4, 12, 8));
     g.stampStructure(at(4, 36, 14, 9));
     g.stampStructure(at(58, 6, 10, 10));
-    // A wall with a 2-cell gap (villager only) and a 3-cell gate (closed).
-    g.stampStructure(at(36, 0, 2, h));
+    // A wall across the whole island with a 2-cell gap (villagers only) and a 17-cell gate (closed;
+    // wide enough for catapults and creatures once opened).
+    g.stampStructure({ x: site.x + 36, y: 0, width: 2, height: GRID_SIZE });
     g.clearStructure(at(36, 22, 2, 2));
-    Object.assign(this.gate, at(36, 36, 2, 3));
+    Object.assign(this.gate, at(36, 30, 2, 17));
     g.stampGate(this.gate, false);
+    this.nominal = {
+      start: { x: site.x - 70, y: site.y + 6 },
+      goal: { x: site.x + 108, y: site.y + 46 },
+    };
     // A road from the west house through the gap to the barn.
     g.paintRoadLine(site.x + 10, site.y + 13, site.x + 35, site.y + 23, 1);
     g.paintRoadLine(site.x + 35, site.y + 23, site.x + 38, site.y + 23, 1);

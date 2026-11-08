@@ -1,7 +1,9 @@
 # Crowd navigation
 
-Worker-safe navigation grid for island crowds (Plan 086). This first phase, `grid-layers`, turns a heightfield into
-Uint8 cost layers, a flag layer and a clearance field. Later phases add sectors, portals and flow fields on top of it.
+Worker-safe navigation grid for island crowds (Plan 086). Phase `grid-layers` turns a heightfield into Uint8 cost
+layers, a flag layer and a clearance field. Phase `sectors-portals` adds 64-cell sectors with portals per unit class and
+an abstract path query on top (see [Sectors, portals and the abstract query](#sectors-portals-and-the-abstract-query)).
+Later phases add flow fields.
 
 ```ts
 import {
@@ -93,6 +95,51 @@ are thresholds on it, not separate grids:
 refreshes flags and cost for the touched cells and, when blocking changes, recomputes clearance only in the touched
 rectangle grown by `maxClearance` and returns that rectangle (the dirty region for later sector rebuilds). Because
 clearance is capped, a windowed recompute equals a full recompute; the specs check this.
+
+## Sectors, portals and the abstract query
+
+`NavSectorGraph` cuts a grid into square sectors (`sectorSize`, default 64; sectors are indexed row-major and edge
+sectors may be smaller) and builds, for each unit class, the portals between neighbouring sectors and the cheapest
+costs between the portals of one sector. An abstract query then runs A* over this small graph instead of the cells.
+
+```ts
+import { NavSectorGraph } from 'triangular-engine/crowd-navigation';
+
+const sectors = NavSectorGraph.build(grid); // or { sectorSize: 32 }
+const route = sectors.findAbstractPath(120, 300, 1800, 1500, 'villager');
+if (route.found) route.sectors; // ordered corridor of sector indices, neighbours in a row
+route.portals; // the portals crossed
+
+const dirty = grid.setGateOpen(gate, true); // any NavGrid edit returns the dirty rectangle
+sectors.rebuildSectors(dirty); // rebuilds touched sectors only; returns their indices
+sectors.versions[s]; // per-sector counter, bumped on rebuild
+```
+
+- **Portal:** along each shared sector edge, a maximal run of cell pairs where both cells are passable for the class
+  (not `BLOCKED` and clearance at or above the threshold) is one portal, represented by its centre pair. A 2-cell gap
+  gives a villager portal and no catapult or creature portal; a wall gives none. Each portal is two nodes (one cell in
+  each sector) joined by a crossing edge costing the entered cell.
+- **Intra-sector links:** nodes that can reach each other inside a sector are joined by the cheapest path over the
+  composed `cost` layer, searched inside the sector only (8-neighbour, diagonals cost sqrt 2 and need both orthogonal
+  cells passable, no corner cutting). Regions are flood-filled first so the search stops once every reachable node is
+  settled.
+- **Query:** `findAbstractPath(startX, startY, goalX, goalY, unitClass)` connects the start and goal to the portals of
+  their own sectors for that query only, then runs A* with an octile heuristic scaled by the cheapest possible cell
+  cost. It returns `{ found, cost, sectors, portals }` (plus `failure`: `'start-blocked'`, `'goal-blocked'` or
+  `'disconnected'` when not found). Connected components of the portal graph prove most unreachable goals without
+  searching. `sectors` removes consecutive duplicates only; a path that leaves and later re-enters a sector lists it
+  twice. The cost is the base composed cost (no territory or faction cost yet) and is approximate: it assumes paths
+  stay inside each sector between portals.
+- **Rebuild:** `rebuildSectors(rect)` takes the rectangle an edit returned (it already includes the clearance halo),
+  recomputes portals on the touched sectors' four edges and the links of the touched sectors, and also rebuilds a
+  neighbour only when the portals on its shared edge changed. The result equals a full build; the specs check this over
+  random edits. `versions` is 1 for every sector after the build and increases by one per rebuild.
+- **Inspection:** `getPortals`, `getEdgePortals`, `getLinks`, `portalCount`, `sectorOf`, `sectorRect` and
+  `sectorsTouching` expose the data for overlays and tests. The demo draws sector borders, portals and the corridor.
+
+Measured by the spec in headless Chrome on the development machine, on the 2,048 x 2,048 generated island (1,024
+sectors, about 1,160 portals per class): the build takes about 4 s (one-off; run it in a worker), an abstract query
+about 2 ms, and a rebuild after a windowed edit tens of milliseconds. These are not guarantees.
 
 ## Island generator
 

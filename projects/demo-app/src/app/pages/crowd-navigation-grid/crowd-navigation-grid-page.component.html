@@ -37,6 +37,49 @@
             <small>({{ editMs() | number: "1.1-2" }} ms edit)</small>
           }
         </button>
+        <strong>Sectors and portals</strong>
+        <div class="buttons" role="group" aria-label="Sector display">
+          <button
+            type="button"
+            [class.active]="showSectors()"
+            [attr.aria-pressed]="showSectors()"
+            (click)="toggleSectors()"
+          >
+            Sectors
+          </button>
+          <button
+            type="button"
+            [class.active]="showCorridor()"
+            [attr.aria-pressed]="showCorridor()"
+            (click)="toggleCorridor()"
+          >
+            Corridor
+          </button>
+        </div>
+        <div class="buttons" role="group" aria-label="Unit class">
+          @for (c of unitClasses; track c) {
+            <button
+              type="button"
+              [class.active]="unitClass() === c"
+              [attr.aria-pressed]="unitClass() === c"
+              (click)="selectClass(c)"
+            >
+              {{ c }}
+            </button>
+          }
+        </div>
+        <span class="muted"
+          >Sector graph built in {{ sectorBuildMs() }} ms · portals: villager
+          {{ portalCounts().villager }} · catapult
+          {{ portalCounts().catapult }} · creature
+          {{ portalCounts().creature }}</span
+        >
+        @if (rebuildInfo()) {
+          <span class="muted">Gate edit: {{ rebuildInfo() }}</span>
+        }
+        @if (corridorText()) {
+          <span>{{ corridorText() }}</span>
+        }
       </div>
     </ng-template>
 
@@ -46,6 +89,22 @@
         @for (entry of legend(); track entry.label) {
           <span class="swatch"
             ><i [style.background]="entry.color"></i>{{ entry.label }}</span
+          >
+        }
+        @if (showSectors() || showCorridor()) {
+          <span class="swatch"
+            ><i style="background: rgb(255 255 255 / 75%)"></i>sector border (64 cells)</span
+          >
+          <span class="swatch"
+            ><i
+              [style.background]="
+                'rgb(' + classColors[unitClass()].join(' ') + ')'
+              "
+            ></i
+            >{{ unitClass() }} portal (cell pair)</span
+          >
+          <span class="swatch"
+            ><i style="background: rgb(255 150 30 / 50%)"></i>corridor sector</span
           >
         }
         <span class="muted"

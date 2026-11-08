@@ -70,7 +70,7 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/procedural` | [procedural/README.md](procedural/README.md) | Procedural flora and craft parts with sockets and colliders | `three` |
 | `triangular-engine/celestial` | [celestial/README.md](celestial/README.md) | Keplerian orbits, atmospheric and gravity models, planet presets | — |
 | `triangular-engine/navigation` | [navigation/README.md](navigation/README.md) | Navigation data contracts and bounded route scheduling | — |
-| `triangular-engine/crowd-navigation` | [crowd-navigation/README.md](crowd-navigation/README.md) | Worker-safe island navigation grid: cost layers, flags, clearance by unit class | — |
+| `triangular-engine/crowd-navigation` | [crowd-navigation/README.md](crowd-navigation/README.md) | Worker-safe island navigation: cost layers, flags, clearance by unit class, sectors and portals with an abstract path query | — |
 | `triangular-engine/animals` | [animals/README.md](animals/README.md) | Deterministic animal flocks and world responses | — |
 | `triangular-engine/life` | [life/README.md](life/README.md) | Fixed-step autonomous-agent movement and flocking | — |
 | `triangular-engine/impostor` | [impostor/README.md](impostor/README.md) | Octahedral impostor baking and rendering | — |
