@@ -2088,3 +2088,51 @@ Audit of the `/lod-surface-morph-spike` page against its own record (parts 1 to 
   - Not tested: bent-bound culling, normals and shading under morph, equirectangular, a fan leaf straddling the cut, the owner's visual check.
 - **Built on top.** G6a to G6m ported the spike's bend, cut, stretch metric and pole fan into the library; G6d and G6e were checked on headless WebGL only. The `planet-scene` morph-1 refinement runaway (scale-invariant pole strips, 2026-11-05 work) and its unexplained GPU cost (scene pass 4.15 ms at morph 1 against 1.04 ms at morph 0) sit exactly in what the spike did not measure.
 - **Decision.** The spike counts as precision-proven, not finished. Next: a morph frame-cost case and a pole-zone case in the spike's suite on the RTX, then the same numbers against `planet-scene`.
+
+## 2026-11-11: Architecture review: paged height tiles proposed (D18, M4b), nothing built
+
+- **Source.** A review of the facts in the context packet (`ignore/fable-context-packet.md`, compiled 2026-11-11), asked for planetary terrain with real-time modification, 3D water and the globe-to-map morph working together. The review used only packet facts; it measured nothing and read no code. Owner inputs for scale: smallest planet radius about 63.7 km, largest 6,371 km (owner, 2026-11-11); the rest of the packet's owner section is unanswered.
+- **Proposal, not a decision.** Keep `lod-surface` (quadtree, instanced grid, integer lattice, anchor precision, edge folding, the bend morph, the CPU twin). Change the height source from one texture per face to tiles keyed by quadtree node, baked on demand from the base source plus an ordered operation list (Plan 055's edit model), read by the vertex stage, `groundAt`, the collider patch and water depth. Recorded in Plan 059 as milestone M4b, decision D18 (status Open) and §Paged height tiles.
+- **Reason.** The texel of the per-face texture is about 153 m at k = 10 on 100 km, about 0.9 km on 600 km, and about 2.4 km on 6,371 km at k = 12 (derived). Plan 059 already lists this as its known limit and leaves camera-local tiles undecided. Edits, a 2 m smallest contact edit and one height truth for colliders need finer data. The packet also shows two height truths in the game differing by up to 11.4 m (collider vertices about 614 m apart).
+- **Not decided here.** Plan 055: the review recommends ending the contender race as a renderer race and keeping its operation list and block work; the records do not park 055, and that is the owner's call. Tunnels, caves and overhangs stay with 055 (D14 unchanged); the review suggests local blocks with a hole in the sheet, hidden at morph 1 (055 D13), only if wanted.
+- **Unknown (no figure in the records).** Per-tile bake time; whether M4's writable texture is meant to be paged; edit-to-collider time (055 measured one block at 59 to 71 ms on CPU workers); tile memory; whether the morph-1 scene pass (4.15 ms against 1.04 ms) relates to leaf count; float32 direction error at 6,371 km (S1 not run); water depth from tiles on the sphere (recorded as untested); any full-stack frame.
+- **Measurements proposed.** Suites `lod-surface-tiles` and `lod-surface-edits`, morph poses with tiles on, water depth after an edit, and a full-stack frame; details and gates in Plan 059 §Paged height tiles. None exist yet.
+- **Order.** The 2026-11-06 morph handover steps come first (RTX run of the five frame-cost cases with GPU timing on, the v8 capped-metric decision, the ER entry with the v7 results), because the morph cost is the biggest unknown under this proposal.
+- **Evidence.** Documentation only; no tests run. Related: [Plan 055](/docs/engineering-records/055_planet_shape_system.md), [ER 080](/docs/engineering-records/080_lod-water.md).
+
+## 2026-11-11: Morph spike frame cost, first GPU numbers (suite `lod-surface-morph` v7, noisy headless)
+
+- **What ran.** The five `frame-cost` cases of v7, one launcher per case, with `--noisy --profile headless-hardware`, after the spike's engine provider got `gpuTiming: true` and `trackTimestamp: true` (that change is still uncommitted). Results: `artifacts/test-runs/lod-surface-morph@v7/2026-11-11T21-21` to `21-24` (five files), fingerprint `69f070b3-28cfa653` (current at the time).
+- **Conditions.** NVIDIA/WebGPU, headless, 1707x872. Machine noisy: game, game client, IDE and agent running; GPU about 45%, CPU 50 to 65%, 63 to 69 C; warning `gpu-busy-before-start`. Automated verdict pass; performance verdict inconclusive ("Headless hardware/power profile was not independently verified"). Read as ordering and ratios, not as clean hardware numbers (testing skill, "Noisy run").
+- **Results (GPU scene pass, median with p95).**
+
+  | Case | Leaves | Triangles | Scene pass | Frame interval median |
+  |---|---|---|---|---|
+  | orbit morph 0 | 384 | 197k | 0.07 ms (0.07) | 6.1 ms |
+  | orbit morph 0.5 | 1,896 | 1.11M | 0.40 ms (0.67) | 12.5 ms |
+  | orbit morph 1 | 2,052 | 1.19M | 0.47 ms (0.74) | 12.6 ms |
+  | pole 200 m morph 0.5 | 4,095 | 2.20M | 0.81 ms (0.83) | 6.1 ms |
+  | pole 200 m morph 1 | 4,098 | 2.20M | 0.74 ms (0.75) | 12.6 ms |
+
+- **Caveats.** The spike's selector has no strip-aspect cap, so it reaches level 20 at morph 0.5 and 1; these numbers are not comparable with `planet-scene` 1.04 / 4.15 ms. Leaf counts differ from the visible RTX run of 2026-11-06 (1,896 against 2,604 at morph 0.5), probably the smaller viewport. Frame intervals of 12.5 ms are missed refreshes under load; the GPU pass is about 0.4 ms in the same cases, so the interval says nothing about GPU cost here.
+- **Reading (inference, not measured).** In this spike the scene pass grows with triangle count (197k to 1.19M triangles, 0.07 to 0.47 ms, about 6x for 6x). The `planet-scene` page spends about 2.8 ms per million triangles at morph 1 (4.15 ms at about 1.5M) against about 0.4 ms here. The spike uses a debug material; the page uses the planet material with its Voronoi layer (12 fetches per fragment). That makes shading the likely source of the page's morph-1 cost, but no run isolated it.
+- **Still open.** A clean visible RTX run of the same cases; the capped metric in the spike (v8); the page poses with a debug material to isolate shading cost; the morph-sweep selection CPU (14.5 ms against 8 ms); the pole-zone float error.
+- **Rerun link.** `http://triangular-demo.localhost:4200/lod-surface-morph-spike?testSuite=lod-surface-morph&testVersion=7&testProfile=headless-hardware&testRepetitions=1&testCases=frame-orbit-map-m1` (one case per launch; a diagnostic measurement, not an accepted baseline).
+
+### Addendum 2026-11-11: the same five cases, visible full-screen browser (noisy)
+
+- **What ran.** The same five v7 cases, one launcher per case, `--noisy`, visible full-screen Chrome (the away switch had expired on 2026-11-06 and was renewed for two hours at the owner's go-ahead). Results: `artifacts/test-runs/lod-surface-morph@v7/2026-11-11T21-30` and `21-31` (five `visible-browser` files), fingerprint `69f070b3-28cfa653`. Automated verdict pass; performance verdict unassessed.
+- **Conditions.** NVIDIA/WebGPU. GPU about 50 to 60% loaded, CPU 25 to 45%, 58 to 64 C; game client, IDE and agent running. Every run has `gpu-busy-before-start`; four of five also `other-app-measuring` (another app's timed case overlapped). Not a clean baseline.
+- **Results (GPU scene pass, median with p95).**
+
+  | Case | Leaves | Triangles | Scene pass | Frame interval median |
+  |---|---|---|---|---|
+  | orbit morph 0 | 720 | 369k | 0.14 ms (0.15) | 6.0 ms |
+  | orbit morph 0.5 | 3,144 | 1.78M | 0.64 ms (0.64) | 6.1 ms |
+  | orbit morph 1 | 3,516 | 1.98M | 0.80 ms (0.81) | 6.0 ms |
+  | pole 200 m morph 0.5 | 4,095 | 2.20M | 0.87 ms (0.87) | 6.1 ms |
+  | pole 200 m morph 1 | 4,098 | 2.20M | 0.76 ms (0.76) | 6.0 ms |
+
+- **Reading.** The scene pass is about 0.36 to 0.40 ms per million triangles at morph 0, 0.5 and 1, matching the headless runs: cost follows leaf and triangle count, with no separate morph cost seen in this spike. Frame interval is display cadence (6.0 to 6.1 ms); the 12.5 ms intervals in the headless runs came from load and pacing, not GPU. Leaf counts (720 / 3,144 / 3,516) are closer to the 2026-11-06 visible run (528 / 2,604 / 3,396) than the headless counts were, consistent with the viewport difference.
+- **Not comparable.** The spike's selector is uncapped (level 20 at morph 0.5 and 1) and uses a debug material, so these do not compare with `planet-scene` 1.04 / 4.15 ms. The shading-cost reading above stays an inference.
+- **Still open.** A run with no other app measuring and a quiet GPU; v8 with the capped metric; the page poses with a debug material to isolate shading cost.

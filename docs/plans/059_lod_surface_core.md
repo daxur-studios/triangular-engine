@@ -165,6 +165,7 @@ Each milestone ends with a gate measured on the reference machine and recorded i
 | M2 | **Blending and the other criteria** (feature regions, horizon, priority budget; the slope criterion was dropped 2026-11-01), each a toggle measured ABAB. Transition fixture first (diagonal ridge, live edit, unequal neighbours, reversed toggle) | Popping score; 3D boundary equality during morphs; each criterion shows its effect and its cost |
 | M3 | **Water v0:** live analytic waves on plane and sphere, CPU twin, amplitude-aware selection, the simple lit look | L5 cost; parity spec; owner visual review |
 | M4 | **Writable height texture source,** shared by water ripples (decaying stamps) and terrain stamps; CPU-authoritative first | Next-frame visibility; cost of an update |
+| M4b | **Paged height tiles (proposal 2026-11-11, D18).** Heights come from tiles keyed by quadtree node, baked on demand from the base source plus an ordered operation list, instead of one texture per face. The CPU twin reads the same tiles; an edit re-bakes only the tiles it touches (§Paged height tiles) | Per-tile bake time on a worker; edit visible next frame; tiles re-baked per edit; texel size against the smallest edit; tile memory; L5 cost against the one-texture-per-face source in the same poses |
 | M5 | **Low-detail terrain v0:** baked noise height texture, edits, collider patch | L5 cost (with its own working number), parity, crack probe |
 | M6 | **Terrain v1: cliffs (D14).** Vector displacement, stretch criterion, fold guard, mesh-shape collider patch, ray-hit query (§Cliff detail). Cases: a 200 m vertical cliff, a recessed face, an overhang, all at eye-2m and 200 m | Zero crack pixels; no inverted triangles; L5 cost with cliffs in view; a body rests on a ledge and under an overhang; CPU twin parity |
 
@@ -209,6 +210,9 @@ measured on the RTX 3080 before the next starts:
 - **Known limit:** one texture per face caps detail at its texel size (2049² per face is about 5 m on the 10 km
   sphere, about 290 m on 600 km). Near detail beyond that (analytic noise on top, or camera-local tiles) is decided
   from the terrain suite's numbers, not up front.
+  *Note 2026-11-11: with edits and a 2 m smallest edit in view (Plan 055 D11), the terrain suite's numbers say the
+  one-texture-per-face source cannot carry them at 600 km or Earth radius; camera-local tiles are proposed as M4b
+  (D18, §Paged height tiles). Nothing is decided.*
 - **Sources:**
   - the cell planet: `buildCellPlanetWorld` and its surface sampler from `triangular-engine/worldgen`, with a
     height scale;
@@ -535,6 +539,45 @@ fine reference during a slow scripted zoom. Both are open to the review.
 - Water gets its own new entry point later (name open). The old `water/` module is retired or kept on WebGL under
   Plan 056; this plan does not touch it.
 
+## Paged height tiles (proposal 2026-11-11)
+
+Status: **proposal, nothing built, nothing decided.** Source: an architecture review of the facts in the context packet
+(`ignore/fable-context-packet.md`), recorded in [ER 059](/docs/engineering-records/059_lod_surface_core.md) (entry
+2026-11-11).
+
+- **Why.** The per-face texture's texel is about 153 m at k = 10 on a 100 km planet, about 0.9 km on 600 km, and about
+  2.4 km on 6,371 km even at k = 12 (derived from the plan's own texture sizes). The mesh lattice is finer (2^24 steps
+  per face). Edits, a 2 m smallest contact edit (Plan 055 D11) and one shared height truth for colliders (M5) cannot be
+  carried by that texel.
+- **Shape.**
+  1. Height is the base source plus an ordered operation list (flatten, raise, crater, carve). The list is the save
+     format; undo removes entries; replay is deterministic. Plan 055's shape operations and CPU twins are the starting
+     point (D3 still forbids imports from the 055 lab; reading it for lessons is allowed).
+  2. Tiles are keyed by quadtree node and baked on demand (worker first; GPU compute only if the worker is too slow).
+     An edit marks the tiles it touches dirty and re-bakes only those.
+  3. The vertex stage and the CPU twin read the same tiles, so drawing, `groundAt` and the collider patch agree by
+     construction.
+  4. Water depth (Plan 080) reads the same tiles on the sphere, so edits move the shoreline.
+- **Not in scope.** Tunnels, caves and arches stay with Plan 055 (D14 unchanged). If wanted later they would be local
+  blocks with a hole cut in the sheet, hidden at morph 1 (Plan 055 D13).
+- **Open facts (none measured).** Per-tile bake time on a worker; whether M4's writable texture is meant to be paged;
+  edit-to-collider time (Plan 055 measured one block at 59 to 71 ms on CPU workers); tile memory; whether the morph-1
+  cost (4.15 ms against 1.04 ms) is related to tile or leaf count; float32 direction error at 6,371 km (S1 not run).
+- **Measurements to add (new cases in new suites, by the `triangular-engine-testing` skill; RTX, visible, GPU timing
+  on).**
+  - `lod-surface-tiles`: bake ms per tile (worker, and compute if tried), upload ms, tile count and MB resident, the
+    same poses as `planet-scene` v3 at 100 km, 600 km and, as a spike, 6,371 km.
+  - `lod-surface-edits`: frames from an edit to the changed ground showing (gate: next frame), tiles re-baked per
+    edit, edit streams of 30 Hz, edit-to-collider time (gate: 100 ms, Plan 055 D18).
+  - Morph 0, 0.5 and 1 in the `planet-scene` poses with tiles on, so the 4.15 ms question is isolated.
+  - Water depth after an edit (`water-lod-spike-*` terrain-read cases), and one full-stack frame (terrain, water,
+    atmosphere, clouds); neither exists today.
+- **Gate (proposed).** Edit visible next frame; collider within 100 ms; L5 cost no worse than the one-texture source in
+  the same poses; zero crack pixels; CPU twin parity.
+- **What would change this.** A smallest edit never below one texel on small planets only (one writable texture is
+  enough); tile baking too slow even in a worker or compute (evaluate operations in the vertex stage instead); S1
+  failing at 6,371 km; a required WebGL fallback.
+
 ## Decisions
 
 | # | Decision | Status |
@@ -556,3 +599,4 @@ fine reference during a slow scripted zoom. Both are open to the review.
 | D15 | Milestone order | **Decided** 2026-10-25 (owner): terrain first (§Milestones, Order); water after M6 |
 | D16 | Terrain for games (step 3c): promote now, ahead of M2, which changes D8's "after M2"; components `<planet>`, `<planetTerrain>`, `<flatTerrain>`, with `<planetAtmosphere>` and clouds as siblings; entry `triangular-engine/lod-surface` | **Decided** 2026-10-29 (owner): names and the write-up approved; the parent's inputs, the suite name `planet-scene` and a separate `<planetClouds>` plan approved 2026-10-29 |
 | D17 | Water before cliffs: the owner moves water (M3, then the water work) ahead of M6 cliff detail. This supersedes D15's "water after M6" **for water only**; D15's terrain-first order otherwise stands. Recorded in dated form; D15 is not edited | **Decided** 2026-11-01 (owner). Record: [Plan 059 water decision](/docs/engineering-records/059_lod_surface_core.md) (entry dated 2026-11-01); the new water plan's record is pending the architect step |
+| D18 | Paged height tiles (M4b, §Paged height tiles): heights as quadtree-node tiles baked from the base source plus an operation list, read by the vertex stage, the CPU twin, colliders and water depth | **Open** (proposal 2026-11-11; not decided by the owner) |
