@@ -14,13 +14,14 @@ import { cellPlanetFor, createGroundSample, type Vec3 } from 'triangular-engine/
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import { bakeInWorker } from '../lod-surface-lab/lod-height-bake-client';
 import { createWaterLodSpikeSphereScene, type IWaterLodSpikeSphereSceneHandle } from '../../water-lod-spike/core/create-water-lod-spike-sphere-scene';
+import { createWaterLodSpikeRecording } from '../../water-lod-spike/core/water-lod-spike-recording';
 import { waterLodSpikeSphereQuality } from '../../water-lod-spike/core/water-lod-spike-quality';
 import {
   PLANET_POSES, PLANET_RADIUS_M, freeDrag, freeLook, freeZoom, groundUp, motionMorph, motionView, nearPlaneFor, planetPoseView,
   resolvePlanetCamera, sceneSunDirection, type PlanetMotion, type PlanetPoseId, type PlanetView,
 } from './planet-camera';
 import { createPlanetSceneTestAdapter, type PlanetSceneTestHost } from './planet-scene-test-adapter';
-import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_TEST_HISTORY, type PlanetSceneTestSettings } from './planet-scene-tests';
+import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_RUNNER_SUITES, type PlanetSceneTestSettings } from './planet-scene-tests';
 
 /**
  * Plan 059 step G5: the planet scene. `<planet>` with `<planetTerrain>` and `<planetAtmosphere>` inside it, written the way
@@ -204,7 +205,7 @@ export class PlanetScenePageComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly poses = PLANET_POSES;
-  readonly testHistory = PLANET_SCENE_TEST_HISTORY;
+  readonly testHistory = PLANET_SCENE_RUNNER_SUITES;
   readonly allowTestAutoStart = isDevMode();
 
   /** What `<planet>` is given, once. */
@@ -372,6 +373,7 @@ export class PlanetScenePageComponent {
       engine: this.engine, format: 'image/webp', quality: 0.6,
       compress: { maxWidthOrHeight: THUMBNAIL_WIDTH, fileType: 'image/webp', quality: 0.6 },
     }),
+    recording: (shot) => createWaterLodSpikeRecording(this.engine.canvas, { shot, label: () => `morph ${this.morph().toFixed(2)}` }),
   };
   readonly testAdapter: TestRunAdapter<PlanetSceneTestSettings, PlanetSceneTestSettings> = createPlanetSceneTestAdapter(this.testHost);
 

@@ -50,16 +50,16 @@ This plan covers separating the capsule character experience from the mixed-purp
 | family-contributions   | done        |
 | verification-workflow  | done        |
 | legacy-lab-separation  | done        |
-| hair-generation-coverage | planned   |
+| hair-generation-coverage | in_progress |
 | hair-motion-and-helmet | planned     |
 | character-performance-matrix | in_progress |
 
-<!-- tri:review version="1" scope-hash="b93cfe7b2642c1484a175013ade107f6892717707276403ca857fe6c442903be" reviewed="2026-10-31" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="b93cfe7b2642c1484a175013ade107f6892717707276403ca857fe6c442903be" reviewed="2026-11-14" reviewer="agent" -->
 <!-- /tri:review -->
 
 ## Delivery progress
 
-The shell and app-local human/cat contributions are in place. The studio hosts capsule visual suites with recordings, thumbnails and review sheets; human visual verdicts for generated media remain pending review. Capsule actors, test suites, adapters and focus framing now belong to Character Studio. `/characters-lab` keeps only the face-rig and general humanoid demonstrations. The new human performance matrix is active; its first visible hardware run and target-device review are pending. Broader themed character packs and promotion of the contribution contract into a public engine entry point require later evidence and scope review.
+The shell and app-local human/cat contributions are in place. The studio hosts capsule visual suites with recordings, thumbnails and review sheets; `capsule-hair-coverage@v1` (30 front, side and back close-ups across 10 hairstyles) and `capsule-human-lineup@v1` (20 full-body baseline and alt presets) are active with centered focus framing and saved baseline contact sheets, while human visual verdicts and hair/clothing geometry improvements remain pending. Capsule actors, test suites, adapters and focus framing belong to Character Studio. `/characters-lab` keeps only the face-rig and general humanoid demonstrations. The human performance matrix is active; its visible hardware run and target-device review are pending. Broader themed character packs and promotion of the contribution contract into a public engine entry point require later evidence and scope review.
 
 Latest diagnostic: [run the human performance matrix](http://triangular-demo.localhost:4200/character-studio?testSuite=character-studio-human-performance&testVersion=1&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1).
 

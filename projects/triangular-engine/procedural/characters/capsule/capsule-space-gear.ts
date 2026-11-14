@@ -374,19 +374,35 @@ function buildKnitBeanie(
   const grp = new Group();
   grp.name = 'capsule-knit-beanie';
 
-  const domeGeo = new SphereGeometry(r * 1.06, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.46);
+  const tiltGroup = new Group();
+  tiltGroup.position.set(0, r * 0.08, -r * 0.04);
+  tiltGroup.rotation.x = -0.20;
+  grp.add(tiltGroup);
+
+  const domeGeo = new SphereGeometry(r * 1.07, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.46);
   const dome = new Mesh(domeGeo, orangeMat);
   dome.position.y = r * 0.06;
   dome.castShadow = true;
-  grp.add(dome);
+  tiltGroup.add(dome);
 
-  const cuffGeo = new TorusGeometry(r * 1.03, r * 0.13, 14, 32);
+  const cuffGeo = new TorusGeometry(r * 1.04, r * 0.13, 14, 32);
   cuffGeo.rotateX(Math.PI * 0.5);
   const cuff = new Mesh(cuffGeo, orangeMat);
   cuff.position.y = r * 0.12;
-  cuff.rotation.x = -0.08;
+  cuff.rotation.x = -0.04;
   cuff.castShadow = true;
-  grp.add(cuff);
+  tiltGroup.add(cuff);
+
+  // Ribbed knit texture along the folded beanie cuff
+  const ribGeo = new CapsuleGeometry(r * 0.028, r * 0.18, 4, 6);
+  const ribCount = 10;
+  for (let i = 0; i < ribCount; i++) {
+    const theta = (i / ribCount) * Math.PI * 2;
+    const rib = new Mesh(ribGeo, orangeMat);
+    rib.position.set(Math.sin(theta) * r * 1.13, r * 0.13, Math.cos(theta) * r * 1.13);
+    rib.castShadow = true;
+    tiltGroup.add(rib);
+  }
 
   return grp;
 }
@@ -398,33 +414,32 @@ function buildRoundGlasses(
   const grp = new Group();
   grp.name = 'capsule-round-glasses';
   const r = dna.bodyRadius;
-  const eyeBaseY = dna.suitSplitY + dna.bodyHeight * 0.34;
+  const eyeBaseY = dna.suitSplitY + dna.bodyHeight * 0.365 + r * 0.04;
 
   for (const side of ['left', 'right'] as const) {
     const sign = side === 'left' ? -1 : 1;
     const sizeAsym = (dna.eyeSizeAsymmetry ?? 0) * sign * 0.5;
     const sideEyeScale = Math.max(0.55, dna.eyeScale * (1 + sizeAsym));
-    const eyeRadius = r * 0.255 * sideEyeScale;
+    const eyeRadius = r * 0.385 * sideEyeScale;
     const heightShift = (dna.eyeHeightAsymmetry ?? 0) * sign * r;
-    const angle = sign * dna.eyeSpacing;
-    const surfaceR = r * 0.99;
+    const angle = sign * Math.max(0.45, dna.eyeSpacing * 1.72);
 
-    const frameGeo = new TorusGeometry(eyeRadius * 1.12, r * 0.036, 12, 26);
+    const frameGeo = new TorusGeometry(eyeRadius * 1.08, r * 0.036, 12, 26);
     const frameMesh = new Mesh(frameGeo, darkMat);
     frameMesh.position.set(
-      Math.sin(angle) * surfaceR,
+      Math.sin(angle) * r * 1.04,
       eyeBaseY + heightShift,
-      Math.cos(angle) * surfaceR + eyeRadius * 0.52,
+      Math.cos(angle) * r * 1.08 + eyeRadius * 0.50,
     );
-    frameMesh.rotation.y = angle * 0.45;
+    frameMesh.rotation.y = angle * 0.38;
     frameMesh.castShadow = true;
     grp.add(frameMesh);
   }
 
-  const bridgeGeo = new CapsuleGeometry(r * 0.026, r * 0.14, 6, 8);
+  const bridgeGeo = new CapsuleGeometry(r * 0.026, r * 0.34, 6, 8);
   bridgeGeo.rotateZ(Math.PI * 0.5);
   const bridgeMesh = new Mesh(bridgeGeo, darkMat);
-  bridgeMesh.position.set(0, eyeBaseY, r * 1.10);
+  bridgeMesh.position.set(0, eyeBaseY, r * 1.14);
   grp.add(bridgeMesh);
 
   return grp;

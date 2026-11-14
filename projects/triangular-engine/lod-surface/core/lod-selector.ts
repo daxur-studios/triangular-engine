@@ -172,6 +172,14 @@ export interface NodeGeometryHook {
    * {@link LodSelector.select} measures more (it rebuilds even for the same view until none is left stale). Default: no limit.
    */
   readonly refreshBudget?: number;
+  /**
+   * Time box, milliseconds, on the stale re-measures of one selection pass (`performance.now` from the start of the pass).
+   * Once it is spent the pass leaves the remaining stale nodes at their old geometry for the next pass, like an exhausted
+   * {@link NodeGeometryHook.refreshBudget}. First measurements of new nodes always happen (the tree needs them) but use up the
+   * node budget and their time counts against the box. At least one stale node is measured per pass, so a refresh always
+   * settles. Default: no time box.
+   */
+  readonly refreshTimeMs?: number;
 }
 
 /**
@@ -377,6 +385,8 @@ export class LodSelector {
   geometryRefreshes = 0;
   /** Stale re-measures this rebuild may still make: the hook's budget, less those made so far (`Infinity` without a budget). */
   private budgetLeft = Infinity;
+  /** `performance.now()` after which this rebuild measures no more stale nodes (`Infinity` without a time box). */
+  private refreshDeadline = Infinity;
 
   /**
    * @param poolTrees Node pool size in trees, at least 2: after a reclaim the pool holds the last tree and must still
@@ -514,6 +524,8 @@ export class LodSelector {
     stats.geometryStale = 0;
     // At least one per pass, so a hook with a budget below 1 cannot leave the spread unsettled for ever.
     this.budgetLeft = Math.max(1, this.geometryHook?.refreshBudget ?? Infinity);
+    const timeBox = this.geometryHook?.refreshTimeMs;
+    this.refreshDeadline = timeBox !== undefined && timeBox > 0 && Number.isFinite(timeBox) ? performance.now() + timeBox : Infinity;
     this.openLast = 0;
     const roots = rootCount(this.settings.domain);
     if (this.nodeCount === 0) {
@@ -852,7 +864,8 @@ export class LodSelector {
       if (geoStamp[node] !== geometryVersion) {
         // A stale node is measured while the budget lasts. Past it the node keeps its old geometry (a pool node always has one)
         // and the next pass measures it.
-        if (this.budgetLeft > 0) {
+        // One is always measured per pass, so the refresh settles whatever the budget and the clock say.
+        if (stats.geometryMeasured === 0 || (this.budgetLeft > 0 && (this.refreshDeadline === Infinity || performance.now() < this.refreshDeadline))) {
           this.budgetLeft--;
           this.geometryRefreshes++;
           stats.geometryMeasured++;
@@ -948,6 +961,8 @@ export class LodSelector {
     this.open[node] = 0;
     this.wasOpen[node] = 0;
     this.wasVisible[node] = 0;
+    // A first measurement cannot wait (the node is in the tree now), but it uses up the pass's budget for stale re-measures.
+    this.budgetLeft--;
     this.measureNode(node);
     const domain = this.settings.domain;
     const cell = this.cell;

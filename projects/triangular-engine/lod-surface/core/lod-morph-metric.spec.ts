@@ -4,6 +4,7 @@ import { domainPoint, type LodDomain, type Vec3 } from './lod-domain';
 import {
   DEFAULT_STRETCH_MORPH_STEP,
   DEFAULT_STRETCH_REFRESH_BUDGET,
+  DEFAULT_STRETCH_REFRESH_TIME_MS,
   DEFAULT_STRETCH_STALE_PAD_PER_MORPH,
   StretchMetric,
   stretchMapXY,
@@ -254,7 +255,7 @@ describe('Plan 059 G6c stretch metric: refresh policy', () => {
   function setup(morph: number, options: { morphStep?: number } = {}): { selector: LodSelector; metric: StretchMetric; frame: (morph: number) => void } {
     const selector = selectorOf(R);
     // One-pass refresh, as the G6c expectations below assume (the budget is the G6e-a option).
-    const metric = new StretchMetric(selector, { radiusM: R, morph, refreshBudget: Infinity, ...options });
+    const metric = new StretchMetric(selector, { radiusM: R, morph, refreshBudget: Infinity, refreshTimeMs: Infinity, ...options });
     const dir = directionOf(stretchProjectionBasis(0, 0), POSES['pole-2m'].lonDeg, POSES['pole-2m'].latDeg);
     const frame = (m: number): void => {
       metric.update({ morph: m });
@@ -319,7 +320,7 @@ describe('Plan 059 G6c stretch metric: refresh policy', () => {
   it('a scripted sweep 0 to 1 over 100 frames refreshes at most steps x touched nodes, and a coarser step refreshes less', () => {
     const run = (step: number): { invalidations: number; measured: number; touched: number; perFrame: number } => {
       const selector = selectorOf(R);
-      const metric = new StretchMetric(selector, { radiusM: R, morphStep: step, refreshBudget: Infinity });
+      const metric = new StretchMetric(selector, { radiusM: R, morphStep: step, refreshBudget: Infinity, refreshTimeMs: Infinity });
       const dir = directionOf(stretchProjectionBasis(0, 0), POSES['pole-2m'].lonDeg, POSES['pole-2m'].latDeg);
       const touched = new Set<number>();
       let total = 0;
@@ -617,7 +618,7 @@ describe('Plan 059 G6e-a stretch metric: amortised refresh', () => {
   it('(b) with an unlimited budget the sweep measures as it did before the budget: every refresh settles in its own frame', () => {
     const sweep = (step: number): number => {
       const selector = selectorOf(R, 4096, false, 0);
-      const metric = new StretchMetric(selector, { radiusM: R, morphStep: step, refreshBudget: Infinity });
+      const metric = new StretchMetric(selector, { radiusM: R, morphStep: step, refreshBudget: Infinity, refreshTimeMs: Infinity });
       for (let k = 0; k <= 100; k++) {
         frameAt(selector, metric, k / 100);
         expect(selector.stats.geometryStale).toBe(0);
@@ -634,9 +635,9 @@ describe('Plan 059 G6e-a stretch metric: amortised refresh', () => {
   it('(c) with the state unchanged the spread settles within ceil(stale / budget) passes, on the full refresh selection', () => {
     const budget = 500;
     const full = selectorOf(R, 4096, false, 0);
-    const fullMetric = new StretchMetric(full, { radiusM: R, morph: 0.5, refreshBudget: Infinity });
+    const fullMetric = new StretchMetric(full, { radiusM: R, morph: 0.5, refreshBudget: Infinity, refreshTimeMs: Infinity });
     const spread = selectorOf(R, 4096, false, 0);
-    const spreadMetric = new StretchMetric(spread, { radiusM: R, morph: 0.5, refreshBudget: budget });
+    const spreadMetric = new StretchMetric(spread, { radiusM: R, morph: 0.5, refreshBudget: budget, refreshTimeMs: Infinity });
     frameAt(full, fullMetric, 0.5);
     frameAt(spread, spreadMetric, 0.5);
     const fullBefore = fullMetric.stats.measured;
@@ -659,7 +660,7 @@ describe('Plan 059 G6e-a stretch metric: amortised refresh', () => {
   it('(d) a trigger mid-spread restarts the sweep, the budget still caps each pass, and the settled tree is the full one at the new morph', () => {
     const budget = 300;
     const spread = selectorOf(R, 4096, false, 0);
-    const spreadMetric = new StretchMetric(spread, { radiusM: R, morph: 0.5, refreshBudget: budget });
+    const spreadMetric = new StretchMetric(spread, { radiusM: R, morph: 0.5, refreshBudget: budget, refreshTimeMs: Infinity });
     frameAt(spread, spreadMetric, 0.5);
     frameAt(spread, spreadMetric, 0.52);
     expect(spread.stats.geometryStale).toBeGreaterThan(0);
@@ -671,7 +672,7 @@ describe('Plan 059 G6e-a stretch metric: amortised refresh', () => {
     const { measured } = settleAt(spread, spreadMetric, 0.54);
     expect(Math.max(...measured)).toBeLessThanOrEqual(budget);
     const full = selectorOf(R, 4096, false, 0);
-    const fullMetric = new StretchMetric(full, { radiusM: R, morph: 0.5, refreshBudget: Infinity });
+    const fullMetric = new StretchMetric(full, { radiusM: R, morph: 0.5, refreshBudget: Infinity, refreshTimeMs: Infinity });
     frameAt(full, fullMetric, 0.5);
     frameAt(full, fullMetric, 0.54);
     expect(treeOf(spread)).toBe(treeOf(full));
@@ -693,11 +694,44 @@ describe('Plan 059 G6e-a stretch metric: amortised refresh', () => {
     expect(metric.stats.staleLeft).toBe(0);
   });
 
+  it('(f) a time box stops a pass early, measures at least one node per pass, and still settles on the full refresh selection', () => {
+    const full = selectorOf(R, 4096, false, 0);
+    const fullMetric = new StretchMetric(full, { radiusM: R, morph: 0.5, refreshBudget: Infinity, refreshTimeMs: Infinity });
+    const boxed = selectorOf(R, 4096, false, 0);
+    // A box far shorter than one measure: only the one guaranteed measure fits in a pass.
+    const boxedMetric = new StretchMetric(boxed, { radiusM: R, morph: 0.5, refreshBudget: Infinity, refreshTimeMs: 1e-9 });
+    expect(boxedMetric.refreshTimeMs).toBe(1e-9);
+    frameAt(full, fullMetric, 0.5);
+    frameAt(boxed, boxedMetric, 0.5);
+    frameAt(full, fullMetric, 0.52);
+    frameAt(boxed, boxedMetric, 0.52);
+    // The one guaranteed stale measure, plus first measurements of nodes the pass opened (those cannot wait).
+    expect(boxed.stats.geometryMeasured).toBeGreaterThanOrEqual(1);
+    expect(boxed.stats.geometryMeasured).toBeLessThan(full.stats.geometryMeasured / 10);
+    expect(boxed.stats.geometryStale).toBeGreaterThan(0);
+    const { frames } = settleAt(boxed, boxedMetric, 0.52, 20_000);
+    expect(frames).toBeGreaterThan(1);
+    expect(boxed.stats.geometryStale).toBe(0);
+    expect(boxedMetric.measuredMorph).toBe(0.52);
+    expect(treeOf(boxed)).toBe(treeOf(full));
+    console.log(`[morph-metric] settle with a 1e-9 ms time box: ${frames + 1} passes, ${boxed.stats.leaves} leaves`);
+  });
+
+  it('(g) the default time box is 2 ms and Infinity turns it off', () => {
+    expect(new StretchMetric(selectorOf(R), { radiusM: R }).refreshTimeMs).toBe(DEFAULT_STRETCH_REFRESH_TIME_MS);
+    expect(DEFAULT_STRETCH_REFRESH_TIME_MS).toBe(2);
+    const unboxed = selectorOf(R, 4096, false, 0);
+    const metric = new StretchMetric(unboxed, { radiusM: R, morph: 0.5, refreshBudget: Infinity, refreshTimeMs: Infinity });
+    frameAt(unboxed, metric, 0.5);
+    frameAt(unboxed, metric, 0.52);
+    expect(unboxed.stats.geometryStale).toBe(0);
+  });
+
   it('the refresh of the 4,098-leaf view (6,371 km, 2 m near the pole, morph 0.5) measures at most the budget per pass; before and after the pass time (printed, not judged)', () => {
     const budget = DEFAULT_STRETCH_REFRESH_BUDGET;
     // Before: the whole refresh in one pass, as the selector did it with no budget.
     const whole = selectorOf(R);
-    const wholeMetric = new StretchMetric(whole, { radiusM: R, morph: 0.5, refreshBudget: Infinity });
+    const wholeMetric = new StretchMetric(whole, { radiusM: R, morph: 0.5, refreshBudget: Infinity, refreshTimeMs: Infinity });
     frameAt(whole, wholeMetric, 0.5);
     const wholeStart = performance.now();
     frameAt(whole, wholeMetric, 0.52);

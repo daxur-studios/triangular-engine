@@ -5,7 +5,7 @@ import {
   sceneSunDirection, yawView,
 } from './planet-camera';
 import { createPlanetSceneTestAdapter, settingsMismatches, type PlanetSceneTestHost } from './planet-scene-test-adapter';
-import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_TEST_HISTORY, type PlanetSceneTestSettings } from './planet-scene-tests';
+import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_RUNNER_SUITES, PLANET_SCENE_TEST_HISTORY, PLANET_SCENE_VISUAL_V1, type PlanetSceneTestSettings } from './planet-scene-tests';
 
 /** The final entry of the history: the version the runner selects. */
 /** v3, the suite most of these specs describe; v4 has its own specs below. */
@@ -60,6 +60,16 @@ function makeHost(override: Partial<PlanetSceneTestHost> = {}, state: { read?: (
   } as unknown as TestContext;
   return { host, context, applied, now: () => now };
 }
+
+describe('planet-scene visual suite', () => {
+  it('is a functional suite of the two scripted moves, offered before v5 so the latest test is still v5', () => {
+    expect(() => validateTestHistory(PLANET_SCENE_RUNNER_SUITES)).not.toThrow();
+    expect(PLANET_SCENE_VISUAL_V1.purpose).toBe('functional');
+    expect(PLANET_SCENE_VISUAL_V1.scenarios.map((scenario) => scenario.id)).toEqual(['descent-full-stack', 'morph-sweep-full-stack']);
+    expect(PLANET_SCENE_VISUAL_V1.scenarios.every((scenario) => scenario.settings.motion !== undefined && !scenario.budgets)).toBeTrue();
+    expect(PLANET_SCENE_RUNNER_SUITES.at(-1)).toBe(PLANET_SCENE_TEST_HISTORY[4]);
+  });
+});
 
 describe('Plan 059 G5 planet-scene suite', () => {
   it('is a valid history: v1, v2 then v3, unique case ids, plain JSON settings, the planned cases', () => {

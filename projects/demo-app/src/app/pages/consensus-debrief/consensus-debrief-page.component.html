@@ -1,5 +1,52 @@
-<scene [showFps]="false">
+<scene [showFps]="true">
   <ambientLight [intensity]="1.15" />
   <directionalLight [position]="[4, 8, 5]" [intensity]="2.1" />
   <directionalLight [position]="[-5, 5, -3]" [intensity]="1.1" />
 </scene>
+@if (replayMode) {
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="replay-panel">
+      <h2>Conversation replay</h2>
+      <label class="file-button">Open transcript <input type="file" accept=".json,application/json" (change)="loadTranscript($event)" /></label>
+      @if (error()) { <p class="error">{{ error() }}</p> }
+      @if (!transcript()) {
+        <p>Choose a saved conversation JSON to show its participants and step through their turns.</p>
+      }
+      @if (transcript(); as conversation) {
+        <p>{{ conversation.question }}</p>
+        <div class="buttons">
+          <button (click)="showTurn(turnCount() - 1)" [disabled]="turnCount() === 0">Previous</button>
+          <span>Turn {{ turnCount() }} / {{ conversation.turns.length }}</span>
+          <button (click)="showTurn(turnCount() + 1)" [disabled]="turnCount() === conversation.turns.length">Next</button>
+        </div>
+        @if (turnCount() > 0) {
+          <p><strong>{{ conversation.turns[turnCount() - 1].participant }}</strong> · round {{ conversation.turns[turnCount() - 1].round }} · {{ conversation.turns[turnCount() - 1].action }}</p>
+          <div class="speech">{{ conversation.turns[turnCount() - 1].speech || 'Passed.' }}</div>
+          @if (conversation.turns[turnCount() - 1].speech) {
+            <button (click)="readTurnAloud()">Read turn aloud</button>
+            <p class="hint">Browser voice; mouth timing is estimated from the text.</p>
+          }
+        } @else { <p>Advance to the first turn.</p> }
+        @if (replayDetails; as details) {
+          <h3>Reported agreement</h3>
+          @for (speaker of conversation.participants; track speaker) {
+            @if (details.agreements[speaker]; as scores) {
+              @for (other of conversation.participants; track other) {
+                @if (scores[other] !== undefined) {
+                  <div>{{ speaker }} → {{ other }}: {{ scores[other] }}/10</div>
+                }
+              }
+            }
+          }
+          <p class="hint">Distance approximates the average of available scores; arrows preserve each view.</p>
+          @if (details.questions.length) {
+            <h3>Questions</h3>
+            @for (question of details.questions; track question.id) {
+              <p><strong>{{ question.id }} · {{ question.status }}</strong><br />{{ question.from }} → {{ question.to }}: {{ question.text }}</p>
+            }
+          }
+        }
+      }
+    </section>
+  </ng-template>
+}

@@ -1,3 +1,4 @@
+import { Box3 } from 'three';
 import {
   ALL_CAPSULE_CHARACTER_PRESETS,
   CAPSULE_ACCESSORY_IDS,
@@ -109,5 +110,33 @@ describe('CapsuleCharacterActor', () => {
     expect(catMouthBounds.max.x - catMouthBounds.min.x).toBeGreaterThan(0.05);
     expect(catMouthBounds.max.y - catMouthBounds.min.y).toBeGreaterThan(0.02);
     cat.dispose();
+  });
+
+  it('keeps all hairstyles inside the bubble helmet dome when helmet is enabled and covers the rear skull', () => {
+    const actor = new CapsuleCharacterActor();
+    const r = actor.dna.bodyRadius;
+    const domeCeilingWorldY =
+      actor.torsoGroup.position.y +
+      actor.dna.suitSplitY +
+      r * 0.04 +
+      r * 1.54 * (0.56 + 1.0);
+
+    for (const style of CAPSULE_HAIR_STYLE_IDS) {
+      if (style === 'bald') continue;
+      actor.setDna({ hairStyleId: style, helmet: true });
+      actor.root.updateMatrixWorld(true);
+      const hairBounds = new Box3().setFromObject(actor.capsuleHairKit.crownSocket);
+      expect(hairBounds.max.y)
+        .withContext(`${style} should stay inside bubble helmet ceiling`)
+        .toBeLessThanOrEqual(domeCeilingWorldY - 0.01);
+
+      if (style !== 'sprout') {
+        expect(hairBounds.min.z)
+          .withContext(`${style} should cover rear of skull`)
+          .toBeLessThan(-r * 0.5);
+      }
+    }
+
+    actor.dispose();
   });
 });

@@ -280,5 +280,28 @@ const PLANET_SCENE_V5: TestSuite<PlanetSceneTestSettings> = {
   ],
 };
 
+/**
+ * The two scripted moves of v5 as a functional suite, so the runner may record a clip of each (it never records a performance
+ * suite). No budgets and no timing claims: this is for looking at the descent and the morph sweep, which only had numbers.
+ * `requiresVisualReview` stays on; a person decides whether the clips look right.
+ */
+export const PLANET_SCENE_VISUAL_V1: TestSuite<PlanetSceneTestSettings> = {
+  id: 'planet-scene-visual',
+  version: 1,
+  title: 'Planet scene, by eye: the descent and the morph sweep with every layer on, recorded as clips',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: [
+    scripted('descent-full-stack', 'descent · orbit to the 2 m eye · air, clouds and water on', 'descent', { pose: 'orbit', atmosphere: true, clouds: true, water: true }),
+    scripted('morph-sweep-full-stack', 'morph sweep · orbit, 0 to 1 and back · air and clouds on, water out', 'morphSweep', { pose: 'orbit', atmosphere: true, clouds: true, water: false }),
+  ],
+};
+
+/** What the page offers its runner: the visual suite first, so "Run latest test" stays planet-scene v5. */
+export const PLANET_SCENE_PAGE_SUITES: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_VISUAL_V1];
+
 /** Oldest first; the final entry is "Run latest test". */
 export const PLANET_SCENE_TEST_HISTORY: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_V1, PLANET_SCENE_V2, PLANET_SCENE_V3, PLANET_SCENE_V4, PLANET_SCENE_V5];
+
+/** The page's runner suites. Declared after the history so the history stays the performance record. */
+export const PLANET_SCENE_RUNNER_SUITES: readonly TestSuite<PlanetSceneTestSettings>[] = [...PLANET_SCENE_PAGE_SUITES, ...PLANET_SCENE_TEST_HISTORY];

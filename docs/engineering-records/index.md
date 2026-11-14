@@ -54,3 +54,4 @@ Records `001`–`042` keep their historical formats; new work uses reciprocal pl
 | [Cat Space Program: Operation Moon Boop](/docs/engineering-records/084_cat-space-program.md) | [PLAN-084](/docs/plans/084_cat-space-program.md) |
 | [Moon Boop cat care and treat guns](/docs/engineering-records/085_moon-boop-cat-care.md) | [PLAN-085](/docs/plans/085_moon-boop-cat-care.md) |
 | [Island crowd navigation](/docs/engineering-records/086_island-crowd-navigation.md) | [PLAN-086](/docs/plans/086_island-crowd-navigation.md) |
+| [Multi-turn consensus conversations](/docs/engineering-records/087_multi-turn-consensus-conversations.md) | [PLAN-087](/docs/plans/087_multi-turn-consensus-conversations.md) |

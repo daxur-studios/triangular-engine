@@ -61,6 +61,13 @@ export const DEFAULT_STRETCH_STALE_PAD_PER_MORPH = 3;
  */
 export const DEFAULT_STRETCH_REFRESH_BUDGET = 300;
 
+/**
+ * Default for {@link StretchMetricOptions.refreshTimeMs}: the most a selector pass spends re-measuring stale nodes. The count
+ * budget alone had no ceiling (it was sized at about 4 ms from a headless estimate, and the pass's own selection and first
+ * measurements were not in it), so a morph sweep measured 13 ms at p95. A pass that hits the box leaves the rest for the next one.
+ */
+export const DEFAULT_STRETCH_REFRESH_TIME_MS = 2;
+
 const TWO_PI = 2 * Math.PI;
 /** A leaf with a pole strictly inside it is bounded by this many planet radii: more than any two points of the map are apart. */
 const TORN_REACH_RADII = 8;
@@ -118,6 +125,11 @@ export interface StretchMetricOptions {
    * `Infinity` measures the whole tree in one pass, as before the budget.
    */
   readonly refreshBudget?: number;
+  /**
+   * Time box, ms, on a selector pass's stale re-measures, on top of {@link StretchMetricOptions.refreshBudget} (whichever is
+   * spent first stops the pass). Default {@link DEFAULT_STRETCH_REFRESH_TIME_MS}; `Infinity` or 0 turns the time box off.
+   */
+  readonly refreshTimeMs?: number;
   /**
    * Growth of the measured cell length per unit of morph lag; the pad is `1 + stalePadPerMorph * morphStep`. Default
    * {@link DEFAULT_STRETCH_STALE_PAD_PER_MORPH}. 0 turns the pad off (then a lagging measurement can under-refine by up to the lag).
@@ -210,6 +222,8 @@ const CORNER_COORD: readonly (readonly [number, number])[] = [[0, 0], [1, 0], [1
 export class StretchMetric implements NodeGeometryHook {
   /** The most stale nodes a selector pass measures (see {@link StretchMetricOptions.refreshBudget}). */
   readonly refreshBudget: number;
+  /** The time box on a selector pass's stale re-measures, ms (see {@link StretchMetricOptions.refreshTimeMs}). */
+  readonly refreshTimeMs: number;
   private readonly counts = { invalidations: 0, measured: 0 };
   private readonly selector: LodSelector;
   private readonly domain: LodDomain;
@@ -255,6 +269,7 @@ export class StretchMetric implements NodeGeometryHook {
     this.morphStep = Math.max(1e-6, options.morphStep ?? DEFAULT_STRETCH_MORPH_STEP);
     this.stalePad = (options.stalePadPerMorph ?? DEFAULT_STRETCH_STALE_PAD_PER_MORPH) * this.morphStep;
     this.refreshBudget = Math.max(1, Math.floor(options.refreshBudget ?? DEFAULT_STRETCH_REFRESH_BUDGET));
+    this.refreshTimeMs = options.refreshTimeMs ?? DEFAULT_STRETCH_REFRESH_TIME_MS;
     const basis = options.basis ?? stretchProjectionBasis(0, 0);
     this.packBasis(basis, this.scratchBasis);
     const morph = clamp01(options.morph ?? 0);

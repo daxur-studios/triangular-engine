@@ -38,7 +38,10 @@ import {
 } from './character-studio-test-adapter';
 import {
   CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
+  CAPSULE_HAIR_COVERAGE_SUITE_V1,
   CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1,
+  CAPSULE_HUMAN_LINEUP_SUITE_V1,
+  CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V1,
   CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
   CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1,
   type CharacterStudioTestSettings,
@@ -131,6 +134,9 @@ export class CharacterStudioPageComponent {
     CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
     CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
     CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1,
+    CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V1,
+    CAPSULE_HAIR_COVERAGE_SUITE_V1,
+    CAPSULE_HUMAN_LINEUP_SUITE_V1,
     CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1,
   ] as const;
   readonly allowTestAutoStart = isDevMode();
@@ -211,12 +217,25 @@ export class CharacterStudioPageComponent {
       this.selectedMotionId.set(settings.gait);
       family.setExpression(settings.emotion);
       this.selectedExpression.set(settings.emotion);
-      if (settings.rightHandAction) family.setControl('rightHandAction', settings.rightHandAction);
-      if (settings.leftHandAction) family.setControl('leftHandAction', settings.leftHandAction);
+      if (settings.hairStyleId !== undefined) family.setControl('hairStyleId', settings.hairStyleId);
+      if (settings.facialHairId !== undefined) family.setControl('facialHairId', settings.facialHairId);
+      if (settings.hairColor !== undefined) family.setControl('hairColor', settings.hairColor);
+      if (settings.accessory !== undefined) family.setControl('accessory', settings.accessory);
+      if (settings.helmet !== undefined) family.setControl('helmet', String(settings.helmet));
+      if (settings.jetpack !== undefined) family.setControl('jetpack', String(settings.jetpack));
+      if (settings.characterType === 'human') {
+        family.setControl('rightHandAction', settings.rightHandAction ?? 'none');
+        family.setControl('leftHandAction', settings.leftHandAction ?? 'none');
+      } else {
+        if (settings.rightHandAction) family.setControl('rightHandAction', settings.rightHandAction);
+        if (settings.leftHandAction) family.setControl('leftHandAction', settings.leftHandAction);
+      }
       if (settings.panicked !== undefined) family.setControl('panicked', String(settings.panicked));
       if (settings.tuft !== undefined) family.setControl('tuft', String(settings.tuft));
       if (settings.restMouthPose) family.setControl('restMouthPose', settings.restMouthPose);
       this.autoRotate.set(false);
+      family.root.rotation.y = 0;
+      family.update(0.25);
       this.setCameraFraming(settings.cameraFraming);
       if (settings.focusTarget) this.applyFocusTargetFraming(settings.focusTarget);
       if (settings.performancePopulation !== undefined && settings.performanceMotion !== undefined) {
@@ -297,6 +316,7 @@ export class CharacterStudioPageComponent {
       return family.resolveFocusFraming(targetId, {
         fovDegrees: camera instanceof PerspectiveCamera ? camera.fov : 42,
         aspect: bounds.height > 0 ? bounds.width / bounds.height : 16 / 9,
+        azimuthRadians: this.framingAzimuthRadians(settings.cameraFraming),
       });
     },
   };
@@ -448,7 +468,7 @@ export class CharacterStudioPageComponent {
         this.cameraPosition.set([this.cameraDistance(3.8), centerY + 0.62, 0.12]);
         break;
       case 'back':
-        this.cameraFraming = 'profile';
+        this.cameraFraming = 'back';
         this.cameraTarget.set([0, centerY, 0]);
         this.cameraPosition.set([0, centerY + 0.7, -this.cameraDistance(3.7)]);
         break;
@@ -474,12 +494,22 @@ export class CharacterStudioPageComponent {
     switch (framing) {
       case 'front': this.applyView('front'); break;
       case 'profile': this.applyView('profile'); break;
+      case 'back': this.applyView('back'); break;
       case 'face-close-up': this.applyView('face'); break;
       case 'head-close-up': this.applyView('hair'); break;
       case 'full-shot':
       case 'three-quarter': this.applyView('three-quarter'); break;
     }
     this.cameraFraming = framing;
+  }
+
+  private framingAzimuthRadians(framing: CameraFramingPreset): number {
+    switch (framing) {
+      case 'profile': return -1.18;
+      case 'back': return Math.PI;
+      case 'three-quarter': return -0.55;
+      default: return 0;
+    }
   }
 
   private applyFocusTargetFraming(targetId: VisualFocusTargetId): void {
@@ -490,6 +520,7 @@ export class CharacterStudioPageComponent {
     const framing = this.activeFamily().resolveFocusFraming(targetId, {
       fovDegrees: camera instanceof PerspectiveCamera ? camera.fov : 42,
       aspect: bounds.height > 0 ? bounds.width / bounds.height : 16 / 9,
+      azimuthRadians: this.framingAzimuthRadians(this.cameraFraming),
     });
     this.cameraPosition.set([...framing.cameraPosition]);
     this.cameraTarget.set([...framing.cameraTarget]);

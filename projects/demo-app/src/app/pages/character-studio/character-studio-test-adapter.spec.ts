@@ -2,6 +2,8 @@ import {
   CAT_EMOTIONS_SUITE_V1,
   CAT_LINEUP_SUITE_V1,
   CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
+  CAPSULE_HAIR_COVERAGE_SUITE_V1,
+  CAPSULE_HUMAN_LINEUP_SUITE_V1,
   CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
   CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1,
   CHARACTER_STUDIO_TEST_HISTORY,
@@ -116,6 +118,26 @@ describe('CharacterStudioTestAdapter & Suites', () => {
       expect(scenario.settings.characterType).toBe('human');
       expect(scenario.settings.layout).toBe('lineup');
       expect(scenario.budgets?.['frameInterval']?.p95).toBe(16.7);
+    }
+  });
+
+  it('defines front/profile/back turnaround hair coverage across 10 hairstyles', () => {
+    expect(CAPSULE_HAIR_COVERAGE_SUITE_V1.requiresVisualReview).toBeTrue();
+    expect(CAPSULE_HAIR_COVERAGE_SUITE_V1.scenarios.length).toBe(30);
+    const angles = new Set(CAPSULE_HAIR_COVERAGE_SUITE_V1.scenarios.map((s) => s.settings.cameraFraming));
+    expect(angles).toEqual(new Set(['front', 'profile', 'back']));
+    for (const sc of CAPSULE_HAIR_COVERAGE_SUITE_V1.scenarios) {
+      expect(sc.settings.focusTarget).toBe('human-head-hair');
+      expect(sc.settings.helmet).toBeFalse();
+    }
+  });
+
+  it('defines full-body lineup coverage for all 20 baseline and alt presets', () => {
+    expect(CAPSULE_HUMAN_LINEUP_SUITE_V1.requiresVisualReview).toBeTrue();
+    expect(CAPSULE_HUMAN_LINEUP_SUITE_V1.scenarios.length).toBe(20);
+    for (const sc of CAPSULE_HUMAN_LINEUP_SUITE_V1.scenarios) {
+      expect(sc.settings.focusTarget).toBe('human-full-body');
+      expect(sc.settings.cameraFraming).toBe('front');
     }
   });
 

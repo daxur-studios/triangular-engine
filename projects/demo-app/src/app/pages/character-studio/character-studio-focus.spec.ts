@@ -87,4 +87,25 @@ describe('character-studio-focus', () => {
     human.dispose();
     cat.dispose();
   });
+
+  it('supports front, profile, and back azimuths on human-head-hair without clipping', () => {
+    const human = new CapsuleCharacterActor({
+      dna: { hairStyleId: 'ponytail', helmet: false },
+    });
+    human.update(0.25);
+
+    const target = resolveCharacterStudioFocusTarget('human-head-hair', { humanActor: human });
+    const frontFit = fitCameraToFocusTarget(target, { fovDegrees: 42, aspect: 16 / 9, azimuthRadians: 0 });
+    const profileFit = fitCameraToFocusTarget(target, { fovDegrees: 42, aspect: 16 / 9, azimuthRadians: -Math.PI / 2 });
+    const backFit = fitCameraToFocusTarget(target, { fovDegrees: 42, aspect: 16 / 9, azimuthRadians: Math.PI });
+
+    expect(frontFit.inFrame).toBeTrue();
+    expect(profileFit.inFrame).toBeTrue();
+    expect(backFit.inFrame).toBeTrue();
+    expect(frontFit.cameraPosition[2]).toBeGreaterThan(frontFit.cameraTarget[2]);
+    expect(profileFit.cameraPosition[0]).toBeLessThan(profileFit.cameraTarget[0]);
+    expect(backFit.cameraPosition[2]).toBeLessThan(backFit.cameraTarget[2]);
+
+    human.dispose();
+  });
 });

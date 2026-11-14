@@ -4,13 +4,17 @@
  */
 
 import {
+  BufferGeometry,
   CapsuleGeometry,
+  CatmullRomCurve3,
   Color,
   DoubleSide,
+  Float32BufferAttribute,
   Group,
   Mesh,
   MeshStandardMaterial,
   SphereGeometry,
+  Vector3,
 } from 'three';
 import type {
   CapsuleBrowRigPose,
@@ -54,27 +58,26 @@ function buildSingleGooglyEye(
   const sign = side === 'left' ? -1 : 1;
   const sizeAsym = (dna.eyeSizeAsymmetry ?? 0) * sign * 0.5;
   const sideEyeScale = Math.max(0.55, dna.eyeScale * (1 + sizeAsym));
-  const eyeRadius = dna.bodyRadius * 0.255 * sideEyeScale;
+  const eyeRadius = dna.bodyRadius * 0.385 * sideEyeScale;
 
   const root = new Group();
   root.name = `capsule-eye-${side}`;
 
-  // Place on the front cylindrical surface of the upper capsule head
-  const angle = sign * dna.eyeSpacing;
-  const surfaceR = dna.bodyRadius * 0.95;
+  // Place on the front surface of the upper capsule head with full googly-eye protrusion
+  const angle = sign * Math.max(0.45, dna.eyeSpacing * 1.72);
   const heightShift = (dna.eyeHeightAsymmetry ?? 0) * sign * dna.bodyRadius;
-  const eyeY = dna.suitSplitY + dna.bodyHeight * 0.34 + heightShift;
+  const eyeY = dna.suitSplitY + dna.bodyHeight * 0.365 + dna.bodyRadius * 0.04 + heightShift;
   root.position.set(
-    Math.sin(angle) * surfaceR,
+    Math.sin(angle) * dna.bodyRadius * 1.04,
     eyeY,
-    Math.cos(angle) * surfaceR,
+    Math.cos(angle) * dna.bodyRadius * 1.08,
   );
-  root.rotation.y = angle * 0.45;
+  root.rotation.y = angle * 0.38;
 
-  // Slightly Z-flattened bulging white eyeball
+  // Nearly spherical bulging white eyeball for clean 3/4 and profile silhouettes
   const scleraGeo = new SphereGeometry(eyeRadius, 24, 18);
   const scleraMesh = new Mesh(scleraGeo, scleraMat);
-  scleraMesh.scale.set(1, 1, 0.82);
+  scleraMesh.scale.set(1, 1, 0.94);
   scleraMesh.castShadow = true;
   scleraMesh.receiveShadow = true;
   root.add(scleraMesh);
@@ -87,19 +90,19 @@ function buildSingleGooglyEye(
   const pupilGeo = new SphereGeometry(eyeRadius, 18, 14);
   const pupilMesh = new Mesh(pupilGeo, pupilMat);
   const pScale = dna.pupilScale;
-  pupilMesh.scale.set(pScale, pScale, pScale * 0.35);
-  pupilMesh.position.set(0, 0, eyeRadius * 0.80);
+  pupilMesh.scale.set(pScale, pScale, pScale * 0.38);
+  pupilMesh.position.set(0, 0, eyeRadius * 0.90);
   gazePivot.add(pupilMesh);
 
-  // Glossy cartoon catchlight dot
-  const catchGeo = new SphereGeometry(eyeRadius * 0.085, 10, 8);
+  // Subtle tiny specular highlight tucked in upper corner so pupils read as clean black dots
+  const catchGeo = new SphereGeometry(eyeRadius * 0.032, 10, 8);
   const catchMesh = new Mesh(catchGeo, catchlightMat);
-  catchMesh.position.set(eyeRadius * 0.09, eyeRadius * 0.09, eyeRadius * 0.87);
+  catchMesh.position.set(-eyeRadius * 0.09, eyeRadius * 0.10, eyeRadius * 0.96);
   gazePivot.add(catchMesh);
 
   // Eyelid tilt container (rotates on Z for angry glare vs worried/sad look)
   const eyelidTiltGroup = new Group();
-  eyelidTiltGroup.scale.set(1, 1, 0.84);
+  eyelidTiltGroup.scale.set(1, 1, 0.95);
   root.add(eyelidTiltGroup);
 
   // Upper hemisphere eyelid shell (phi: 0..2PI, theta: 0..PI/2)
@@ -109,29 +112,31 @@ function buildSingleGooglyEye(
   upperLidMesh.castShadow = true;
 
   const upperLidPivot = new Group();
-  // In rest state (open), tilt the upper hemisphere back so only a thin upper rim frames the eye
-  upperLidPivot.rotation.x = -1.15;
+  // In rest state (open), tuck upper lid high behind the eye so profile views show the full sclera sphere
+  upperLidPivot.rotation.x = -1.34;
   upperLidPivot.add(upperLidMesh);
   eyelidTiltGroup.add(upperLidPivot);
 
-  // Optional female eyelashes attached to the outer rim of the upper eyelid
+  // Female eyelashes anchored on eyelidTiltGroup at the upper-outer horizontal corner
   const lashesGroup = new Group();
   lashesGroup.visible = dna.eyelashes;
-  const lashGeo = new CapsuleGeometry(eyeRadius * 0.032, eyeRadius * 0.14, 4, 6);
+  const lashGeo = new CapsuleGeometry(eyeRadius * 0.028, eyeRadius * 0.13, 5, 8);
+  const upAxis = new Vector3(0, 1, 0);
   for (let i = 0; i < 3; i++) {
     const lash = new Mesh(lashGeo, lashMat);
     const t = i / 2; // 0..1
-    const lashAngle = sign * (0.42 + t * 0.46);
-    lash.position.set(
-      Math.sin(lashAngle) * lidRadius * 1.02,
-      -0.01 + (1 - t) * eyeRadius * 0.06,
-      Math.cos(lashAngle) * lidRadius * 0.92,
-    );
-    lash.rotation.z = -sign * (0.65 + t * 0.35);
-    lash.rotation.x = 0.25;
+    const polarPhi = 0.86 + t * 0.38;
+    const lashDir = new Vector3(
+      sign * Math.sin(polarPhi) * 0.96,
+      Math.cos(polarPhi) * 0.96 + 0.06 * (1 - t),
+      0.22,
+    ).normalize();
+    lash.position.copy(lashDir).multiplyScalar(lidRadius + eyeRadius * 0.045);
+    lash.quaternion.setFromUnitVectors(upAxis, lashDir);
+    lash.castShadow = true;
     lashesGroup.add(lash);
   }
-  upperLidPivot.add(lashesGroup);
+  eyelidTiltGroup.add(lashesGroup);
 
   // Lower hemisphere eyelid shell (theta: PI/2..PI)
   const lowerLidGeo = new SphereGeometry(
@@ -161,6 +166,83 @@ function buildSingleGooglyEye(
   };
 }
 
+function createArchedBrowGeometry(r: number, sign: -1 | 1): BufferGeometry {
+  const controlPoints = [-1, -0.5, 0, 0.5, 1].map((u) => {
+    const x = u * r * 0.215;
+    const slightInnerLift = -sign * u * r * 0.008;
+    const y = r * (0.068 * Math.cos(u * Math.PI * 0.5) - 0.024) + slightInnerLift;
+    const z = r * (0.052 * Math.cos(u * Math.PI * 0.5) - 0.042);
+    return new Vector3(x, y, z);
+  });
+
+  const curve = new CatmullRomCurve3(controlPoints);
+  const tubularSegments = 16;
+  const radialSegments = 10;
+  const ringVerts = radialSegments + 1;
+  const maxRadius = r * 0.052;
+  const forwardRef = new Vector3(0, 0, 1);
+
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const binormal = new Vector3();
+  const normal = new Vector3();
+
+  for (let i = 0; i <= tubularSegments; i++) {
+    const t = i / tubularSegments;
+    const pt = curve.getPointAt(t);
+    const tangent = curve.getTangentAt(t).normalize();
+
+    binormal.crossVectors(forwardRef, tangent);
+    if (binormal.lengthSq() < 1e-5) binormal.set(0, 1, 0);
+    else binormal.normalize();
+    normal.crossVectors(tangent, binormal).normalize();
+
+    const endCap = i === 0 || i === tubularSegments;
+    const taper = endCap ? 0 : Math.pow(Math.sin(t * Math.PI), 0.42);
+    const rad = Math.max(0.0005, maxRadius * taper);
+
+    for (let j = 0; j <= radialSegments; j++) {
+      const theta = (j / radialSegments) * Math.PI * 2;
+      const cosT = Math.cos(theta);
+      const sinT = Math.sin(theta);
+
+      positions.push(
+        pt.x + rad * (cosT * binormal.x + sinT * normal.x),
+        pt.y + rad * (cosT * binormal.y + sinT * normal.y),
+        pt.z + rad * (cosT * binormal.z + sinT * normal.z),
+      );
+
+      if (endCap) {
+        const capSign = i === 0 ? -1 : 1;
+        normals.push(tangent.x * capSign, tangent.y * capSign, tangent.z * capSign);
+      } else {
+        normals.push(
+          cosT * binormal.x + sinT * normal.x,
+          cosT * binormal.y + sinT * normal.y,
+          cosT * binormal.z + sinT * normal.z,
+        );
+      }
+    }
+  }
+
+  for (let i = 0; i < tubularSegments; i++) {
+    for (let j = 0; j < radialSegments; j++) {
+      const a = i * ringVerts + j;
+      const b = (i + 1) * ringVerts + j;
+      const c = (i + 1) * ringVerts + (j + 1);
+      const d = i * ringVerts + (j + 1);
+      indices.push(a, d, b, b, d, c);
+    }
+  }
+
+  const geo = new BufferGeometry();
+  geo.setAttribute('position', new Float32BufferAttribute(positions, 3));
+  geo.setAttribute('normal', new Float32BufferAttribute(normals, 3));
+  geo.setIndex(indices);
+  return geo;
+}
+
 function buildFloatingEyebrow(
   side: 'left' | 'right',
   dna: CapsuleCharacterDNA,
@@ -168,27 +250,26 @@ function buildFloatingEyebrow(
 ): Mesh {
   const sign = side === 'left' ? -1 : 1;
   const r = dna.bodyRadius;
-  const browGeo = new CapsuleGeometry(r * 0.046, r * 0.22, 6, 10);
-  // Rotate capsule geometry so its length runs horizontally along X
-  browGeo.rotateZ(Math.PI * 0.5);
+  const browGeo = createArchedBrowGeometry(r, sign);
 
   const browMesh = new Mesh(browGeo, browMat);
   browMesh.name = `capsule-brow-${side}`;
   browMesh.castShadow = true;
 
-  const angle = sign * dna.eyeSpacing * 1.02;
-  const surfaceR = r * 1.01;
+  const angle = sign * Math.max(0.45, dna.eyeSpacing * 1.72);
   const sizeAsym = (dna.eyeSizeAsymmetry ?? 0) * sign * 0.5;
   const sideEyeScale = Math.max(0.55, dna.eyeScale * (1 + sizeAsym));
+  const eyeRadius = r * 0.385 * sideEyeScale;
   const heightShift = (dna.eyeHeightAsymmetry ?? 0) * sign * r;
-  const baseBrowY = dna.suitSplitY + dna.bodyHeight * 0.34 + heightShift + r * 0.33 * sideEyeScale;
+  const eyeY = dna.suitSplitY + dna.bodyHeight * 0.365 + r * 0.04 + heightShift;
+  const baseBrowY = eyeY + eyeRadius * 1.03;
 
   browMesh.position.set(
-    Math.sin(angle) * surfaceR,
+    Math.sin(angle) * r * 0.96,
     baseBrowY,
-    Math.cos(angle) * surfaceR,
+    Math.cos(angle) * r * 1.08,
   );
-  browMesh.rotation.y = angle * 0.65;
+  browMesh.rotation.y = angle * 0.55;
   browMesh.userData['baseY'] = baseBrowY;
 
   return browMesh;
@@ -242,8 +323,8 @@ export function buildCapsuleFaceRig(dna: CapsuleCharacterDNA): CapsuleFaceRigRes
   const catchlightMat = new MeshStandardMaterial({
     color: new Color('#ffffff'),
     emissive: new Color('#ffffff'),
-    emissiveIntensity: 0.45,
-    roughness: 0.1,
+    emissiveIntensity: 0.04,
+    roughness: 0.08,
   });
 
   const browMat = new MeshStandardMaterial({
@@ -290,10 +371,10 @@ export function buildCapsuleFaceRig(dna: CapsuleCharacterDNA): CapsuleFaceRigRes
   const applyEyePose = (eye: CapsuleEyeAssembly, pose: CapsuleEyeRigPose): void => {
     eye.gazePivot.rotation.set(pose.gazePitch * 0.75, pose.gazeYaw * 0.75, 0);
     const pScale = pose.pupilScale;
-    eye.pupilMesh.scale.set(pScale, pScale, pScale * 0.35);
+    eye.pupilMesh.scale.set(pScale, pScale, pScale * 0.38);
 
-    // Rest open angle is -1.15 rad; closing rotates forward toward +0.35 rad
-    eye.upperLidPivot.rotation.x = -1.15 + pose.upperLidAngle;
+    // Rest open angle is -1.34 rad; closing rotates forward toward +0.21 rad
+    eye.upperLidPivot.rotation.x = -1.34 + pose.upperLidAngle;
     // Lower lid rest is +1.18 rad; squinting rotates upward toward +0.25 rad
     eye.lowerLidPivot.rotation.x = 1.18 - pose.lowerLidAngle;
     eye.eyelidTiltGroup.rotation.z = pose.lidTiltZ;

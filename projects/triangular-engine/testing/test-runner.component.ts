@@ -280,7 +280,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
       if (launch) {
         this.launchLoad = launch.load;
         if (!this.modes().includes(launch.mode)) throw new Error(`This page runs standard mode only, not ${launch.mode}`);
-        this.form.setValue({ suite: launch.key, repetitions: launch.repetitions, profile: launch.profile, mode: launch.mode, thumbnails: launch.thumbnails, recordings: false });
+        this.form.setValue({ suite: launch.key, repetitions: launch.repetitions, profile: launch.profile, mode: launch.mode, thumbnails: launch.thumbnails, recordings: launch.recordings });
         if (launch.autoStart && !this.allowAutoStart()) this.message.set('Autostart is disabled by this application. Use Run selected.');
         this.pendingAutoStart = launch.autoStart && this.allowAutoStart();
         if (launch.cases) {

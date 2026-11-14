@@ -1,5 +1,5 @@
 import type { GpuPassKind, IFrameSampleSummary } from 'triangular-engine';
-import { modeActionMs, type TestCheck, type TestContext, type TestMetric, type TestObservation, type TestRunAdapter, type TestScenario, type TestSetting } from 'triangular-engine/testing';
+import { modeActionMs, type TestCheck, type TestContext, type TestMetric, type TestObservation, type TestRecordingCapture, type TestRunAdapter, type TestScenario, type TestSetting } from 'triangular-engine/testing';
 import { CAP_SLACK } from 'triangular-engine/lod-surface/core';
 import type { PlanetSceneTestSettings } from './planet-scene-tests';
 
@@ -42,6 +42,8 @@ export interface PlanetSceneTestHost {
   stopSampling(): IFrameSampleSummary;
   environment(): Readonly<Record<string, TestSetting>>;
   thumbnail?(): Promise<Blob | undefined>;
+  /** A bounded recording of the canvas for the opt-in clip of a scripted move; the testing entry starts it before `measure` and stops it after. */
+  recording?(shot: string): TestRecordingCapture;
 }
 
 /** Includes the height bake (seconds in the worker), the cell lookup of the terrain's material and the atmosphere's table bake (1-2 s). */
@@ -310,6 +312,10 @@ export function createPlanetSceneTestAdapter(host: PlanetSceneTestHost): TestRun
         const image = await host.thumbnail?.();
         return image ? [image] : undefined;
       },
+    } : {}),
+    // Only scripted moves are worth a clip: a still view already has its thumbnail.
+    ...(host.recording ? {
+      recording: (scenario: TestScenario<PlanetSceneTestSettings>) => (scenario.settings.motion !== undefined ? host.recording?.(scenario.id) : undefined),
     } : {}),
   };
 }

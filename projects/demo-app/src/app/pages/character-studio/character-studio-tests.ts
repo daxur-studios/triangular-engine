@@ -1,14 +1,20 @@
 import type { TestScenario, TestSuite } from 'triangular-engine/testing';
-import type {
-  CapsuleCatGaitMode,
-  CapsuleCatMouthPose,
-  CapsuleHandActionMode,
-  CapsuleLocomotionMode,
-  ExtendedEmotionName,
+import {
+  CAPSULE_ALT_CHARACTER_PRESETS,
+  CAPSULE_CHARACTER_PRESETS,
+  type CapsuleAccessoryId,
+  type CapsuleCatGaitMode,
+  type CapsuleCatMouthPose,
+  type CapsuleCharacterDNA,
+  type CapsuleFacialHairId,
+  type CapsuleHairStyleId,
+  type CapsuleHandActionMode,
+  type CapsuleLocomotionMode,
+  type ExtendedEmotionName,
 } from 'triangular-engine/characters';
 import type { VisualFocusTargetId } from './character-studio-focus';
 
-export type CameraFramingPreset = 'front' | 'face-close-up' | 'head-close-up' | 'three-quarter' | 'profile' | 'full-shot';
+export type CameraFramingPreset = 'front' | 'back' | 'face-close-up' | 'head-close-up' | 'three-quarter' | 'profile' | 'full-shot';
 export type CapsuleLayoutMode = 'hero' | 'lineup';
 export type CharacterStudioPerformanceMotion = 'idle' | 'walk' | 'walk-path';
 
@@ -29,6 +35,12 @@ export interface CharacterStudioTestSettings {
   readonly panicked?: boolean;
   readonly tuft?: boolean;
   readonly restMouthPose?: CapsuleCatMouthPose;
+  readonly hairStyleId?: CapsuleHairStyleId;
+  readonly facialHairId?: CapsuleFacialHairId;
+  readonly hairColor?: string;
+  readonly accessory?: CapsuleAccessoryId;
+  readonly helmet?: boolean;
+  readonly jetpack?: boolean;
   readonly rightHandAction?: CapsuleHandActionMode;
   readonly leftHandAction?: CapsuleHandActionMode;
   readonly motion?: 'turntable' | 'camera-orbit' | 'still';
@@ -482,6 +494,155 @@ export const CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1: TestSuite<CharacterStu
   ],
 };
 
+const HAIR_TURNAROUND_SPECS: readonly {
+  readonly slug: string;
+  readonly sheet: 's1' | 's2';
+  readonly label: string;
+  readonly presetId: string;
+  readonly hairStyleId: CapsuleHairStyleId;
+  readonly facialHairId?: CapsuleFacialHairId;
+  readonly hairColor?: string;
+  readonly accessory?: CapsuleAccessoryId;
+}[] = [
+  { slug: 'pigtails', sheet: 's1', label: 'Female Pigtails', presetId: 'curly-pigtails', hairStyleId: 'pigtails', hairColor: '#e06829' },
+  { slug: 'gussy-shaggy', sheet: 's1', label: 'Gussy Shaggy + Mustache', presetId: 'gussy-mustache', hairStyleId: 'spiky', facialHairId: 'mustache_handlebar' },
+  { slug: 'space-buns', sheet: 's1', label: 'Space Buns', presetId: 'alt-space-buns-pink', hairStyleId: 'space_buns' },
+  { slug: 'bob-cut', sheet: 's1', label: 'Bob Cut', presetId: 'alt-bob-cut', hairStyleId: 'bob_cut' },
+  { slug: 'classic-coiff', sheet: 's1', label: 'Classic Swept Coiff + Mustache', presetId: 'gussy-mustache', hairStyleId: 'swept', facialHairId: 'mustache_handlebar', hairColor: '#26282e' },
+  { slug: 'afro', sheet: 's2', label: 'Curly Afro', presetId: 'alt-afro-groove', hairStyleId: 'afro' },
+  { slug: 'goggles-spikes', sheet: 's2', label: 'Goggles + Messy Spikes', presetId: 'alt-goggles-mechanic', hairStyleId: 'wacky', accessory: 'goggles' },
+  { slug: 'shaggy-beard', sheet: 's2', label: 'Shaggy Hair + Full Beard', presetId: 'bearded-commander', hairStyleId: 'spiky', facialHairId: 'full_beard' },
+  { slug: 'high-ponytail', sheet: 's2', label: 'High Blonde Ponytail', presetId: 'female-ponytail', hairStyleId: 'ponytail', hairColor: '#e8c374' },
+  { slug: 'beanie-mullet', sheet: 's2', label: 'Beanie + Long Mullet', presetId: 'alt-beanie-explorer', hairStyleId: 'mullet', accessory: 'beanie' },
+];
+
+const HAIR_TURNAROUND_ANGLES: readonly {
+  readonly framing: 'front' | 'profile' | 'back';
+  readonly label: string;
+}[] = [
+  { framing: 'front', label: 'Front' },
+  { framing: 'profile', label: 'Side' },
+  { framing: 'back', label: 'Back' },
+];
+
+/**
+ * Suite 8: Procedural Hair Turnaround Coverage (10 styles × Front/Side/Back)
+ * Captures helmetless close-ups aligned with the two 5×3 hair turnaround concept sheets.
+ */
+export const CAPSULE_HAIR_COVERAGE_SUITE_V1: TestSuite<CharacterStudioTestSettings> = {
+  id: 'capsule-hair-coverage',
+  version: 1,
+  title: 'Capsule Human Procedural Hair Turnarounds (Front, Side, Back)',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: HAIR_TURNAROUND_SPECS.flatMap((spec) =>
+    HAIR_TURNAROUND_ANGLES.map((angle): TestScenario<CharacterStudioTestSettings> => ({
+      id: `hair-${spec.sheet}-${spec.slug}-${angle.framing}`,
+      label: `${spec.label} · ${angle.label}`,
+      settings: {
+        ...DEFAULT_HUMAN_TEST_SETTINGS,
+        presetId: spec.presetId,
+        emotion: 'happy',
+        gait: 'idle',
+        cameraFraming: angle.framing,
+        focusTarget: 'human-head-hair',
+        helmet: false,
+        jetpack: false,
+        hairStyleId: spec.hairStyleId,
+        ...(spec.facialHairId ? { facialHairId: spec.facialHairId } : {}),
+        ...(spec.hairColor ? { hairColor: spec.hairColor } : {}),
+        ...(spec.accessory ? { accessory: spec.accessory } : {}),
+        rightHandAction: 'none',
+        leftHandAction: 'none',
+      },
+      warmupMs: 250,
+      durationMs: 1_800,
+      quickMs: 600,
+    })),
+  ),
+};
+
+function lineupScenarioForPreset(
+  prefix: 'base' | 'alt',
+  preset: CapsuleCharacterDNA,
+): TestScenario<CharacterStudioTestSettings> {
+  const id = preset.id ?? 'custom';
+  const holdsProp = preset.accessory === 'walkie_talkie' || preset.accessory === 'coffee_mug' || preset.accessory === 'tablet';
+  const waves = id === 'wacky-helmet-waver' || id === 'alt-spiky-wonky-waver';
+  return {
+    id: `lineup-${prefix}-${id}`,
+    label: preset.label ?? id,
+    settings: {
+      ...DEFAULT_HUMAN_TEST_SETTINGS,
+      presetId: id,
+      emotion: 'happy',
+      gait: 'idle',
+      cameraFraming: 'front',
+      focusTarget: 'human-full-body',
+      rightHandAction: waves ? 'wave' : 'none',
+      leftHandAction: holdsProp ? 'hold_gadget' : 'none',
+    },
+    warmupMs: 250,
+    durationMs: 1_800,
+    quickMs: 600,
+  };
+}
+
+/**
+ * Suite 9: Full-Body Capsule Human Preset Lineup (10 Baseline + 10 Alt Space Variants)
+ */
+export const CAPSULE_HUMAN_LINEUP_SUITE_V1: TestSuite<CharacterStudioTestSettings> = {
+  id: 'capsule-human-lineup',
+  version: 1,
+  title: 'Capsule Human Full-Body Preset Lineup (Baseline + Alt)',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: [
+    ...CAPSULE_CHARACTER_PRESETS.map((preset) => lineupScenarioForPreset('base', preset)),
+    ...CAPSULE_ALT_CHARACTER_PRESETS.map((preset) => lineupScenarioForPreset('alt', preset)),
+  ],
+};
+
+/**
+ * Suite 8b: Single-Character Orange Pigtails Turnaround Benchmark (Front, 3/4, Profile, Back)
+ * Focused headshot benchmark for comparing eye scale, profile bulge, arched brows, lashes, and bangs.
+ */
+export const CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V1: TestSuite<CharacterStudioTestSettings> = {
+  id: 'capsule-orange-pigtails-benchmark',
+  version: 1,
+  title: 'Capsule Human Benchmark: Orange Pigtails (Front, 3/4, Profile, Back)',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: (
+    [
+      { framing: 'front', label: 'Front' },
+      { framing: 'three-quarter', label: '3/4 View' },
+      { framing: 'profile', label: 'Profile' },
+      { framing: 'back', label: 'Back' },
+    ] as const
+  ).map((angle): TestScenario<CharacterStudioTestSettings> => ({
+    id: `orange-pigtails-${angle.framing}`,
+    label: `Orange Pigtails · ${angle.label}`,
+    settings: {
+      ...DEFAULT_HUMAN_TEST_SETTINGS,
+      presetId: 'curly-pigtails',
+      emotion: 'happy',
+      gait: 'idle',
+      cameraFraming: angle.framing,
+      focusTarget: 'human-head-hair',
+      helmet: false,
+      jetpack: false,
+      hairStyleId: 'pigtails',
+      hairColor: '#e06829',
+      rightHandAction: 'none',
+      leftHandAction: 'none',
+    },
+    warmupMs: 250,
+    durationMs: 1_600,
+    quickMs: 600,
+  })),
+};
+
 /**
  * Full test history for Character Studio, oldest first.
  * The final entry is the default latest test suite.
@@ -494,5 +655,8 @@ export const CHARACTER_STUDIO_TEST_HISTORY: readonly TestSuite<CharacterStudioTe
   CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
   CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
   CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1,
+  CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V1,
+  CAPSULE_HAIR_COVERAGE_SUITE_V1,
+  CAPSULE_HUMAN_LINEUP_SUITE_V1,
   CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1,
 ];

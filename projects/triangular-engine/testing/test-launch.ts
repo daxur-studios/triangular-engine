@@ -63,6 +63,8 @@ export interface TestLaunchSelection {
   readonly autoStart: boolean;
   /** `testThumbnails=0` turns the adapter's thumbnails off; they are on otherwise. */
   readonly thumbnails: boolean;
+  /** `testRecordings=1` ticks the runner's opt-in video recording (functional/visual suites with a recording adapter, dev sink); off otherwise. */
+  readonly recordings: boolean;
   /** The cases named by `testCases`, in link order. Absent when the link has no `testCases`. */
   readonly cases?: readonly TestBatchTest[];
 }
@@ -90,7 +92,7 @@ function parseTestCases<T extends object>(raw: string, suite: TestSuite<T>, suit
 export function parseTestLaunch<T extends object>(url: URL, suites: readonly TestSuite<T>[]): TestLaunchSelection | null {
   validateTestHistory(suites);
   const query = url.searchParams;
-  const allowed = new Set(['testSuite', 'testVersion', 'testProfile', 'testRepetitions', 'testAutoStart', 'testMode', 'testThumbnails', 'testCases', 'testLoad']);
+  const allowed = new Set(['testSuite', 'testVersion', 'testProfile', 'testRepetitions', 'testAutoStart', 'testMode', 'testThumbnails', 'testCases', 'testLoad', 'testRecordings']);
   const seen = new Set<string>();
   query.forEach((_, key) => {
     if (key.startsWith('test') && (!allowed.has(key) || seen.has(key))) throw new Error(`Unknown or duplicate test parameter: ${key}`);
@@ -111,17 +113,18 @@ export function parseTestLaunch<T extends object>(url: URL, suites: readonly Tes
   const autoStart = query.get('testAutoStart') ?? '0';
   const mode = query.get('testMode') ?? 'standard';
   const thumbnails = query.get('testThumbnails') ?? '1';
+  const recordings = query.get('testRecordings') ?? '0';
   const load = query.get('testLoad');
   if (!TEST_MODES.includes(mode as TestMode)) throw new Error('Invalid test mode');
   if (load !== null && !TEST_LOADS.includes(load as TestLoad)) throw new Error('Invalid test load');
   if (!TEST_PROFILES.includes(profile as TestProfile) || !Number.isInteger(repetitions) ||
-      repetitions < 1 || repetitions > MAX_TEST_REPETITIONS || !['0', '1'].includes(autoStart) || !['0', '1'].includes(thumbnails)) {
+      repetitions < 1 || repetitions > MAX_TEST_REPETITIONS || !['0', '1'].includes(autoStart) || !['0', '1'].includes(thumbnails) || !['0', '1'].includes(recordings)) {
     throw new Error('Invalid test profile, repetitions, autostart or thumbnails');
   }
   const rawCases = query.get('testCases');
   const cases = rawCases === null ? undefined : parseTestCases(rawCases, suite, suites);
   return {
-    key: testSuiteKey(suite), profile: profile as TestProfile, mode: mode as TestMode, repetitions, autoStart: autoStart === '1', thumbnails: thumbnails === '1',
+    key: testSuiteKey(suite), profile: profile as TestProfile, mode: mode as TestMode, repetitions, autoStart: autoStart === '1', thumbnails: thumbnails === '1', recordings: recordings === '1',
     ...(load ? { load: load as TestLoad } : {}), ...(cases ? { cases } : {}),
   };
 }

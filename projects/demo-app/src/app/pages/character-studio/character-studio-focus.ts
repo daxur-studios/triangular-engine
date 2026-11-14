@@ -49,6 +49,8 @@ export interface CameraFocusFitOptions {
   readonly padding?: number;
   /** Optional pitch offset in radians (positive looks slightly down from above). */
   readonly elevationRadians?: number;
+  /** Optional yaw offset around world up in radians (default `0`). */
+  readonly azimuthRadians?: number;
 }
 
 export interface ResolvedFocusFraming {
@@ -220,7 +222,8 @@ export function resolveCharacterStudioFocusTarget(
       );
       const headLeftLocal = new Vector3(-human.dna.bodyRadius * 1.08, human.dna.bodyHeight * 0.25, 0);
       const headRightLocal = new Vector3(human.dna.bodyRadius * 1.08, human.dna.bodyHeight * 0.25, 0);
-      for (const pt of [headTopLocal, headBottomLocal, headLeftLocal, headRightLocal]) {
+      const headBackLocal = new Vector3(0, human.dna.bodyHeight * 0.25, -human.dna.bodyRadius * 1.08);
+      for (const pt of [headTopLocal, headBottomLocal, headLeftLocal, headRightLocal, headBackLocal]) {
         sceneGeometry.expandByPoint(pt.applyMatrix4(human.capsuleBody.mesh.matrixWorld));
       }
 
@@ -452,12 +455,16 @@ export function fitCameraToFocusTarget(
   const aspect = options.aspect ?? 16 / 9;
   const padding = options.padding ?? target.defaultPadding;
   const elevationRadians = options.elevationRadians ?? 0.04;
+  const azimuthRadians = options.azimuthRadians ?? 0;
 
   const center = new Vector3();
   target.worldBounds.getCenter(center);
 
-  // Build camera view direction from target's forward normal + slight elevation
+  // Build camera view direction from target's forward normal rotated by azimuth + slight elevation
   const viewDir = target.forwardNormal.clone().normalize();
+  if (azimuthRadians !== 0) {
+    viewDir.applyAxisAngle(new Vector3(0, 1, 0), azimuthRadians);
+  }
   viewDir.y += Math.sin(elevationRadians);
   viewDir.normalize();
 

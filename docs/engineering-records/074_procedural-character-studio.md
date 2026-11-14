@@ -92,6 +92,45 @@ Plan: [PLAN-074](/docs/plans/074_procedural-character-studio.md).
 
 Append dated findings, decisions, scope changes and verification. Do not erase earlier outcomes when a plan is superseded.
 
+### 2026-11-14 — Multi-angle focus framing and hair/lineup contact sheets
+
+- **Framing fix (`character-studio-page.component.html`, `character-studio-page.component.ts`, `character-studio-focus.ts`).** Removed `[isActive]="!runnerBusy()"` from `<orbitControls>` because disabling `OrbitControlsComponent` during test execution disposed the controls and stopped `orbit.update()` from updating the camera look-at target when `[cameraPosition]` and `[target]` changed, cropping test stills to the right edge. Kept `<orbitControls>` active with `[fov]="42"`, disabled pointer input on `.viewport-panel` while `runnerBusy()` is true, reset `family.root.rotation.y = 0` and called `family.update(0.25)` on scenario apply, and added world-Y `azimuthRadians` support to `fitCameraToFocusTarget` and `CameraFocusFitOptions` (`front`, `profile`, `back`, `three-quarter`) plus rear head bounds for `human-head-hair`.
+- **Verification suites (`character-studio-tests.ts`).** Added `capsule-hair-coverage@v1` (30 helmetless `human-head-hair` close-ups across 10 hairstyles × Front/Side/Back) and `capsule-human-lineup@v1` (20 `human-full-body` front presets covering the 10 baseline and 10 alt capsule characters), with DNA override support (`hairStyleId`, `facialHairId`, `hairColor`, `accessory`, `helmet`) during scenario setup.
+- **Verification and generated baseline sheets.**
+  - `npx ng test demo-app --watch=false --browsers=ChromeHeadless --include="**/character-studio-*.spec.ts"` passed (`18 SUCCESS`).
+  - `daxur app status triangular-demo --json --wait` reported `state: "ok"` (`0` errors, `0` warnings).
+  - Headless hardware runs (`--profile headless-hardware --noisy`, GPU shared with desktop workload; `visual=pending` awaiting human review):
+    - `capsule-hair-coverage@v1` (`2026-11-14T16-08-24-953Z_headless-hardware_9632de21-e3b0c442`): 30/30 `auto=pass`, 30 WebP stills + 2 contact sheets (`capsule-human-hair-variants-sheet-1-front-side-back.contact.svg`/`.png`, `capsule-human-hair-variants-sheet-2-front-side-back.contact.svg`/`.png`).
+    - `capsule-human-lineup@v1` (`2026-11-14T16-09-47-155Z_headless-hardware_9632de21-e3b0c442`): 20/20 `auto=pass`, 20 WebP stills + 2 contact sheets (`capsule-human-space-variants-baseline-lineup-10.contact.svg`/`.png`, `capsule-human-alt-space-variants-lineup-10.contact.svg`/`.png`).
+    - `capsule-human-ab-variants@v1` (`2026-11-14T16-10-49-331Z_headless-hardware_9632de21-e3b0c442`): 10/10 `auto=pass`.
+  - Visual baseline observations: centered framing is restored across all hair angles and presets; current gaps relative to the target style include sharp horizontal scalp-cap seams on short/updo cuts, crown-fanning spike clusters lacking lower side/nape volume, wide gaps in `bob_cut` fringe teeth, tubular front bangs on `space_buns`, `sprout` helmet penetration, tall forehead spacing with flat rectangular eyebrows, and body customization limited to `suitSplitY` shader colors rather than layered garments.
+
+### 2026-11-14 — Option A: Procedural hair, scalp, knit beanie, and facial hair overhaul
+
+- **Sculpted clay hair & dome containment (`capsule-hair-kit.ts`, `capsule-space-gear.ts`, `capsule-character-actor.spec.ts`).** Replaced Twist-prone Frenet tube profiles with surface-aligned `CatmullRomCurve3` tapered clay locks with center ridge crease, configurable `tipBluntness`, recessed vertex-clamped base scalp blocker (`addScalpBaseCap`), forehead curtain bangs (`addFullCurtainBangs`), surface-hugging meridional back coverage (`addSculptedPartedBackScalp`), and exact-surface-radius layered back cascades (`addLayeredBackCascade`). Overhauled all non-bald hairstyles (`sprout`, `space_buns`, `bob_cut`, `afro`, `curly`, `ponytail`, `pigtails`, `buns`, `top_bun`, `spiky`, `wacky`, `mullet`, `swept`, `receding`, `mohawk`), upgraded `mustache_handlebar` and `full_beard`, tilted `buildKnitBeanie` (`-0.20` rad) with 10 ribbed cuff capsules so `mullet` bangs clear underneath without clipping, and clamped geometry vertices against the bubble helmet dome when `helmet: true`.
+- **Coverage suite updates (`character-studio-tests.ts`, `character-studio-page.component.ts`).** Added `jetpack?: boolean` override support on `CharacterStudioTestSettings` and disabled jetpacks across `capsule-hair-coverage@v1` so side/back hair profiles are unoccluded, and updated the full-beard coverage preset to `spiky`.
+- **Verification.**
+  - `npm run test:triangular-engine:procedural` passed (`271 SUCCESS`), including the added spec asserting bubble helmet dome containment and rear-skull coverage across all hairstyles.
+  - `npx ng test demo-app --watch=false --browsers=ChromeHeadless --include="**/character-studio-*.spec.ts"` passed (`18 SUCCESS`).
+  - `daxur app status triangular-demo --json --wait` reported `state: "ok"` (`0` errors, `0` warnings).
+  - Headless hardware browser runs (`--profile headless-hardware --noisy`; `visual=pending` awaiting human review):
+    - `capsule-hair-coverage@v1` (`2026-11-14T17-19-26-232Z_headless-hardware_9632de21-87751c7b`): 30/30 `auto=pass`, 30 unoccluded stills + regenerated `capsule-human-hair-variants-sheet-1-front-side-back.contact.svg`/`.png` and `sheet-2` (blunt `bob_cut`, dense `afro` curls, high centered `ponytail`, clean `mullet` cuff bangs, full nape wrap across updos/swept/spikes).
+    - `capsule-human-lineup@v1` (`2026-11-14T17-20-56-693Z_headless-hardware_9632de21-87751c7b`): 20/20 `auto=pass`, 20 lineup stills + regenerated `capsule-human-space-variants-baseline-lineup-10.contact.svg`/`.png` and `capsule-human-alt-space-variants-lineup-10.contact.svg`/`.png` with clean dome clearance across all helmeted characters.
+    - `capsule-human-ab-variants@v1` (`2026-11-14T17-21-59-298Z_headless-hardware_9632de21-87751c7b`): 10/10 `auto=pass`.
+
+### 2026-11-14 — Option B (in progress): Single-character `Orange Pigtails` face & proportion benchmark
+
+- **Benchmark suite (`character-studio-tests.ts`, `character-studio-page.component.ts`).** Added `capsule-orange-pigtails-benchmark@v1` (4 helmetless close-ups on `curly-pigtails` `#e06829` / `#38bdf8` ties: `Front`, `3/4 View`, `Profile`, `Back`) and adjusted `framingAzimuthRadians('three-quarter')` to `-0.55` rad and `framingAzimuthRadians('profile')` to `-1.18` rad.
+- **Pass 1 — Larger protruding eyes, arched brows & curtain bangs (`capsule-face-rig.ts`, `capsule-hair-kit.ts`).** Enlarged `eyeRadius` (`0.255r` → `0.325r`), raised `eyeY` (`suitSplitY + bodyHeight * 0.365 + 0.04r`) so lower eye clearance above the shader mouth stayed unchanged, rounded sclera Z-scale (`0.94`), tucked open `upperLidPivot.rotation.x` to `-1.34` rad, moved female eyelashes onto `eyelidTiltGroup` (`polarPhi = 0.94..1.36`), replaced flat brow capsules with 5-point `CatmullRomCurve3` `createArchedBrowGeometry`, lifted `addFullCurtainBangs` forehead waves, smoothed `addSculptedPartedBackScalp` (8 ribs, `tipBluntness: 0.90`), and tilted `pigtails` hairbands.
+- **Pass 2 — Wide eye spacing, outer rim silhouette break & temple clearance (`capsule-face-rig.ts`, `capsule-space-gear.ts`, `capsule-dna.ts`, `capsule-hair-kit.ts`).** Enlarged `eyeRadius` to `0.385r` and widened eye/brow angle to `max(0.56, eyeSpacing * 1.72)` (`x ≈ 1.04r * sin(angle)`, `z ≈ 1.08r * cos(angle)`) so outer white eye rims reach/break the capsule silhouette; synced `buildRoundGlasses`; trimmed `curly-pigtails` to `bodyRadius: 0.34`, `bodyHeight: 0.84`; lifted `addFullCurtainBangs` temple sweep above eye level and disabled `includeLongTendrils` on `pigtails`.
+- **Verification (after Pass 2).**
+  - `npx ng test demo-app --watch=false --browsers=ChromeHeadless --include="**/character-studio-*.spec.ts"` passed (`18 SUCCESS`).
+  - `npm run build:triangular-engine` succeeded (`dist/triangular-engine`).
+  - `daxur app status triangular-demo --json --wait` reported `state: "ok"` (`0` errors, `0` warnings).
+  - `capsule-orange-pigtails-benchmark@v1` (`2026-11-14T19-23-04-063Z_headless-hardware_9632de21-75c09682`): 4/4 `auto=pass`.
+  - `npm run test:triangular-engine:procedural` failed to compile on unrelated working-tree changes in `projects/triangular-engine/testing/test-launch.spec.ts` (`recordings` missing in expected `TestLaunchSelection`).
+- **Owner visual feedback after Pass 2.** Outer eye rims break the silhouette better, but the eyes now read as too wide apart — likely because the capsule body (`bodyRadius`) itself is still too wide relative to the head/eye proportions. Passing to a fresh agent for body-width/eye-spacing tuning.
+
 ## Scope history
 
 <!-- tri:scope-history -->
