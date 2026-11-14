@@ -95,7 +95,7 @@
       [style.pointer-events]="runnerBusy() ? 'none' : null"
     >
       <scene [showFps]="true">
-        <orbitControls [cameraPosition]="cameraPosition()" [target]="cameraTarget()" [fov]="42" />
+        <orbitControls [cameraPosition]="cameraPosition()" [target]="cameraTarget()" [fov]="cameraFovDegrees()" />
         <ambientLight [intensity]="1.3" />
         <directionalLight [position]="[3.2, 5.4, 4.2]" [intensity]="2.5" />
         <directionalLight [position]="[-3.8, 3.2, 1.5]" [intensity]="1.35" />

@@ -297,8 +297,54 @@ export const PLANET_SCENE_VISUAL_V1: TestSuite<PlanetSceneTestSettings> = {
   ],
 };
 
-/** What the page offers its runner: the visual suite first, so "Run latest test" stays planet-scene v5. */
-export const PLANET_SCENE_PAGE_SUITES: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_VISUAL_V1];
+/** A short still for the by-eye suite: a brief warm-up and window, the case is for its picture, not its timing. */
+function look(id: string, label: string, change: Partial<PlanetSceneTestSettings>): TestScenario<PlanetSceneTestSettings> {
+  return { ...still(id, label, { clouds: true, water: false, ...change }), warmupMs: 800, durationMs: 1000 };
+}
+
+/**
+ * Suite `planet-scene-visual` v2: the flat-map look at fixed morph values, air on beside air off, as thumbnails. Added after the
+ * ground went blue at morph 1 and the sky stayed a sphere at mid-morph (Opus's answer `atmosphere-morph-look`): orbit at morph
+ * 0.05, 0.1, 0.25, 0.5, 0.75 and 1 with the air on, the air-off partners at 0.25 and 1, and the 20 km pose at morph 1 (the
+ * low view must keep its 0.15 haze floor). No budgets, no timing claims; a person looks at the stills.
+ */
+export const PLANET_SCENE_VISUAL_V2: TestSuite<PlanetSceneTestSettings> = {
+  id: 'planet-scene-visual',
+  version: 2,
+  title: 'Planet scene, by eye: stills at fixed morph values, air on beside air off',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: [
+    ...[0.05, 0.1, 0.25, 0.5, 0.75, 1].map((morph) => look(`orbit-morph-${morph}-air`, `orbit · morph ${morph} · air on`, { pose: 'orbit', morph, atmosphere: true })),
+    look('orbit-morph-0.25-no-air', 'orbit · morph 0.25 · air off', { pose: 'orbit', morph: 0.25, atmosphere: false }),
+    look('orbit-morph-1-no-air', 'orbit · morph 1 · air off', { pose: 'orbit', morph: 1, atmosphere: false }),
+    look('20km-morph-1-air', '20 km · morph 1 · air on', { pose: 'mid-20km', morph: 1, atmosphere: true }),
+    look('20km-morph-1-no-air', '20 km · morph 1 · air off', { pose: 'mid-20km', morph: 1, atmosphere: false }),
+  ],
+};
+
+/**
+ * Suite `planet-scene-visual` v3: which layer is the ghost sphere. Bruno's screenshot at mid-morph shows a darker round sphere
+ * offset behind the bending map. Orbit at morph 0.3 with the water, the air and the clouds switched on and off in turn, so the
+ * sphere shows in exactly the cases where its layer is on. No budgets; a person looks at the stills.
+ */
+export const PLANET_SCENE_VISUAL_V3: TestSuite<PlanetSceneTestSettings> = {
+  id: 'planet-scene-visual',
+  version: 3,
+  title: 'Planet scene, by eye: which layer is the ghost sphere (morph 0.3, water, air, clouds on and off)',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: [
+    look('ghost-all', 'morph 0.3 · water + air + clouds', { pose: 'orbit', morph: 0.3, atmosphere: true, clouds: true, water: true }),
+    look('ghost-water-only', 'morph 0.3 · water only', { pose: 'orbit', morph: 0.3, atmosphere: false, clouds: false, water: true }),
+    look('ghost-air-only', 'morph 0.3 · air only', { pose: 'orbit', morph: 0.3, atmosphere: true, clouds: false, water: false }),
+    look('ghost-clouds-only', 'morph 0.3 · clouds only', { pose: 'orbit', morph: 0.3, atmosphere: false, clouds: true, water: false }),
+    look('ghost-none', 'morph 0.3 · terrain only', { pose: 'orbit', morph: 0.3, atmosphere: false, clouds: false, water: false }),
+  ],
+};
+
+/** What the page offers its runner: the visual suites first, so "Run latest test" stays planet-scene v5. */
+export const PLANET_SCENE_PAGE_SUITES: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_VISUAL_V1, PLANET_SCENE_VISUAL_V2, PLANET_SCENE_VISUAL_V3];
 
 /** Oldest first; the final entry is "Run latest test". */
 export const PLANET_SCENE_TEST_HISTORY: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_V1, PLANET_SCENE_V2, PLANET_SCENE_V3, PLANET_SCENE_V4, PLANET_SCENE_V5];

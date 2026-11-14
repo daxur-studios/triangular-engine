@@ -15,6 +15,20 @@ export interface ReplayTranscript {
   turns: ReplayTurn[];
 }
 
+/** Move at a steady walking pace and stop exactly at the destination. */
+export function replayWalkStep(x: number, z: number, destination: readonly [number, number], dt: number) {
+  const dx = destination[0] - x, dz = destination[1] - z;
+  const distance = Math.hypot(dx, dz);
+  const step = Math.min(distance, Math.max(0, dt));
+  if (distance < 0.001 || step === 0) return { x, z, walking: false, heading: 0 };
+  return {
+    x: x + dx / distance * step,
+    z: z + dz / distance * step,
+    walking: true,
+    heading: Math.atan2(dx, dz),
+  };
+}
+
 /** Validate before handing user-selected JSON to the scene. */
 export function readTranscript(value: unknown): ReplayTranscript {
   const t = value as ReplayTranscript;

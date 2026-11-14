@@ -97,6 +97,9 @@ export function settingsMismatches(
   if (actual.cameraFraming !== expected.cameraFraming) {
     out.push(`cameraFraming: expected ${expected.cameraFraming}, found ${actual.cameraFraming}`);
   }
+  if (expected.cameraFovDegrees !== undefined && actual.cameraFovDegrees !== expected.cameraFovDegrees) {
+    out.push(`cameraFovDegrees: expected ${expected.cameraFovDegrees}, found ${actual.cameraFovDegrees ?? 'unset'}`);
+  }
   if (actual.layout !== expected.layout) {
     out.push(`layout: expected ${expected.layout}, found ${actual.layout}`);
   }

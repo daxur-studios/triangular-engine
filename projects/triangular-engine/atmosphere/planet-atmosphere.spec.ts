@@ -274,11 +274,11 @@ describe('skyShellFade: the unbent sky shell leaves as the planet unrolls', () =
     expect(skyShellFade(1, TOP, TOP)).toBe(0);
   });
 
-  it('from orbit (4 air heights) no ghost globe is left once a third of the way to the map, at 0.5 and above', () => {
-    for (const morph of [0.35, 0.5, 0.85, 1]) expect(skyShellFade(morph, 4 * TOP, TOP)).toBe(1);
-    // The old curve left half the shell at morph 0.5.
-    expect(skyShellFade(0.17, 4 * TOP, TOP)).toBeGreaterThan(0);
-    expect(skyShellFade(0.17, 4 * TOP, TOP)).toBeLessThan(1);
+  it('from orbit (4 air heights) no ghost globe is left by morph 0.06 (it showed a round rim at 0.1-0.3 when the fade was slower)', () => {
+    for (const morph of [0.06, 0.1, 0.25, 0.5, 0.85, 1]) expect(skyShellFade(morph, 4 * TOP, TOP)).toBe(1);
+    // Part-way through the first 6% it is neither whole nor gone.
+    expect(skyShellFade(0.03, 4 * TOP, TOP)).toBeGreaterThan(0);
+    expect(skyShellFade(0.03, 4 * TOP, TOP)).toBeLessThan(1);
   });
 
   it('is monotonic in the morph and in the height', () => {

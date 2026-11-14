@@ -39,14 +39,29 @@
             }
           }
           <p class="hint">Distance approximates the average of available scores; arrows preserve each view.</p>
-          @if (details.questions.length) {
-            <h3>Questions</h3>
-            @for (question of details.questions; track question.id) {
-              <p><strong>{{ question.id }} · {{ question.status }}</strong><br />{{ question.from }} → {{ question.to }}: {{ question.text }}</p>
-            }
-          }
         }
       }
     </section>
   </ng-template>
+  @if (replayDetails; as details) {
+    @if (details.questions.length) {
+      <ng-template portalTarget="overlay" lane="topCenter" [order]="10">
+        <section class="question-board" aria-label="Conversation questions" aria-live="polite">
+          <h2>Conversation questions</h2>
+          <div class="question-list">
+            @for (question of details.questions; track question.id) {
+              <article class="question-card" [class.answered]="question.status === 'answered'" [class.declined]="question.status === 'declined'">
+                <div class="question-heading">
+                  <strong>{{ question.id }}</strong>
+                  <span class="question-status">{{ question.status === 'answered' ? '✓ Answered' : question.status === 'declined' ? '— Declined' : '○ Open' }}</span>
+                </div>
+                <p>{{ question.text }}</p>
+                <div class="question-route">{{ question.from }} → {{ question.to }}</div>
+              </article>
+            }
+          </div>
+        </section>
+      </ng-template>
+    }
+  }
 }

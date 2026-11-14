@@ -18,7 +18,7 @@ describe('test launch selection', () => {
   it('round-trips bounded options and preserves backend flags', () => {
     const url = new URL(buildTestLaunchUrl('http://localhost/lab?backend=webgl2', first, 'human-observed', 3));
     expect(url.searchParams.get('backend')).toBe('webgl2');
-    expect(parseTestLaunch(url, [first])).toEqual({ key: 'reference@1', profile: 'human-observed', mode: 'standard', repetitions: 3, autoStart: true, thumbnails: true });
+    expect(parseTestLaunch(url, [first])).toEqual({ key: 'reference@1', profile: 'human-observed', mode: 'standard', repetitions: 3, autoStart: true, thumbnails: true, recordings: false });
     const quick = new URL(buildTestLaunchUrl('http://localhost/lab', first, 'visible-browser', 1, 'quick'));
     expect(parseTestLaunch(quick, [first])?.mode).toBe('quick');
     // Thumbnails are on unless the link says otherwise, and an on link stays free of the parameter.
@@ -89,7 +89,7 @@ describe('test launch selection', () => {
       expect(url.searchParams.get('testCases')).toBe('third,second-suite@3/zoom,check');
       expect(url.searchParams.get('backend')).toBe('webgl2');
       expect(parseTestLaunch(url, history)).toEqual({
-        key: 'reference@1', profile: 'human-observed', mode: 'quick', repetitions: 2, autoStart: true, thumbnails: false, cases: tests,
+        key: 'reference@1', profile: 'human-observed', mode: 'quick', repetitions: 2, autoStart: true, thumbnails: false, recordings: false, cases: tests,
       });
       expect(new URL(buildTestLaunchUrl(link, multi, 'visible-browser', 1)).searchParams.has('testCases')).toBeFalse();
       expect(() => buildTestBatchLaunchUrl('http://localhost/', [], 'visible-browser', 1)).toThrow();

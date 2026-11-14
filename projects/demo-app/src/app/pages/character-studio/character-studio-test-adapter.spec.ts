@@ -24,8 +24,9 @@ describe('CharacterStudioTestAdapter & Suites', () => {
     const suiteIds = new Set<string>();
     for (const suite of CHARACTER_STUDIO_TEST_HISTORY) {
       expect(suite.id).toBeTruthy();
-      expect(suiteIds.has(suite.id)).toBeFalse();
-      suiteIds.add(suite.id);
+      const suiteVersion = `${suite.id}@${suite.version}`;
+      expect(suiteIds.has(suiteVersion)).toBeFalse();
+      suiteIds.add(suiteVersion);
 
       expect(suite.version).toBeGreaterThan(0);
       expect(suite.scenarios.length).toBeGreaterThan(0);
@@ -348,6 +349,12 @@ describe('CharacterStudioTestAdapter & Suites', () => {
     const diffs = settingsMismatches(s1, s2);
     expect(diffs.length).toBe(1);
     expect(diffs[0]).toContain('emotion');
+  });
+
+  it('detects an incorrect field of view when a scenario specifies one', () => {
+    const actual = { ...DEFAULT_CAT_TEST_SETTINGS, cameraFovDegrees: 42 };
+    const expected = { ...DEFAULT_CAT_TEST_SETTINGS, cameraFovDegrees: 25 };
+    expect(settingsMismatches(actual, expected)).toEqual(['cameraFovDegrees: expected 25, found 42']);
   });
 
   it('forwards one close-up still per first-repetition case and omits later repetitions', async () => {

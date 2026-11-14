@@ -28,6 +28,7 @@ export interface CharacterStudioTestSettings {
   readonly emotion: ExtendedEmotionName;
   readonly gait: CapsuleCatGaitMode | CapsuleLocomotionMode;
   readonly cameraFraming: CameraFramingPreset;
+  readonly cameraFovDegrees?: number;
   readonly focusTarget?: VisualFocusTargetId;
   readonly layout: CapsuleLayoutMode;
   readonly speak?: boolean;
@@ -643,6 +644,17 @@ export const CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V1: TestSuite<CharacterStud
   })),
 };
 
+/** Same character and views as v1 with a more distant, 25-degree perspective. */
+export const CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V2: TestSuite<CharacterStudioTestSettings> = {
+  ...CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V1,
+  version: 2,
+  title: 'Capsule Human Benchmark: Orange Pigtails (25° perspective)',
+  scenarios: CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V1.scenarios.map((scenario) => ({
+    ...scenario,
+    settings: { ...scenario.settings, cameraFovDegrees: 25 },
+  })),
+};
+
 /**
  * Full test history for Character Studio, oldest first.
  * The final entry is the default latest test suite.
@@ -656,6 +668,7 @@ export const CHARACTER_STUDIO_TEST_HISTORY: readonly TestSuite<CharacterStudioTe
   CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
   CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1,
   CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V1,
+  CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V2,
   CAPSULE_HAIR_COVERAGE_SUITE_V1,
   CAPSULE_HUMAN_LINEUP_SUITE_V1,
   CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1,

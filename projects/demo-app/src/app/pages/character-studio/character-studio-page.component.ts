@@ -42,6 +42,7 @@ import {
   CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1,
   CAPSULE_HUMAN_LINEUP_SUITE_V1,
   CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V1,
+  CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V2,
   CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
   CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1,
   type CharacterStudioTestSettings,
@@ -120,6 +121,7 @@ export class CharacterStudioPageComponent {
   readonly activeView = signal<CharacterStudioView>('three-quarter');
   readonly cameraPosition = signal<[number, number, number]>([2.6, 1.7, 3.2]);
   readonly cameraTarget = signal<[number, number, number]>([0, 0.98, 0]);
+  readonly cameraFovDegrees = signal(42);
   readonly viewOptions: readonly CharacterStudioViewOption[] = [
     { id: 'front', label: 'Front' },
     { id: 'three-quarter', label: '3/4' },
@@ -135,6 +137,7 @@ export class CharacterStudioPageComponent {
     CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
     CAPSULE_HUMAN_AB_VARIANTS_SUITE_V1,
     CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V1,
+    CAPSULE_ORANGE_PIGTAILS_BENCHMARK_SUITE_V2,
     CAPSULE_HAIR_COVERAGE_SUITE_V1,
     CAPSULE_HUMAN_LINEUP_SUITE_V1,
     CHARACTER_STUDIO_HUMAN_PERFORMANCE_SUITE_V1,
@@ -189,6 +192,7 @@ export class CharacterStudioPageComponent {
         emotion: this.selectedExpression(),
         gait: this.selectedMotionId() as CharacterStudioTestSettings['gait'],
         cameraFraming: this.cameraFraming,
+        cameraFovDegrees: this.cameraFovDegrees(),
         ...(this.activeFocusTarget ? { focusTarget: this.activeFocusTarget } : {}),
         layout: this.performancePopulation !== undefined ? 'lineup' : 'hero',
         ...(this.performancePopulation !== undefined ? {
@@ -206,6 +210,12 @@ export class CharacterStudioPageComponent {
       };
     },
     apply: (settings) => {
+      const fov = settings.cameraFovDegrees ?? 42;
+      this.cameraFovDegrees.set(fov);
+      if (this.engine.camera instanceof PerspectiveCamera) {
+        this.engine.camera.fov = fov;
+        this.engine.camera.updateProjectionMatrix();
+      }
       if (this.selectedFamilyId() !== settings.characterType) {
         this.selectedFamilyId.set(settings.characterType);
         this.syncFamilyVisibility();

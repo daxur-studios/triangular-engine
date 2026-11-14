@@ -4,7 +4,8 @@ import { Color, Mesh, MeshStandardMaterial, PlaneGeometry, TorusGeometry, Vector
 import { EngineModule, EngineService } from 'triangular-engine';
 import { preProcessText, wordsToVisemes, type ExtendedEmotionName, type VisemeKeyframe } from 'triangular-engine/characters';
 import { CapsuleCharacterActor } from 'triangular-engine/procedural';
-import { readTranscript, replayPositions, replayState, type ReplayTranscript } from './conversation-replay';
+import { readTranscript, replayPositions, replayState, replayWalkStep, type ReplayTranscript } from './conversation-replay';
+import { QUESTION_REPLAY_SAMPLE } from './question-replay-sample';
 
 /** One debrief participant seated in the circle. */
 export interface DebriefSpeaker {
@@ -113,6 +114,7 @@ export class ConsensusDebriefPageComponent {
   readonly error = signal('');
   private targets: [number, number][] = [];
   private replayUtterance?: SpeechSynthesisUtterance;
+  private transcriptLoadVersion = 0;
   private activeId?: string;
   private lookAtId?: string;
   private envelope: readonly number[] = [];
@@ -141,7 +143,11 @@ export class ConsensusDebriefPageComponent {
     (window as unknown as { __debrief: DebriefControls }).__debrief = controls;
 
     this.engine.tick$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((dt) => this.update(dt));
+    if (this.replayMode && new URLSearchParams(window.location.search).get('sample') === 'questions') {
+      this.setTranscript(QUESTION_REPLAY_SAMPLE, 1);
+    }
     this.destroyRef.onDestroy(() => {
+      this.transcriptLoadVersion++;
       this.stopReplaySpeech();
       for (const s of this.seats) {
         s.actor.dispose();
@@ -195,18 +201,24 @@ export class ConsensusDebriefPageComponent {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
+    const version = ++this.transcriptLoadVersion;
     try {
-      const transcript = readTranscript(JSON.parse(await file.text()));
-      this.transcript.set(transcript);
-      this.turnCount.set(0);
-      this.error.set('');
-      this.init(transcript.participants.map(name => ({ id: name, name, stance: 'waiting' })));
-      this.showTurn(0);
+      const value: unknown = JSON.parse(await file.text());
+      if (version === this.transcriptLoadVersion) this.setTranscript(value, 0);
     } catch {
-      this.error.set('Could not read this conversation file. Select a coordinator transcript JSON.');
+      if (version === this.transcriptLoadVersion) this.error.set('Could not read this conversation file. Select a coordinator transcript JSON.');
     } finally {
       input.value = '';
     }
+  }
+
+  private setTranscript(value: unknown, firstTurn: number): void {
+    const transcript = readTranscript(value);
+    this.transcript.set(transcript);
+    this.turnCount.set(0);
+    this.error.set('');
+    this.init(transcript.participants.map(name => ({ id: name, name, stance: 'waiting' })));
+    this.showTurn(firstTurn);
   }
 
   showTurn(count: number): void {
@@ -379,11 +391,16 @@ export class ConsensusDebriefPageComponent {
     this.updateCamera(dt, active);
     for (const [index, seat] of this.seats.entries()) {
       const destination = this.replayMode ? this.targets[index] : undefined;
+      let walking = false;
+      let walkingHeading = 0;
       if (destination) {
-        const k = Math.min(1, dt * 2);
-        seat.actor.root.position.x += (destination[0] - seat.actor.root.position.x) * k;
-        seat.actor.root.position.z += (destination[1] - seat.actor.root.position.z) * k;
+        const step = replayWalkStep(seat.actor.root.position.x, seat.actor.root.position.z, destination, dt);
+        seat.actor.root.position.x = step.x;
+        seat.actor.root.position.z = step.z;
+        walking = step.walking;
+        walkingHeading = step.heading;
       }
+      seat.actor.setLocomotion(walking ? 'walk' : 'idle');
       const isActive = seat === active;
       seat.ring.material = isActive ? this.activeMat : this.idleMat;
       const scale = seat.actor.root.scale.x + ((isActive ? SPEAKER_SCALE : 1) - seat.actor.root.scale.x) * Math.min(1, dt * 8);
@@ -399,6 +416,7 @@ export class ConsensusDebriefPageComponent {
         const away = Math.atan2(Math.sin(desired - toCamera), Math.cos(desired - toCamera));
         desired = toCamera + away * (this.replayMode ? 0.5 : 1 - SPEAKER_CAMERA_FACING_SHARE);
       }
+      if (walking) desired = walkingHeading;
       let delta = desired - seat.actor.root.rotation.y;
       delta = Math.atan2(Math.sin(delta), Math.cos(delta));
       seat.actor.root.rotation.y += delta * Math.min(1, dt * TURN_RATE_PER_S);

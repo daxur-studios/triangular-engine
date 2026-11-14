@@ -1,0 +1,59 @@
+{
+  "description": "Manually estimated landmarks for the front Orange Pigtails concept; reviewed visually by the owner. Approximate, not an exact segmentation.",
+  "source_sha256": "80f1ef2cb1ddc0dd5a4cbeaa000ae804a0271eb26af9ddca26b44a17384cb8f3",
+  "source_size_pixels": [
+    1792,
+    2400
+  ],
+  "coordinate_space": "original image pixels, origin top left; eye entries are [x,y,radius]",
+  "landmarks": {
+    "crop": [
+      10,
+      340,
+      465,
+      670
+    ],
+    "eyes": [
+      [
+        197,
+        510,
+        41
+      ],
+      [
+        306,
+        507,
+        41
+      ]
+    ],
+    "pupils": [
+      [
+        202,
+        508
+      ],
+      [
+        302,
+        505
+      ]
+    ],
+    "head_edges": [
+      [
+        166,
+        590
+      ],
+      [
+        338,
+        590
+      ]
+    ],
+    "mouth_corners": [
+      [
+        215,
+        563
+      ],
+      [
+        285,
+        565
+      ]
+    ]
+  }
+}

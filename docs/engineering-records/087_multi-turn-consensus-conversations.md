@@ -83,6 +83,14 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 
 **[finding]** The pre-existing debrief page already drives the engine's viseme and expression controller from recorded audio envelopes. Manual replay previously bypassed it and the initial replay video was silent. Replay now offers optional browser speech using the same engine viseme controller and text-estimated timing; this is approximate and is separate from the recorded-audio video path. Replay participants turn partly toward the camera and each other, and active-speaker enlargement is reduced to seven percent. Spoken audio and visual synchronization still require human review.
 
+**[decision]** Replay participants move at a steady pace using the capsule walk animation, face the direction of travel, and return to idle on arrival. The motion remains a visual approximation of the saved agreement layout.
+
+**[decision]** Replay shows questions as floating cards with their sender, recipient and recorded open, answered or declined status. Rewinding reconstructs the earlier state. An explicitly illustrative fixture exercises these states without additional provider calls; the original mixed-provider transcript raised no questions.
+
+**[verification]** Five headless replay tests passed, and a headless browser checked question appearance, responses and rewind against the illustrative fixture. Visual acceptance remains with the owner.
+
+**[decision]** The illustrative question replay opens from a direct sample URL with the first questions already visible; selecting a file is optional for other transcripts.
+
 ## Scope history
 
 <!-- tri:scope-history -->

@@ -116,6 +116,21 @@ describe('PlanetAtmosphereBinding.sync, the sky through the morph', () => {
     }
   });
 
+  it('floors a flat-map ray at 0.15 near the ground and 0.6 from orbit, so a slanted orbit view is not washed blue', () => {
+    // At morph 1 the map is the plane z = 0 through the centre, so the camera's z (in radii, radiusUnits 1) is its height above the map.
+    const low = synced([0, 0, 0.003], 1);
+    const mid = synced([0, 0, 0.2], 1);
+    const orbit = synced([0, 0, 3], 1);
+    expect(low.binding.slabFloor.value).toBeCloseTo(0.15, 6);
+    expect(mid.binding.slabFloor.value).toBeGreaterThan(0.15);
+    expect(mid.binding.slabFloor.value).toBeLessThan(0.6);
+    expect(orbit.binding.slabFloor.value).toBeCloseTo(0.6, 6);
+    for (const r of [low, mid, orbit]) {
+      r.backdrop.dispose();
+      r.model.dispose();
+    }
+  });
+
   it('points the sky up along the radial direction on the globe and the map normal when flat', () => {
     const globe = synced([0.5, 0.3, 2], 0);
     expect(globe.axes[1].distanceTo(radial)).toBeLessThan(1e-6);

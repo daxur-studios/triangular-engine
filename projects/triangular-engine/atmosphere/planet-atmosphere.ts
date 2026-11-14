@@ -21,13 +21,15 @@ import { AtmosphereSkyViewLut, type AtmosphereSkyViewOptions } from './atmospher
 /**
  * How much of the sky shell is gone, 0 (all there) to 1 (hidden), for a planet unrolled to `morph` and a camera `skyAltitude` metres
  * up, with the air `topAltitude` thick. The shell is a sphere's: it does not bend with the planet, so seen from above the air it
- * would hang as a dark ghost globe behind the bending map. It dissolves over the first third of the morph there (from one to four
+ * would hang as a dark ghost globe behind the bending map. It dissolves over the first 6% of the morph there (from one to four
  * air heights up). Close to the ground it stays whatever the morph, because the hazed horizon needs a sky behind it.
  */
 export function skyShellFade(morph: number, skyAltitude: number, topAltitude: number): number {
   const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
   const high = clamp01((skyAltitude / topAltitude - 1) / 3);
-  const unrolled = clamp01((morph - 0.02) / 0.3);
+  // Dissolve the globe-sized shell while the terrain still looks like a globe (by morph 0.06 it has barely moved); a slower
+  // fade left a round rim hanging around the peeling terrain. The bent sky (BentAtmosphere) is the clean fix, not yet wired.
+  const unrolled = clamp01(morph / 0.06);
   return unrolled * unrolled * (3 - 2 * unrolled) * high * high * (3 - 2 * high);
 }
 

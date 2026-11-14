@@ -96,6 +96,12 @@ export class PlanetAtmosphereBinding {
    */
   readonly skyAltitude = uniform(0);
   /**
+   * Lowest elevation (as a fraction of the ray's length) the flat-map haze lets a ray count, once the morph has ramped it in.
+   * 0.15 (an airmass of about 7) keeps a low view's horizon hazy; it rises to 0.6 (about 1.7) as the camera climbs far above
+   * the map, because a slanted ray from orbit would otherwise count several airmasses and wash the whole map blue.
+   */
+  readonly slabFloor = uniform(0.15);
+  /**
    * Optional point (body frame, any length) under the camera whose sun angle the sky shows. Default: the camera's own
    * direction from the planet's centre. A page whose flat map projects a different point under the camera sets it.
    */
@@ -234,6 +240,9 @@ export class PlanetAtmosphereBinding {
     this.ez.normalize();
     this.skyUp.copy(radialUp).multiplyScalar(Math.cos(angle)).addScaledVector(this.ez, Math.sin(angle)).normalize();
     this.skyAltitude.value = Math.max(0, altitude + (Math.max(0, this.camBody.z) - altitude) * morph);
+    // Floor 0.15 near the ground, 0.6 once the camera is a good fraction of a planet radius up (smoothstep 0.05R to 0.5R).
+    const heightT = Math.min(1, Math.max(0, ((this.skyAltitude.value as number) / this.model.profile.planetRadiusM - 0.05) / 0.45));
+    this.slabFloor.value = 0.15 + 0.45 * heightT * heightT * (3 - 2 * heightT);
     this.ref.set(0, 1, 0);
     if (Math.abs(this.skyUp.y) > 0.99) this.ref.set(1, 0, 0);
     const sx = this.ex.crossVectors(this.ref, this.skyUp).normalize();
@@ -352,7 +361,8 @@ export class PlanetAtmosphereBinding {
     // count thousands of kilometres of dense air (everything goes white). Floor the ray's elevation (0.15, an airmass of about 7),
     // ramped in over the first third of the morph; on the flat map the same floor stops a low view from counting the
     // whole map as air. The globe (morph 0) is untouched.
-    const elevationFloor = min(this.morph.mul(3), 1).mul(0.15);
+    // The floor itself rises with the camera's height above the map ({@link slabFloor}).
+    const elevationFloor = min(this.morph.mul(3), 1).mul(this.slabFloor);
     const haze = this.model.slab({
       distance,
       cameraHeight: max(dot(toCamera, upView).mul(mpu), distance.mul(elevationFloor)),

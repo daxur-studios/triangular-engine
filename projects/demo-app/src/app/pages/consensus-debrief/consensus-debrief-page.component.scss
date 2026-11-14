@@ -11,3 +11,16 @@ button:disabled { opacity: .45; cursor: default; }
 .speech { white-space: pre-wrap; }
 .hint { color: #b5c4cb; font-size: 12px; }
 .error { color: #ffac9f; }
+.question-board { width: min(330px, 33vw); max-height: 42vh; overflow: auto; color: #f2f5f7; font: 13px/1.4 system-ui, sans-serif; }
+.question-board h2 { margin: 0 0 6px; text-align: center; font-size: 13px; text-shadow: 0 1px 4px #141a22; }
+.question-list { display: grid; gap: 7px; }
+.question-card { padding: 9px 11px; border: 1px solid #d8b979; border-radius: 10px; background: rgba(30, 37, 45, .94); box-shadow: 0 5px 16px #0005; overflow-wrap: anywhere; }
+.question-card.answered { border-color: #83cba8; }
+.question-card.declined { border-color: #a2aeb7; }
+.question-heading { display: flex; justify-content: space-between; gap: 8px; }
+.question-status { font-size: 12px; color: #f2d499; }
+.answered .question-status { color: #a5e4c3; }
+.declined .question-status, .question-route { color: #bdc9d0; }
+.question-card p { margin: 5px 0; }
+.question-route { font-size: 11px; }
+@media (max-width: 700px) { .question-board { width: min(250px, 45vw); max-height: 35vh; } }

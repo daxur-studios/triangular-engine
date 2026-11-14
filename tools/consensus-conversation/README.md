@@ -60,5 +60,7 @@ document export is implemented yet. DeepSeek and Hydrogen were tested manually b
 To replay a saved JSON transcript, open the existing demo app at `/consensus-debrief?replay=1`, choose
 **Open transcript**, and step through its turns. The file is read locally by the page. Capsule spacing
 approximates the average of reported directional scores, while the panel keeps each score separate;
-positions are not a precise map of all relationships. Questions and readiness update as turns appear.
-This is a manual replay, not live playback, floating question cards or a voting interface.
+positions are not a precise map of all relationships. Floating question cards and readiness update as
+turns appear, including when stepping backwards. Open `/consensus-debrief?replay=1&sample=questions`
+for an illustrative example of open, answered and declined questions; its dialogue is invented, not a model transcript.
+This is a manual replay, not live playback or a voting interface.
