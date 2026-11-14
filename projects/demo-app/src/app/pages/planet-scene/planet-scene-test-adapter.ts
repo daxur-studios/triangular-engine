@@ -80,6 +80,10 @@ export function settingsMismatches(actual: PlanetSceneTestSettings, expected: Pl
   for (const key of ['pose', 'terrain', 'atmosphere', 'morph', 'motion'] as const) {
     if (actual[key] !== expected[key]) out.push(`${key}: expected ${expected[key]}, found ${actual[key]}`);
   }
+  // Omitted means the planet material, so an omitted key and `false` are the same setting.
+  if ((actual.plainMaterial ?? false) !== (expected.plainMaterial ?? false)) {
+    out.push(`plainMaterial: expected ${expected.plainMaterial ?? false}, found ${actual.plainMaterial ?? false}`);
+  }
   return out;
 }
 
@@ -270,6 +274,7 @@ export function createPlanetSceneTestAdapter(host: PlanetSceneTestHost): TestRun
           leaves: info.leaves, drawnLeaves: info.drawnLeaves, deepestLevel: info.deepestLevel, capHit: info.capHit, unmet: info.unmet,
           drawCalls: info.drawCalls, rendererTriangles: info.rendererTriangles,
           drawingBufferWidth: info.drawingBuffer[0], drawingBufferHeight: info.drawingBuffer[1],
+          terrainMaterial: settings.plainMaterial ? 'plain-unlit' : 'planet',
           ...(moving ? { motionSeconds } : {}),
           ...labelDetails,
           ...(settleTimerErrors > 0 ? { settleTimerErrorsTolerated: settleTimerErrors } : {}),

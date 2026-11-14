@@ -1,6 +1,7 @@
 import { Component, DestroyRef, computed, inject, isDevMode, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AmbientLight, DirectionalLight, Matrix4, PerspectiveCamera, Vector3 } from 'three';
+import { MeshBasicNodeMaterial } from 'three/webgpu';
 import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
 import { PlanetCloudsComponent } from 'triangular-engine/cloud-volumes';
 import { PlanetAtmosphereComponent, type IAtmosphereSurface } from 'triangular-engine/atmosphere';
@@ -74,7 +75,7 @@ interface RendererLike {
     <scene>
       <planet [radius]="radius" [sunDirection]="sun" [world]="world" [bake]="bake" [morph]="morph()">
         @if (terrainOn()) {
-          <planetTerrain />
+          <planetTerrain [material]="plainMaterial() ? plainNode : undefined" />
         }
         <planetAtmosphere preset="earth" [surfaces]="surfaces()" [enabled]="atmosphereOn()" />
         <planetClouds [coverage]="0.45" />
@@ -192,6 +193,10 @@ export class PlanetScenePageComponent {
   readonly terrainOn = signal(DEFAULT_PLANET_SCENE_SETTINGS.terrain);
   readonly atmosphereOn = signal(DEFAULT_PLANET_SCENE_SETTINGS.atmosphere);
   readonly morph = signal(DEFAULT_PLANET_SCENE_SETTINGS.morph);
+  /** Test-only (suite v4): draw the terrain with {@link plainNode} instead of the planet material. Not in the panel. */
+  readonly plainMaterial = signal(false);
+  /** An unlit basic material: no cell lookup, no lighting. The terrain sets its `positionNode`. */
+  readonly plainNode = new MeshBasicNodeMaterial({ color: 0x8a8f6a });
   /** The page's own scripted move (the "play" buttons), or undefined. */
   readonly playing = signal<DemoMotion | undefined>(undefined);
   /** Mouse orbit: the canvas drags, looks and zooms the camera (see {@link setFreeOrbit}). Off by default. */
@@ -452,6 +457,7 @@ export class PlanetScenePageComponent {
   private readSettings(): PlanetSceneTestSettings {
     return {
       pose: this.pose(), terrain: this.terrainOn(), atmosphere: this.atmosphereOn(), morph: this.morph(),
+      ...(this.plainMaterial() ? { plainMaterial: true } : {}),
       ...(this.testProgress !== undefined && this.testMotion ? { motion: this.testMotion } : {}),
     };
   }
@@ -463,6 +469,7 @@ export class PlanetScenePageComponent {
     this.terrainOn.set(settings.terrain);
     this.atmosphereOn.set(settings.atmosphere);
     this.morph.set(settings.morph);
+    this.plainMaterial.set(settings.plainMaterial ?? false);
     this.pose.set(settings.pose);
     this.testMotion = settings.motion;
     this.setTestProgress(settings.motion ? 0 : undefined);
@@ -495,6 +502,8 @@ export class PlanetScenePageComponent {
     const heights = this.planet()?.heights();
     if (!heights) return 'the height bake';
     if (body.settings.heights !== heights) return 'the terrain to take the baked heights';
+    if (this.plainMaterial() && body.settings.material !== this.plainNode) return 'the terrain to take the plain material';
+    if (!this.plainMaterial() && body.settings.material === this.plainNode) return 'the terrain to leave the plain material';
     const surface = layer.surface();
     if (surface && body.settings.material !== surface) return "the terrain to take the planet's material";
     if (!body.object.visible) return "the terrain's pipeline";

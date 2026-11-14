@@ -527,6 +527,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'consensus-debrief',
+    loadComponent: () =>
+      import('./pages/consensus-debrief/consensus-debrief-page.component').then(
+        ({ ConsensusDebriefPageComponent }) => ConsensusDebriefPageComponent,
+      ),
+  },
+  {
     path: 'capsule-human-sandbox',
     loadComponent: () =>
       import('./pages/capsule-human-sandbox/capsule-human-sandbox-page.component').then(

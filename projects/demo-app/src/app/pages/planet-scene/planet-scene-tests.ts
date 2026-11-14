@@ -22,6 +22,13 @@ export interface PlanetSceneTestSettings {
    * morph 0 to 1 and back to 0.
    */
   readonly motion?: PlanetMotion;
+  /**
+   * Draw the terrain with a plain unlit `MeshBasicNodeMaterial` instead of the planet material (v4). The vertex stage,
+   * the morph and the selection are unchanged; only the fragment stage (the cell lookup, 12 fetches a fragment) and the
+   * lighting are gone. The atmosphere cannot attach to it, so plain cases also turn the atmosphere off. Omitted means the
+   * planet material, as in v1 to v3.
+   */
+  readonly plainMaterial?: boolean;
 }
 
 /** The scene as a game would run it: terrain and atmosphere on, the globe. */
@@ -104,5 +111,29 @@ const PLANET_SCENE_V3: TestSuite<PlanetSceneTestSettings> = {
   ],
 };
 
+/**
+ * Suite `planet-scene` v4 (Plan 059, morph frame cost): v3 unchanged, plus a material A/B. The morph-1 scene pass was 4.15 ms
+ * against 1.04 ms at morph 0 (about 2.8 ms per million triangles), while the morph spike, which draws a debug material, costs
+ * about 0.4 ms per million triangles at every morph. The `-plain` cases draw the same views with an unlit basic material and
+ * the atmosphere off; each partner is the existing atmosphere-off case of the same view with the planet material (one new
+ * partner, `orbit-morph-0.5-atmosphere-off`). If a plain case costs about what the spike does and its partner costs the
+ * 4.15 ms, the planet material's fragment stage is the cost; if both are high, it is the vertex stage or the page.
+ */
+const PLANET_SCENE_V4: TestSuite<PlanetSceneTestSettings> = {
+  id: 'planet-scene',
+  version: 4,
+  title: 'Planet scene: v3 plus the plain-material A/B for the morph frame cost (Plan 059 G6)',
+  purpose: 'performance',
+  requiresVisualReview: true,
+  scenarios: [
+    ...PLANET_SCENE_V3.scenarios,
+    still('orbit-morph-0.5-atmosphere-off', 'orbit · morph 0.5 · atmosphere off (A/B partner of orbit-morph-0.5-plain)', { pose: 'orbit', morph: 0.5, atmosphere: false }),
+    still('orbit-plain', 'orbit · plain material (A/B partner of orbit-atmosphere-off)', { pose: 'orbit', atmosphere: false, plainMaterial: true }),
+    still('orbit-morph-0.5-plain', 'orbit · morph 0.5 · plain material (A/B partner of orbit-morph-0.5-atmosphere-off)', { pose: 'orbit', morph: 0.5, atmosphere: false, plainMaterial: true }),
+    still('orbit-morph-1-plain', 'orbit · morph 1 · plain material (A/B partner of orbit-morph-1-atmosphere-off)', { pose: 'orbit', morph: 1, atmosphere: false, plainMaterial: true }),
+    still('ground-morph-1-plain', '2 m eye · morph 1 · plain material (A/B partner of ground-morph-1-atmosphere-off)', { pose: 'ground', morph: 1, atmosphere: false, plainMaterial: true }),
+  ],
+};
+
 /** Oldest first; the final entry is "Run latest test". */
-export const PLANET_SCENE_TEST_HISTORY: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_V1, PLANET_SCENE_V2, PLANET_SCENE_V3];
+export const PLANET_SCENE_TEST_HISTORY: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_V1, PLANET_SCENE_V2, PLANET_SCENE_V3, PLANET_SCENE_V4];

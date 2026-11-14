@@ -8,7 +8,9 @@ import { createPlanetSceneTestAdapter, settingsMismatches, type PlanetSceneTestH
 import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_TEST_HISTORY, type PlanetSceneTestSettings } from './planet-scene-tests';
 
 /** The final entry of the history: the version the runner selects. */
-const SUITE = PLANET_SCENE_TEST_HISTORY[PLANET_SCENE_TEST_HISTORY.length - 1];
+/** v3, the suite most of these specs describe; v4 has its own specs below. */
+const SUITE = PLANET_SCENE_TEST_HISTORY[2];
+const V4 = PLANET_SCENE_TEST_HISTORY[3];
 const V1_IDS = ['orbit', 'mid-20km', 'ground', 'descent', 'yaw-360', 'orbit-atmosphere-off', 'ground-atmosphere-off'];
 const BASE = 'http://triangular-demo.localhost:4200/planet-scene';
 
@@ -61,7 +63,7 @@ function makeHost(override: Partial<PlanetSceneTestHost> = {}, state: { read?: (
 describe('Plan 059 G5 planet-scene suite', () => {
   it('is a valid history: v1, v2 then v3, unique case ids, plain JSON settings, the planned cases', () => {
     expect(() => validateTestHistory(PLANET_SCENE_TEST_HISTORY)).not.toThrow();
-    expect(PLANET_SCENE_TEST_HISTORY.map((suite) => [suite.id, suite.version])).toEqual([['planet-scene', 1], ['planet-scene', 2], ['planet-scene', 3]]);
+    expect(PLANET_SCENE_TEST_HISTORY.map((suite) => [suite.id, suite.version])).toEqual([['planet-scene', 1], ['planet-scene', 2], ['planet-scene', 3], ['planet-scene', 4]]);
     expect(SUITE.version).toBe(3);
     const ids = SUITE.scenarios.map((scenario) => scenario.id);
     expect(ids).toEqual([...V1_IDS, 'orbit-morph-0.5', 'orbit-morph-1', 'ground-morph-0.5', 'ground-morph-1', 'morph-sweep', 'orbit-morph-1-atmosphere-off', 'ground-morph-1-atmosphere-off']);
@@ -115,6 +117,30 @@ describe('Plan 059 G5 planet-scene suite', () => {
       expect(scenarioOf(partner).warmupMs).toBe(scenarioOf(base).warmupMs);
       expect(scenarioOf(partner).durationMs).toBe(scenarioOf(base).durationMs);
     }
+  });
+
+  it('keeps v4 as v3 plus the plain-material A/B: each plain case differs from its partner only in the material', () => {
+    expect(V4.version).toBe(4);
+    const ids = V4.scenarios.map((scenario) => scenario.id);
+    expect(ids.slice(0, SUITE.scenarios.length)).toEqual(SUITE.scenarios.map((scenario) => scenario.id));
+    expect(ids.slice(SUITE.scenarios.length)).toEqual(['orbit-morph-0.5-atmosphere-off', 'orbit-plain', 'orbit-morph-0.5-plain', 'orbit-morph-1-plain', 'ground-morph-1-plain']);
+    expect(new Set(ids).size).toBe(ids.length);
+    const of = (id: string) => V4.scenarios.find((scenario) => scenario.id === id) as TestScenario<PlanetSceneTestSettings>;
+    for (const [plain, partner] of [
+      ['orbit-plain', 'orbit-atmosphere-off'], ['orbit-morph-0.5-plain', 'orbit-morph-0.5-atmosphere-off'],
+      ['orbit-morph-1-plain', 'orbit-morph-1-atmosphere-off'], ['ground-morph-1-plain', 'ground-morph-1-atmosphere-off'],
+    ] as const) {
+      expect(of(plain).settings).withContext(plain).toEqual({ ...of(partner).settings, plainMaterial: true });
+      expect(of(partner).settings.plainMaterial).withContext(partner).toBeUndefined();
+      expect(of(plain).durationMs).toBe(of(partner).durationMs);
+    }
+    // The older suites are unchanged: none of their cases names the plain material.
+    for (const scenario of SUITE.scenarios) expect(scenario.settings.plainMaterial).withContext(scenario.id).toBeUndefined();
+  });
+
+  it('treats an omitted plainMaterial as the planet material and names a mismatch', () => {
+    expect(settingsMismatches(DEFAULT_PLANET_SCENE_SETTINGS, { ...DEFAULT_PLANET_SCENE_SETTINGS, plainMaterial: false })).toEqual([]);
+    expect(settingsMismatches(DEFAULT_PLANET_SCENE_SETTINGS, { ...DEFAULT_PLANET_SCENE_SETTINGS, plainMaterial: true })).toEqual(['plainMaterial: expected true, found false']);
   });
 
   it('runs the scripted cases on a motion and the still cases on none', () => {
