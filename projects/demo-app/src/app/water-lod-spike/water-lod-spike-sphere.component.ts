@@ -140,6 +140,8 @@ export class WaterLodSpikeSphereComponent {
   /** The split suite's water variant while it holds one, and the page's own quality tier to hand back. */
   private readonly heldVariant = signal<IWaterLodSpikeSphereVariant | null>(null);
   private savedQuality: WaterLodSpikeQualityId | null = null;
+  /** Water-alone suite: the engine's `pixelRatio` option (possibly unset) and the effective ratio to hand back; undefined while no pixel scale is held. */
+  private pixelRatioHold: { readonly option: number | undefined; readonly base: number } | undefined;
 
   private renderedFrames = 0;
   private frameTimes: number[] | null = null;
@@ -206,6 +208,10 @@ export class WaterLodSpikeSphereComponent {
 
     this.testAdapter = createWaterLodSpikeSphereTestAdapter({
       ready: () => this.runnerReady(),
+      drawingBufferPixels: () => {
+        const canvas = (this.engine.renderer as unknown as RendererLike).domElement;
+        return (canvas?.width ?? 0) * (canvas?.height ?? 0);
+      },
       setPose: (id) => this.heldPose.set(id),
       setLayers: (layers) => this.holdLayers(layers),
       setWaterVariant: (variant) => this.holdWaterVariant(variant),
@@ -370,11 +376,31 @@ export class WaterLodSpikeSphereComponent {
     this.rig.setTransfer(variant ? variant.quadrature : true);
     this.setQuality(variant ? variant.quality : (this.savedQuality ?? this.quality()));
     if (!variant) this.savedQuality = null;
+    this.holdPixelScale(variant?.pixelScale);
     // Density suite: the tier's uniforms set above, then the variant's own bias, and no waves = every wave filtered out in both stages.
     if (variant?.lodBias !== undefined) this.rig.uniforms.lodBias.value = variant.lodBias;
     if (variant?.waves === false) {
       this.rig.uniforms.cellPixels.value = NO_WAVES_CELL_PIXELS;
       this.rig.uniforms.lodBias.value = NO_WAVES_LOD_BIAS;
+    }
+  }
+
+  /**
+   * Water-alone suite: keeps this fraction of the page's drawn pixels by lowering the renderer's pixel ratio to its own times the
+   * square root of the fraction (the engine reads `options.pixelRatio` on every resize, so a resize keeps it). Undefined or 1 hands
+   * the page's own ratio back.
+   */
+  private holdPixelScale(scale: number | undefined): void {
+    const options = this.engine.options as { pixelRatio?: number };
+    const renderer = this.engine.renderer as unknown as { setPixelRatio?(ratio: number): void } | undefined;
+    if (scale !== undefined && scale !== 1) {
+      if (this.pixelRatioHold === undefined) this.pixelRatioHold = { option: options.pixelRatio, base: this.engine.pixelRatio };
+      options.pixelRatio = this.pixelRatioHold.base * Math.sqrt(scale);
+      renderer?.setPixelRatio?.(options.pixelRatio);
+    } else if (this.pixelRatioHold !== undefined) {
+      options.pixelRatio = this.pixelRatioHold.option;
+      this.pixelRatioHold = undefined;
+      renderer?.setPixelRatio?.(this.engine.pixelRatio);
     }
   }
 

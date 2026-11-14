@@ -13,6 +13,8 @@ import {
 import { cellPlanetFor, createGroundSample, type Vec3 } from 'triangular-engine/lod-surface/core';
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import { bakeInWorker } from '../lod-surface-lab/lod-height-bake-client';
+import { createWaterLodSpikeSphereScene, type IWaterLodSpikeSphereSceneHandle } from '../../water-lod-spike/core/create-water-lod-spike-sphere-scene';
+import { waterLodSpikeSphereQuality } from '../../water-lod-spike/core/water-lod-spike-quality';
 import {
   PLANET_POSES, PLANET_RADIUS_M, freeDrag, freeLook, freeZoom, groundUp, motionMorph, motionView, nearPlaneFor, planetPoseView,
   resolvePlanetCamera, sceneSunDirection, type PlanetMotion, type PlanetPoseId, type PlanetView,
@@ -75,12 +77,26 @@ interface RendererLike {
     <scene>
       <planet [radius]="radius" [sunDirection]="sun" [world]="world" [bake]="bake" [morph]="morph()">
         @if (terrainOn()) {
-          <planetTerrain [material]="plainMaterial() ? plainNode : undefined" />
+          <planetTerrain #terrainBody [material]="plainMaterial() ? plainNode : undefined" />
         }
         <planetAtmosphere preset="earth" [surfaces]="surfaces()" [enabled]="atmosphereOn()" />
-        <planetClouds [coverage]="0.45" />
+        <planetClouds [coverage]="0.45" [enabled]="cloudsOn()" />
         <planetSurfaceDetail [surface]="detailSurface()" [layers]="detailLayers" />
       </planet>
+      @if (waterOn() && waterRig(); as rig) {
+        <!-- The water spike's body beside <planet>: it takes its own radius, sun, heights and material, so it cannot sit inside it. -->
+        <planetTerrain
+          #waterBody
+          [radius]="radius"
+          [heights]="rig.heights"
+          [material]="rig.material"
+          [detailNoise]="0"
+          [sunDirection]="sun"
+          [cellPixels]="waterTier.cellPixels"
+          [leafCap]="waterTier.leafCap"
+          [horizonCull]="true"
+        />
+      }
     </scene>
 
     @if (!webGpuOk()) {
@@ -140,6 +156,14 @@ interface RendererLike {
           <input type="checkbox" [checked]="atmosphereOn()" (change)="setAtmosphere($any($event.target).checked)" />
           Atmosphere (sky, and lighting and haze on the terrain)
         </label>
+        <label class="feature">
+          <input type="checkbox" data-testid="clouds-toggle" [checked]="cloudsOn()" (change)="setClouds($any($event.target).checked)" />
+          Clouds (the shell)
+        </label>
+        <label class="feature">
+          <input type="checkbox" data-testid="water-toggle" [checked]="waterOn()" (change)="setWater($any($event.target).checked)" />
+          Water (the water spike's body, ultra tier, beside the planet; first use compiles its material)
+        </label>
         <p class="note">Atmosphere on the terrain: {{ surfaceLine() }}</p>
         <p class="note" data-testid="clouds">Clouds: a shell (<code>&lt;planetClouds&gt;</code>) bent into the map with the morph (lit as on the globe). Not yet looked at on a GPU.</p>
 
@@ -193,6 +217,14 @@ export class PlanetScenePageComponent {
   readonly terrainOn = signal(DEFAULT_PLANET_SCENE_SETTINGS.terrain);
   readonly atmosphereOn = signal(DEFAULT_PLANET_SCENE_SETTINGS.atmosphere);
   readonly morph = signal(DEFAULT_PLANET_SCENE_SETTINGS.morph);
+  /** `<planetClouds [enabled]>` (suite v5). On by default, as before v5. */
+  readonly cloudsOn = signal(true);
+  /** The water body beside the planet (suite v5). Off by default. */
+  readonly waterOn = signal(false);
+  /** The water spike's rig, made the first time the water goes on and kept until the page is destroyed. */
+  readonly waterRig = signal<IWaterLodSpikeSphereSceneHandle | undefined>(undefined);
+  /** The water's mesh: the spike sphere page's ultra tier. */
+  protected readonly waterTier = waterLodSpikeSphereQuality('ultra');
   /** Test-only (suite v4): draw the terrain with {@link plainNode} instead of the planet material. Not in the panel. */
   readonly plainMaterial = signal(false);
   /** An unlit basic material: no cell lookup, no lighting. The terrain sets its `positionNode`. */
@@ -203,7 +235,8 @@ export class PlanetScenePageComponent {
   readonly freeOn = signal(false);
 
   private readonly planet = viewChild(PlanetComponent);
-  private readonly terrainLayer = viewChild(PlanetTerrainComponent);
+  private readonly terrainLayer = viewChild<PlanetTerrainComponent>('terrainBody');
+  private readonly waterLayer = viewChild<PlanetTerrainComponent>('waterBody');
   private readonly atmosphereLayer = viewChild(PlanetAtmosphereComponent);
 
   /** The terrain's material when it is a surface the atmosphere can light and haze (a `TerrainPlanetMaterial` is). */
@@ -379,6 +412,7 @@ export class PlanetScenePageComponent {
       rendered.unsubscribe();
       if (this.sunLight && this.ambientLight) this.engine.scene.remove(this.sunLight, this.sunLight.target, this.ambientLight);
       this.sunLight = this.ambientLight = undefined;
+      this.waterRig()?.dispose();
     });
   }
 
@@ -443,6 +477,11 @@ export class PlanetScenePageComponent {
 
   setTerrain(on: boolean): void { this.terrainOn.set(on); }
   setAtmosphere(on: boolean): void { this.atmosphereOn.set(on); }
+  setClouds(on: boolean): void { this.cloudsOn.set(on); }
+  setWater(on: boolean): void {
+    if (on) this.ensureWaterRig();
+    this.waterOn.set(on);
+  }
   setMorph(value: number): void { this.morph.set(Math.min(1, Math.max(0, value))); }
 
   onTestProgress(progress: TestProgress | null): void {
@@ -454,10 +493,31 @@ export class PlanetScenePageComponent {
     }
   }
 
+  /**
+   * Makes the water spike's rig once. The rig adds its own sun and ambient light to the scene, which would double the planet's
+   * lighting, so what it added is taken out again (the page's own two lights stay). Its shore, foam and depth colour read the spike's
+   * own islands, not this planet's land, so they are off. Its tick and anchor steps stay subscribed until the page is destroyed.
+   */
+  private ensureWaterRig(): void {
+    if (this.waterRig() || this.pageDestroyed) return;
+    const before = new Set(this.engine.scene.children);
+    const rig = createWaterLodSpikeSphereScene(this.engine, this.sun, () => undefined);
+    for (const child of [...this.engine.scene.children]) {
+      if (!before.has(child)) this.engine.scene.remove(child);
+    }
+    rig.setQuality('ultra');
+    rig.setShore(false);
+    rig.setFoam(false);
+    rig.setDepthColour(false);
+    this.waterRig.set(rig);
+  }
+
   private readSettings(): PlanetSceneTestSettings {
     return {
       pose: this.pose(), terrain: this.terrainOn(), atmosphere: this.atmosphereOn(), morph: this.morph(),
       ...(this.plainMaterial() ? { plainMaterial: true } : {}),
+      ...(this.cloudsOn() ? {} : { clouds: false }),
+      ...(this.waterOn() ? { water: true } : {}),
       ...(this.testProgress !== undefined && this.testMotion ? { motion: this.testMotion } : {}),
     };
   }
@@ -470,6 +530,8 @@ export class PlanetScenePageComponent {
     this.atmosphereOn.set(settings.atmosphere);
     this.morph.set(settings.morph);
     this.plainMaterial.set(settings.plainMaterial ?? false);
+    this.cloudsOn.set(settings.clouds ?? true);
+    this.setWater(settings.water ?? false);
     this.pose.set(settings.pose);
     this.testMotion = settings.motion;
     this.setTestProgress(settings.motion ? 0 : undefined);
@@ -495,6 +557,11 @@ export class PlanetScenePageComponent {
     if (!this.webGpuOk()) return '';
     const atmosphere = this.atmosphereLayer()?.atmosphere();
     if (!atmosphere) return 'the atmosphere tables';
+    if (this.waterOn()) {
+      const water = this.waterLayer()?.terrain();
+      if (!water) return 'the water body';
+      if (!water.object.visible) return "the water body's pipeline";
+    }
     if (!this.terrainOn()) return '';
     const layer = this.terrainLayer();
     const body = layer?.terrain();

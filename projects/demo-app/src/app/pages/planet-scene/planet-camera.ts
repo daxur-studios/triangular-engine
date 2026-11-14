@@ -9,7 +9,7 @@ import { FIXTURE_GROUND, FIXTURE_HEADING_RAD, groundFrame, type Vec3 } from 'tri
  * counterpart whose ground height comes from a callback (the terrain's `groundAt`).
  */
 
-export type PlanetPoseId = 'orbit' | 'mid-20km' | 'ground';
+export type PlanetPoseId = 'orbit' | 'mid-20km' | 'coast' | 'ground';
 
 /**
  * Scripted moves; each is a pure function of its progress in 0..1. `descent` and `yaw360` move the camera. `morphSweep` keeps the
@@ -43,6 +43,7 @@ export const PLANET_RADIUS_M = 600_000;
 export const ORBIT_ALTITUDE_M = 2 * PLANET_RADIUS_M;
 export const MID_ALTITUDE_M = 20_000;
 export const EYE_ALTITUDE_M = 2;
+export const COAST_ALTITUDE_M = 50;
 export const ORBIT_PITCH_RAD = -90 * DEG;
 export const GROUND_PITCH_RAD = -5 * DEG;
 
@@ -50,9 +51,29 @@ export const GROUND_PITCH_RAD = -5 * DEG;
 const GROUND: Vec3 = FIXTURE_GROUND.sphere;
 const HEADING = FIXTURE_HEADING_RAD.sphere;
 
+/**
+ * The coast pose (suite v5): the nearest shore of the cell planet to {@link GROUND}, found by sampling the planet's own
+ * `cellPlanetSampler` on rings round the fixture ground. The shore is 18.75 km from it at bearing 152 degrees (south-east),
+ * a gentle beach (about 1.3 percent: 1.2 m of land 100 m inland, 7.7 m at 600 m). The camera stands 600 m inland, 50 m above
+ * the ground there, and looks seaward at the shore, so land, beach and sea share the view. Offsets are metres east and north
+ * of the fixture ground. Taken from the sampler, not from the baked heights, so the baked shore may sit a few metres off.
+ */
+const COAST_EAST_M = 8521;
+const COAST_NORTH_M = -16026;
+const COAST_HEADING_RAD = 152 * DEG;
+const COAST_PITCH_RAD = -6 * DEG;
+
+function coastGround(): Vec3 {
+  const { up, east, north } = groundFrame('sphere', GROUND);
+  const p = [0, 1, 2].map((k) => up[k] * PLANET_RADIUS_M + east[k] * COAST_EAST_M + north[k] * COAST_NORTH_M);
+  const length = Math.hypot(p[0], p[1], p[2]);
+  return [p[0] / length, p[1] / length, p[2] / length];
+}
+
 export const PLANET_POSES: readonly { readonly id: PlanetPoseId; readonly label: string }[] = [
   { id: 'orbit', label: 'orbit' },
   { id: 'mid-20km', label: '20 km' },
+  { id: 'coast', label: 'coast, 50 m' },
   { id: 'ground', label: '2 m eye' },
 ];
 
@@ -60,6 +81,7 @@ export function planetPoseView(id: PlanetPoseId): PlanetView {
   switch (id) {
     case 'orbit': return { ground: GROUND, altitudeM: ORBIT_ALTITUDE_M, headingRad: HEADING, pitchRad: ORBIT_PITCH_RAD };
     case 'mid-20km': return { ground: GROUND, altitudeM: MID_ALTITUDE_M, headingRad: HEADING, pitchRad: -25 * DEG };
+    case 'coast': return { ground: coastGround(), altitudeM: COAST_ALTITUDE_M, headingRad: COAST_HEADING_RAD, pitchRad: COAST_PITCH_RAD };
     case 'ground': return { ground: GROUND, altitudeM: EYE_ALTITUDE_M, headingRad: HEADING, pitchRad: GROUND_PITCH_RAD };
   }
 }

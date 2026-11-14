@@ -12,6 +12,9 @@ performance:
   - id: water-lod-spike-performance-v1
     url: http://triangular-demo.localhost:4200/water-lod-spike?testSuite=water-lod-spike-performance&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
     status: runnable-diagnostic-hardware-unmeasured
+  - id: water-lod-spike-sphere-density-v2
+    url: http://triangular-demo.localhost:4200/water-lod-spike-sphere?testSuite=water-lod-spike-sphere-density&testVersion=2&testProfile=visible-browser&testMode=standard&testRepetitions=3&testAutoStart=1
+    status: runnable-diagnostic-hardware-unmeasured
 ---
 
 # Plan 080: LOD Water

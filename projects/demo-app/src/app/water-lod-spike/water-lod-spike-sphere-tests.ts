@@ -9,10 +9,15 @@ export interface WaterLodSpikeSphereTestSettings {
    * `cost`: the layer arms. `split`: the water's own shading parts on the land. `density`: the water alone, mesh density and wave
    * work. `horizon`: the cull and the leaf cap. `stills`: one picture of the whole stack at one leaf cap (`leafCap`).
    */
-  readonly measure: 'cost' | 'split' | 'density' | 'horizon' | 'stills';
+  readonly measure: 'cost' | 'split' | 'density' | 'horizon' | 'stills' | 'water-alone';
   /** Stills suite: the water's leaf cap for this case. */
   readonly leafCap?: number;
+  /** Water-alone suite (density v2): which setting this case holds, see {@link SPHERE_WATER_ALONE_ARMS}. */
+  readonly arm?: SphereWaterAloneArmId;
 }
+
+/** The water-alone suite's settings: A the reference, B waves off, C half the drawn pixels, D four times the patches. */
+export type SphereWaterAloneArmId = 'A' | 'B' | 'C' | 'D';
 
 /** What of the water's cost is switched off or lowered in one split arm. */
 export interface IWaterLodSpikeSphereVariant {
@@ -32,6 +37,11 @@ export interface IWaterLodSpikeSphereVariant {
    * without it draws all of them, as the earlier suites measured, whatever the page's own switch says.
    */
   readonly horizon?: boolean;
+  /**
+   * Water-alone suite: the fraction of the page's drawn pixels to keep (0.5 halves them). The page lowers the renderer's pixel ratio
+   * by the square root of it and hands the ratio back when the variant is released.
+   */
+  readonly pixelScale?: number;
 }
 
 /** What is switched on in one cost arm. */
@@ -45,6 +55,8 @@ export interface IWaterLodSpikeSphereLayers {
 export interface WaterLodSpikeSphereTestHost {
   /** True once the engine has rendered frames. */
   ready(): boolean;
+  /** Pixels in the drawing buffer now (width times height), for the water-alone suite's pixel check. */
+  drawingBufferPixels?(): number;
   /** Holds the camera at the pose; null hands it back to the page's own. */
   setPose(id: SpherePoseId | null): void;
   /**
@@ -237,6 +249,87 @@ const WATER_LOD_SPIKE_SPHERE_STILLS_V1: TestSuite<WaterLodSpikeSphereTestSetting
   ),
 };
 
+/** The metric the water-alone suite budgets and compares. */
+export const SPHERE_WATER_ALONE_METRIC = 'GPU frame, water alone';
+/** The most GPU time (median, ms) arm A may take at the eye and the coast, and at 20 km (planet-water answer, section 6). */
+export const SPHERE_WATER_ALONE_MAX_NEAR_MS = 1.5;
+export const SPHERE_WATER_ALONE_MAX_20KM_MS = 1.0;
+
+/**
+ * The water-alone suite's settings. All four keep the shipped ultra shading and 4 px cells with the horizon cull on, and differ in
+ * the one thing named. A: 256 patches (leaves), full waves. B: A with every wave off. C: A at half the drawn pixels. D: A at 1,024 patches.
+ */
+export const SPHERE_WATER_ALONE_ARMS: Readonly<Record<SphereWaterAloneArmId, IWaterLodSpikeSphereVariant>> = {
+  A: { quadrature: true, depthRead: true, quality: 'ultra', horizon: true, mesh: { cellPixels: 4, leafCap: 256 } },
+  B: { quadrature: true, depthRead: true, quality: 'ultra', horizon: true, mesh: { cellPixels: 4, leafCap: 256 }, waves: false },
+  C: { quadrature: true, depthRead: true, quality: 'ultra', horizon: true, mesh: { cellPixels: 4, leafCap: 256 }, pixelScale: 0.5 },
+  D: { quadrature: true, depthRead: true, quality: 'ultra', horizon: true, mesh: { cellPixels: 4, leafCap: 1024 } },
+};
+
+const WATER_ALONE_POSES: readonly (readonly [SpherePoseId, string, number | undefined])[] = [
+  ['eye-2m', '2 m eye', SPHERE_WATER_ALONE_MAX_NEAR_MS],
+  ['coast-300m', 'Coast, 50 m', SPHERE_WATER_ALONE_MAX_NEAR_MS],
+  ['mid-20km', '20 km', SPHERE_WATER_ALONE_MAX_20KM_MS],
+  ['orbit', 'Orbit', undefined],
+];
+
+/** Each partner is compared with A in its own group: B waves off, C half the pixels, D 1,024 patches. */
+const WATER_ALONE_PARTNERS: readonly (readonly [key: string, arm: Exclude<SphereWaterAloneArmId, 'A'>, label: string])[] = [
+  ['waves', 'B', 'waves off'],
+  ['pixels', 'C', 'half the pixels'],
+  ['patches', 'D', '1,024 patches'],
+];
+
+/**
+ * Suite `water-lod-spike-sphere-density` v2 (Plan 080; the architect's first test for the water, planet-water answer, "The first
+ * test to build"): is the water's 1-2 ms floor pixels or vertices? Water alone against an empty frame (no land, no atmosphere), at
+ * four views (2 m eye, 50 m coast, 20 km, orbit) and four settings:
+ *
+ * - A: 256 patches (the leaf cap), full waves, the shipped ultra shading, 4 px cells, the horizon cull on
+ * - B: A with every wave off (A/B partner of A)
+ * - C: A at half the drawn pixels, the renderer's pixel ratio times the square root of a half (A/B partner of A)
+ * - D: 1,024 patches, full waves (A/B partner of A)
+ *
+ * B, C and D are each an A/B group per view (A, partner, A, partner, ...), so run it with 3 repetitions for three rounds per arm.
+ * The metric is `GPU frame, water alone`: five one-second timestamp-query averages after a warm-up. Triangles, the drawing buffer
+ * pixels and the CPU frame are reported. Run it headed and quiet on the NVIDIA GPU (`expectedGpuVendor`); an A/B group whose
+ * rounds spread more than 15% is rejected, which is the "spread within 15%" condition.
+ *
+ * Budget (runner, on arm A only): GPU median at most 1.5 ms at eye and coast and at most 1.0 ms at 20 km. Orbit has none. The
+ * figure is the arm's own frame, water over an empty frame; the empty frame's cost is not subtracted. The runner cannot express
+ * "headed and clean": read the profile and the machine warnings in `npm run test:summary`.
+ *
+ * What a fail means:
+ * - C is about half of A (the A/B line for the pixels group shows about -50%): the cost is pixels. Work on the shading loop.
+ * - B is close to A and C does not help: the cost is fixed per vertex. Use fewer, larger patches, or fewer waves in the geometry.
+ * - D passes too (read D's frame against the same 1.5 / 1.0 ms): raise the default patch cap to 1,024.
+ *
+ * Settings the page gained: `pixelScale` on the held water variant (the page lowers the renderer's pixel ratio; the wave footprint
+ * filter reads the smaller buffer, and the terrain selector sees a smaller viewport, so C's patch count can move: the triangle
+ * metric shows it). `waves` and `mesh.leafCap` existed. The engine is unchanged.
+ */
+const WATER_LOD_SPIKE_SPHERE_DENSITY_V2: TestSuite<WaterLodSpikeSphereTestSettings> = {
+  id: 'water-lod-spike-sphere-density',
+  version: 2,
+  title: 'Water on a planet, alone: pixels against vertices (256 patches, waves off, half pixels, 1,024 patches)',
+  purpose: 'performance',
+  expectedGpuVendor: 'nvidia',
+  ablation: { feature: 'waves off (B), half the pixels (C) or 1,024 patches (D), each against A', metrics: [SPHERE_WATER_ALONE_METRIC] },
+  scenarios: WATER_ALONE_POSES.flatMap(([pose, label, budgetMs]) =>
+    WATER_ALONE_PARTNERS.flatMap(([key, partner, partnerLabel]) =>
+      (['A', partner] as const).map((arm): TestScenario<WaterLodSpikeSphereTestSettings> => ({
+        id: `${pose}-${arm}-${key}`,
+        label: `${label}: ${arm}, ${arm === 'A' ? `reference (vs ${partnerLabel})` : partnerLabel}`,
+        settings: { pose, measure: 'water-alone', arm },
+        durationMs: 1000,
+        warmupMs: 500,
+        ablation: { group: `${pose}-${key}`, arm: arm === 'A' ? 'A' : 'B' },
+        ...(arm === 'A' && budgetMs !== undefined ? { budgets: { [SPHERE_WATER_ALONE_METRIC]: { median: budgetMs } } } : {}),
+      })),
+    ),
+  ),
+};
+
 /** The suites of the sphere water page, oldest first. */
 export const WATER_LOD_SPIKE_SPHERE_TEST_HISTORY: readonly TestSuite<WaterLodSpikeSphereTestSettings>[] = [
   WATER_LOD_SPIKE_SPHERE_COST_V1,
@@ -244,6 +337,7 @@ export const WATER_LOD_SPIKE_SPHERE_TEST_HISTORY: readonly TestSuite<WaterLodSpi
   WATER_LOD_SPIKE_SPHERE_DENSITY_V1,
   WATER_LOD_SPIKE_SPHERE_HORIZON_V1,
   WATER_LOD_SPIKE_SPHERE_STILLS_V1,
+  WATER_LOD_SPIKE_SPHERE_DENSITY_V2,
 ];
 
 /** One arm of the split suite: land only, or land and water at a variant. */
@@ -326,6 +420,7 @@ export const SPHERE_COST_ARMS: readonly ISphereCostArm[] = [
 const GPU_WARMUP_MS = 1500;
 const GPU_SAMPLES = 3;
 const SETTLE_FRAMES = 30;
+const WATER_ALONE_GPU_SAMPLES = 5;
 const DRAWN_TIMEOUT_MS = 60_000;
 
 const mean = (values: readonly number[]): number => (values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : Number.NaN);
@@ -456,7 +551,56 @@ async function measureVariants(
   };
 }
 
-const measureSplit = (host: WaterLodSpikeSphereTestHost, context: TestContext): Promise<TestObservation> =>
+/** One-second GPU averages after a warm-up; samples the timestamp query could not give are left out. */
+async function gpuSamplesMs(host: WaterLodSpikeSphereTestHost, context: TestContext, count: number): Promise<number[]> {
+  await context.wait(GPU_WARMUP_MS);
+  const samples: number[] = [];
+  for (let n = 0; n < count; n++) {
+    await context.wait(1000);
+    const sample = host.gpuFrameMs();
+    if (sample !== null) samples.push(sample);
+  }
+  return samples;
+}
+
+/** Water alone, held at the case's setting of the water-alone suite; the A/B analysis compares the rounds. */
+async function measureWaterAlone(host: WaterLodSpikeSphereTestHost, context: TestContext, armId: SphereWaterAloneArmId): Promise<TestObservation> {
+  const setVariant = host.setWaterVariant?.bind(host);
+  const layers: IWaterLodSpikeSphereLayers = { land: false, water: true, atmosphere: false };
+  await host.waitFrames(SETTLE_FRAMES, context);
+  const pixelsBefore = host.drawingBufferPixels?.() ?? Number.NaN;
+  host.setLayers(layers);
+  setVariant?.(SPHERE_WATER_ALONE_ARMS[armId]);
+  const flipped = performance.now();
+  await host.waitFrames(2, context);
+  while (!drawsAll(host.drawn(), layers) && performance.now() - flipped < DRAWN_TIMEOUT_MS) await host.waitFrames(1, context);
+  const drawnAll = drawsAll(host.drawn(), layers);
+  await host.waitFrames(SETTLE_FRAMES, context);
+  host.beginFrameSampling();
+  const gpu = await gpuSamplesMs(host, context, WATER_ALONE_GPU_SAMPLES);
+  host.endFrameSampling();
+  const cpuMs = mean(host.takeCpuFrameMs());
+  const { triangles, drawCalls } = host.counts();
+  const pixels = host.drawingBufferPixels?.() ?? Number.NaN;
+  const pixelRatio = pixels / pixelsBefore;
+  const pixelsOk = armId === 'C' ? pixelRatio > 0.45 && pixelRatio < 0.55 : Number.isNaN(pixelRatio) || Math.abs(pixelRatio - 1) < 0.01;
+  return {
+    metrics: [
+      { name: SPHERE_WATER_ALONE_METRIC, unit: 'ms', source: 'WebGPU timestamp queries, 1 s averages after a warm-up', samples: gpu },
+      { name: 'CPU frame, water alone', unit: 'ms', source: 'fpsController.cpuFrameTime (tick and render), mean over the GPU window', samples: [cpuMs] },
+      { name: 'triangles, water alone', unit: 'triangles', source: 'renderer.info.render.triangles', samples: [triangles] },
+      { name: 'drawing buffer pixels', unit: 'pixels', source: 'renderer.domElement width times height', samples: [pixels] },
+    ],
+    checks: [
+      { name: 'the water draws and nothing else does', passed: drawnAll, detail: drawnAll ? `draw calls ${drawCalls}` : 'the water did not draw in time' },
+      { name: 'GPU time measured', passed: gpu.length === WATER_ALONE_GPU_SAMPLES, detail: gpu.map((value) => value.toFixed(2)).join(', ') || 'no timestamp samples' },
+      { name: armId === 'C' ? 'half the pixels are drawn (0.45 to 0.55 of the page\'s own)' : 'the full pixel count is drawn', passed: pixelsOk, detail: `${pixels} of ${pixelsBefore} pixels` },
+      { name: 'the host can hold a water variant', passed: setVariant !== undefined, detail: setVariant ? 'yes' : 'the page has no setWaterVariant' },
+    ],
+  };
+}
+
+const measureSplit =(host: WaterLodSpikeSphereTestHost, context: TestContext): Promise<TestObservation> =>
   measureVariants(host, context, SPHERE_SPLIT_ARMS, true);
 
 const measureDensity = (host: WaterLodSpikeSphereTestHost, context: TestContext): Promise<TestObservation> =>
@@ -544,6 +688,7 @@ export function createWaterLodSpikeSphereTestAdapter(host: WaterLodSpikeSphereTe
         case 'split': return measureSplit(host, context);
         case 'density': return measureDensity(host, context);
         case 'horizon': return measureHorizon(host, context);
+        case 'water-alone': return measureWaterAlone(host, context, scenario.settings.arm ?? 'A');
         case 'stills': return measureStills(host, context, scenario.settings.leafCap ?? SPHERE_STILL_LEAF_CAPS[1]);
         default: return measureCost(host, context);
       }

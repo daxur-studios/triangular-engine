@@ -1,6 +1,6 @@
 import { buildTestBatchLaunchUrl, buildTestLaunchUrl, parseTestLaunch, validateTestHistory, type TestContext, type TestScenario } from 'triangular-engine/testing';
 import {
-  EYE_ALTITUDE_M, GROUND_PITCH_RAD, MID_ALTITUDE_M, ORBIT_ALTITUDE_M, ORBIT_PITCH_RAD, PLANET_RADIUS_M,
+  COAST_ALTITUDE_M, EYE_ALTITUDE_M, GROUND_PITCH_RAD, MID_ALTITUDE_M, ORBIT_ALTITUDE_M, ORBIT_PITCH_RAD, PLANET_RADIUS_M,
   descentView, morphSweepValue, motionMorph, motionView, morphSweepView, nearPlaneFor, planetPoseView, resolvePlanetCamera,
   sceneSunDirection, yawView,
 } from './planet-camera';
@@ -11,6 +11,7 @@ import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_TEST_HISTORY, type PlanetSc
 /** v3, the suite most of these specs describe; v4 has its own specs below. */
 const SUITE = PLANET_SCENE_TEST_HISTORY[2];
 const V4 = PLANET_SCENE_TEST_HISTORY[3];
+const V5 = PLANET_SCENE_TEST_HISTORY[4];
 const V1_IDS = ['orbit', 'mid-20km', 'ground', 'descent', 'yaw-360', 'orbit-atmosphere-off', 'ground-atmosphere-off'];
 const BASE = 'http://triangular-demo.localhost:4200/planet-scene';
 
@@ -63,7 +64,7 @@ function makeHost(override: Partial<PlanetSceneTestHost> = {}, state: { read?: (
 describe('Plan 059 G5 planet-scene suite', () => {
   it('is a valid history: v1, v2 then v3, unique case ids, plain JSON settings, the planned cases', () => {
     expect(() => validateTestHistory(PLANET_SCENE_TEST_HISTORY)).not.toThrow();
-    expect(PLANET_SCENE_TEST_HISTORY.map((suite) => [suite.id, suite.version])).toEqual([['planet-scene', 1], ['planet-scene', 2], ['planet-scene', 3], ['planet-scene', 4]]);
+    expect(PLANET_SCENE_TEST_HISTORY.map((suite) => [suite.id, suite.version])).toEqual([['planet-scene', 1], ['planet-scene', 2], ['planet-scene', 3], ['planet-scene', 4], ['planet-scene', 5]]);
     expect(SUITE.version).toBe(3);
     const ids = SUITE.scenarios.map((scenario) => scenario.id);
     expect(ids).toEqual([...V1_IDS, 'orbit-morph-0.5', 'orbit-morph-1', 'ground-morph-0.5', 'ground-morph-1', 'morph-sweep', 'orbit-morph-1-atmosphere-off', 'ground-morph-1-atmosphere-off']);
@@ -138,6 +139,78 @@ describe('Plan 059 G5 planet-scene suite', () => {
     for (const scenario of SUITE.scenarios) expect(scenario.settings.plainMaterial).withContext(scenario.id).toBeUndefined();
   });
 
+  it('keeps v5 as v4 unchanged plus the layer ladder, the air pairs and two full-stack motion cases', () => {
+    expect(V5.version).toBe(5);
+    expect(() => validateTestHistory(PLANET_SCENE_TEST_HISTORY)).not.toThrow();
+    const ids = V5.scenarios.map((scenario) => scenario.id);
+    expect(ids.slice(0, V4.scenarios.length)).toEqual(V4.scenarios.map((scenario) => scenario.id));
+    for (const old of V4.scenarios) expect(V5.scenarios.find((item) => item.id === old.id)).withContext(old.id).toEqual(old);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(V5.purpose).toBe('performance');
+    expect(V5.requiresVisualReview).toBeTrue();
+    expect(V5.ablation?.metrics).toEqual(['gpuPassTotal']);
+    expect(ids.slice(-2)).toEqual(['descent-full-stack', 'morph-sweep-full-stack']);
+  });
+
+  it('builds the ladder: four views, three cumulative steps, A B A B, B adding one layer to A', () => {
+    const added = { air: 'atmosphere', clouds: 'clouds', water: 'water' } as const;
+    for (const view of ['orbit', '20km', 'coast', 'eye']) {
+      for (const step of ['air', 'clouds', 'water'] as const) {
+        const group = `ladder-${view}-${step}`;
+        const cases = V5.scenarios.filter((item) => item.ablation?.group === group);
+        expect(cases.map((item) => item.ablation?.arm)).withContext(group).toEqual(['A', 'B', 'A', 'B']);
+        const [a, b] = cases;
+        expect(a.settings.morph).toBe(0);
+        expect(a.settings.pose).toBe(b.settings.pose);
+        const key = added[step];
+        expect(a.settings[key] ?? (key === 'clouds')).withContext(group).toBeFalse();
+        expect(b.settings[key] ?? (key === 'clouds')).withContext(group).toBeTrue();
+      }
+    }
+    expect(V5.scenarios.find((item) => item.id === 'ladder-coast-air-A1')?.settings.pose).toBe('coast');
+    expect(V5.scenarios.find((item) => item.id === 'ladder-eye-air-A1')?.settings.pose).toBe('ground');
+  });
+
+  it('keeps the air pairs at the planned morphs, air off against air on, clouds on and water out', () => {
+    const groups = [...new Set(V5.scenarios.map((item) => item.ablation?.group).filter((group): group is string => !!group && group.startsWith('air-')))];
+    expect(groups).toEqual(['air-orbit-morph-0', 'air-orbit-morph-0.25', 'air-orbit-morph-0.5', 'air-orbit-morph-1', 'air-20km-morph-0', 'air-20km-morph-0.5']);
+    for (const group of groups) {
+      const [a, b] = V5.scenarios.filter((item) => item.ablation?.group === group);
+      expect(a.settings.atmosphere).toBeFalse();
+      expect(b.settings.atmosphere).toBeTrue();
+      expect(a.settings.clouds).toBeTrue();
+      expect(b.settings.water ?? false).toBeFalse();
+      expect(a.settings.morph).toBe(b.settings.morph);
+    }
+  });
+
+  it('carries the planet-stack budgets the runner can express', () => {
+    const median = (id: string) => V5.scenarios.find((item) => item.id === id)?.budgets?.['gpuPassTotal']?.median;
+    expect([median('ladder-orbit-water-B1'), median('ladder-20km-water-B1'), median('ladder-coast-water-B1'), median('ladder-eye-water-B2')]).toEqual([2.6, 4.5, 5.5, 5.5]);
+    expect(median('air-orbit-morph-1-B1')).toBe(4.6);
+    expect(median('ladder-orbit-water-A1')).toBeUndefined();
+    for (const id of ['descent-full-stack', 'morph-sweep-full-stack']) {
+      const scenario = V5.scenarios.find((item) => item.id === id);
+      expect(scenario?.budgets).withContext(id).toEqual({ gpuPassTotal: { p95: 7 }, selectionCpu: { p95: 4 } });
+    }
+    expect(V5.scenarios.find((item) => item.id === 'descent-full-stack')?.settings.water).toBeTrue();
+    expect(V5.scenarios.find((item) => item.id === 'morph-sweep-full-stack')?.settings.water).toBeFalse();
+  });
+
+  it('treats omitted clouds as on and omitted water as off, and names a mismatch', () => {
+    expect(settingsMismatches(DEFAULT_PLANET_SCENE_SETTINGS, { ...DEFAULT_PLANET_SCENE_SETTINGS, clouds: true, water: false })).toEqual([]);
+    expect(settingsMismatches(DEFAULT_PLANET_SCENE_SETTINGS, { ...DEFAULT_PLANET_SCENE_SETTINGS, clouds: false })).toEqual(['clouds: expected false, found true']);
+    expect(settingsMismatches(DEFAULT_PLANET_SCENE_SETTINGS, { ...DEFAULT_PLANET_SCENE_SETTINGS, water: true })).toEqual(['water: expected true, found false']);
+    for (const scenario of SUITE.scenarios) expect(scenario.settings.clouds ?? scenario.settings.water).withContext(scenario.id).toBeUndefined();
+  });
+
+  it('launches v5 by its exact version', () => {
+    const url = buildTestLaunchUrl(BASE, V5, 'visible-browser', 1, 'quick');
+    expect(url).toContain('testSuite=planet-scene');
+    expect(url).toContain('testVersion=5');
+    expect(parseTestLaunch(new URL(url), PLANET_SCENE_TEST_HISTORY)?.key).toBe('planet-scene@5');
+  });
+
   it('treats an omitted plainMaterial as the planet material and names a mismatch', () => {
     expect(settingsMismatches(DEFAULT_PLANET_SCENE_SETTINGS, { ...DEFAULT_PLANET_SCENE_SETTINGS, plainMaterial: false })).toEqual([]);
     expect(settingsMismatches(DEFAULT_PLANET_SCENE_SETTINGS, { ...DEFAULT_PLANET_SCENE_SETTINGS, plainMaterial: true })).toEqual(['plainMaterial: expected true, found false']);
@@ -178,6 +251,12 @@ describe('Plan 059 G5 planet-scene suite', () => {
 });
 
 describe('Plan 059 G5 planet-scene cameras', () => {
+  it('stands the coast pose 50 m up', () => {
+    const camera = resolvePlanetCamera(planetPoseView('coast'), PLANET_RADIUS_M, 0);
+    expect(Math.hypot(...camera.position)).toBeCloseTo(PLANET_RADIUS_M + COAST_ALTITUDE_M, 6);
+    expect(camera.clearanceM).toBe(COAST_ALTITUDE_M);
+  });
+
   it('stands the three poses on the planet at their altitudes', () => {
     for (const [id, altitude] of [['orbit', ORBIT_ALTITUDE_M], ['mid-20km', MID_ALTITUDE_M], ['ground', EYE_ALTITUDE_M]] as const) {
       const camera = resolvePlanetCamera(planetPoseView(id), PLANET_RADIUS_M, 0);

@@ -84,6 +84,9 @@ export function settingsMismatches(actual: PlanetSceneTestSettings, expected: Pl
   if ((actual.plainMaterial ?? false) !== (expected.plainMaterial ?? false)) {
     out.push(`plainMaterial: expected ${expected.plainMaterial ?? false}, found ${actual.plainMaterial ?? false}`);
   }
+  // Omitted clouds mean on and omitted water means off (v1 to v4 had the shell always on and no water).
+  if ((actual.clouds ?? true) !== (expected.clouds ?? true)) out.push(`clouds: expected ${expected.clouds ?? true}, found ${actual.clouds ?? true}`);
+  if ((actual.water ?? false) !== (expected.water ?? false)) out.push(`water: expected ${expected.water ?? false}, found ${actual.water ?? false}`);
   return out;
 }
 
@@ -264,7 +267,8 @@ export function createPlanetSceneTestAdapter(host: PlanetSceneTestHost): TestRun
         metrics,
         checks,
         details: {
-          clouds: 'shell',
+          clouds: settings.clouds === false ? 'off' : 'shell',
+          water: settings.water ? 'spike body, ultra tier, beside <planet>' : 'off',
           gpuAdapter: String(environment['gpu.description'] ?? 'unknown'),
           gpuVendor: String(environment['gpu.vendor'] ?? 'unknown'),
           planetRadiusM: environment['planet.radiusM'] ?? null,
@@ -285,6 +289,7 @@ export function createPlanetSceneTestAdapter(host: PlanetSceneTestHost): TestRun
           ...(software ? ['Software renderer: functional evidence only, not hardware performance'] : []),
         ],
         limitations: [
+          ...(settings.water ? ["Water is the water spike body mounted beside <planet>: no atmosphere haze, and its shore, foam and depth colour read the spike islands, not this planet land."] : []),
           'Clouds are a v1 far shell (<planetClouds>): drawn inside the main scene pass, not timed on their own, and faded out with the morph rather than bent into the map.',
           'The GPU timer splits by render pass, not by layer. The terrain and the sky backdrop share the main scene pass; read the sky\'s cost from the `-atmosphere-off` partner of a case (same view, sky, lighting and haze off).',
           'Compute passes are not split by the timer. The atmosphere\'s table updates that run as compute are inside the whole-frame figure only.',

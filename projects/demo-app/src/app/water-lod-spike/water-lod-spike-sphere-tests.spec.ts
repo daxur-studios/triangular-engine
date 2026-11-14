@@ -6,6 +6,7 @@ import {
   SPHERE_HORIZON_ARMS,
   SPHERE_SPLIT_ARMS,
   SPHERE_STACK_MAX_MS,
+  SPHERE_WATER_ALONE_ARMS,
   SPHERE_STILL_LEAF_CAPS,
   SPHERE_STILL_WAVE_TIME_S,
   WATER_LOD_SPIKE_SPHERE_TEST_HISTORY,
@@ -15,6 +16,7 @@ import {
   sphereStillVariant,
   type IWaterLodSpikeSphereLayers,
   type IWaterLodSpikeSphereVariant,
+  type SphereWaterAloneArmId,
   type WaterLodSpikeSphereTestHost,
   type WaterLodSpikeSphereTestSettings,
 } from './water-lod-spike-sphere-tests';
@@ -359,6 +361,84 @@ describe('water-lod-spike sphere cost suite', () => {
       expect(await adapter.thumbnail?.(SCENARIO, makeContext())).toEqual([thumb]);
       await adapter.restore(await adapter.capture(makeContext()), makeContext());
       expect(times).toEqual([null]);
+    });
+  });
+
+  describe('water-alone density suite v2', () => {
+    const suite = WATER_LOD_SPIKE_SPHERE_TEST_HISTORY[5];
+    const caseOf = (arm: SphereWaterAloneArmId): TestScenario<WaterLodSpikeSphereTestSettings> => ({
+      id: `eye-2m-${arm}`, label: `Eye ${arm}`, settings: { pose: 'eye-2m', measure: 'water-alone', arm }, durationMs: 1000, warmupMs: 500,
+    });
+
+    it('is appended after the earlier versions, which stay as they were', () => {
+      expect(WATER_LOD_SPIKE_SPHERE_TEST_HISTORY.length).toBe(6);
+      expect(WATER_LOD_SPIKE_SPHERE_TEST_HISTORY[2].version).toBe(1);
+      expect(WATER_LOD_SPIKE_SPHERE_TEST_HISTORY[2].scenarios.every((s) => s.settings.measure === 'density')).toBe(true);
+      expect([suite.id, suite.version, suite.purpose]).toEqual(['water-lod-spike-sphere-density', 2, 'performance']);
+      expect(suite.expectedGpuVendor).toBe('nvidia');
+    });
+
+    it('has A and its partner for each of B, C and D at each of four views, alternating A, partner in each group', () => {
+      expect(suite.scenarios.length).toBe(24);
+      expect(new Set(suite.scenarios.map((s) => s.id)).size).toBe(24);
+      expect([...new Set(suite.scenarios.map((s) => s.settings.pose))]).toEqual(['eye-2m', 'coast-300m', 'mid-20km', 'orbit']);
+      const groups = new Map<string, string[]>();
+      for (const s of suite.scenarios) groups.set(s.ablation?.group ?? '', [...(groups.get(s.ablation?.group ?? '') ?? []), `${s.ablation?.arm}:${s.settings.arm}`]);
+      expect(groups.size).toBe(12);
+      expect(groups.get('eye-2m-waves')).toEqual(['A:A', 'B:B']);
+      expect(groups.get('coast-300m-pixels')).toEqual(['A:A', 'B:C']);
+      expect(groups.get('orbit-patches')).toEqual(['A:A', 'B:D']);
+      expect(suite.ablation?.metrics).toEqual(['GPU frame, water alone']);
+    });
+
+    it('budgets only A: 1.5 ms median at the eye and the coast, 1.0 ms at 20 km, none at orbit', () => {
+      const budgeted = suite.scenarios.filter((s) => s.budgets);
+      expect(budgeted.every((s) => s.settings.arm === 'A')).toBe(true);
+      const limit = (pose: string) => [...new Set(budgeted.filter((s) => s.settings.pose === pose).map((s) => s.budgets?.['GPU frame, water alone']?.median))];
+      expect(limit('eye-2m')).toEqual([1.5]);
+      expect(limit('coast-300m')).toEqual([1.5]);
+      expect(limit('mid-20km')).toEqual([1.0]);
+      expect(limit('orbit')).toEqual([]);
+    });
+
+    it('defines the four settings: A 256 patches, B waves off, C half the pixels, D 1,024 patches', () => {
+      expect(SPHERE_WATER_ALONE_ARMS.A.mesh).toEqual({ cellPixels: 4, leafCap: 256 });
+      expect(SPHERE_WATER_ALONE_ARMS.A.waves).toBeUndefined();
+      expect(SPHERE_WATER_ALONE_ARMS.B).toEqual({ ...SPHERE_WATER_ALONE_ARMS.A, waves: false });
+      expect(SPHERE_WATER_ALONE_ARMS.C).toEqual({ ...SPHERE_WATER_ALONE_ARMS.A, pixelScale: 0.5 });
+      expect(SPHERE_WATER_ALONE_ARMS.D.mesh?.leafCap).toBe(1024);
+    });
+
+    it('holds water alone at the case\'s setting and reports five GPU samples', async () => {
+      const variants: (IWaterLodSpikeSphereVariant | null)[] = [];
+      const host = makeHost({ land: 9, water: 1.2, atmosphere: 9 }, { setWaterVariant: (v) => { variants.push(v); } });
+      const observation = await createWaterLodSpikeSphereTestAdapter(host).measure(caseOf('B'), makeContext());
+      expect(host.layers).toEqual({ land: false, water: true, atmosphere: false });
+      expect(variants).toEqual([SPHERE_WATER_ALONE_ARMS.B]);
+      expect(metric(observation, 'GPU frame, water alone')?.samples).toEqual([1.2, 1.2, 1.2, 1.2, 1.2]);
+      expect(metric(observation, 'triangles, water alone')?.samples).toEqual([1200]);
+      expect(observation.checks?.every((c) => c.passed)).toBe(true);
+    });
+
+    it('checks that C draws about half the pixels and the others all of them', async () => {
+      let pixels = 1000;
+      const host = makeHost({ land: 9, water: 1, atmosphere: 9 }, {
+        drawingBufferPixels: () => pixels,
+        setWaterVariant: (v) => { pixels = v?.pixelScale === undefined ? 1000 : 1000 * v.pixelScale; },
+      });
+      const adapter = createWaterLodSpikeSphereTestAdapter(host);
+      expect(check(await adapter.measure(caseOf('C'), makeContext()), 'pixels')?.passed).toBe(true);
+      pixels = 1000;
+      expect(check(await adapter.measure(caseOf('A'), makeContext()), 'pixel')?.passed).toBe(true);
+      const unchanged = makeHost({ land: 9, water: 1, atmosphere: 9 }, { drawingBufferPixels: () => 1000, setWaterVariant: () => undefined });
+      expect(check(await createWaterLodSpikeSphereTestAdapter(unchanged).measure(caseOf('C'), makeContext()), 'pixels')?.passed).toBe(false);
+    });
+
+    it('fails when the timestamps are unsupported or the page cannot hold a variant', async () => {
+      const host = makeHost({ land: 9, water: 1, atmosphere: 9 }, { gpuFrameMs: () => null });
+      const observation = await createWaterLodSpikeSphereTestAdapter(host).measure(caseOf('A'), makeContext());
+      expect(check(observation, 'GPU time')?.passed).toBe(false);
+      expect(check(observation, 'can hold')?.passed).toBe(false);
     });
   });
 

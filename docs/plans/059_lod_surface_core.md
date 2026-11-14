@@ -12,6 +12,9 @@ performance:
   - id: lod-surface-terrain-v1
     url: http://triangular-demo.localhost:4200/lod-surface-lab?testSuite=lod-surface-terrain&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
     status: measured-rtx3080-visual-review-pending
+  - id: planet-scene-v5
+    url: http://triangular-demo.localhost:4200/planet-scene?testSuite=planet-scene&testVersion=5&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
+    status: runnable-hardware-unmeasured
 ---
 
 # Plan 059: LOD Surface Core for Water and Terrain
