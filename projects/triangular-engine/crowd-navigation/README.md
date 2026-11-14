@@ -195,14 +195,59 @@ field.sample(x + 0.5, y + 0.5, out); // bilinear direction at a position in cell
 - **Determinism.** Spawning uses a seeded PRNG (`seed`); the step uses no `Math.random`. The same seed and step sequence
   give identical positions (the spec compares two runs).
 - **Limits.** There is one field per sector per goal, so an agent whose cell cannot reach the sector's downstream
-  neighbour (a walled-in pocket) is marked unreachable. Arrival uses the straight distance, so a goal right behind a thin
-  wall can be reached from the other side. Agents standing in a cell that an edit blocks are not moved out yet.
+  neighbour (a walled-in pocket) is marked unreachable. Arrival uses the straight distance (for a goal set, the nearest
+  source cell within the arrival radius), so a goal right behind a thin wall can be reached from the other side.
   Territory cost is not applied. There is no worker wrapper yet; the simulation is plain typed-array code and runs
   wherever it is called.
 
 Measured by the specs in headless Chrome on the development machine: one 64 x 64 sector field builds in about 1.2 to
 1.6 ms, and 1,000 villagers cross the generated 512 x 512 island (a wall with a 9-cell opening between them, 11 sector
 fields built) in about 1,900 steps of 0.05 s with a mean step of 0.7 ms. These are not guarantees.
+
+## Goal sets (several sources)
+
+A goal can be a set of cells. `new NavGoalSet(graph)` holds the sources (`add`, `addCell`, `remove`, `removeCell`, `has`,
+`size`, `forEachCell`); `crowd.addGoalSet(set)` registers it as a goal id and `cache.fieldForGoals(set, unitClass)` gives
+the field. Every cell leads to its nearest source by path cost: the abstract search ends at the cheapest reachable source
+(`findAbstractPathToAny`), each sector field is seeded with every source inside it, and a newly built sector of a
+multi-source field is also seeded from built neighbours that do not depend on it. Agents arrive at the nearest source
+cell within `arrivalRadius`; `crowd.arrivedCell[i]` says which one (single goals report their one cell).
+
+Adding or removing a source bumps only the stamps of the sectors that can change: the 3 x 3 ring around the source's
+sector when adding, the source's own sector when removing. The cached sector fields of those sectors, and the fields
+seeded from them, rebuild lazily on the next `ensure`; the rest keep their data. Limits: fields elsewhere stay valid but
+can be suboptimal after an add (an agent may head for a source that is no longer the nearest); `touchAll()` forces an
+exact refresh. Removing a source also invalidates fields that were seeded from neighbours of its sector.
+
+`crowd.retargetAgent(i, goalId)` moves one agent to another goal.
+
+## Roads
+
+A road's cost factor is applied when the cost layer is composed: `cost = round(terrain * factor)` (clamped 1..254), the
+factor going from 1 (no road) to `roadMinFactor` for a full road; a road `value` below 255 gives a weaker preference.
+`grid.setRoadMinFactor(f)` (0.05 to 1, default 0.4) retunes it; it recomposes the whole grid, so rebuild the graph after
+it (`NavWorld.setRoadPreference` does both). The preference is global because the composed cost layer is shared by all
+classes and goals. The sector search heuristic follows the factor, so roads never break A* admissibility.
+
+## One edit API: `NavWorld`
+
+`NavWorld.fromHeightfield(heightfield)` (or `new NavWorld(graph)`) wraps the grid and graph. `placeBuilding`,
+`removeBuilding`, `placeGate`, `setGateOpen`, `paintRoad`, `paintRoadLine`, `editTerrain(rect, fn)`, `updateTerrain` and
+`setRoadPreference` update the grid in a local window, call `rebuildSectors(dirty)` and return a `NavEditResult`
+(`dirty`, the rebuilt `sectors`, `gridMs`, `sectorMs`). Untouched sectors keep their `versions`; flow fields repair
+lazily through the versions (see above); `world.stats` totals edits and rebuilt sectors.
+
+## Blocked cells and arrival spreading
+
+When the graph changes, `NavCrowd.step` moves every agent standing in a cell its class can no longer stand in to the
+nearest passable cell (a bounded square-ring search, `displaceRadius`, default 32; ties resolve in scan order;
+velocity is zeroed). The count is `stats.displaced`; agents with no passable cell nearby are counted in `stats.stranded`
+and left alone. `crowd.displaceBlocked()` runs the pass on demand.
+
+Arrived agents do not stack on the goal cell: they stay in the spatial hash with zero flow and settle only through the
+separation force, and a moving agent that touches an arrived agent of its own goal set joins it (arrives by contact).
+The blob therefore grows from the goal toward the approach side. This is deliberately simple; ring slots or a
+formation system can replace it later.
 
 ## Island generator
 

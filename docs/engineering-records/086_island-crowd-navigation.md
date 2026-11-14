@@ -401,6 +401,90 @@ goals-edits: keep the plan's order (worker after goals-edits); arrival spreading
 moving agents out of newly blocked cells are part of goals-edits; one portal per open run, the single-downstream
 sector field, unit scale (cells, top speed 4) and the double-click goal gesture stay as they are for now.
 
+### 2026-11-08 — goals-edits: multi-source goals, roads, incremental edits, displacement and arrival spreading (implementation, awaiting review)
+
+Built in `triangular-engine/crowd-navigation` (still worker-safe: no Angular, three.js or engine-root imports; the built
+bundle `triangular-engine-crowd-navigation.mjs` has no `@angular`, `ɵɵngDeclare` or `three` import).
+
+Files:
+
+- New: `core/nav-goals.ts` (`NavGoalSet`), `core/nav-world.ts` (`NavWorld`, `NavEditResult`, `NavWorldStats`),
+  `core/nav-edits.spec.ts` (19 specs).
+- Changed: `core/nav-sectors.ts` (`findAbstractPathToAny`, goal sides, `revision`, live road `minCost`),
+  `core/nav-grid.ts` (`setRoadMinFactor`), `core/nav-flow.ts` (fields over goal sets, goal stamps, neighbour seeding),
+  `core/nav-crowd.ts` (goal sets, `arrivedCell`, displacement, arrival spreading), `public-api.ts`, entry `README.md`
+  (goal sets, roads, `NavWorld`, displacement and arrival sections), `CHANGELOG.md`, package README row and
+  `docs/entry-points.md` row.
+- Demo `/crowd-navigation-grid`: `.component.ts/.html` (edit-mode toggle, gate through `NavWorld`, four-storehouse preset
+  with remove/restore, HUD counters), all inside the existing `topCenter` portal lane.
+
+Design as built:
+
+- Goal sets: `NavGoalSet` has a bitset for membership and a per-sector source list. Adding a source bumps the stamps of
+  the 3 x 3 sector ring around it; removing one bumps its own sector. A sector field stores the stamp it was built with,
+  `sync()` marks entries stale when the sector version or the stamp differs and then propagates staleness to entries
+  seeded from a stale one. A single-cell goal is a one-source set, so the old API still works (`goalX/goalY/goalCell` are
+  getters on the primary source).
+- Search: `searchAbstract` is shared by `findAbstractPath` (octile heuristic) and `findAbstractPathToAny`, which uses a
+  per-sector "goal side" (cost from each portal node to the nearest source, a reverse multi-source local search, cached per
+  class and keyed by sector version and the set's stamp). With more than one source the heuristic is 0.
+- Sector fields: every passable source in the sector is a cost 0 seed. For multi-source fields a new sector is also seeded
+  from built neighbours that do not depend on it, which keeps the dependency graph acyclic. Without it, agents near the
+  border between two sources went to the second nearest (254 of 300 matched the nearest source; with it 298 of 300).
+- Roads: the road layer already composed into cost as `round(terrain * factor)`; the factor is now tunable
+  (`setRoadMinFactor`, 0.05 to 1) and the A* minimum cost follows it. Global by design (the cost layer is shared).
+- Edits: `NavWorld` applies one grid edit, calls `rebuildSectors(dirty)` and returns the dirty sectors and timings. The
+  graph `revision` increases when any sector is rebuilt.
+- Displacement: when the revision changes, `NavCrowd.step` scans square rings up to `displaceRadius` (32) and puts an
+  agent that stands in a cell its class cannot use on the nearest passable cell (centre distance, ties by scan order),
+  velocity zeroed. Agents with no such cell are counted as `stranded`.
+- Arrival spreading: arrived agents stay in the spatial hash with zero flow, so separation spreads them; a moving or
+  waiting agent that touches an arrived agent of its goal set arrives by contact. Chosen because it needs no slot
+  allocation and is deterministic; the blob grows toward the approach side.
+
+Results (headless Chrome, development machine, not guarantees):
+
+- `npm run test:triangular-engine:crowd-navigation`: 74 of 74 specs pass (55 earlier plus 19 new).
+- Building dropped on the active route (generated island, 1,000 villagers): 1000 of 1000 arrived in 1,643 steps, step
+  1.1 ms mean and 15 to 28 ms max; the edit rebuilt 4 of 64 sectors in about 30 ms (grid update 0.1 to 0.2 ms), invalidated
+  5 fields, 2 of them rebuilt in the next step, 340 agents moved out; 13 field builds in total, 16 to 26 ms of field building.
+- Gate closing mid-route (256 x 128 plain, 400 agents, a second opening): 400 of 400 arrived in 904 steps, step 0.4 to
+  0.5 ms mean and 3.6 to 5.5 ms max; 243 agents were within 28 cells of the gate when it closed; 4 of 32 sectors rebuilt in
+  3.7 to 6 ms; 8 fields invalidated, 9 rebuilt in the next step, 19 builds in total. A sealed gate makes agents on the
+  wrong side unreachable and they arrive after it reopens.
+- Four storehouses (island, 600 villagers, one removed at step 60): 600 of 600 arrived in 265 steps; arrivals per source
+  212 / 84 / 105 / 199; step 0.41 ms mean and 11.7 ms max; removing one source invalidated 4 of 4 cached sector fields (the
+  neighbour seeding widens dependencies); 8 builds in 13.3 ms. On open ground 298 of 300 agents ended at the nearest of 3
+  sources.
+- Road spec: with factor 0.4 a flat cell costs 6 instead of 16 and agents take a detour over the road (and go straight with
+  factor 1).
+- No agent was inside a blocked cell at any check (every few steps) in the three scenarios.
+- Observation: about 7 ms per rebuilt sector, dominated by the graph rebuild for all classes.
+- Demo check: `/crowd-navigation-grid` builds without errors (`daxur app status`); placing a building mid-run showed
+  "2 of 64 sectors rebuilt in 8.1 ms, 4 sector fields invalidated", the gate toggle "2 of 64 sectors in 13.8 ms", and the
+  storehouse preset arrived 1000 of 1000 after one storehouse was removed (991 / 9 at the remaining two). The console shows
+  only 503 responses from the period when the dev build restarted. Screenshots: `artifacts/crowd-navigation/edits-building.png`,
+  `edits-gate.png`, `edits-multisource.png`.
+
+Deviations and limits:
+
+- Adding a source refreshes only its sector ring and dependants; fields elsewhere stay valid but can be suboptimal.
+  Opening a gate or building a road does not make fields outside the dependent chain reroute (`touchAll()` is the exact
+  refresh).
+- Agents wait while their sector field is rebuilt after an edit (they slow down until the next `ensure`).
+- One global road multiplier. Neighbour seeding makes a removal invalidate more fields than strictly needed.
+- The demo storehouse positions are fixed offsets from the spawn point; the split between them is uneven (most villagers
+  prefer one) because of the terrain; the count is shown per source.
+- Not verified: hardware GPU timings; worker use.
+
+Open questions for the developer:
+
+1. Q4 (desire paths) remains open and untouched.
+2. Is contact-joining (the blob grows toward the approach side) acceptable, or do you want ring slots around the goal?
+3. Should adding a source or opening a gate trigger a wider or exact refresh (`touchAll`) by default, at the cost of more rebuilds?
+4. Per-class or per-faction road multipliers instead of one global factor?
+5. Is neighbour seeding worth the wider invalidation?
+
 ## Scope history
 
 <!-- tri:scope-history -->

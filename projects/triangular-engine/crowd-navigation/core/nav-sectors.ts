@@ -74,6 +74,28 @@ export interface NavAbstractPath {
   readonly portals: readonly NavPortal[];
 }
 
+/**
+ * One goal sector of a multi-source query: the passable source cells inside the sector and the cost
+ * from each portal node of the sector to the nearest of them. Built by {@link NavSectorGraph.goalSide};
+ * valid until the sector is rebuilt.
+ */
+export interface NavGoalSide {
+  /** The sector holding the sources. */
+  readonly sector: number;
+  /** Passable source cell indices inside the sector. */
+  readonly cells: readonly number[];
+  /** Portal nodes of the sector (`portalId * 2 + side`) at the time of the build. */
+  readonly nodes: Int32Array;
+  /** Cost from each node to the nearest source inside the sector, `Infinity` when none is reachable. */
+  readonly costs: Float64Array;
+}
+
+/** Anything that can list the goal sides of a source set per unit class (see `NavGoalSet`). */
+export interface NavGoalSides {
+  /** The goal sides (one per sector holding at least one passable source) for a unit class. */
+  sidesFor(unitClass: NavUnitClass): readonly NavGoalSide[];
+}
+
 /** Why a query did not find a path (diagnostics, mostly for tests and the demo). */
 export type NavAbstractFailure = 'start-blocked' | 'goal-blocked' | 'disconnected';
 
@@ -143,9 +165,13 @@ export class NavSectorGraph {
   readonly sectorCount: number;
   /** Per-sector rebuild counter. A full build sets every entry to 1; a rebuild bumps rebuilt sectors only. */
   readonly versions: Uint32Array;
+  /**
+   * Increases by one for every {@link rebuildSectors} call that rebuilt at least one sector. Cheap way
+   * for consumers (the crowd, caches) to notice that the grid was edited.
+   */
+  revision = 0;
 
   private readonly classes: Record<NavUnitClass, ClassData>;
-  private readonly minCost: number;
 
   // Local (per-sector) search scratch.
   private readonly lDist: Float32Array;
@@ -166,7 +192,6 @@ export class NavSectorGraph {
     this.sectorsY = Math.ceil(grid.height / sectorSize);
     this.sectorCount = this.sectorsX * this.sectorsY;
     this.versions = new Uint32Array(this.sectorCount);
-    this.minCost = Math.max(1, Math.floor(NAV_BASE_TERRAIN_COST * grid.roadMinFactor));
     const area = sectorSize * sectorSize;
     this.lDist = new Float32Array(area);
     this.lDone = new Uint8Array(area);
@@ -273,6 +298,7 @@ export class NavSectorGraph {
     }
     const out = [...rebuilt].sort((a, b) => a - b);
     for (const s of out) this.versions[s]++;
+    if (out.length > 0) this.revision++;
     return out;
   }
 
@@ -335,61 +361,114 @@ export class NavSectorGraph {
     unitClass: NavUnitClass,
   ): NavAbstractPath & { readonly failure?: NavAbstractFailure } {
     const grid = this.grid;
-    const none = (failure: NavAbstractFailure) => ({
-      found: false,
-      cost: Infinity,
-      sectors: [] as number[],
-      portals: [] as NavPortal[],
-      failure,
-    });
-    if (!grid.isPassable(startX, startY, unitClass)) return none('start-blocked');
-    if (!grid.isPassable(goalX, goalY, unitClass)) return none('goal-blocked');
+    if (!grid.isPassable(startX, startY, unitClass)) return this.noPath('start-blocked');
+    if (!grid.isPassable(goalX, goalY, unitClass)) return this.noPath('goal-blocked');
+    const side = this.goalSide(this.sectorOf(goalX, goalY), [goalY * grid.width + goalX], unitClass);
+    return this.searchAbstract(startX, startY, [side], { x: goalX, y: goalY }, unitClass);
+  }
+
+  /**
+   * The abstract query toward the nearest of many sources: finds the cheapest route from a start
+   * cell to any passable source of a goal set and returns the sector corridor and portals, ending in
+   * the sector of the source it reaches. `goals` is usually a `NavGoalSet`, which caches the per-sector
+   * goal sides between calls. With more than one source the search has no heuristic (plain Dijkstra
+   * over the small portal graph). Failures: `'start-blocked'`, `'goal-blocked'` (no passable source)
+   * or `'disconnected'`.
+   */
+  findAbstractPathToAny(
+    startX: number,
+    startY: number,
+    goals: NavGoalSides,
+    unitClass: NavUnitClass,
+  ): NavAbstractPath & { readonly failure?: NavAbstractFailure } {
+    if (!this.grid.isPassable(startX, startY, unitClass)) return this.noPath('start-blocked');
+    const sides = goals.sidesFor(unitClass);
+    if (sides.length === 0) return this.noPath('goal-blocked');
+    let only: { x: number; y: number } | undefined;
+    if (sides.length === 1 && sides[0].cells.length === 1) {
+      const c = sides[0].cells[0];
+      only = { x: c % this.grid.width, y: Math.floor(c / this.grid.width) };
+    }
+    return this.searchAbstract(startX, startY, sides, only, unitClass);
+  }
+
+  /**
+   * The goal side of one sector: the passable cells among `cells` and the cost from each portal node
+   * of the sector to the nearest of them (a reverse multi-source search inside the sector).
+   */
+  goalSide(sector: number, cells: readonly number[], unitClass: NavUnitClass): NavGoalSide {
+    const cd = this.classes[unitClass];
+    const W = this.grid.width;
+    const live = cells.filter((c) => this.passable(cd, c));
+    const nodes = cd.secNodes[sector];
+    const costs = new Float64Array(nodes.length).fill(Infinity);
+    if (live.length > 0 && nodes.length > 0) {
+      const nodeCells = Array.from(nodes, (n) => this.nodeCell(cd, n));
+      this.localSearch(cd.threshold, sector, live, true, nodeCells);
+      const r = this.sectorRect(sector);
+      for (let k = 0; k < nodes.length; k++) {
+        const c = nodeCells[k];
+        costs[k] = this.lDist[(Math.floor(c / W) - r.y) * r.width + (c % W) - r.x];
+      }
+    }
+    return { sector, cells: live, nodes, costs };
+  }
+
+  private noPath(failure: NavAbstractFailure): NavAbstractPath & { readonly failure: NavAbstractFailure } {
+    return { found: false, cost: Infinity, sectors: [], portals: [], failure };
+  }
+
+  private searchAbstract(
+    startX: number,
+    startY: number,
+    sides: readonly NavGoalSide[],
+    hGoal: { x: number; y: number } | undefined,
+    unitClass: NavUnitClass,
+  ): NavAbstractPath & { readonly failure?: NavAbstractFailure } {
+    const grid = this.grid;
     const cd = this.classes[unitClass];
     const W = grid.width;
     const startCell = startY * W + startX;
-    const goalCell = goalY * W + goalX;
     const sS = this.sectorOf(startX, startY);
-    const sG = this.sectorOf(goalX, goalY);
 
-    // Connect the start (forward search) and the goal (reverse search) to the portals of their sectors.
+    // Connect the start (forward search) to the portals of its sector and to the sources inside it;
+    // the sources' side (reverse search) was computed per goal sector.
     const sNodes = cd.secNodes[sS];
-    const gNodes = cd.secNodes[sG];
     const sCells = Array.from(sNodes, (n) => this.nodeCell(cd, n));
-    const gCells = Array.from(gNodes, (n) => this.nodeCell(cd, n));
-    if (sS === sG) sCells.push(goalCell);
+    const sameSide = sides.find((side) => side.sector === sS);
+    const nDirect = sameSide ? sameSide.cells.length : 0;
+    if (sameSide) for (const c of sameSide.cells) sCells.push(c);
     this.localSearch(cd.threshold, sS, startCell, false, sCells);
     const rS = this.sectorRect(sS);
     const startDist = sCells.map((c) => this.lDist[(Math.floor(c / W) - rS.y) * rS.width + (c % W) - rS.x]);
     let direct = Infinity;
-    if (sS === sG) direct = startDist.pop() as number;
-    this.localSearch(cd.threshold, sG, goalCell, true, gCells);
-    const rG = this.sectorRect(sG);
-    const goalDist = gCells.map((c) => this.lDist[(Math.floor(c / W) - rG.y) * rG.width + (c % W) - rG.x]);
+    if (nDirect > 0) direct = Math.min(...startDist.splice(startDist.length - nDirect, nDirect));
 
     // Components: fail fast when no reachable start node shares a component with a goal node.
     const startComps = new Set<number>();
     for (let k = 0; k < sNodes.length; k++) if (startDist[k] !== Infinity) startComps.add(cd.comp[sNodes[k]]);
     const toGoal = new Map<number, number>();
     let shared = false;
-    for (let k = 0; k < gNodes.length; k++) {
-      if (goalDist[k] === Infinity) continue;
-      toGoal.set(gNodes[k], goalDist[k]);
-      if (startComps.has(cd.comp[gNodes[k]])) shared = true;
+    for (const side of sides) {
+      for (let k = 0; k < side.nodes.length; k++) {
+        if (side.costs[k] === Infinity) continue;
+        toGoal.set(side.nodes[k], side.costs[k]);
+        if (startComps.has(cd.comp[side.nodes[k]])) shared = true;
+      }
     }
-    if (!shared && direct === Infinity) return none('disconnected');
+    if (!shared && direct === Infinity) return this.noPath('disconnected');
 
     this.ensureScratch(cd);
     const stampId = ++cd.stampCounter;
     const { g, pred, stamp } = cd;
     const heap = this.aHeap;
     heap.clear();
-    const minCost = this.minCost;
-    const hx = goalX;
-    const hy = goalY;
+    const minCost = Math.max(1, Math.floor(NAV_BASE_TERRAIN_COST * grid.roadMinFactor));
     const h = (node: number): number => {
+      if (!hGoal) return 0;
       const c = this.nodeCell(cd, node);
-      const dx = Math.abs((c % W) - hx);
-      const dy = Math.abs(Math.floor(c / W) - hy);
+      const dx = Math.abs((c % W) - hGoal.x);
+      const dy = Math.abs(Math.floor(c / W) - hGoal.y);
       return (Math.max(dx, dy) + (SQRT2 - 1) * Math.min(dx, dy)) * minCost;
     };
     for (let k = 0; k < sNodes.length; k++) {
@@ -430,7 +509,7 @@ export class NavSectorGraph {
         if (j !== idx && w !== Infinity) this.relax(cd, stampId, u, nodes[j], gu + w, h, heap);
       }
     }
-    if (best === Infinity) return none('disconnected');
+    if (best === Infinity) return this.noPath('disconnected');
 
     // Reconstruct.
     const pathNodes: number[] = [];
@@ -446,7 +525,6 @@ export class NavSectorGraph {
       push((n & 1) === 0 ? cd.sectorA[n >> 1] : cd.sectorB[n >> 1]);
       if (k > 0 && pathNodes[k - 1] >> 1 === n >> 1) portals.push(this.portalOf(cd, n >> 1));
     }
-    push(sG);
     return { found: true, cost: best, sectors, portals };
   }
 
@@ -628,7 +706,7 @@ export class NavSectorGraph {
   private localSearch(
     threshold: number,
     sector: number,
-    source: number,
+    source: number | readonly number[],
     reverse: boolean,
     targets: number[],
   ): void {
@@ -650,15 +728,15 @@ export class NavSectorGraph {
         remaining++;
       }
     }
-    if (targets.length === 0) {
-      dist[(Math.floor(source / W) - y0) * sw + (source % W) - x0] = 0;
-      return;
-    }
     const heap = this.heap;
     heap.clear();
-    const src = (Math.floor(source / W) - y0) * sw + (source % W) - x0;
-    dist[src] = 0;
-    heap.push(0, src);
+    const sources = typeof source === 'number' ? [source] : source;
+    for (const c of sources) {
+      const src = (Math.floor(c / W) - y0) * sw + (c % W) - x0;
+      dist[src] = 0;
+      if (targets.length > 0) heap.push(0, src);
+    }
+    if (targets.length === 0) return;
     const pass = (i: number) => (flags[i] & NavFlag.BLOCKED) === 0 && clearance[i] >= threshold;
     while (heap.size > 0) {
       const lu = heap.pop();

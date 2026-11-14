@@ -126,7 +126,29 @@
             </button>
           }
         </div>
-        <span class="muted">Goal: {{ goalLabel() }} (double-click the terrain to set one)</span>
+        <div class="buttons" role="group" aria-label="Click mode">
+          @for (m of editModes; track m.id) {
+            <button
+              type="button"
+              [class.active]="editMode() === m.id"
+              [attr.aria-pressed]="editMode() === m.id"
+              (click)="setEditMode(m.id)"
+            >
+              {{ m.label }}
+            </button>
+          }
+        </div>
+        @if (multiGoal()) {
+          <div class="buttons" role="group" aria-label="Storehouses">
+            <button type="button" (click)="removeStorehouse()">Remove a storehouse</button>
+            <button type="button" (click)="restoreStorehouses()">Restore storehouses</button>
+          </div>
+          <span class="hud">Storehouses {{ storehouses() }} · arrivals per storehouse {{ sourceArrivals().join(" / ") }}</span>
+        }
+        @if (editInfo()) {
+          <span class="muted">{{ editInfo() }}</span>
+        }
+        <span class="muted">Goal: {{ goalLabel() }} (double-click the terrain to set one; edit mode makes a click place or remove a building)</span>
         <span class="hud"
           >Arrived {{ crowdHud().arrived | number }} / {{ crowdSize | number }} · moving
           {{ crowdHud().moving | number }} · waiting {{ crowdHud().waiting | number }}
@@ -143,6 +165,10 @@
           {{ crowdHud().builds }} built · last
           {{ crowdHud().lastBuildMs | number: "1.2-2" }} ms · total
           {{ crowdHud().totalBuildMs | number: "1.1-1" }} ms</span
+        >
+        <span class="hud"
+          >Edits {{ crowdHud().edits }} · sectors rebuilt {{ crowdHud().sectorsRebuilt }} · fields invalidated
+          {{ crowdHud().invalidations }} · agents moved {{ crowdHud().displaced }}</span
         >
       </div>
     </ng-template>

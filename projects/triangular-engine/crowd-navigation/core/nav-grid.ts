@@ -40,8 +40,13 @@ export class NavGrid {
   readonly cellSize: number;
   /** Largest walkable slope (rise over run). */
   readonly maxWalkableSlope: number;
-  /** Road cost factor at road value 255. */
-  readonly roadMinFactor: number;
+  /**
+   * Road cost factor at road value 255 (how strongly roads are preferred). Change it with
+   * {@link NavGrid.setRoadMinFactor}.
+   */
+  get roadMinFactor(): number {
+    return this.roadFactor;
+  }
   /** Cost factor for another faction's territory. */
   readonly hostileTerritoryFactor: number;
   /** Clearance saturation value in cells. */
@@ -64,6 +69,7 @@ export class NavGrid {
   /** Clearance field in cells. */
   readonly clearance: Uint8Array;
 
+  private roadFactor: number;
   private readonly waterLevel: number | undefined;
   private readonly waterMask: Uint8Array | undefined;
 
@@ -82,7 +88,7 @@ export class NavGrid {
     this.height = height;
     this.cellSize = source.cellSize;
     this.maxWalkableSlope = options.maxWalkableSlope ?? 0.7;
-    this.roadMinFactor = options.roadMinFactor ?? 0.4;
+    this.roadFactor = clampRoadFactor(options.roadMinFactor ?? 0.4);
     this.hostileTerritoryFactor = options.hostileTerritoryFactor ?? 1.5;
     this.maxClearance = Math.min(255, Math.max(1, Math.floor(options.maxClearance ?? 16)));
     this.heights = source.heights;
@@ -221,6 +227,22 @@ export class NavGrid {
     const r = this.clip(footprint);
     this.refresh(r);
     return this.computeClearance(r);
+  }
+
+  /**
+   * Retunes how strongly roads are preferred: the cost factor of a full road (road value 255), from
+   * 0.05 (a road is twenty times cheaper than open ground) to 1 (roads are no cheaper). Recomposes
+   * the `cost` layer of the whole grid and returns the grid bounds, so pass the result to
+   * `NavSectorGraph.rebuildSectors` (every sector is rebuilt and every cached field is dropped; this is
+   * a rare, global retune, not a per-frame edit). A road laid with a smaller `value` than 255 keeps a
+   * proportionally weaker preference, so roads of different quality need no extra layer. The factor is
+   * one value for all unit classes because the composed `cost` layer is shared.
+   */
+  setRoadMinFactor(factor: number): NavRect {
+    this.roadFactor = clampRoadFactor(factor);
+    const r = this.bounds();
+    this.refresh(r);
+    return r;
   }
 
   /** Paints the road layer over a footprint with `value` (0 to 255; 255 is a full road). */
@@ -364,6 +386,10 @@ export class NavGrid {
       }
     }
   }
+}
+
+function clampRoadFactor(f: number): number {
+  return Math.min(1, Math.max(0.05, f));
 }
 
 function grow(r: NavRect, by: number): NavRect {

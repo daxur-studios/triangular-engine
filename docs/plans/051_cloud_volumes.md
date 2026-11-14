@@ -51,6 +51,7 @@ Both exist today, so no phase here waits on those plans. This plan delivers the 
 | G6 | Budget (GPU, 1440p, maintainer's GPU): **≤ 1.5 ms typical, ≤ 2.5 ms worst case** (camera inside thin, wispy cloud). Status at 2b: typical met at 1-4 volumes (0.2-1.2 ms); worst met at 1, borderline at 4 (2.4-2.6 inside); moving not measured yet; 12 volumes fails and becomes a Phase 6 gate (cost nearly flat as visible volume count grows) unless step 3c fixes it. Phase 6 needs one generic loop over volumes with per-volume params in a uniform/storage buffer, so shared atlases also fix the sampler count |
 | G7 | From orbit, planet-wide cloud cover for a fraction of a millisecond, casting shadows on the ground |
 | G8 | A few point lights light the cloud from inside: a rocket engine flying through, lightning in a storm. Both shown in the lab (Phase 7) |
+| G9 | Clouds render correctly through the planet's globe-to-map morph, day and night as on the globe (proposed 2026-11-11; see §The morph) |
 
 ## What was tried before, and the lesson
 
@@ -183,6 +184,77 @@ and time warp. What each table depends on, and so how often it is rebuilt:
   2 km planet but shimmers at planet scale, so Phase 2 fixes it (§Rendering, step 1).
 - **Gate rule:** every timing gate is measured twice, camera still and in the moving worst case
   (camera orbiting, planet turning at high time warp, so every table above rebuilds every frame).
+
+## The morph (G9, added 2026-11-11, proposed)
+
+The planet's morph runs from 0 (globe) to 1 (flat map): one shared uniform set on `<planet>`, every in-between shape a piece
+of a sphere of curvature k = curve(morph)/R ([Plan 049](/docs/plans/049_morphing_planet_atmosphere.md) §Morph). Today only
+the 2D planet cloud shell bends (`planet-cloud-bend.ts`, which reuses `planetBentSurfaceNodes`). The volume core has no
+radius, curvature or up logic, and nothing here plans a morph path. Every item below is **proposed**; the owner has not
+chosen it.
+
+**Chosen direction (to be tried first): rigid placement.** A volume keeps its straight box, its baked density and light, and
+its unchanged march. Only its transform follows the bent ground:
+- its centre goes through the bend function (the CPU twin `bend()` in `atmosphere/bent-planet.ts`; the one function terrain,
+  atmosphere and clouds must all use, which has to be confirmed first);
+- its frame turns to the bent local up at that point.
+
+**Light stays the globe's.** Day and night is `'real'` ([Plan 049](/docs/plans/049_morphing_planet_atmosphere.md) §Day and
+night): a map point is lit as its globe location is. Each volume computes its light at its true globe position, with the sun
+direction in the volume's own frame, exactly as today. That frame does not change with the morph, so the morph causes no
+light re-bake. The planet material already lights a morphed surface as if it were still on the sphere, and the cloud shell
+is lit as on the globe, so the clouds then agree with the ground.
+
+**Found while building the suite (2026-11-11): "no re-bake" needs two per-volume steps.** A volume's light is baked in its
+own frame from the world sun and the mesh's world rotation, and the atmosphere lighting reads the mesh's world position.
+So a rigid turn to the bent up would, left alone, change the frame-local sun (a re-bake while the morph moves) and light the
+volume from its bent position (wrong). The lab (`bent-volume-pose.ts`) fixes both without touching the core: it turns each
+volume's sun by the same rotation as the volume (`turn * sun`, so the frame-local sun is unchanged), and runs the
+lighting with the meshes put back at their globe positions. The cleaner engine form is a separate light pose on
+`CloudVolume` and on `CloudVolumeAtmosphereLighting`; not built.
+
+**Edges (a volume is not drawn rigidly where rigid placement breaks).** A volume fades into the 2D shell near the map
+outline, at the cut meridian and the poles, and at any zoom where the owner judges volumes stop reading. The fade window is
+chosen by eye. The shell needs Phase 6's far-shell coverage so it matches where the volumes were.
+
+**What this assumes (all unmeasured or unknown):**
+- A volume is small next to the planet. Derived, not recorded: a straight box of side s on radius R is off by about
+  s²/(8R); at R = 600 km that reaches the shell's 150 m floor near s = 27 km, on a 6 km world near 2.7 km. Volume sizes in
+  metres are not in the records.
+- Map distortion across one volume is small. A rigid volume keeps its true footprint while the ground under it stretches, so
+  neighbours can overlap or gap, most at high latitude. The size of that is not known.
+- Haze comes from the bent atmosphere at the volume's bent position. The aerial table cannot carry the map mask, so volumes
+  near the outline get slightly wrong haze.
+
+**Options not chosen, and why:**
+- *Bend the rays inside the march:* a morph inversion per step, bent proxy bounds and a second code path in the core. Per-step
+  cost is not in the records (the 12-volume overhead is per volume and per chunk). Revisit only if a measured volume size
+  makes the rigid error visible.
+- *No volumes on the map (shell only):* nearly free, but 3D cloud shape stops reading at map scale. It is the edge rule
+  above, not the main path. Whether it should be the main path depends on whether map scale needs 3D cloud shape, which the
+  game's docs do not say.
+- *Re-bake density in bent space:* rejected; the light bake alone had to be spread over frames.
+
+**Measured before it is believed (suite `cloud-volumes-morph`, to be built by the `triangular-engine-testing` skill; RTX
+3080 Laptop, visible, GPU timing on; the owner runs it):**
+
+| Case | Reads | Why |
+|---|---|---|
+| 12 volumes placed, morph 0 / 0.5 / 1, camera still, orbit and ground | GPU pass net of a same-run control; drawn volume count | Does rigid placement hold the sphere-side figures (net 1.0 to 2.5 ms for 12 volumes)? |
+| Morph sweep 0 to 1 with 12 volumes | CPU ms per frame for the transforms; light bakes triggered | The morph should trigger none (Phase 3a re-bake rule). |
+| 50 and 200 volumes, morph 0.5 | Same, plus CPU ms | The stress case the plan never ran. |
+| Bent cloud shell, morph 0 / 0.5 / 1, ground and orbit | GPU pass net of control | No GPU cost for the bent shell is recorded; the 1.54 and 1.70 ms figures came from a build whose bend state is not recorded. |
+| Volumes at the outline, cut meridian and a pole | Look suite (by eye): holes, double cover, haze colour | The edge rule. |
+| Full stack: terrain, atmosphere, volumes, shell at morph 0 / 0.5 / 1 | One frame's GPU pass | [Plan 059](/docs/plans/059_lod_surface_core.md) §Measurements to add lists it; none exists. |
+
+**Gate (proposed, not confirmed by the owner):** the morph adds no light re-bake; a volume's net cost at morph 0.5 and 1 is no
+worse than at morph 0 by more than the noise in a clean run; the look suite passes by the owner's eye; the 12-volume case
+stays inside G6's worst case. G6's typical and worst figures are themselves proposals.
+
+**Missing facts** (decide the choice above): volume sizes in metres; the planet radius the game ships; what already triggers
+a volume's light re-bake; whether map scale needs 3D cloud shape; whether the three bend implementations (the lab's,
+`planetBentSurfaceNodes`, formula P2 in `lod-surface`) are one function; whether the terrain's direct shadows return above
+morph 0 (cloud ground shadows depend on that, and they are off today above morph 0).
 
 ## Performance budget (G6)
 
@@ -340,6 +412,7 @@ Plan 050's existing occlusion slot.
 | Atlas formats: density RGBA8 and light RGBA16F, four z slices packed per texel | Proposed (review), measured in Phase 2b step 1 |
 | Empty-space skip: tried in 2b and removed; Phase 6 brick allocation covers it | Superseded |
 | Budget G6: ≤ 1.5 ms typical, ≤ 2.5 ms worst, measured with GPU timestamps | Proposed |
+| Morph (G9): volumes keep their box and march and are placed rigidly on the bent ground; light stays the globe's (`'real'` day and night); fade to the shell at the outline, cut meridian and poles | Proposed 2026-11-11, not chosen by the owner; see §The morph |
 
 ## Out of scope for now
 

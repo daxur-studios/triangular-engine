@@ -11,6 +11,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import {
   BufferAttribute,
+  BoxGeometry,
   BufferGeometry,
   CapsuleGeometry,
   Color,
@@ -38,8 +39,12 @@ import {
   NavAgentState,
   NavCrowd,
   NavFlag,
+  NavGoalSet,
   NavGrid,
   NavSectorGraph,
+  NavWorld,
+  type NavEditResult,
+  type NavRect,
   NAV_CLEARANCE_THRESHOLDS,
   type NavAbstractPath,
   type NavUnitClass,
@@ -53,6 +58,12 @@ const CROWD_SIZE = 1000;
 
 /** Simulation speed multipliers offered by the crowd panel. */
 const SIM_SPEEDS: readonly number[] = [1, 4, 16];
+
+/** Edge length in cells of a building placed with the edit mode. */
+const BUILDING_SIZE = 8;
+
+/** What a click on the terrain does. */
+export type CrowdEditMode = 'off' | 'place' | 'remove';
 
 /** Cells along each side of the rendered demo island (1 m cells). */
 const GRID_SIZE = 512;
@@ -68,6 +79,11 @@ const UNIT_CLASSES: readonly NavUnitClass[] = ['villager', 'catapult', 'creature
  * (villagers only) and the 17-cell gate are its only crossings. The Sectors toggle draws the 64-cell
  * sector borders and the portals of the selected unit class; the corridor shows the abstract path
  * between two fixed points as highlighted sectors and rebuilds when the gate changes.
+ *
+ * Phase goals-edits adds the edit controls: a click places or removes an 8 x 8 building (a `NavWorld`
+ * edit that rebuilds only the touched sectors and repairs cached fields lazily), the gate toggle goes
+ * through the same API, and a goal preset sends the villagers to the nearest of four storehouses (a
+ * multi-source `NavGoalSet`, removable one by one). The HUD shows the invalidations and rebuilds.
  *
  * The Crowd panel runs 1,000 villagers on the main thread (a worker comes in a later phase): the
  * `NavCrowd` simulation builds flow fields lazily in the corridor sectors only (tinted green), the
@@ -109,6 +125,16 @@ export class CrowdNavigationGridPageComponent {
   readonly crowdRunning = signal(false);
   readonly showFlow = signal(true);
   readonly goalPresets = signal<{ id: string; label: string }[]>([]);
+  readonly editMode = signal<CrowdEditMode>('off');
+  readonly editInfo = signal('');
+  readonly multiGoal = signal(false);
+  readonly storehouses = signal(0);
+  readonly sourceArrivals = signal<number[]>([]);
+  readonly editModes: readonly { id: CrowdEditMode; label: string }[] = [
+    { id: 'off', label: 'Edit off' },
+    { id: 'place', label: 'Place building' },
+    { id: 'remove', label: 'Remove building' },
+  ];
   readonly goalLabel = signal('');
   readonly crowdHud = signal({
     arrived: 0,
@@ -117,6 +143,10 @@ export class CrowdNavigationGridPageComponent {
     unreachable: 0,
     stepMs: 0,
     cachedFields: 0,
+    invalidations: 0,
+    displaced: 0,
+    sectorsRebuilt: 0,
+    edits: 0,
     builds: 0,
     lastBuildMs: 0,
     totalBuildMs: 0,
@@ -125,6 +155,12 @@ export class CrowdNavigationGridPageComponent {
 
   private readonly grid: NavGrid;
   private sectors!: NavSectorGraph;
+  private world!: NavWorld;
+  private storehouseSet!: NavGoalSet;
+  private storehouseCells: number[] = [];
+  private readonly placed: { rect: NavRect; mesh: Mesh }[] = [];
+  private readonly buildingGeometry = new BoxGeometry(BUILDING_SIZE, 5, BUILDING_SIZE);
+  private readonly buildingMaterial = new MeshLambertMaterial({ color: '#c9a36b' });
   /** Nominal demo endpoints west and east of the wall (set by `stampExamples`). */
   private nominal = { start: { x: 0, y: 0 }, goal: { x: 0, y: 0 } };
   private readonly pixels = new Uint8Array(GRID_SIZE * GRID_SIZE * 4);
@@ -133,7 +169,7 @@ export class CrowdNavigationGridPageComponent {
 
   private readonly crowd: NavCrowd;
   private crowdMesh!: InstancedMesh;
-  private goalMarker!: Mesh;
+  private goalMarkers: Mesh[] = [];
   private terrainMesh!: Mesh;
   private flowLines: LineSegments | undefined;
   private flowKey = '';
@@ -173,6 +209,8 @@ export class CrowdNavigationGridPageComponent {
     this.sectors = NavSectorGraph.build(this.grid);
     this.sectorBuildMs.set(Math.round(performance.now() - t1));
     this.updatePortalCounts();
+    this.world = new NavWorld(this.sectors);
+    this.storehouseSet = new NavGoalSet(this.sectors);
     this.crowd = new NavCrowd(this.sectors, {
       capacity: CROWD_SIZE,
       seed: 11,
@@ -210,12 +248,18 @@ export class CrowdNavigationGridPageComponent {
       if (Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y) > 5) return;
       // Two clicks within 350 ms set the goal; single clicks and drags orbit as usual.
       const t = performance.now();
+      if (this.editMode() !== 'off') {
+        this.editFromClick(event);
+        return;
+      }
       const double = t - this.lastClickAt < 350;
       this.lastClickAt = double ? 0 : t;
       if (double) this.setGoalFromClick(event);
     });
     destroyRef.onDestroy(() => {
-      this.engine.scene.remove(mesh, this.crowdMesh, this.goalMarker);
+      this.engine.scene.remove(mesh, this.crowdMesh, ...this.goalMarkers, ...this.placed.map((b) => b.mesh));
+      this.buildingGeometry.dispose();
+      this.buildingMaterial.dispose();
       if (this.flowLines) {
         this.engine.scene.remove(this.flowLines);
         this.flowLines.geometry.dispose();
@@ -226,8 +270,10 @@ export class CrowdNavigationGridPageComponent {
       this.crowdMesh.geometry.dispose();
       (this.crowdMesh.material as MeshLambertMaterial).dispose();
       this.crowdMesh.dispose();
-      this.goalMarker.geometry.dispose();
-      (this.goalMarker.material as MeshBasicMaterial).dispose();
+      for (const m of this.goalMarkers) {
+        m.geometry.dispose();
+        (m.material as MeshBasicMaterial).dispose();
+      }
       this.texture.dispose();
     });
   }
@@ -252,6 +298,7 @@ export class CrowdNavigationGridPageComponent {
     crowd.clear();
     this.simSeconds = 0;
     if (this.crowdGoalId < 0) this.setGoal(this.goalPoints.get('east') ?? this.spawnPoint, 'East of the wall (via the gap)');
+    else crowd.retarget(this.crowdGoalId);
     const sp = this.spawnPoint;
     crowd.spawnRandom(CROWD_SIZE, { x: sp.x - 16, y: sp.y - 16, width: 32, height: 32 }, this.crowdGoalId);
     this.lastColored.fill(255);
@@ -262,9 +309,61 @@ export class CrowdNavigationGridPageComponent {
   }
 
   selectGoal(id: string): void {
+    if (id === 'storehouses') {
+      this.selectStorehouses();
+      return;
+    }
     const p = this.goalPoints.get(id);
     if (!p) return;
     this.setGoal(p, this.goalPresets().find((g) => g.id === id)?.label ?? id);
+  }
+
+  setEditMode(mode: CrowdEditMode): void {
+    this.editMode.set(mode);
+  }
+
+  /** Removes the first remaining storehouse (the last one stays). Only fields near it are rebuilt. */
+  removeStorehouse(): void {
+    const cells = this.storehouseCells.filter((c) => this.storehouseSet.hasCell(c));
+    if (cells.length <= 1) return;
+    const inv = this.crowd.cache.stats.invalidations;
+    const w = this.grid.width;
+    this.storehouseSet.removeCell(cells[0]);
+    this.crowd.cache.sync();
+    this.storehouses.set(this.storehouseSet.size);
+    this.editInfo.set(
+      `Storehouse (${cells[0] % w}, ${Math.floor(cells[0] / w)}) removed: ${this.crowd.cache.stats.invalidations - inv} cached sector fields invalidated`,
+    );
+    this.refreshMarkersAndFlow();
+  }
+
+  /** Puts every storehouse back. */
+  restoreStorehouses(): void {
+    for (const c of this.storehouseCells) this.storehouseSet.addCell(c);
+    this.crowd.cache.sync();
+    this.storehouses.set(this.storehouseSet.size);
+    this.editInfo.set(`Storehouses restored (${this.storehouseSet.size})`);
+    this.refreshMarkersAndFlow();
+  }
+
+  private selectStorehouses(): void {
+    this.crowdGoalId = this.crowd.addGoalSet(this.storehouseSet);
+    this.crowd.retarget(this.crowdGoalId);
+    this.lastColored.fill(255);
+    this.goalLabel.set('Nearest of 4 storehouses');
+    this.multiGoal.set(true);
+    this.storehouses.set(this.storehouseSet.size);
+    this.flowKey = '';
+    this.refreshMarkersAndFlow();
+  }
+
+  private refreshMarkersAndFlow(): void {
+    const w = this.grid.width;
+    const pts: { x: number; y: number }[] = [];
+    this.storehouseSet.forEachCell((c) => pts.push({ x: c % w, y: Math.floor(c / w) }));
+    this.placeGoalMarkers(pts);
+    this.flowKey = '';
+    this.refreshFlow();
   }
 
   private setGoal(p: { x: number; y: number }, label: string): void {
@@ -272,7 +371,8 @@ export class CrowdNavigationGridPageComponent {
     this.crowd.retarget(this.crowdGoalId);
     this.lastColored.fill(255);
     this.goalLabel.set(label);
-    this.placeGoalMarker(p.x, p.y);
+    this.multiGoal.set(false);
+    this.placeGoalMarkers([p]);
     this.flowKey = '';
     if (this.crowd.count > 0) this.refreshFlow();
   }
@@ -284,10 +384,20 @@ export class CrowdNavigationGridPageComponent {
     this.goalPoints.set('east', this.nearestRoomy(this.nominal.goal.x, this.nominal.goal.y));
     this.goalPoints.set('north', this.nearestRoomy(sp.x + 40, sp.y - 110));
     this.goalPoints.set('south', this.nearestRoomy(sp.x + 50, sp.y + 120));
+    // Four storehouses around the spawn area, on the spawn side of the wall.
+    const w = this.grid.width;
+    this.storehouseCells = [
+      this.nearestRoomy(sp.x + 40, sp.y - 55),
+      this.nearestRoomy(sp.x + 45, sp.y + 55),
+      this.nearestRoomy(sp.x + 80, sp.y - 5),
+      this.nearestRoomy(sp.x + 10, sp.y - 100),
+    ].map((p) => p.y * w + p.x);
+    for (const c of this.storehouseCells) this.storehouseSet.addCell(c);
     this.goalPresets.set([
       { id: 'east', label: 'East of the wall (via the gap)' },
       { id: 'north', label: 'North, same side' },
       { id: 'south', label: 'South, same side' },
+      { id: 'storehouses', label: 'Nearest of 4 storehouses' },
     ]);
   }
 
@@ -319,25 +429,37 @@ export class CrowdNavigationGridPageComponent {
     this.crowdMesh.frustumCulled = false;
     this.crowdMesh.count = 0;
     this.engine.scene.add(this.crowdMesh);
-    this.goalMarker = new Mesh(
-      new CylinderGeometry(3, 3, 14, 20, 1, true),
-      new MeshBasicMaterial({ color: '#ff3cdc', transparent: true, opacity: 0.45, depthWrite: false }),
-    );
-    this.engine.scene.add(this.goalMarker);
+    const geometry = new CylinderGeometry(3, 3, 14, 20, 1, true);
+    for (let k = 0; k < 4; k++) {
+      const marker = new Mesh(
+        geometry.clone(),
+        new MeshBasicMaterial({ color: '#ff3cdc', transparent: true, opacity: 0.45, depthWrite: false }),
+      );
+      marker.visible = false;
+      this.goalMarkers.push(marker);
+      this.engine.scene.add(marker);
+    }
+    geometry.dispose();
   }
 
-  private placeGoalMarker(x: number, y: number): void {
+  /** Shows one marker per goal point (at most four). */
+  private placeGoalMarkers(points: { x: number; y: number }[]): void {
     const n = GRID_SIZE;
-    this.goalMarker.position.set(
-      (x - n / 2) * this.grid.cellSize,
-      Math.max(this.grid.heights[y * n + x], 0) + 7,
-      (y - n / 2) * this.grid.cellSize,
-    );
+    this.goalMarkers.forEach((marker, k) => {
+      const p = points[k];
+      marker.visible = !!p;
+      if (!p) return;
+      marker.position.set(
+        (p.x - n / 2) * this.grid.cellSize,
+        Math.max(this.grid.heights[p.y * n + p.x], 0) + 7,
+        (p.y - n / 2) * this.grid.cellSize,
+      );
+    });
   }
 
   private update(dt: number): void {
     const crowd = this.crowd;
-    if (this.crowdRunning() && crowd.stats.arrived < crowd.count) {
+    if (this.crowdRunning()) {
       const steps = crowd.advance(Math.min(dt, 0.1) * this.simSpeed(), 48);
       this.simSeconds += steps * crowd.fixedDt;
     }
@@ -412,16 +534,29 @@ export class CrowdNavigationGridPageComponent {
       unreachable: crowd.stats.unreachable,
       stepMs: crowd.stats.lastStepMs,
       cachedFields: cs.sectorFields,
+      invalidations: cs.invalidations,
+      displaced: crowd.stats.displaced,
+      sectorsRebuilt: this.world.stats.sectorsRebuilt,
+      edits: this.world.stats.edits,
       builds: cs.builds,
       lastBuildMs: cs.lastBuildMs,
       totalBuildMs: cs.totalBuildMs,
       simSeconds: this.simSeconds,
     });
+    if (this.multiGoal()) {
+      const counts = this.storehouseCells.map(() => 0);
+      for (let i = 0; i < crowd.count; i++) {
+        const k = this.storehouseCells.indexOf(crowd.arrivedCell[i]);
+        if (k >= 0) counts[k]++;
+      }
+      this.sourceArrivals.set(counts);
+    }
   }
 
-  private setGoalFromClick(event: MouseEvent): void {
+  /** The grid cell under a mouse event, or undefined when the ray misses the terrain. */
+  private cellFromEvent(event: MouseEvent): { x: number; y: number } | undefined {
     const camera = this.engine.camera;
-    if (!camera) return;
+    if (!camera) return undefined;
     const resolution = this.engine.resolution$.value;
     this.pointerNdc.set(
       (event.offsetX / resolution.width) * 2 - 1,
@@ -429,15 +564,106 @@ export class CrowdNavigationGridPageComponent {
     );
     this.raycaster.setFromCamera(this.pointerNdc, camera);
     const hit = this.raycaster.intersectObject(this.terrainMesh, false)[0];
-    if (!hit) return;
+    if (!hit) return undefined;
     const n = GRID_SIZE;
-    const goal = this.nearestPassable(
-      Math.round(hit.point.x / this.grid.cellSize + n / 2),
-      Math.round(hit.point.z / this.grid.cellSize + n / 2),
-      'villager',
-    );
+    return {
+      x: Math.round(hit.point.x / this.grid.cellSize + n / 2),
+      y: Math.round(hit.point.z / this.grid.cellSize + n / 2),
+    };
+  }
+
+  private setGoalFromClick(event: MouseEvent): void {
+    const cell = this.cellFromEvent(event);
+    if (!cell) return;
+    const goal = this.nearestPassable(cell.x, cell.y, 'villager');
     if (!this.grid.isPassable(goal.x, goal.y, 'villager')) return;
     this.setGoal(goal, `clicked cell ${goal.x}, ${goal.y}`);
+  }
+
+  /** Place or remove a building at the clicked cell (edit mode). */
+  private editFromClick(event: MouseEvent): void {
+    const cell = this.cellFromEvent(event);
+    if (!cell) return;
+    if (this.editMode() === 'place') {
+      const rect: NavRect = {
+        x: cell.x - BUILDING_SIZE / 2,
+        y: cell.y - BUILDING_SIZE / 2,
+        width: BUILDING_SIZE,
+        height: BUILDING_SIZE,
+      };
+      if (!this.canBuild(rect)) {
+        this.editInfo.set('Cannot build there: water, steep ground, another structure or a goal.');
+        return;
+      }
+      const result = this.runEdit(() => this.world.placeBuilding(rect), 'Building placed');
+      this.addBuildingMesh(rect);
+      void result;
+    } else {
+      const k = this.placed.findIndex(
+        (b) => cell.x >= b.rect.x && cell.y >= b.rect.y && cell.x < b.rect.x + b.rect.width && cell.y < b.rect.y + b.rect.height,
+      );
+      if (k < 0) {
+        this.editInfo.set('No placed building under the cursor (only buildings you placed can be removed).');
+        return;
+      }
+      const [b] = this.placed.splice(k, 1);
+      this.engine.scene.remove(b.mesh);
+      this.runEdit(() => this.world.removeBuilding(b.rect), 'Building removed');
+    }
+  }
+
+  private canBuild(rect: NavRect): boolean {
+    const g = this.grid;
+    for (let y = rect.y; y < rect.y + rect.height; y++) {
+      for (let x = rect.x; x < rect.x + rect.width; x++) {
+        if (!g.inBounds(x, y) || g.flags[y * g.width + x] & (NavFlag.WATER | NavFlag.STEEP | NavFlag.STRUCTURE)) {
+          return false;
+        }
+        const c = y * g.width + x;
+        if (this.storehouseSet.hasCell(c)) return false;
+        const goal = this.crowd.goalCell(this.crowdGoalId);
+        if (goal && goal.x === x && goal.y === y) return false;
+      }
+    }
+    return true;
+  }
+
+  private addBuildingMesh(rect: NavRect): void {
+    const n = GRID_SIZE;
+    const g = this.grid;
+    const cx = rect.x + rect.width / 2;
+    const cy = rect.y + rect.height / 2;
+    const mesh = new Mesh(this.buildingGeometry, this.buildingMaterial);
+    mesh.position.set(
+      (cx - 0.5 - n / 2) * g.cellSize,
+      Math.max(g.heights[Math.floor(cy) * n + Math.floor(cx)], 0) + 2.5,
+      (cy - 0.5 - n / 2) * g.cellSize,
+    );
+    this.engine.scene.add(mesh);
+    this.placed.push({ rect, mesh });
+  }
+
+  /**
+   * Applies a world edit and publishes what it touched: the sectors rebuilt, the sector fields the
+   * crowd's cache invalidated and the agents moved out of blocked cells.
+   */
+  private runEdit(edit: () => NavEditResult, label: string): NavEditResult {
+    const cache = this.crowd.cache;
+    const inv = cache.stats.invalidations;
+    const displaced = this.crowd.stats.displaced;
+    const result = edit();
+    this.updatePortalCounts();
+    this.crowd.displaceBlocked();
+    cache.sync();
+    this.editMs.set(result.gridMs);
+    this.editInfo.set(
+      `${label}: ${result.sectors.length} of ${this.sectors.sectorCount} sectors rebuilt in ${result.sectorMs.toFixed(1)} ms · ` +
+        `${cache.stats.invalidations - inv} sector fields invalidated · ${this.crowd.stats.displaced - displaced} agents moved out`,
+    );
+    this.flowKey = '';
+    this.refreshFlow();
+    this.redraw();
+    return result;
   }
 
   selectOverlay(id: NavOverlayId): void {
@@ -448,19 +674,8 @@ export class CrowdNavigationGridPageComponent {
   toggleGate(): void {
     const open = !this.gateOpen();
     this.gateOpen.set(open);
-    const t0 = performance.now();
-    const dirty = this.grid.setGateOpen(this.gate, open);
-    this.editMs.set(performance.now() - t0);
-    const t1 = performance.now();
-    const rebuilt = this.sectors.rebuildSectors(dirty);
-    this.rebuildInfo.set(
-      `${rebuilt.length} of ${this.sectors.sectorCount} sectors rebuilt in ${(performance.now() - t1).toFixed(1)} ms`,
-    );
-    this.updatePortalCounts();
-    this.crowd.cache.sync();
-    this.flowKey = '';
-    this.refreshFlow();
-    this.redraw();
+    const result = this.runEdit(() => this.world.setGateOpen(this.gate, open), open ? 'Gate opened' : 'Gate closed');
+    this.rebuildInfo.set(`${result.sectors.length} of ${this.sectors.sectorCount} sectors rebuilt in ${result.sectorMs.toFixed(1)} ms`);
   }
 
   selectClass(c: NavUnitClass): void {

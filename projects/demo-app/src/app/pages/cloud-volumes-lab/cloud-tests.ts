@@ -3,7 +3,7 @@ import { NEXT_TEST, type NextTestMode, type NextTestScenario } from './next-test
 
 /** Fully resolved settings prevent inherited manual state or previous scenarios from changing a rerun. */
 export interface CloudTestSettings {
-  readonly kind: 'static' | 'flyby';
+  readonly kind: 'static' | 'flyby' | 'morph-sweep';
   readonly preset: string;
   readonly volumes: number;
   readonly mode: NextTestMode;
@@ -26,13 +26,15 @@ export interface CloudTestSettings {
   readonly skyBackdrop: boolean;
   /** The planet-wide noise shell (`CloudNoiseShell`) instead of the volumes. */
   readonly noiseShell: boolean;
+  /** The planet's morph, 0 (globe) to 1 (flat map). The volumes are placed rigidly on the bent ground (Plan 051 §The morph). */
+  readonly morph: number;
 }
 
 export const CLOUD_TEST_DEFAULTS: CloudTestSettings = {
   kind: 'static', preset: 'outside', volumes: 1, mode: 'proxy', scale: 1, steps: 24,
   animateSun: false, bakeBudget: 1, rebakeEveryFrame: false, spinWarp: 0, spinAngle: 0, clouds: true,
   atmosphereLighting: true, haze: false, sunElevation: 35, sunAzimuth: 40,
-  extinction: 0.02, jitter: true, fetch: true, hidden: false, skyBackdrop: false, noiseShell: false,
+  extinction: 0.02, jitter: true, fetch: true, hidden: false, skyBackdrop: false, noiseShell: false, morph: 0,
 };
 
 function migrateScenario(scenario: NextTestScenario, index: number): TestScenario<CloudTestSettings> {
@@ -129,6 +131,46 @@ function shellLookScenarios(skyBackdrop = false): TestScenario<CloudTestSettings
   })));
 }
 
+/** Views and morph values of the rigid-placement cost cases (Plan 051 §The morph). */
+const MORPH_VIEWS = ['outside', 'horizon'];
+const MORPH_VALUES = [0, 0.5, 1];
+
+/**
+ * Plan 051 §The morph: what 12 rigidly placed volumes cost at one morph, as clouds off (A) against on (B) at a still
+ * camera, so B - A is the clouds on the same frames. Haze is off: the bent atmosphere is not wired into this lab, so it
+ * would be the sphere's haze at the wrong place. Atmosphere lighting is on and reads each volume's globe position.
+ */
+function morphCostRounds(preset: string, morph: number, volumes = 12): TestScenario<CloudTestSettings>[] {
+  const group = `${preset.replace(' ', '-')}-m${String(morph).replace('.', '')}-${volumes}`;
+  return Array.from({ length: AB_ROUNDS * 2 }, (_, index) => {
+    const on = index % 2 === 1;
+    const round = Math.floor(index / 2) + 1;
+    return {
+      id: `${group}-${on ? 'on' : 'off'}-${round}`, label: `${preset}, morph ${morph}, ${volumes} volumes, clouds ${on ? 'on' : 'off'}, round ${round}`,
+      durationMs: 5000, warmupMs: 1500,
+      settings: { ...CLOUD_TEST_DEFAULTS, preset, volumes, mode: 'proxy', clouds: on, atmosphereLighting: true, morph },
+      ablation: { group, arm: on ? 'B' : 'A' },
+    };
+  });
+}
+
+/**
+ * A morph sweep 0 -> 1 over the measurement window with 12 volumes: clouds off (A) against on (B). B also reports the CPU
+ * time the placement takes per frame and checks that the morph queued no light bake.
+ */
+function morphSweepRounds(preset: string): TestScenario<CloudTestSettings>[] {
+  return Array.from({ length: AB_ROUNDS * 2 }, (_, index) => {
+    const on = index % 2 === 1;
+    const round = Math.floor(index / 2) + 1;
+    return {
+      id: `sweep-${preset}-${on ? 'on' : 'off'}-${round}`, label: `${preset}, morph sweep, clouds ${on ? 'on' : 'off'}, round ${round}`,
+      durationMs: 8000, quickMs: 4000, warmupMs: 1500,
+      settings: { ...CLOUD_TEST_DEFAULTS, kind: 'morph-sweep', preset, volumes: 12, mode: 'proxy', clouds: on, atmosphereLighting: true },
+      ablation: { group: `sweep-${preset}`, arm: on ? 'B' : 'A' },
+    };
+  });
+}
+
 /** Append new suites/versions at the end. Run latest resolves the final entry exactly once at launch. */
 export const CLOUD_TEST_HISTORY: readonly TestSuite<CloudTestSettings>[] = [
   {
@@ -175,5 +217,17 @@ export const CLOUD_TEST_HISTORY: readonly TestSuite<CloudTestSettings>[] = [
     title: 'Noise shell look against the sky: ground, horizon, mid and orbit at noon, dusk and night',
     purpose: 'functional', requiresVisualReview: true,
     scenarios: shellLookScenarios(true),
+  },
+  {
+    id: 'cloud-volumes-morph', version: 1,
+    title: 'Volumes through the morph (Plan 051 G9): 12 placed volumes at morph 0 / 0.5 / 1, 90 and 180 at morph 0.5, and a sweep',
+    purpose: 'performance',
+    expectedGpuVendor: 'nvidia',
+    ablation: { feature: 'cloud volumes on the bent planet', metrics: ['gpuWholeRender'] },
+    scenarios: [
+      ...MORPH_VIEWS.flatMap((preset) => MORPH_VALUES.flatMap((morph) => morphCostRounds(preset, morph))),
+      ...[90, 180].flatMap((volumes) => morphCostRounds('globe mid', 0.5, volumes)),
+      ...morphSweepRounds('outside'),
+    ],
   },
 ];

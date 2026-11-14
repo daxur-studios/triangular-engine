@@ -21,6 +21,7 @@ import {
 import { CloudVolume, CloudVolumeAtmosphereLighting, CloudVolumeBakeScheduler, CloudVolumeScreenPass } from 'triangular-engine/cloud-volumes';
 import { GpuTimer } from './gpu-timer';
 import { CloudNoiseShell } from './cloud-noise-shell';
+import { placeOnBentPlanet } from './bent-volume-pose';
 import { CLOUD_SHELL_LAB } from './cloud-noise-shell-density';
 import { installCloudReplayProbe } from './cloud-replay-probe';
 
@@ -500,6 +501,15 @@ export class CloudVolumesLabPageComponent {
   readonly warps = [0, 1, 1000, 100000];
   private spinAngle = 0;
   private readonly basePoses = new Map<CloudVolume, { position: Vector3; quaternion: Quaternion }>();
+  /** Each volume's pose on the globe after the spin: the pose its light is computed from (Plan 051 §The morph). */
+  private readonly globePoses = new Map<CloudVolume, { position: Vector3; quaternion: Quaternion }>();
+  /** Each volume's rotation from its globe frame to its bent frame; its sun is turned by it. Absent at morph 0. */
+  private readonly morphTurns = new Map<CloudVolume, Quaternion>();
+  /** The planet's morph, 0 (globe) to 1 (flat map). The volumes sit rigidly on the bent ground; the lab's sphere does not bend. */
+  readonly morph = signal(0);
+  /** CPU ms spent placing the volumes on the bent ground, one reading per placement while a morph sweep runs. */
+  private placementSamples: number[] | undefined;
+  private morphSweep: { startMs: number; durationMs: number } | undefined;
   private readonly bakeScheduler = new CloudVolumeBakeScheduler();
   /** Sun colour and sky ambient of every volume from the Earth atmosphere (Plan 051 Phase 3); off = the fixed white sun. */
   readonly atmosphereLighting = signal(true);
@@ -606,6 +616,12 @@ export class CloudVolumesLabPageComponent {
       }
       if (this.spinWarp() > 0) {
         this.spinAngle = (this.spinAngle + delta * this.spinWarp() * ((Math.PI * 2) / 21600)) % (Math.PI * 2);
+        this.applySpin();
+        this.applySun();
+      }
+      if (this.morphSweep) {
+        const t = (performance.now() - this.morphSweep.startMs) / this.morphSweep.durationMs;
+        this.morph.set(Math.min(1, Math.max(0, t)));
         this.applySpin();
         this.applySun();
       }
@@ -729,7 +745,7 @@ export class CloudVolumesLabPageComponent {
       atmosphereLighting: this.atmosphereLighting(), haze: this.cloudHaze(),
       sunElevation: this.sunElevation(), sunAzimuth: this.sunAzimuth(), extinction: this.extinction(),
       jitter: this.jitterOn(), fetch: this.fetchOn(), hidden: this.hiddenOn(), skyBackdrop: this.skyBackdrop(),
-      noiseShell: this.noiseShellOn(),
+      noiseShell: this.noiseShellOn(), morph: this.morph(),
     };
   }
 
@@ -748,6 +764,7 @@ export class CloudVolumesLabPageComponent {
     this.rebakeEveryFrame.set(settings.rebakeEveryFrame);
     this.setSpinWarp(settings.spinWarp);
     this.spinAngle = settings.spinAngle;
+    this.morph.set(settings.morph);
     this.applySpin();
     this.sunElevation.set(settings.sunElevation);
     this.sunAzimuth.set(settings.sunAzimuth);
@@ -796,20 +813,39 @@ export class CloudVolumesLabPageComponent {
     const stop = this.timer.observeRender((sample) => samples.push(sample));
     const before = this.renderedFrames;
     try {
+      const sweeping = scenario.settings.kind === 'morph-sweep';
+      const volumes = this.activeVolumes();
+      const lightBakesBefore = volumes.reduce((sum, volume) => sum + volume.lightBakes, 0);
+      if (sweeping) {
+        this.placementSamples = [];
+        this.morphSweep = { startMs: performance.now(), durationMs: scenario.durationMs };
+      }
       if (scenario.settings.kind === 'flyby') await this.flybyOnce(scenario.durationMs / 1000, context.signal);
       else await context.wait(scenario.durationMs);
+      const placement = this.placementSamples ?? [];
+      this.morphSweep = undefined;
+      this.placementSamples = undefined;
+      const lightBakes = volumes.reduce((sum, volume) => sum + volume.lightBakes, 0) - lightBakesBefore;
       if (this.testEngineError) throw new Error(this.testEngineError);
       const frames = sampler.stop();
       return {
         metrics: [{
           name: 'gpuWholeRender', unit: 'ms', source: 'Three.js batched GPU timestamp reading, requested every 10 rendered frames; includes bake passes',
           samples, unavailableReason: samples.length ? undefined : 'No GPU timestamp reading in this window/backend',
+        }, {
+          name: 'morphPlacementCpu', unit: 'ms', optional: true,
+          source: 'performance.now() around placing every volume on the bent ground, once per frame of a morph sweep',
+          samples: placement, unavailableReason: placement.length ? undefined : 'Only a morph sweep places volumes while timing',
         }],
         checks: [
+          ...(sweeping && this.cloudsOn() ? [{
+            name: 'The morph queued no light bake', passed: lightBakes === 0,
+            detail: `${lightBakes} light bakes over ${volumes.length} volumes`,
+          }] : []),
           { name: 'Completed renders during action', passed: this.renderedFrames > before },
           { name: 'Requested renderer backend', passed: FORCE_WEBGL ? this.backendLabel === 'WebGL2' : this.backendLabel === 'WebGPU', detail: this.backendLabel },
         ],
-        details: { frames: frames.frames, cpuMedianMs: frames.cpuMedianMs, cpuP95Ms: frames.cpuP95Ms,
+        details: { morphAtEnd: this.morph(), frames: frames.frames, cpuMedianMs: frames.cpuMedianMs, cpuP95Ms: frames.cpuP95Ms,
           wallMedianMs: frames.wallMedianMs, wallP95Ms: frames.wallP95Ms, frameVerdict: frames.verdict },
         validityIssues: [...frames.invalidReasons, ...(frames.frames < 60 ? ['Fewer than 60 rendered frames in measurement window'] : [])],
         limitations: [
@@ -994,10 +1030,45 @@ export class CloudVolumesLabPageComponent {
   private applySpin(): void {
     const turn = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), this.spinAngle);
     for (const [volume, base] of this.basePoses) {
-      volume.mesh.position.copy(base.position).applyQuaternion(turn);
-      volume.mesh.quaternion.copy(turn).multiply(base.quaternion);
+      const globe = this.globePoses.get(volume) ?? { position: new Vector3(), quaternion: new Quaternion() };
+      globe.position.copy(base.position).applyQuaternion(turn);
+      globe.quaternion.copy(turn).multiply(base.quaternion);
+      this.globePoses.set(volume, globe);
+    }
+    this.placeVolumes();
+  }
+
+  /**
+   * Puts every volume on the bent ground (Plan 051 §The morph). At morph 0 this is the globe pose, as before. Above 0 the
+   * pose goes through `placeOnBentPlanet`; the lab's own sphere does not bend, so it is hidden.
+   */
+  private placeVolumes(): void {
+    const morph = this.morph();
+    const timed = this.placementSamples !== undefined;
+    const start = timed ? performance.now() : 0;
+    for (const [volume, globe] of this.globePoses) {
+      if (morph === 0) {
+        volume.mesh.position.copy(globe.position);
+        volume.mesh.quaternion.copy(globe.quaternion);
+        this.morphTurns.delete(volume);
+      } else {
+        const placed = placeOnBentPlanet(globe, PLANET_RADIUS, morph);
+        volume.mesh.position.copy(placed.position);
+        volume.mesh.quaternion.copy(placed.quaternion);
+        this.morphTurns.set(volume, placed.turn);
+      }
       volume.mesh.updateMatrixWorld();
     }
+    this.planet.visible = morph === 0;
+    if (timed) this.placementSamples!.push(performance.now() - start);
+  }
+
+  /** Sets the morph and moves the volumes. The light stays the globe's, so this queues no light bake. */
+  setMorph(morph: number): void {
+    this.morph.set(Math.min(1, Math.max(0, morph)));
+    this.applySpin();
+    this.applySun();
+    this.timer.reset();
   }
 
   setSkyBackdrop(on: boolean): void {
@@ -1088,9 +1159,31 @@ export class CloudVolumesLabPageComponent {
   }
 
   /** Per frame: sun colour and ambient for the volumes, and the same light for the planet's own directional and sky lights. */
+  /** Lights the volumes from their globe positions: the lighting reads each mesh's position, so it is put back for the call. */
+  private updateVolumeLighting(): void {
+    const volumes = this.allVolumes();
+    if (this.morph() === 0) {
+      this.lighting!.update(volumes, this.sunWorld);
+      return;
+    }
+    const bent = new Map<CloudVolume, Vector3>();
+    for (const volume of volumes) {
+      const globe = this.globePoses.get(volume);
+      if (!globe) continue;
+      bent.set(volume, volume.mesh.position.clone());
+      volume.mesh.position.copy(globe.position);
+      volume.mesh.updateMatrixWorld();
+    }
+    this.lighting!.update(volumes, this.sunWorld);
+    for (const [volume, position] of bent) {
+      volume.mesh.position.copy(position);
+      volume.mesh.updateMatrixWorld();
+    }
+  }
+
   private applyAtmosphereLighting(): void {
     if (!this.atmosphereLighting() || !this.lighting) return;
-    this.lighting.update(this.allVolumes(), this.sunWorld);
+    this.updateVolumeLighting();
     const ground = this.lighting.groundLight(this.sunWorld);
     this.sun.color.setRGB(ground.sun[0], ground.sun[1], ground.sun[2]);
     this.sun.intensity = 3;
@@ -1599,7 +1692,15 @@ export class CloudVolumesLabPageComponent {
     const y = Math.sin(el);
     const z = Math.cos(el) * Math.cos(az);
     this.sunWorld.set(x, y, z);
-    for (const volume of this.allVolumes()) volume.setSunDirection(x, y, z);
+    // The globe's sun, turned with each volume's frame, so a volume's light does not change with the morph.
+    const turned = new Vector3();
+    for (const volume of this.allVolumes()) {
+      const turn = this.morphTurns.get(volume);
+      if (turn) {
+        turned.set(x, y, z).applyQuaternion(turn);
+        volume.setSunDirection(turned.x, turned.y, turned.z);
+      } else volume.setSunDirection(x, y, z);
+    }
     this.sun.position.set(x, y, z).multiplyScalar(PLANET_RADIUS * 3).add(VOLUME_CENTER);
     this.sun.target.position.copy(VOLUME_CENTER);
     this.sun.target.updateMatrixWorld();

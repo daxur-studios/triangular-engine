@@ -766,3 +766,38 @@ The owner then ran the suite in a visible browser (`2026-11-05T19-13-48-292Z_vis
 - Whether ground and horizon, at 1.54 and 1.70 ms, count against G6's typical or worst figure.
 - The owner's visual review. Still to judge: blur close to the ground (56 m voxels), a thin bright line along the planet's limb at dusk, and a thin arc near the limb in the globe mid views.
 - Not built: aerial perspective haze on the shell, the altitude cross-fade with volumes, and moving this out of the lab into `triangular-engine/cloud-volumes`.
+
+
+## 2026-11-11: Morph plan added (no code, nothing measured)
+
+The owner asked that clouds render correctly through the planet's globe-to-map morph, with day and night as on the globe ("parts dark, parts lit"). The records had no plan for it: the volume core has no radius, curvature or up logic, and only the 2D shell bends.
+
+### Written
+- [Plan 051](/docs/plans/051_cloud_volumes.md) gains goal G9 and §The morph: rigid placement of each volume on the bent ground, light kept at each volume's true globe position (Plan 049's `'real'` day and night, so the morph triggers no light re-bake), and a fade to the shell at the map outline, the cut meridian and the poles. The planned suite is `cloud-volumes-morph`, with a proposed gate. All of it is proposed; the owner has not chosen it.
+- Rejected on paper, not measured: bending rays inside the march (a morph inversion per step), and re-baking density in bent space.
+
+### Facts used
+- Today's morph handling: `planet-cloud-bend.ts` reuses `planetBentSurfaceNodes` for the shell only; its worst bend error is 117.6 m at R = 600 km, morph 1, headless, against a 150 m floor. The shell is lit with the unbent globe direction.
+- The terrain lights a morphed surface as if it were still on the sphere (`uMorphLightingTurn`), so rigid volumes lit by the globe's sun agree with the ground.
+- Derived, not recorded: a straight box of side s on radius R is off by about s²/(8R).
+
+### Open
+- Volume sizes in metres, the radius the game ships, what triggers a volume's light re-bake, whether map scale needs 3D cloud shape, and whether the three bend implementations are one function.
+- No GPU cost exists for the bent shell, for volumes under a morph, or for the 50 to 200 volume case.
+- Cloud ground shadows depend on whether the terrain's direct shadows return above morph 0 (off today).
+
+
+## 2026-11-11: Suite `cloud-volumes-morph` v1 built (not yet run on a GPU)
+
+The lab (`pages/cloud-volumes-lab`) now places its volumes rigidly on a bent planet and has a suite for the cost.
+
+### Built
+- `bent-volume-pose.ts` (+ spec): `placeOnBentPlanet(rest, radius, morph)` sends a volume's globe pose through `bend()` / `bendFrame()` from `atmosphere/bent-planet.ts` and returns the bent position, orientation and the rotation `turn` between the two frames. The map is the bend's own plane (longitude and latitude times the radius), not Equal Earth. The map centre stays at lab (0, R, 0). Poles are not handled.
+- Lab: a `morph` setting. Above 0 the volumes use the bent pose, each volume's sun is turned by its `turn` (so its frame-local sun, and its light, do not change), the atmosphere lighting is run with the meshes at their globe positions, and the lab's own sphere is hidden (it does not bend). Morph 0 is the old path.
+- Finding: without those two steps a rigid turn would change the frame-local sun and light the volume from its bent position. See Plan 051 §The morph.
+- Suite `cloud-volumes-morph` v1, A/B (clouds off against on, three rounds each, haze off): 12 volumes at morph 0, 0.5 and 1 from `outside` and `horizon`; 90 and 180 volumes at morph 0.5 from `globe mid`; and a morph sweep 0 to 1 over 8 s with 12 volumes. The sweep also records `morphPlacementCpu` (ms per frame, optional) and checks that the morph queued no light bake.
+
+### Not covered
+- Look cases (map outline, cut meridian, pole) and the fade to the shell: not built. The lab has no map outline, cut meridian or bent ground.
+- The bent cloud shell's cost, the Equal Earth map, haze from the bent atmosphere, and the full-stack frame.
+- No run yet. The numbers must come from a visible RTX run, which the owner starts.

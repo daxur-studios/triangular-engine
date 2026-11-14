@@ -1,5 +1,6 @@
 import { NavMinHeap } from './nav-heap';
 import { NAV_CLEARANCE_THRESHOLDS, NavFlag, type NavUnitClass } from './nav-flags';
+import { NavGoalSet } from './nav-goals';
 import { NAV_UNIT_CLASSES, type NavSectorGraph } from './nav-sectors';
 import type { NavRect } from './nav-types';
 
@@ -81,7 +82,7 @@ export interface NavFlowBuildRecord {
   readonly sector: number;
   /** Build time in milliseconds. */
   readonly ms: number;
-  /** Goal cell index of the field. */
+  /** Primary goal cell index of the field (the first source of a multi-source set). */
   readonly goalCell: number;
   /** Unit class of the field. */
   readonly unitClass: NavUnitClass;
@@ -107,23 +108,22 @@ export interface NavFlowEnsureResult {
 }
 
 interface SectorEntry extends NavSectorField {
+  goalStamp: number;
   lastUsed: number;
   stale: boolean;
   owner: NavFlowField;
 }
 
 /**
- * The flow field of one (goal cell, unit class) pair: a sparse set of {@link NavSectorField}s, one
- * per built sector. Get one from {@link NavFlowCache.field}; fill it with {@link NavFlowCache.ensure}.
- * Sampling returns "no direction" in sectors that are not built yet.
+ * The flow field of one (goal set, unit class) pair: a sparse set of {@link NavSectorField}s, one
+ * per built sector. The goal set is a single cell for {@link NavFlowCache.field} and any number of
+ * sources for {@link NavFlowCache.fieldForGoals}; every cell then leads to its nearest source by path
+ * cost. Fill it with {@link NavFlowCache.ensure}. Sampling returns "no direction" in sectors that are
+ * not built yet.
  */
 export class NavFlowField {
-  /** The goal column. */
-  readonly goalX: number;
-  /** The goal row. */
-  readonly goalY: number;
-  /** The goal cell index. */
-  readonly goalCell: number;
+  /** The sources this field leads to. */
+  readonly goals: NavGoalSet;
   /** The unit class the field is built for. */
   readonly unitClass: NavUnitClass;
   /** The built sector fields, indexed by sector (`undefined` = not built, evicted or invalidated). */
@@ -141,19 +141,33 @@ export class NavFlowField {
 
   constructor(
     readonly graph: NavSectorGraph,
-    goalX: number,
-    goalY: number,
+    goals: NavGoalSet,
     unitClass: NavUnitClass,
   ) {
-    this.goalX = goalX;
-    this.goalY = goalY;
+    this.goals = goals;
     this.unitClass = unitClass;
     this.width = graph.grid.width;
     this.height = graph.grid.height;
-    this.goalCell = goalY * this.width + goalX;
     this.sectorSize = graph.sectorSize;
     this.sectorsX = graph.sectorsX;
     this.sectors = new Array<NavSectorField | undefined>(graph.sectorCount).fill(undefined);
+  }
+
+  /** The primary goal cell index (the only goal of a single-goal field, the first source of a set; -1 when empty). */
+  get goalCell(): number {
+    return this.goals.primary;
+  }
+
+  /** The column of the primary goal cell (-1 when the set is empty). */
+  get goalX(): number {
+    const c = this.goals.primary;
+    return c < 0 ? -1 : c % this.width;
+  }
+
+  /** The row of the primary goal cell (-1 when the set is empty). */
+  get goalY(): number {
+    const c = this.goals.primary;
+    return c < 0 ? -1 : Math.floor(c / this.width);
   }
 
   /** Number of sectors with a built field. */
@@ -281,6 +295,8 @@ export class NavFlowCache {
 
   private readonly buildLogSize: number;
   private readonly fields = new Map<number, NavFlowField>();
+  private readonly singleGoals = new Map<number, NavGoalSet>();
+  private readonly seenGoalRevision = new Map<NavGoalSet, number>();
   private readonly entries = new Set<SectorEntry>();
   private readonly seen: Uint32Array;
   private clock = 0;
@@ -302,13 +318,36 @@ export class NavFlowCache {
    * key while it holds any built sector. Does not build anything.
    */
   field(goalX: number, goalY: number, unitClass: NavUnitClass): NavFlowField {
-    const key = (goalY * this.graph.grid.width + goalX) * 3 + NAV_UNIT_CLASSES.indexOf(unitClass);
+    return this.fieldForGoals(this.singleGoal(goalX, goalY), unitClass);
+  }
+
+  /**
+   * The (initially empty) flow field of a goal set and unit class: every cell leads to the source
+   * with the lowest path cost. The same object for the same set and class while it holds any built
+   * sector. Does not build anything. Changing the set later invalidates only the sector fields that
+   * depend on the changed sectors (see {@link NavGoalSet}).
+   */
+  fieldForGoals(goals: NavGoalSet, unitClass: NavUnitClass): NavFlowField {
+    const key = goals.id * 3 + NAV_UNIT_CLASSES.indexOf(unitClass);
     let f = this.fields.get(key);
     if (!f) {
-      f = new NavFlowField(this.graph, goalX, goalY, unitClass);
+      f = new NavFlowField(this.graph, goals, unitClass);
       this.fields.set(key, f);
+      if (!this.seenGoalRevision.has(goals)) this.seenGoalRevision.set(goals, goals.revision);
     }
     return f;
+  }
+
+  /** The one-cell goal set shared by every single-goal field of that cell. */
+  singleGoal(goalX: number, goalY: number): NavGoalSet {
+    const cell = goalY * this.graph.grid.width + goalX;
+    let set = this.singleGoals.get(cell);
+    if (!set) {
+      set = new NavGoalSet(this.graph);
+      set.addCell(cell);
+      this.singleGoals.set(cell, set);
+    }
+    return set;
   }
 
   /** Marks every built sector of a field as recently used (call per frame for fields in use). */
@@ -332,8 +371,16 @@ export class NavFlowCache {
         seen[s] = versions[s];
       }
     }
+    for (const [set, revision] of this.seenGoalRevision) {
+      if (set.revision !== revision) {
+        changed = true;
+        this.seenGoalRevision.set(set, set.revision);
+      }
+    }
     if (!changed) return 0;
-    for (const e of this.entries) e.stale = e.version !== versions[e.sector];
+    for (const e of this.entries) {
+      e.stale = e.version !== versions[e.sector] || e.goalStamp !== e.owner.goals.stamps[e.sector];
+    }
     for (let more = true; more; ) {
       more = false;
       for (const e of this.entries) {
@@ -384,13 +431,12 @@ export class NavFlowCache {
       this.touchSector(field, graph.sectorOf(fromX, fromY));
       return { status: 'ready', built: 0 };
     }
-    const path = graph.findAbstractPath(fromX, fromY, field.goalX, field.goalY, field.unitClass);
+    const path = graph.findAbstractPathToAny(fromX, fromY, field.goals, field.unitClass);
     if (!path.found) {
       field.failed.add(fromCell);
       return { status: 'unreachable', built: 0 };
     }
     const secs = path.sectors;
-    const goalSector = secs[secs.length - 1];
     const visited = new Set<number>();
     let built = 0;
     for (let i = secs.length - 1; i >= 0; i--) {
@@ -414,7 +460,8 @@ export class NavFlowCache {
         downstreams.push(d);
       }
       if (built >= maxBuilds) return { status: 'partial', built };
-      this.buildSector(field, s, downstreams, s === goalSector);
+      if (field.goals.size > 1) this.addNeighbourSeeds(field, s, downstreams);
+      this.buildSector(field, s, downstreams);
       built++;
     }
     if (built === 0) stats.hits++;
@@ -428,6 +475,36 @@ export class NavFlowCache {
   /** The cached sector fields of every goal, for inspection and tests. */
   get cachedFields(): number {
     return this.entries.size;
+  }
+
+  /**
+   * Multi-source fields: besides the corridor's downstream, a sector is also seeded from every built
+   * neighbour that does not (transitively) depend on it, because the nearest source of some of its
+   * cells may lie across another edge. Seeding only from fields built earlier keeps the dependency
+   * graph acyclic.
+   */
+  private addNeighbourSeeds(field: NavFlowField, s: number, downstreams: number[]): void {
+    const g = this.graph;
+    const sx = s % g.sectorsX;
+    const sy = (s - sx) / g.sectorsX;
+    const near: number[] = [];
+    if (sx > 0) near.push(s - 1);
+    if (sx + 1 < g.sectorsX) near.push(s + 1);
+    if (sy > 0) near.push(s - g.sectorsX);
+    if (sy + 1 < g.sectorsY) near.push(s + g.sectorsX);
+    for (const n of near) {
+      if (downstreams.includes(n) || !field.sectors[n] || this.dependsOn(field, n, s, new Set())) continue;
+      downstreams.push(n);
+    }
+  }
+
+  private dependsOn(field: NavFlowField, n: number, s: number, seen: Set<number>): boolean {
+    if (seen.has(n)) return false;
+    seen.add(n);
+    const e = field.sectors[n];
+    if (!e) return false;
+    for (const d of e.downstreams) if (d === s || this.dependsOn(field, d, s, seen)) return true;
+    return false;
   }
 
   private touchSector(field: NavFlowField, s: number): void {
@@ -444,7 +521,7 @@ export class NavFlowCache {
     }
     this.stats.sectorFields = this.entries.size;
     if (owner.builtCount === 0) {
-      const key = owner.goalCell * 3 + NAV_UNIT_CLASSES.indexOf(owner.unitClass);
+      const key = owner.goals.id * 3 + NAV_UNIT_CLASSES.indexOf(owner.unitClass);
       if (this.fields.get(key) === owner) this.fields.delete(key);
     }
   }
@@ -452,7 +529,7 @@ export class NavFlowCache {
   private register(field: NavFlowField, entry: SectorEntry): void {
     const old = field.sectors[entry.sector] as SectorEntry | undefined;
     if (old) this.remove(old);
-    const key = field.goalCell * 3 + NAV_UNIT_CLASSES.indexOf(field.unitClass);
+    const key = field.goals.id * 3 + NAV_UNIT_CLASSES.indexOf(field.unitClass);
     if (!this.fields.has(key)) this.fields.set(key, field);
     field.sectors[entry.sector] = entry;
     field.builtCount++;
@@ -471,9 +548,9 @@ export class NavFlowCache {
 
   /**
    * Builds one sector field. `downstreams` are neighbouring sectors whose fields already exist in
-   * `field`; the goal sector also seeds the goal cell.
+   * `field`; every passable source of the goal set inside the sector is also a seed at cost 0.
    */
-  private buildSector(field: NavFlowField, sector: number, downstreams: number[], isGoalSector: boolean): void {
+  private buildSector(field: NavFlowField, sector: number, downstreams: number[]): void {
     const t0 = now();
     const graph = this.graph;
     const grid = graph.grid;
@@ -495,9 +572,14 @@ export class NavFlowCache {
     }
 
     // Seeds.
-    if (isGoalSector) {
-      dist[(field.goalY - y0) * sw + (field.goalX - x0)] = 0;
-      heap.push(0, (field.goalY - y0) * sw + (field.goalX - x0));
+    const sources = field.goals.bySector.get(sector);
+    if (sources) {
+      for (const c of sources) {
+        if (!pass(c)) continue;
+        const l = (Math.floor(c / W) - y0) * sw + (c % W) - x0;
+        dist[l] = 0;
+        heap.push(0, l);
+      }
     }
     for (const de of down) {
       const r = de.rect;
@@ -612,6 +694,7 @@ export class NavFlowCache {
       cost: dist,
       dir,
       buildMs: ms,
+      goalStamp: field.goals.stamps[sector],
       lastUsed: ++this.clock,
       stale: false,
       owner: field,

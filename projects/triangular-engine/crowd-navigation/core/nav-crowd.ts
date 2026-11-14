@@ -1,4 +1,5 @@
 import type { NavUnitClass } from './nav-flags';
+import { NavGoalSet } from './nav-goals';
 import { NavFlowCache, type NavFlowCacheOptions, type NavFlowDirection, type NavFlowField } from './nav-flow';
 import { NAV_UNIT_CLASSES, type NavSectorGraph } from './nav-sectors';
 import type { NavGrid } from './nav-grid';
@@ -8,7 +9,11 @@ import type { NavRect } from './nav-types';
 export const NavAgentState = {
   /** Following the flow field. */
   Moving: 0,
-  /** Within the arrival radius of the goal; frozen and left out of separation. */
+  /**
+   * Reached a goal source: within the arrival radius of it, or touching an agent that arrived at the
+   * same goal. Arrived agents stop following the field but stay in the separation hash, so they
+   * spread out around the source instead of stacking.
+   */
   Arrived: 1,
   /** No direction yet: the field is being built or the agent has no usable cell. */
   Waiting: 2,
@@ -32,6 +37,12 @@ export interface NavCrowdOptions extends NavFlowCacheOptions {
   readonly separationStrength?: number;
   /** An agent this close to the goal centre has arrived. Default 3. */
   readonly arrivalRadius?: number;
+  /**
+   * How far (in cells) an agent standing in a cell that an edit made impassable is searched a new
+   * place. Default 32. Agents with no passable cell inside it stay where they are and are counted in
+   * `stats.stranded`.
+   */
+  readonly displaceRadius?: number;
   /** Time step used by `step()` without an argument and by `advance`. Default 0.05. */
   readonly fixedDt?: number;
   /**
@@ -53,6 +64,10 @@ export interface NavCrowdStats {
   waiting: number;
   /** Agents that cannot reach the goal. */
   unreachable: number;
+  /** Agents moved out of cells that an edit made impassable, since the crowd was created. */
+  displaced: number;
+  /** Agents found in an impassable cell with no passable cell within `displaceRadius`. */
+  stranded: number;
   /** Wall-clock time of the last step in milliseconds. */
   lastStepMs: number;
   /** Sector fields built during the last step. */
@@ -122,6 +137,11 @@ export class NavCrowd {
   readonly unitClass: Uint8Array;
   /** {@link NavAgentState} per agent. */
   readonly state: Uint8Array;
+  /**
+   * The source cell index (`y * width + x`) an arrived agent reached, -1 while it has not arrived.
+   * Agents that joined the crowd around a source report that source's cell.
+   */
+  readonly arrivedCell: Int32Array;
 
   /** Counters of the last step. */
   readonly stats: NavCrowdStats = {
@@ -129,6 +149,8 @@ export class NavCrowd {
     arrived: 0,
     waiting: 0,
     unreachable: 0,
+    displaced: 0,
+    stranded: 0,
     lastStepMs: 0,
     lastStepBuilds: 0,
     steps: 0,
@@ -142,12 +164,16 @@ export class NavCrowd {
   private readonly maxAccel: number;
   private readonly sepRadius: number;
   private readonly sepStrength: number;
+  private readonly arrivalR: number;
   private readonly arrivalR2: number;
+  private readonly displaceRadius: number;
+  private seenRevision: number;
+  private readonly joinCell: Int32Array;
   private readonly maxBuilds: number;
   private readonly rng: NavRng;
   private accumulator = 0;
 
-  private readonly goals: { x: number; y: number }[] = [];
+  private readonly goals: { x: number; y: number; set: NavGoalSet; single: number }[] = [];
   private readonly fields: (NavFlowField | undefined)[] = [];
   private readonly activeFields = new Set<NavFlowField>();
 
@@ -176,7 +202,10 @@ export class NavCrowd {
     this.sepRadius = options.separationRadius ?? 1;
     this.sepStrength = options.separationStrength ?? 0.6;
     const ar = options.arrivalRadius ?? 3;
+    this.arrivalR = ar;
     this.arrivalR2 = ar * ar;
+    this.displaceRadius = Math.max(1, Math.floor(options.displaceRadius ?? 32));
+    this.seenRevision = graph.revision;
     this.fixedDt = options.fixedDt ?? 0.05;
     this.maxBuilds = options.maxBuildsPerStep ?? Infinity;
     const n = this.capacity;
@@ -187,6 +216,8 @@ export class NavCrowd {
     this.goalId = new Int32Array(n);
     this.unitClass = new Uint8Array(n);
     this.state = new Uint8Array(n);
+    this.arrivedCell = new Int32Array(n).fill(-1);
+    this.joinCell = new Int32Array(n).fill(-1);
     this.hashSize = Math.max(4, Math.ceil(this.sepRadius));
     this.hashW = Math.ceil(this.grid.width / this.hashSize);
     this.hashH = Math.ceil(this.grid.height / this.hashSize);
@@ -200,11 +231,36 @@ export class NavCrowd {
 
   /** Registers a goal cell and returns its id. The cell should be passable for the agents' class. */
   addGoal(x: number, y: number): number {
-    this.goals.push({ x: Math.floor(x), y: Math.floor(y) });
+    const gx = Math.floor(x);
+    const gy = Math.floor(y);
+    const set = this.cache.singleGoal(gx, gy);
+    this.goals.push({ x: gx, y: gy, set, single: gy * this.grid.width + gx });
     return this.goals.length - 1;
   }
 
-  /** The cell of a goal id. */
+  /**
+   * Registers a set of goal sources (all trees, all storehouses, ...) and returns its id. Agents
+   * follow a field that leads each of them to its nearest source by path cost and arrive at the one
+   * they reach (see {@link NavCrowd.arrivedCell}). The set may keep changing: add and remove sources
+   * on the {@link NavGoalSet} and only the fields that depend on the changed sectors are rebuilt.
+   */
+  addGoalSet(set: NavGoalSet): number {
+    const c = set.primary;
+    this.goals.push({
+      x: c < 0 ? -1 : c % this.grid.width,
+      y: c < 0 ? -1 : Math.floor(c / this.grid.width),
+      set,
+      single: -1,
+    });
+    return this.goals.length - 1;
+  }
+
+  /** The goal set of a goal id (a one-cell set for {@link NavCrowd.addGoal} goals). */
+  goalSet(id: number): NavGoalSet {
+    return this.goals[id].set;
+  }
+
+  /** The cell of a goal id (the first source of a goal set at registration time). */
   goalCell(id: number): { readonly x: number; readonly y: number } {
     return this.goals[id];
   }
@@ -214,8 +270,7 @@ export class NavCrowd {
     const idx = goalId * 3 + NAV_UNIT_CLASSES.indexOf(unitClass);
     let f = this.fields[idx];
     if (!f) {
-      const g = this.goals[goalId];
-      f = this.cache.field(g.x, g.y, unitClass);
+      f = this.cache.fieldForGoals(this.goals[goalId].set, unitClass);
       this.fields[idx] = f;
     }
     return f;
@@ -235,6 +290,7 @@ export class NavCrowd {
     this.goalId[i] = goalId;
     this.unitClass[i] = NAV_UNIT_CLASSES.indexOf(unitClass);
     this.state[i] = NavAgentState.Waiting;
+    this.arrivedCell[i] = -1;
     return i;
   }
 
@@ -257,14 +313,80 @@ export class NavCrowd {
   retarget(goalId: number): void {
     this.goalId.fill(goalId, 0, this.count);
     this.state.fill(NavAgentState.Waiting, 0, this.count);
+    this.arrivedCell.fill(-1, 0, this.count);
     this.velX.fill(0, 0, this.count);
     this.velY.fill(0, 0, this.count);
+  }
+
+  /**
+   * Sends one agent to a goal id (typically after it arrived and the game gave it new work). The
+   * agent waits for the field of its next step.
+   */
+  retargetAgent(index: number, goalId: number): void {
+    this.goalId[index] = goalId;
+    this.state[index] = NavAgentState.Waiting;
+    this.arrivedCell[index] = -1;
+    this.velX[index] = 0;
+    this.velY[index] = 0;
+  }
+
+  /**
+   * Moves every agent standing in a cell that its class can no longer stand in (an edit placed a
+   * building on it, closed a gate, raised the terrain, or shrank the clearance below the class
+   * threshold) to the nearest passable cell within `displaceRadius`. The search scans square rings
+   * outward and takes the cell whose centre is nearest to the agent (ties go to the first cell in
+   * scan order), so it is deterministic. The agent keeps its position as far as the new cell allows
+   * and loses its velocity. Called by {@link NavCrowd.step} when the sector graph was rebuilt; call
+   * it yourself to resolve the edit immediately. Returns the number of agents moved.
+   */
+  displaceBlocked(): number {
+    const { grid, posX, posY } = this;
+    let moved = 0;
+    for (let i = 0; i < this.count; i++) {
+      const cls = NAV_UNIT_CLASSES[this.unitClass[i]];
+      const cx = Math.floor(posX[i]);
+      const cy = Math.floor(posY[i]);
+      if (grid.isPassable(cx, cy, cls)) continue;
+      let bestX = -1;
+      let bestY = -1;
+      let bestD = Infinity;
+      for (let r = 1; r <= this.displaceRadius && r <= Math.sqrt(bestD) + 1.5; r++) {
+        for (let dy = -r; dy <= r; dy++) {
+          const step = Math.abs(dy) === r ? 1 : 2 * r;
+          for (let dx = -r; dx <= r; dx += step) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (!grid.isPassable(nx, ny, cls)) continue;
+            const ex = nx + 0.5 - posX[i];
+            const ey = ny + 0.5 - posY[i];
+            const d = ex * ex + ey * ey;
+            if (d < bestD) {
+              bestD = d;
+              bestX = nx;
+              bestY = ny;
+            }
+          }
+        }
+      }
+      if (bestX < 0) {
+        this.stats.stranded++;
+        continue;
+      }
+      posX[i] = Math.min(bestX + 0.95, Math.max(bestX + 0.05, posX[i]));
+      posY[i] = Math.min(bestY + 0.95, Math.max(bestY + 0.05, posY[i]));
+      this.velX[i] = 0;
+      this.velY[i] = 0;
+      moved++;
+    }
+    this.stats.displaced += moved;
+    return moved;
   }
 
   /** Removes every agent (goals, fields and the cache are kept). */
   clear(): void {
     this.count = 0;
     this.accumulator = 0;
+    this.arrivedCell.fill(-1);
     this.activeFields.clear();
     this.stats.moving = this.stats.arrived = this.stats.waiting = this.stats.unreachable = 0;
   }
@@ -293,6 +415,10 @@ export class NavCrowd {
     const { posX, posY, velX, velY, state, goalId, unitClass } = this;
     const stats = this.stats;
     const buildsBefore = cache.stats.builds;
+    if (this.graph.revision !== this.seenRevision) {
+      this.seenRevision = this.graph.revision;
+      this.displaceBlocked();
+    }
     cache.sync();
     let buildsLeft = this.maxBuilds;
 
@@ -305,20 +431,25 @@ export class NavCrowd {
     const dir = this.dirOut;
     const { dirX, dirY } = this;
     for (let i = 0; i < n; i++) {
+      this.joinCell[i] = -1;
       if (state[i] === NavAgentState.Arrived) {
+        // Settling: no flow, only separation (the agent stays in the hash).
         arrived++;
-        this.bucketOf[i] = -1;
+        dirX[i] = 0;
+        dirY[i] = 0;
+        this.bucketOf[i] = -2;
         continue;
       }
-      const g = this.goals[goalId[i]];
-      const dx = posX[i] - (g.x + 0.5);
-      const dy = posY[i] - (g.y + 0.5);
-      if (dx * dx + dy * dy <= this.arrivalR2) {
+      const reached = this.findArrival(i);
+      if (reached >= 0) {
         state[i] = NavAgentState.Arrived;
+        this.arrivedCell[i] = reached;
         velX[i] = 0;
         velY[i] = 0;
         arrived++;
-        this.bucketOf[i] = -1;
+        dirX[i] = 0;
+        dirY[i] = 0;
+        this.bucketOf[i] = -2;
         continue;
       }
       const cls = NAV_UNIT_CLASSES[unitClass[i]];
@@ -367,6 +498,8 @@ export class NavCrowd {
     for (let i = 0; i < n; i++) {
       const b = this.bucketOf[i];
       if (b < 0) continue;
+      const joinable = state[i] === NavAgentState.Moving || state[i] === NavAgentState.Waiting;
+      const goalSet = this.goals[goalId[i]].set;
       const px = posX[i];
       const py = posY[i];
       let sx = 0;
@@ -385,6 +518,10 @@ export class NavCrowd {
             let dy = py - posY[j];
             let d2 = dx * dx + dy * dy;
             if (d2 >= r2) continue;
+            if (joinable && state[j] === NavAgentState.Arrived && this.joinCell[i] < 0) {
+              const ac = this.arrivedCell[j];
+              if (goalSet.hasCell(ac)) this.joinCell[i] = ac;
+            }
             if (d2 < 1e-8) {
               dx = i < j ? 1e-3 : -1e-3;
               dy = (i + j) & 1 ? 1e-3 : -1e-3;
@@ -438,6 +575,20 @@ export class NavCrowd {
       else velY[i] = 0;
     }
 
+    // Agents that touched an arrived agent of their goal join it (state changes after the pass, so
+    // every agent saw the same start-of-step states).
+    for (let i = 0; i < n; i++) {
+      const jc = this.joinCell[i];
+      if (jc < 0 || state[i] === NavAgentState.Arrived) continue;
+      if (state[i] === NavAgentState.Moving) moving--;
+      else waiting--;
+      state[i] = NavAgentState.Arrived;
+      this.arrivedCell[i] = jc;
+      velX[i] = 0;
+      velY[i] = 0;
+      arrived++;
+    }
+
     stats.moving = moving;
     stats.arrived = arrived;
     stats.waiting = waiting;
@@ -445,6 +596,47 @@ export class NavCrowd {
     stats.steps++;
     stats.lastStepBuilds = cache.stats.builds - buildsBefore;
     stats.lastStepMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+  }
+
+  /**
+   * The source cell an agent has arrived at, or -1. A single goal arrives within `arrivalRadius` of
+   * the goal centre; a goal set arrives at the nearest source cell (lowest index on ties) within the
+   * radius that the agent's class can stand in.
+   */
+  private findArrival(i: number): number {
+    const g = this.goals[this.goalId[i]];
+    const px = this.posX[i];
+    const py = this.posY[i];
+    if (g.single >= 0) {
+      const dx = px - (g.x + 0.5);
+      const dy = py - (g.y + 0.5);
+      return dx * dx + dy * dy <= this.arrivalR2 ? g.single : -1;
+    }
+    const set = g.set;
+    if (set.size === 0) return -1;
+    const grid = this.grid;
+    const R = this.arrivalR;
+    const cls = NAV_UNIT_CLASSES[this.unitClass[i]];
+    const x0 = Math.max(0, Math.floor(px - R - 0.5));
+    const x1 = Math.min(grid.width - 1, Math.floor(px + R + 0.5));
+    const y0 = Math.max(0, Math.floor(py - R - 0.5));
+    const y1 = Math.min(grid.height - 1, Math.floor(py + R + 0.5));
+    let best = -1;
+    let bestD = this.arrivalR2 + 1e-9;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const cell = y * grid.width + x;
+        if (!set.hasCell(cell)) continue;
+        const dx = px - (x + 0.5);
+        const dy = py - (y + 0.5);
+        const d = dx * dx + dy * dy;
+        if (d < bestD && grid.isPassableIndex(cell, cls)) {
+          bestD = d;
+          best = cell;
+        }
+      }
+    }
+    return best;
   }
 
   /** Counting sort of the agents that are in the hash (`bucketOf` is -2) into `sorted`. */
