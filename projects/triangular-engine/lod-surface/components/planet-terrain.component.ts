@@ -134,10 +134,20 @@ export class PlanetTerrainComponent {
    * Standalone only (see {@link morph}). Default `null`.
    */
   readonly projectionCentre = input<PlanetProjectionCentre | null>(null);
+  /**
+   * A planet's morph to follow from outside it: bind `<planet #p>`'s `p.morphUniforms` (the same object, not a copy) on a
+   * layer that cannot sit inside the `<planet>` (a water body with its own heights and material). The terrain then bends
+   * exactly as the planet's ground does, at the same radius, so `radius` must be the planet's. Ignored inside a `<planet>`
+   * (its uniforms win); when set, `morph`, `projection` and `projectionCentre` are ignored. Default: none.
+   */
+  readonly planetMorph = input<IPlanetMorphUniforms | undefined>(undefined);
 
-  /** The uniforms the morph is read from: `<planet>`'s inside one, else this terrain's own, written from the three inputs above. */
+  /**
+   * The uniforms the morph is read from: `<planet>`'s inside one, else {@link planetMorph}, else this terrain's own, written
+   * from the three standalone inputs above.
+   */
   private readonly ownMorph = createPlanetMorphUniforms();
-  private readonly morphUniforms: IPlanetMorphUniforms = this.planet?.morphUniforms ?? this.ownMorph;
+  private readonly morphUniforms = computed<IPlanetMorphUniforms>(() => this.planet?.morphUniforms ?? this.planetMorph() ?? this.ownMorph);
 
   private readonly effectiveRadius = computed(() => this.radius() ?? this.context?.radius());
   /** The material made for the enclosing planet's world, kept to dispose it when it is replaced and on destroy. */
@@ -146,12 +156,13 @@ export class PlanetTerrainComponent {
     // Not pure: it makes and disposes a material. Only the terrain's effect reads it, and swaps the mesh to the returned
     // material in the same run, so the old one is never drawn after it is disposed.
     const cellPlanet = this.material() ? undefined : this.planet?.cellPlanet();
+    const morphUniforms = this.morphUniforms();
     return untracked(() => {
       this.ownedMaterial?.dispose();
       this.ownedMaterial = undefined;
       if (!cellPlanet) return undefined;
       try {
-        this.ownedMaterial = new TerrainPlanetMaterial({ cellPlanet, morphUniforms: this.morphUniforms });
+        this.ownedMaterial = new TerrainPlanetMaterial({ cellPlanet, morphUniforms });
       } catch (error) {
         this.report('config', error);
       }
@@ -207,7 +218,7 @@ export class PlanetTerrainComponent {
         lighting: this.lighting(),
         bounds: this.bounds(),
         wireframe: this.wireframe(),
-        morph: this.morphUniforms,
+        morph: this.morphUniforms(),
         center: this.position() ?? this.context?.position?.() ?? [0, 0, 0],
       };
     }),

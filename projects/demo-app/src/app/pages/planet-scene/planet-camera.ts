@@ -1,4 +1,6 @@
-import { FIXTURE_GROUND, FIXTURE_HEADING_RAD, groundFrame, type Vec3 } from 'triangular-engine/lod-surface/core';
+import {
+  bendPointInto, FIXTURE_GROUND, FIXTURE_HEADING_RAD, groundFrame, morphMapXY, type MorphMap, type Vec3,
+} from 'triangular-engine/lod-surface/core';
 
 /**
  * Cameras of the planet scene page (Plan 059, step G5). The planet's centre is the scene origin, so a camera is a ground
@@ -39,8 +41,18 @@ const DEG = Math.PI / 180;
 /** The page's planet radius, metres: the size the cell planet, its height scale and the atmosphere's earth preset are tuned for in the lab and docs. */
 export const PLANET_RADIUS_M = 600_000;
 
+/** Earth's mean radius, metres: 1x of the world-size ladder. */
+export const EARTH_RADIUS_M = 6_371_000;
+/** The world sizes of the ground-only ladder, as fractions of {@link EARTH_RADIUS_M}. */
+export const EARTH_SCALE_TIERS = [0.001, 0.01, 0.1, 1] as const;
+
+/** Orbit altitude above the ground for a planet radius: two radii, so three from the centre. */
+export function orbitAltitudeFor(radiusM: number): number {
+  return 2 * radiusM;
+}
+
 /** Orbit altitude above the ground: three radii from the centre, so the whole globe is in a 60 degree view. */
-export const ORBIT_ALTITUDE_M = 2 * PLANET_RADIUS_M;
+export const ORBIT_ALTITUDE_M = orbitAltitudeFor(PLANET_RADIUS_M);
 export const MID_ALTITUDE_M = 20_000;
 export const EYE_ALTITUDE_M = 2;
 export const COAST_ALTITUDE_M = 50;
@@ -63,9 +75,9 @@ const COAST_NORTH_M = -16026;
 const COAST_HEADING_RAD = 152 * DEG;
 const COAST_PITCH_RAD = -6 * DEG;
 
-function coastGround(): Vec3 {
+function coastGround(radiusM: number): Vec3 {
   const { up, east, north } = groundFrame('sphere', GROUND);
-  const p = [0, 1, 2].map((k) => up[k] * PLANET_RADIUS_M + east[k] * COAST_EAST_M + north[k] * COAST_NORTH_M);
+  const p = [0, 1, 2].map((k) => up[k] * radiusM + east[k] * COAST_EAST_M + north[k] * COAST_NORTH_M);
   const length = Math.hypot(p[0], p[1], p[2]);
   return [p[0] / length, p[1] / length, p[2] / length];
 }
@@ -77,19 +89,19 @@ export const PLANET_POSES: readonly { readonly id: PlanetPoseId; readonly label:
   { id: 'ground', label: '2 m eye' },
 ];
 
-export function planetPoseView(id: PlanetPoseId): PlanetView {
+export function planetPoseView(id: PlanetPoseId, radiusM: number = PLANET_RADIUS_M): PlanetView {
   switch (id) {
-    case 'orbit': return { ground: GROUND, altitudeM: ORBIT_ALTITUDE_M, headingRad: HEADING, pitchRad: ORBIT_PITCH_RAD };
+    case 'orbit': return { ground: GROUND, altitudeM: orbitAltitudeFor(radiusM), headingRad: HEADING, pitchRad: ORBIT_PITCH_RAD };
     case 'mid-20km': return { ground: GROUND, altitudeM: MID_ALTITUDE_M, headingRad: HEADING, pitchRad: -25 * DEG };
-    case 'coast': return { ground: coastGround(), altitudeM: COAST_ALTITUDE_M, headingRad: COAST_HEADING_RAD, pitchRad: COAST_PITCH_RAD };
+    case 'coast': return { ground: coastGround(radiusM), altitudeM: COAST_ALTITUDE_M, headingRad: COAST_HEADING_RAD, pitchRad: COAST_PITCH_RAD };
     case 'ground': return { ground: GROUND, altitudeM: EYE_ALTITUDE_M, headingRad: HEADING, pitchRad: GROUND_PITCH_RAD };
   }
 }
 
 /** The descent: orbit to the 2 m eye over the same ground point, altitude logarithmic, the pitch easing from straight down to level. */
-export function descentView(t: number): PlanetView {
-  const from = planetPoseView('orbit');
-  const to = planetPoseView('ground');
+export function descentView(t: number, radiusM: number = PLANET_RADIUS_M): PlanetView {
+  const from = planetPoseView('orbit', radiusM);
+  const to = planetPoseView('ground', radiusM);
   const s = Math.min(1, Math.max(0, t));
   return {
     ...from,
@@ -99,14 +111,17 @@ export function descentView(t: number): PlanetView {
 }
 
 /** The turn: the ground pose with the heading going once round (360 degrees). */
-export function yawView(t: number): PlanetView {
-  const from = planetPoseView('ground');
+export function yawView(t: number, radiusM: number = PLANET_RADIUS_M): PlanetView {
+  const from = planetPoseView('ground', radiusM);
   return { ...from, headingRad: from.headingRad + 2 * Math.PI * Math.min(1, Math.max(0, t)) };
 }
 
-/** The morph sweep: the camera stays on the orbit pose for the whole move. */
-export function morphSweepView(): PlanetView {
-  return planetPoseView('orbit');
+/**
+ * The morph sweep: the camera stays on one pose for the whole move, the orbit pose unless the case names another (suite
+ * visual v5 sweeps at 20 km and at the 2 m eye too).
+ */
+export function morphSweepView(pose: PlanetPoseId = 'orbit', radiusM: number = PLANET_RADIUS_M): PlanetView {
+  return planetPoseView(pose, radiusM);
 }
 
 /**
@@ -120,9 +135,10 @@ export function morphSweepValue(t: number): number {
   return x * x * (3 - 2 * x);
 }
 
-export function motionView(motion: PlanetMotion, t: number): PlanetView {
-  if (motion === 'morphSweep') return morphSweepView();
-  return motion === 'descent' ? descentView(t) : yawView(t);
+/** The view of a scripted move at progress `t`; `sweepPose` is the pose a morph sweep holds (the orbit pose when omitted). */
+export function motionView(motion: PlanetMotion, t: number, sweepPose: PlanetPoseId = 'orbit', radiusM: number = PLANET_RADIUS_M): PlanetView {
+  if (motion === 'morphSweep') return morphSweepView(sweepPose, radiusM);
+  return motion === 'descent' ? descentView(t, radiusM) : yawView(t, radiusM);
 }
 
 /** The morph a scripted move sets at progress `t`, or undefined when the move leaves the morph alone. */
@@ -159,6 +175,115 @@ export function resolvePlanetCamera(view: PlanetView, radiusM: number, groundHei
   return { position, forward, right, up: cross(right, forward), clearanceM: view.altitudeM };
 }
 
+// -- reference cubes ------------------------------------------------------------------------------------------------
+
+/** A reference cube of the page: its edge, where it stands from the pose ground point, and its colour. */
+export interface ReferenceCube {
+  readonly sizeM: number;
+  /** Metres along the ground pose's heading from the pose ground point (the tangent plane; the point is then put on the sphere). */
+  readonly aheadM: number;
+  /** Metres to the left of that heading. */
+  readonly leftM: number;
+  readonly color: number;
+}
+
+/**
+ * Three cubes about 32 times apart in size (100 m, 3 km, 100 km), in front of the 2 m eye, so each altitude has one to judge
+ * scale and the bend by: the small one fills part of the eye's view, the middle one is plain at 20 km, the large one is
+ * about 70 pixels across from orbit and its top clears the eye's horizon (the drop at 150 km is about 19 km).
+ */
+export const REFERENCE_CUBES: readonly ReferenceCube[] = [
+  { sizeM: 100, aheadM: 400, leftM: 150, color: 0xff2bd6 },
+  { sizeM: 3000, aheadM: 8000, leftM: -3000, color: 0xffd400 },
+  { sizeM: 100_000, aheadM: 150_000, leftM: 0, color: 0x00e5ff },
+];
+
+/** The reference cubes a planet of this radius shows: those whose distance ahead is at most the radius (a cube past it would stand beyond the horizon of a small world). */
+export function referenceCubesFor(radiusM: number): readonly ReferenceCube[] {
+  return REFERENCE_CUBES.filter((cube) => cube.aheadM <= radiusM);
+}
+
+/** The unit ground direction under a reference cube's centre. */
+export function referenceCubeGround(cube: ReferenceCube, radiusM: number = PLANET_RADIUS_M): Vec3 {
+  const { up, east, north } = groundFrame('sphere', GROUND);
+  const ch = Math.cos(HEADING);
+  const sh = Math.sin(HEADING);
+  const p = [0, 1, 2].map((k) => up[k] * radiusM
+    + (ch * north[k] + sh * east[k]) * cube.aheadM
+    - (ch * east[k] - sh * north[k]) * cube.leftM);
+  const length = Math.hypot(p[0], p[1], p[2]);
+  return [p[0] / length, p[1] / length, p[2] / length];
+}
+
+/**
+ * How high a cube's centre stands above the ground under it, metres: half its edge, less the sphere's drop at its corners
+ * (half the diagonal of its base, `d^2 / 2R`), so its base corners touch the ground rather than float.
+ */
+export function referenceCubeLift(cube: ReferenceCube, radiusM: number): number {
+  const halfDiagonal = cube.sizeM / Math.SQRT2;
+  return cube.sizeM / 2 - (halfDiagonal * halfDiagonal) / (2 * radiusM);
+}
+
+// -- following the bend ---------------------------------------------------------------------------------------------
+
+/** Scratch of {@link bendGlobePoint} (synchronous, so one set per module is enough). */
+const BEND_XY: [number, number] = [0, 0];
+const BEND_OUT = { position: [0, 0, 0] as Vec3, normal: [0, 0, 0] as Vec3 };
+
+/**
+ * Where the morph puts a point of the unbent globe, in the scene (= body) frame: the point's longitude and latitude in the
+ * projection basis go through the map (`morphMapXY`) and the bend (`bendPointInto`), with its height above the base sphere
+ * along the bent normal, and the map frame goes back to the body frame (`right x + up y + forward (z + shift)`). The terrain,
+ * the water and the atmosphere bend their vertices the same way, so a point placed with this stays on the drawn ground.
+ * At morph 0 it returns `p`.
+ *
+ * @param map The morph map of this frame (`MorphMapResolver.resolve(planet.morphUniforms, R)`).
+ * @param p A point of the unbent globe, scene metres from the planet's centre.
+ * @param out Where to write the result.
+ */
+export function bendGlobePoint(map: MorphMap, p: readonly number[], out: Vec3 = [0, 0, 0]): Vec3 {
+  const { right, up, forward } = map.basis;
+  const r = Math.hypot(p[0], p[1], p[2]);
+  const ur = (p[0] * right[0] + p[1] * right[1] + p[2] * right[2]) / r;
+  const uu = (p[0] * up[0] + p[1] * up[1] + p[2] * up[2]) / r;
+  const uf = (p[0] * forward[0] + p[1] * forward[1] + p[2] * forward[2]) / r;
+  const lon = Math.atan2(ur, uf);
+  const lat = Math.asin(Math.min(1, Math.max(-1, uu)));
+  morphMapXY(lon, lat, map, BEND_XY);
+  const q = bendPointInto(BEND_XY[0], BEND_XY[1], map.k, r - map.radius, BEND_OUT).position;
+  for (let i = 0; i < 3; i++) out[i] = right[i] * q[0] + up[i] * q[1] + forward[i] * (q[2] + map.shift);
+  return out;
+}
+
+/** The finite-difference step of {@link bentDirection}, metres: small next to the bend's curvature, large next to rounding. */
+const BEND_STEP_M = 1;
+
+/** The direction the bend gives a unit vector `v` at the globe point `p` (the bend's derivative along `v`), normalised. */
+export function bentDirection(map: MorphMap, p: readonly number[], v: readonly number[]): Vec3 {
+  const a = bendGlobePoint(map, [p[0] + BEND_STEP_M * v[0], p[1] + BEND_STEP_M * v[1], p[2] + BEND_STEP_M * v[2]]);
+  const b = bendGlobePoint(map, [p[0] - BEND_STEP_M * v[0], p[1] - BEND_STEP_M * v[1], p[2] - BEND_STEP_M * v[2]]);
+  const d: Vec3 = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const length = Math.hypot(d[0], d[1], d[2]);
+  return [d[0] / length, d[1] / length, d[2] / length];
+}
+
+/**
+ * The camera carried through the morph: its position bent like the ground under it, and its forward and up turned by the
+ * bend there (up made square to forward again), so it keeps the same view of the ground at every morph. At morph 0 the
+ * camera is returned unchanged.
+ */
+export function bendPlanetCamera(camera: ResolvedPlanetCamera, map: MorphMap): ResolvedPlanetCamera {
+  if (map.morph === 0) return camera;
+  const position = bendGlobePoint(map, camera.position);
+  const forward = bentDirection(map, camera.position, camera.forward);
+  const bentUp = bentDirection(map, camera.position, camera.up);
+  const along = bentUp[0] * forward[0] + bentUp[1] * forward[1] + bentUp[2] * forward[2];
+  const square: Vec3 = [bentUp[0] - along * forward[0], bentUp[1] - along * forward[1], bentUp[2] - along * forward[2]];
+  const length = Math.hypot(square[0], square[1], square[2]);
+  const up: Vec3 = [square[0] / length, square[1] / length, square[2] / length];
+  return { position, forward, up, right: cross(forward, up), clearanceM: camera.clearanceM };
+}
+
 /** The near plane for a clearance: a quarter of it, between 2 cm and 1 km (a reversed depth buffer holds the whole range). */
 export function nearPlaneFor(clearanceM: number): number {
   return Math.min(1000, Math.max(0.02, clearanceM * 0.25));
@@ -171,8 +296,11 @@ export function groundUp(view: PlanetView): Vec3 {
 
 /** The lowest altitude the mouse orbit mode reaches: the 2 m eye. */
 export const FREE_MIN_ALTITUDE_M = EYE_ALTITUDE_M;
-/** The highest altitude the mouse orbit mode reaches: twice the orbit altitude (2.4 million m). */
-export const FREE_MAX_ALTITUDE_M = 2 * ORBIT_ALTITUDE_M;
+/** The highest altitude the mouse orbit mode reaches: four radii (twice the orbit altitude; 2.4 million m at the default radius). */
+export function freeMaxAltitudeFor(radiusM: number): number {
+  return 4 * radiusM;
+}
+export const FREE_MAX_ALTITUDE_M = freeMaxAltitudeFor(PLANET_RADIUS_M);
 /** The largest ground angle one drag step may move the camera, radians. */
 const FREE_MAX_DRAG_STEP_RAD = 0.5;
 
@@ -193,11 +321,11 @@ function wrapAngle(angleRad: number): number {
  * @param viewportHeightPx The canvas height in CSS pixels.
  * @param fovDeg The vertical field of view, degrees.
  */
-export function freeDrag(view: PlanetView, dxPx: number, dyPx: number, viewportHeightPx: number, fovDeg: number): PlanetView {
+export function freeDrag(view: PlanetView, dxPx: number, dyPx: number, viewportHeightPx: number, fovDeg: number, radiusM: number = PLANET_RADIUS_M): PlanetView {
   const pixels = Math.hypot(dxPx, dyPx);
   if (pixels === 0) return { ...view };
   const { up, east, north } = groundFrame('sphere', view.ground);
-  const radPerPx = (fovDeg * DEG / viewportHeightPx) * (Math.max(1, view.altitudeM) / PLANET_RADIUS_M);
+  const radPerPx = (fovDeg * DEG / viewportHeightPx) * (Math.max(1, view.altitudeM) / radiusM);
   const angle = Math.min(FREE_MAX_DRAG_STEP_RAD, pixels * radPerPx);
   const tangent: Vec3 = [0, 1, 2].map((k) => (-dxPx * east[k] + dyPx * north[k]) / pixels) as Vec3;
   const c = Math.cos(angle);
@@ -235,7 +363,7 @@ export function freeLook(view: PlanetView, dxPx: number, dyPx: number, viewportH
  * @param view The view to zoom.
  * @param wheelDeltaY The wheel event's `deltaY`.
  */
-export function freeZoom(view: PlanetView, wheelDeltaY: number): PlanetView {
+export function freeZoom(view: PlanetView, wheelDeltaY: number, radiusM: number = PLANET_RADIUS_M): PlanetView {
   const altitude = view.altitudeM * Math.exp(wheelDeltaY * 0.001);
-  return { ...view, altitudeM: Math.min(FREE_MAX_ALTITUDE_M, Math.max(FREE_MIN_ALTITUDE_M, altitude)) };
+  return { ...view, altitudeM: Math.min(freeMaxAltitudeFor(radiusM), Math.max(FREE_MIN_ALTITUDE_M, altitude)) };
 }

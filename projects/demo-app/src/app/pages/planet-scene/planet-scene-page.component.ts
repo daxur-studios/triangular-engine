@@ -1,7 +1,7 @@
 import { Component, DestroyRef, computed, inject, isDevMode, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { AmbientLight, DirectionalLight, Matrix4, PerspectiveCamera, Vector3 } from 'three';
-import { MeshBasicNodeMaterial } from 'three/webgpu';
+import { AmbientLight, BoxGeometry, DirectionalLight, Matrix4, Mesh, PerspectiveCamera, Vector3 } from 'three';
+import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu';
 import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
 import { PlanetCloudsComponent } from 'triangular-engine/cloud-volumes';
 import { PlanetAtmosphereComponent, type IAtmosphereSurface } from 'triangular-engine/atmosphere';
@@ -10,15 +10,16 @@ import { checkerDebugLayer, PlanetSurfaceMaterial } from 'triangular-engine/plan
 import {
   PlanetComponent, PlanetSurfaceDetailComponent, PlanetTerrainComponent, TerrainPlanetMaterial, type PlanetSurfaceDetailLayer,
 } from 'triangular-engine/lod-surface';
-import { cellPlanetFor, createGroundSample, type Vec3 } from 'triangular-engine/lod-surface/core';
+import { cellPlanetFor, createGroundSample, groundFrame, MorphMapResolver, type MorphMap, type Vec3 } from 'triangular-engine/lod-surface/core';
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import { bakeInWorker } from '../lod-surface-lab/lod-height-bake-client';
 import { createWaterLodSpikeSphereScene, type IWaterLodSpikeSphereSceneHandle } from '../../water-lod-spike/core/create-water-lod-spike-sphere-scene';
 import { createWaterLodSpikeRecording } from '../../water-lod-spike/core/water-lod-spike-recording';
 import { waterLodSpikeSphereQuality } from '../../water-lod-spike/core/water-lod-spike-quality';
 import {
-  PLANET_POSES, PLANET_RADIUS_M, freeDrag, freeLook, freeZoom, groundUp, motionMorph, motionView, nearPlaneFor, planetPoseView,
-  resolvePlanetCamera, sceneSunDirection, type PlanetMotion, type PlanetPoseId, type PlanetView,
+  PLANET_POSES, PLANET_RADIUS_M, REFERENCE_CUBES, referenceCubesFor, bendGlobePoint, bendPlanetCamera, bentDirection, freeDrag, freeLook, freeZoom,
+  groundUp, motionMorph, motionView, nearPlaneFor, planetPoseView, referenceCubeGround, referenceCubeLift, resolvePlanetCamera,
+  sceneSunDirection, type PlanetMotion, type PlanetPoseId, type PlanetView,
 } from './planet-camera';
 import { createPlanetSceneTestAdapter, type PlanetSceneTestHost } from './planet-scene-test-adapter';
 import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_RUNNER_SUITES, type PlanetSceneTestSettings } from './planet-scene-tests';
@@ -76,19 +77,21 @@ interface RendererLike {
   host: { class: 'flex-page' },
   template: `
     <scene>
-      <planet [radius]="radius" [sunDirection]="sun" [world]="world" [bake]="bake" [morph]="morph()">
+      <planet #planetBody [radius]="radiusM()" [sunDirection]="sun" [world]="world()" [bake]="bake" [morph]="morph()">
         @if (terrainOn()) {
-          <planetTerrain #terrainBody [material]="plainMaterial() ? plainNode : undefined" />
+          <planetTerrain #terrainBody [cull]="terrainCull()" [material]="plainMaterial() ? plainNode : undefined" />
         }
-        <planetAtmosphere preset="earth" [surfaces]="surfaces()" [enabled]="atmosphereOn()" />
+        <planetAtmosphere preset="earth" [surfaces]="surfaces()" [enabled]="atmosphereOn()" [sky]="skyOn()" [haze]="hazeOn()" [shellFade]="shellFadeOn()" />
         <planetClouds [coverage]="0.45" [enabled]="cloudsOn()" />
         <planetSurfaceDetail [surface]="detailSurface()" [layers]="detailLayers" />
       </planet>
       @if (waterOn() && waterRig(); as rig) {
-        <!-- The water spike's body beside <planet>: it takes its own radius, sun, heights and material, so it cannot sit inside it. -->
+        <!-- The water spike's body beside <planet>: it takes its own heights and material, so it cannot sit inside it. It
+             shares the planet's morph uniforms (the same object) and radius, so it bends exactly with the ground. -->
         <planetTerrain
           #waterBody
-          [radius]="radius"
+          [radius]="radiusM()"
+          [planetMorph]="planetBody.morphUniforms"
           [heights]="rig.heights"
           [material]="rig.material"
           [detailNoise]="0"
@@ -168,6 +171,14 @@ interface RendererLike {
         <p class="note">Atmosphere on the terrain: {{ surfaceLine() }}</p>
         <p class="note" data-testid="clouds">Clouds: a shell (<code>&lt;planetClouds&gt;</code>) bent into the map with the morph (lit as on the globe). Not yet looked at on a GPU.</p>
 
+        <label class="feature">
+          <input type="checkbox" data-testid="follow-bend" [checked]="followBend()" (change)="followBend.set($any($event.target).checked)" />
+          Camera follows the bend (keeps the same view of the ground through the morph)
+        </label>
+        <label class="feature">
+          <input type="checkbox" data-testid="reference-cubes" [checked]="references()" (change)="references.set($any($event.target).checked)" />
+          Reference cubes: 100 m (pink), 3 km (yellow), 100 km (cyan), ahead of the eye
+        </label>
         <p class="row">morph {{ morph().toFixed(2) }}
           <input type="range" min="0" max="1" step="0.05" aria-label="Globe to map morph" [value]="morph()" (input)="setMorph(+$any($event.target).value)" />
         </p>
@@ -208,10 +219,14 @@ export class PlanetScenePageComponent {
   readonly testHistory = PLANET_SCENE_RUNNER_SUITES;
   readonly allowTestAutoStart = isDevMode();
 
-  /** What `<planet>` is given, once. */
-  readonly radius = PLANET_RADIUS_M;
+  /**
+   * The planet's radius, metres (the ground-only ladder, suite `planet-ground-earth-*`, sets it per case). The planet restarts its
+   * height bake when it changes, and `heights()` is undefined for the old radius from that moment.
+   */
+  readonly radiusM = signal(PLANET_RADIUS_M);
   readonly sun = sceneSunDirection();
-  readonly world = cellPlanetFor(PLANET_RADIUS_M);
+  /** The cell planet drawn at the live radius. */
+  readonly world = computed(() => cellPlanetFor(this.radiusM()));
   readonly bake = bakeInWorker;
 
   readonly pose = signal<PlanetPoseId>(DEFAULT_PLANET_SCENE_SETTINGS.pose);
@@ -226,10 +241,25 @@ export class PlanetScenePageComponent {
   readonly waterRig = signal<IWaterLodSpikeSphereSceneHandle | undefined>(undefined);
   /** The water's mesh: the spike sphere page's ultra tier. */
   protected readonly waterTier = waterLodSpikeSphereQuality('ultra');
+  /** Test-only (visual v4): `<planetAtmosphere [sky]>`, the backdrop. Not in the panel. */
+  readonly skyOn = signal(true);
+  /** Test-only (visual v4): `<planetAtmosphere [haze]>`, the surface haze. Not in the panel. */
+  readonly hazeOn = signal(true);
+  /** Test-only (visual v4): `<planetAtmosphere [shellFade]>`; the stills turn it off. Not in the panel. */
+  readonly shellFadeOn = signal(true);
   /** Test-only (suite v4): draw the terrain with {@link plainNode} instead of the planet material. Not in the panel. */
   readonly plainMaterial = signal(false);
+  /** Test-only: the ground `<planetTerrain [cull]>` (the selector's own culling). On by default; the cull A/B turns it off. */
+  readonly terrainCull = signal(true);
   /** An unlit basic material: no cell lookup, no lighting. The terrain sets its `positionNode`. */
   readonly plainNode = new MeshBasicNodeMaterial({ color: 0x8a8f6a });
+  /**
+   * The camera is carried through the morph like the ground under it (visual v5), so a pose keeps its view of the ground at
+   * every morph. On in the panel; a test case turns it on with `followBend: true` and every older case has it off.
+   */
+  readonly followBend = signal(true);
+  /** The three reference cubes ({@link REFERENCE_CUBES}, visual v5). On in the panel; off unless a case asks for them. */
+  readonly references = signal(true);
   /** The page's own scripted move (the "play" buttons), or undefined. */
   readonly playing = signal<DemoMotion | undefined>(undefined);
   /** Mouse orbit: the canvas drags, looks and zooms the camera (see {@link setFreeOrbit}). Off by default. */
@@ -299,6 +329,23 @@ export class PlanetScenePageComponent {
   private readonly groundSample = createGroundSample();
   private readonly basis = new Matrix4();
   private readonly axes = [new Vector3(), new Vector3(), new Vector3()] as const;
+  /** The morph map of the planet's uniforms, resolved each tick (no allocation while the morph holds still). */
+  private readonly morphResolver = new MorphMapResolver();
+  /** The reference cubes' meshes, in {@link REFERENCE_CUBES} order. */
+  private readonly cubeMeshes = REFERENCE_CUBES.map((cube) => {
+    const mesh = new Mesh(
+      new BoxGeometry(cube.sizeM, cube.sizeM, cube.sizeM),
+      new MeshStandardNodeMaterial({ color: cube.color, emissive: cube.color, emissiveIntensity: 0.35, roughness: 0.6 }),
+    );
+    mesh.name = `reference cube ${cube.sizeM} m`;
+    mesh.frustumCulled = false;
+    return mesh;
+  });
+  /** Each cube's unbent centre on the globe, scene metres; remade when the baked heights change. */
+  private cubeCentres: readonly Vec3[] = [];
+  private cubeHeightsFor: unknown;
+  /** The radius {@link cubeCentres} were made for. */
+  private cubeRadiusFor = PLANET_RADIUS_M;
   /** The view mouse orbit edits while it is on; undefined otherwise. */
   private freeView: PlanetView | undefined;
   /** The canvas the mouse orbit listeners are attached to, or undefined while they are not. */
@@ -321,7 +368,7 @@ export class PlanetScenePageComponent {
     const height = this.freeCanvas.clientHeight || 1;
     this.freeView = gesture.look
       ? freeLook(this.freeView, dx, dy, height, FOV_DEG)
-      : freeDrag(this.freeView, dx, dy, height, FOV_DEG);
+      : freeDrag(this.freeView, dx, dy, height, FOV_DEG, this.radiusM());
   };
 
   private readonly onFreePointerUp = (event: PointerEvent): void => {
@@ -330,7 +377,7 @@ export class PlanetScenePageComponent {
 
   private readonly onFreeWheel = (event: WheelEvent): void => {
     event.preventDefault();
-    if (this.freeView) this.freeView = freeZoom(this.freeView, event.deltaY);
+    if (this.freeView) this.freeView = freeZoom(this.freeView, event.deltaY, this.radiusM());
   };
 
   private readonly onFreeContextMenu = (event: Event): void => event.preventDefault();
@@ -390,6 +437,10 @@ export class PlanetScenePageComponent {
     this.sunLight.position.set(this.sun[0], this.sun[1], this.sun[2]);
     this.ambientLight = new AmbientLight(0xaabbdd, 0.5);
     this.engine.scene.add(this.sunLight, this.sunLight.target, this.ambientLight);
+    for (const mesh of this.cubeMeshes) {
+      mesh.visible = false;
+      this.engine.scene.add(mesh);
+    }
 
     const tick = this.engine.tick$.subscribe(() => this.update());
     const rendered = this.engine.renderComplete$.subscribe(({ renderedAt }) => {
@@ -414,6 +465,11 @@ export class PlanetScenePageComponent {
       rendered.unsubscribe();
       if (this.sunLight && this.ambientLight) this.engine.scene.remove(this.sunLight, this.sunLight.target, this.ambientLight);
       this.sunLight = this.ambientLight = undefined;
+      for (const mesh of this.cubeMeshes) {
+        this.engine.scene.remove(mesh);
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+      }
       this.waterRig()?.dispose();
     });
   }
@@ -520,6 +576,13 @@ export class PlanetScenePageComponent {
       ...(this.plainMaterial() ? { plainMaterial: true } : {}),
       ...(this.cloudsOn() ? {} : { clouds: false }),
       ...(this.waterOn() ? { water: true } : {}),
+      ...(this.skyOn() ? {} : { sky: false }),
+      ...(this.hazeOn() ? {} : { haze: false }),
+      ...(this.shellFadeOn() ? {} : { shellFade: false }),
+      ...(this.followBend() ? { followBend: true } : {}),
+      ...(this.references() ? { references: true } : {}),
+      ...(this.terrainCull() ? {} : { terrainCull: false }),
+      ...(this.radiusM() !== PLANET_RADIUS_M ? { radiusM: this.radiusM() } : {}),
       ...(this.testProgress !== undefined && this.testMotion ? { motion: this.testMotion } : {}),
     };
   }
@@ -528,12 +591,19 @@ export class PlanetScenePageComponent {
     this.setFreeOrbit(false);
     this.demo = undefined;
     this.playing.set(undefined);
+    this.radiusM.set(settings.radiusM ?? PLANET_RADIUS_M);
+    this.terrainCull.set(settings.terrainCull ?? true);
     this.terrainOn.set(settings.terrain);
     this.atmosphereOn.set(settings.atmosphere);
     this.morph.set(settings.morph);
     this.plainMaterial.set(settings.plainMaterial ?? false);
     this.cloudsOn.set(settings.clouds ?? true);
     this.setWater(settings.water ?? false);
+    this.skyOn.set(settings.sky ?? true);
+    this.hazeOn.set(settings.haze ?? true);
+    this.shellFadeOn.set(settings.shellFade ?? true);
+    this.followBend.set(settings.followBend ?? false);
+    this.references.set(settings.references ?? false);
     this.pose.set(settings.pose);
     this.testMotion = settings.motion;
     this.setTestProgress(settings.motion ? 0 : undefined);
@@ -564,6 +634,9 @@ export class PlanetScenePageComponent {
       if (!water) return 'the water body';
       if (!water.object.visible) return "the water body's pipeline";
     }
+    // A radius change reaches `<planet>` at the next change detection, and its bake restarts after that; `heights()` is
+    // undefined for the old radius from then on, so the checks below wait for the bake of the new radius.
+    if (this.planet()?.radius() !== this.radiusM()) return 'the planet to take the new radius';
     if (!this.terrainOn()) return '';
     const layer = this.terrainLayer();
     const body = layer?.terrain();
@@ -582,32 +655,38 @@ export class PlanetScenePageComponent {
   }
 
   private currentView(): PlanetView {
-    if (this.testProgress !== undefined && this.testMotion) return motionView(this.testMotion, this.testProgress);
+    if (this.testProgress !== undefined && this.testMotion) return motionView(this.testMotion, this.testProgress, this.pose(), this.radiusM());
     if (this.freeOn() && this.freeView) return this.freeView;
     const demo = this.demo;
     if (demo) {
       const t = (performance.now() - demo.began) / (PLAY_SECONDS[demo.motion] * 1000);
-      if (t < 1) return motionView(demo.motion, t);
+      if (t < 1) return motionView(demo.motion, t, 'orbit', this.radiusM());
       // The move ends where it ends: the eye pose it finishes on, then the buttons are free again.
       this.demo = undefined;
       this.playing.set(undefined);
       this.pose.set(demo.motion === 'descent' ? 'ground' : 'ground');
     }
-    return planetPoseView(this.pose());
+    return planetPoseView(this.pose(), this.radiusM());
   }
 
   /** Every tick: place the camera on the view, with the eye kept above the drawn ground. The terrain selects in `beforeRender$`. */
   private update(): void {
     if (this.freeOn()) this.attachFreeListeners();
     const view = this.currentView();
+    const R = this.radiusM();
     const up = groundUp(view);
     const layer = this.terrainLayer();
     let groundHeight = 0;
     if (layer && this.terrainOn()) {
-      const sample = layer.groundAt([up[0] * PLANET_RADIUS_M, up[1] * PLANET_RADIUS_M, up[2] * PLANET_RADIUS_M] as Vec3, this.groundSample);
+      const sample = layer.groundAt([up[0] * R, up[1] * R, up[2] * R] as Vec3, this.groundSample);
       if (sample) groundHeight = sample.heightM;
     }
-    const camera = resolvePlanetCamera(view, PLANET_RADIUS_M, groundHeight);
+    // The morph the terrain draws with this frame: the planet's uniforms (set from `[morph]`), not the signal.
+    const uniforms = this.planet()?.morphUniforms;
+    const map = uniforms ? this.morphResolver.resolve(uniforms, R) : undefined;
+    const globeCamera = resolvePlanetCamera(view, R, groundHeight);
+    const camera = map && this.followBend() ? bendPlanetCamera(globeCamera, map) : globeCamera;
+    this.placeCubes(map);
     const engineCamera = this.engine.camera;
     const [right, cameraUp, back] = this.axes;
     right.set(...camera.right);
@@ -639,6 +718,64 @@ export class PlanetScenePageComponent {
     }
   }
 
+  /**
+   * Places the reference cubes for this frame: each centre on the drawn ground (the terrain's height under it, sampled once
+   * the heights are baked, plus {@link referenceCubeLift}), bent by the morph, and turned with the bent east and up there, so
+   * a cube sits on the bent ground the way it sits on the globe.
+   */
+  private placeCubes(map: MorphMap | undefined): void {
+    const show = this.references();
+    const R = this.radiusM();
+    // Only the cubes that fit the world are shown (see referenceCubesFor).
+    const fitting = referenceCubesFor(R);
+    this.cubeMeshes.forEach((mesh, i) => { mesh.visible = show && fitting.includes(REFERENCE_CUBES[i]); });
+    if (!show) return;
+    const heights = this.planet()?.heights();
+    if (this.cubeRadiusFor !== R) {
+      // A new radius: the old centres and the sampling of the old bake no longer apply.
+      this.cubeCentres = [];
+      this.cubeHeightsFor = undefined;
+      this.cubeRadiusFor = R;
+    }
+    if (this.cubeCentres.length === 0 || (heights && heights !== this.cubeHeightsFor)) {
+      const layer = this.terrainLayer();
+      const ready = !!heights && !!layer && this.terrainOn();
+      this.cubeCentres = REFERENCE_CUBES.map((cube) => {
+        const up = referenceCubeGround(cube, R);
+        const sample = ready ? layer!.groundAt([up[0] * R, up[1] * R, up[2] * R] as Vec3, this.groundSample) : undefined;
+        const r = R + (sample?.heightM ?? 0) + referenceCubeLift(cube, R);
+        return [up[0] * r, up[1] * r, up[2] * r] as Vec3;
+      });
+      // Sampled from the baked heights: keep it. Before the bake lands, sample again next tick.
+      this.cubeHeightsFor = ready ? heights : undefined;
+    }
+    const [x, y, z] = this.axes;
+    for (let i = 0; i < this.cubeMeshes.length; i++) {
+      const mesh = this.cubeMeshes[i];
+      if (!mesh.visible) continue;
+      const centre = this.cubeCentres[i];
+      const frame = groundFrame('sphere', centre);
+      let east: Vec3 = frame.east;
+      let up: Vec3 = frame.up;
+      let position: Vec3 = centre;
+      if (map && map.morph !== 0) {
+        position = bendGlobePoint(map, centre);
+        east = bentDirection(map, centre, frame.east);
+        const bentUp = bentDirection(map, centre, frame.up);
+        const along = bentUp[0] * east[0] + bentUp[1] * east[1] + bentUp[2] * east[2];
+        const square = [bentUp[0] - along * east[0], bentUp[1] - along * east[1], bentUp[2] - along * east[2]];
+        const length = Math.hypot(square[0], square[1], square[2]);
+        up = [square[0] / length, square[1] / length, square[2] / length];
+      }
+      x.set(east[0], east[1], east[2]);
+      y.set(up[0], up[1], up[2]);
+      z.crossVectors(x, y);
+      mesh.position.set(position[0], position[1], position[2]);
+      mesh.quaternion.setFromRotationMatrix(this.basis.makeBasis(x, y, z));
+      mesh.updateMatrixWorld();
+    }
+  }
+
   private environment(): Record<string, TestSetting> {
     const renderer = this.engine.renderer as unknown as RendererLike;
     const backend = renderer.backend;
@@ -653,8 +790,8 @@ export class PlanetScenePageComponent {
       'canvas.drawingBufferHeight': renderer.domElement?.height ?? 0,
       devicePixelRatio: globalThis.devicePixelRatio ?? 1,
       reversedDepthBuffer: true,
-      'planet.radiusM': this.radius,
-      'planet.world': `cell planet seed ${this.world.seed}, ${this.world.cellCount} cells, ${this.world.heightScaleM} m per unit`,
+      'planet.radiusM': this.radiusM(),
+      'planet.world': `cell planet seed ${this.world().seed}, ${this.world().cellCount} cells, ${this.world().heightScaleM} m per unit`,
       'surface.material': 'terrain-planet',
       clouds: 'shell',
     };

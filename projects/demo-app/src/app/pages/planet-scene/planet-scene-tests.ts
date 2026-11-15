@@ -1,5 +1,5 @@
 import type { TestScenario, TestSuite } from 'triangular-engine/testing';
-import type { PlanetMotion, PlanetPoseId } from './planet-camera';
+import { EARTH_RADIUS_M, EARTH_SCALE_TIERS, type PlanetMotion, type PlanetPoseId } from './planet-camera';
 
 /** Everything a planet-scene case sets; also the snapshot a run restores. Plain JSON. */
 export interface PlanetSceneTestSettings {
@@ -18,8 +18,8 @@ export interface PlanetSceneTestSettings {
   readonly morph: number;
   /**
    * A scripted camera runs during the window instead of a still pose: `descent` flies orbit to the 2 m eye over one ground
-   * point; `yaw360` holds the ground pose and turns the heading once round; `morphSweep` holds the orbit pose and sweeps the
-   * morph 0 to 1 and back to 0.
+   * point; `yaw360` holds the ground pose and turns the heading once round; `morphSweep` holds the case's pose and sweeps the
+   * morph 0 to 1 and back to 0 (every case before visual v5 sweeps at orbit).
    */
   readonly motion?: PlanetMotion;
   /**
@@ -36,10 +36,37 @@ export interface PlanetSceneTestSettings {
   readonly clouds?: boolean;
   /**
    * The water body (v5): the water spike's `<planetTerrain>` over the sea, mounted beside `<planet>` because it cannot go inside
-   * it (it takes its own radius, sun, heights and material). The ultra tier, horizon cull on. It does not morph and gets no
-   * atmosphere haze, so the cases that use it stay at morph 0. Omitted means off, as in v1 to v4.
+   * it (it takes its own radius, sun, heights and material). The ultra tier, horizon cull on. It bends with the planet (it shares
+   * `<planet>`'s morph uniforms, since visual v4) and gets no atmosphere haze. Omitted means off, as in v1 to v4.
    */
   readonly water?: boolean;
+  /** `<planetAtmosphere [sky]>` (visual v4): off hides the backdrop and keeps the surface haze. Omitted means on. */
+  readonly sky?: boolean;
+  /** `<planetAtmosphere [haze]>` (visual v4): off takes the surface haze off and keeps the backdrop. Omitted means on. */
+  readonly haze?: boolean;
+  /**
+   * `<planetAtmosphere [shellFade]>` (visual v4): off keeps the sky shell at full strength at any morph, so a still shows where
+   * the unbent shell sits instead of it dissolving. Omitted means on, as the game runs.
+   */
+  readonly shellFade?: boolean;
+  /**
+   * The camera is carried through the morph like the ground under it (visual v5), so the pose keeps its view of the same
+   * ground at any morph. Omitted means off: the camera stays where the globe put it, as in every earlier case.
+   */
+  readonly followBend?: boolean;
+  /** The three reference cubes (100 m, 3 km and 100 km) on the ground ahead of the eye, bent with it (visual v5). Omitted means off. */
+  readonly references?: boolean;
+  /**
+   * The planet's radius in metres (the ground-only ladder, `planet-ground-earth-*`). The camera poses, the orbit altitude
+   * (two radii) and the cubes that fit the world follow it; the cell planet is baked again for it. Omitted means 600 000, the
+   * page's default, as in every suite before the ladder.
+   */
+  readonly radiusM?: number;
+  /**
+   * `<planetTerrain [cull]>` of the ground (the selector's own culling of leaves outside the view). Off for the cull A/B, which
+   * checks whether the ground flicker in a morph sweep comes from culling against bounds that lag the morph. Omitted means on.
+   */
+  readonly terrainCull?: boolean;
 }
 
 /** The scene as a game would run it: terrain and atmosphere on, the globe. */
@@ -343,8 +370,156 @@ export const PLANET_SCENE_VISUAL_V3: TestSuite<PlanetSceneTestSettings> = {
   ],
 };
 
-/** What the page offers its runner: the visual suites first, so "Run latest test" stays planet-scene v5. */
-export const PLANET_SCENE_PAGE_SUITES: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_VISUAL_V1, PLANET_SCENE_VISUAL_V2, PLANET_SCENE_VISUAL_V3];
+/** The layer sets of the bent-sky stills (visual v4). */
+const BENT_SKY_LAYERS: readonly { id: string; label: string; change: Partial<PlanetSceneTestSettings> }[] = [
+  { id: 'air', label: 'air only', change: { atmosphere: true, water: false } },
+  { id: 'water', label: 'water only', change: { atmosphere: false, water: true } },
+  { id: 'both', label: 'air + water', change: { atmosphere: true, water: true } },
+];
+const BENT_SKY_POSES: readonly { id: PlanetSceneTestSettings['pose']; label: string }[] = [
+  { id: 'orbit', label: 'orbit' },
+  { id: 'mid-20km', label: '20 km' },
+  { id: 'ground', label: 'ground' },
+];
+
+/**
+ * Suite `planet-scene-visual` v4: the gate stills for the bent sky and water (Fable's answer `atmosphere-bent-sky`, slices 1-2).
+ * Morph 0, 0.3, 0.6 and 1, at orbit, 20 km and on the ground, with air only, water only and both; clouds off and the sky-shell
+ * fade off throughout, so a layer that does not bend shows instead of dissolving. Two attribution stills at morph 1 from orbit,
+ * backdrop only and surface haze only, settle whether the blue wash is the air counted twice. No budgets; a person looks.
+ */
+export const PLANET_SCENE_VISUAL_V4: TestSuite<PlanetSceneTestSettings> = {
+  id: 'planet-scene-visual',
+  version: 4,
+  title: 'Planet scene, by eye: bent-sky gate stills (morph × pose × layers, fade off) and the morph-1 wash attribution',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: [
+    ...[0, 0.3, 0.6, 1].flatMap((morph) =>
+      BENT_SKY_POSES.flatMap((pose) =>
+        BENT_SKY_LAYERS.map((layers) =>
+          look(`${pose.id}-morph-${morph}-${layers.id}`, `${pose.label} · morph ${morph} · ${layers.label}`, {
+            pose: pose.id, morph, clouds: false, shellFade: false, ...layers.change,
+          }),
+        ),
+      ),
+    ),
+    look('orbit-morph-1-backdrop-only', 'orbit · morph 1 · backdrop only (surface haze off)', {
+      pose: 'orbit', morph: 1, atmosphere: true, water: false, clouds: false, shellFade: false, haze: false,
+    }),
+    look('orbit-morph-1-haze-only', 'orbit · morph 1 · surface haze only (backdrop off)', {
+      pose: 'orbit', morph: 1, atmosphere: true, water: false, clouds: false, shellFade: false, sky: false,
+    }),
+  ],
+};
+
+/** The layers every visual v5 case draws: air and water, clouds and the sky-shell fade off, the camera on the bend, the cubes in. */
+const REFERENCE_LAYERS: Partial<PlanetSceneTestSettings> = {
+  atmosphere: true, water: true, clouds: false, shellFade: false, followBend: true, references: true,
+};
+
+/**
+ * Suite `planet-scene-visual` v5: the morph seen with something to measure it by. Three reference cubes (100 m, 3 km and
+ * 100 km, ahead of the eye) sit on the ground and bend with it, and the camera follows the bend, so each pose keeps its view
+ * of the same ground from globe to map. A morph sweep (0 to 1 and back) at orbit, 20 km and the 2 m eye, recorded when the
+ * page runs with `testRecordings=1`, and stills at morph 0, 0.5 and 1 at each pose for a contact sheet. No budgets.
+ */
+export const PLANET_SCENE_VISUAL_V5: TestSuite<PlanetSceneTestSettings> = {
+  id: 'planet-scene-visual',
+  version: 5,
+  title: 'Planet scene, by eye: the morph sweep with reference cubes, the camera following the bend (orbit, 20 km, ground)',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: [
+    ...BENT_SKY_POSES.map((pose) =>
+      scripted(`sweep-${pose.id}`, `${pose.label} · morph sweep 0 to 1 and back · cubes, camera on the bend`, 'morphSweep', {
+        pose: pose.id, ...REFERENCE_LAYERS,
+      }),
+    ),
+    ...BENT_SKY_POSES.flatMap((pose) =>
+      [0, 0.5, 1].map((morph) =>
+        look(`cubes-${pose.id}-morph-${morph}`, `${pose.label} · morph ${morph} · cubes, camera on the bend`, {
+          pose: pose.id, morph, ...REFERENCE_LAYERS,
+        }),
+      ),
+    ),
+  ],
+};
+
+/**
+ * The layers of the ground-only ladder (step 1): the terrain alone, with the camera on the bend and the reference cubes in.
+ * Atmosphere, water, clouds, sky and haze are off; the sky-shell fade is off too, so nothing dissolves.
+ */
+const GROUND_ONLY_LAYERS: Partial<PlanetSceneTestSettings> = {
+  terrain: true, atmosphere: false, water: false, clouds: false, sky: false, haze: false, shellFade: false,
+  followBend: true, references: true, plainMaterial: false,
+};
+
+/** The label of a ladder tier: `0.001x`. */
+function tierLabel(tier: number): string {
+  return `${tier}x`;
+}
+
+/**
+ * One suite of the ground-only ladder (step 1: the ground layer alone) for a world `tier` times Earth's radius (6 371 000 m).
+ * Three morph sweeps (orbit, 20 km, ground) and six stills (orbit and ground at morph 0, 0.5 and 1), built like visual v5's.
+ * One suite per tier because a run's recordings are capped at 5 MiB.
+ */
+function groundEarthSuite(tier: number): TestSuite<PlanetSceneTestSettings> {
+  const layers: Partial<PlanetSceneTestSettings> = { ...GROUND_ONLY_LAYERS, radiusM: tier * EARTH_RADIUS_M };
+  const label = tierLabel(tier);
+  const stillPoses = BENT_SKY_POSES.filter((pose) => pose.id !== 'mid-20km');
+  return {
+    // The runner's id rule is lower-case letters, digits and hyphens, so 0.001x is `0-001x` in the id.
+    id: `planet-ground-earth-${label.replace('.', '-')}`,
+    version: 1,
+    title: `Planet ground, ladder step 1 (ground only): ${label} Earth, radius ${(tier * EARTH_RADIUS_M).toLocaleString('en-US')} m, morph sweeps and stills`,
+    purpose: 'functional',
+    requiresVisualReview: true,
+    scenarios: [
+      ...BENT_SKY_POSES.map((pose) =>
+        scripted(`sweep-${pose.id}`, `${pose.label} · morph sweep 0 to 1 and back · ground only, ${label} Earth`, 'morphSweep', { pose: pose.id, ...layers }),
+      ),
+      ...stillPoses.flatMap((pose) =>
+        [0, 0.5, 1].map((morph) =>
+          look(`cubes-${pose.id}-morph-${morph}`, `${pose.label} · morph ${morph} · ground only, ${label} Earth`, { pose: pose.id, morph, ...layers }),
+        ),
+      ),
+    ],
+  };
+}
+
+/** The ground-only ladder, step 1: one suite per world size, 0.001x to 1x Earth. */
+export const PLANET_GROUND_EARTH_SUITES: readonly TestSuite<PlanetSceneTestSettings>[] = EARTH_SCALE_TIERS.map(groundEarthSuite);
+
+/**
+ * Suite `planet-ground-cull-ab` v1: the cull A/B for the ladder step 1 ground flicker. At the 0.1x tier (radius 637 100 m), ground
+ * only, a morph sweep at 20 km and at the 2 m eye with the terrain's own culling on and off. If the flicker goes with the
+ * culling off, the selector's cull works on bounds that lag the morph. Look at the clips; no timing claims.
+ */
+export const PLANET_GROUND_CULL_AB: TestSuite<PlanetSceneTestSettings> = {
+  id: 'planet-ground-cull-ab',
+  version: 1,
+  title: 'Planet ground, cull A/B for the ladder step 1 flicker: morph sweeps at 0.1x Earth with terrain culling on and off',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: [
+    ['mid-20km', '20 km'], ['ground', '2 m eye'],
+  ].flatMap(([pose, poseLabel]) => [true, false].map((cull) =>
+    scripted(`sweep-${pose}-cull-${cull ? 'on' : 'off'}`, `${poseLabel} · morph sweep · ground only, 0.1x Earth · terrain cull ${cull ? 'on' : 'off'}`, 'morphSweep', {
+      pose: pose as PlanetPoseId, ...GROUND_ONLY_LAYERS, radiusM: 0.1 * EARTH_RADIUS_M, ...(cull ? {} : { terrainCull: false }),
+    }),
+  )),
+};
+
+/**
+ * What the page offers its runner: the visual suites, the ground-only ladder and the cull A/B first. The runner suites append the
+ * history after them, so the last entry ("Run latest test") is still planet-scene v5.
+ */
+export const PLANET_SCENE_PAGE_SUITES: readonly TestSuite<PlanetSceneTestSettings>[] = [
+  PLANET_SCENE_VISUAL_V1, PLANET_SCENE_VISUAL_V2, PLANET_SCENE_VISUAL_V3, PLANET_SCENE_VISUAL_V4, PLANET_SCENE_VISUAL_V5,
+  ...PLANET_GROUND_EARTH_SUITES, PLANET_GROUND_CULL_AB,
+];
 
 /** Oldest first; the final entry is "Run latest test". */
 export const PLANET_SCENE_TEST_HISTORY: readonly TestSuite<PlanetSceneTestSettings>[] = [PLANET_SCENE_V1, PLANET_SCENE_V2, PLANET_SCENE_V3, PLANET_SCENE_V4, PLANET_SCENE_V5];

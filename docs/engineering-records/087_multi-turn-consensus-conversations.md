@@ -91,6 +91,72 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 
 **[decision]** The illustrative question replay opens from a direct sample URL with the first questions already visible; selecting a file is optional for other transcripts.
 
+### 2026-11-14 — Discussion value and delivery priorities
+
+**[decision]** The primary goal is useful multi-model, multi-provider discussion that reveals blind spots, tests assumptions and preserves meaningful disagreement. Evaluate the discussion and its actionable outcome before investing further in visual polish or voting mechanics.
+
+**[decision]** For future reviews, the owner prefers agents to generate and present a video using the share-media-in-chat skill standards. Replay and visuals support the discussion and are secondary; interactive replay is optional, not the expected delivery path. Automated video delivery for arbitrary conversations remains to be established.
+
+### 2026-11-14 — Four-provider self-review spike
+
+**[verification]** A bounded manual bridge ran independent openings and one continued turn each in separate Luna, Haiku, DeepSeek V4.1 Flash and Hydrogen Low CLI sessions, with eight calls maximum and 90 seconds per call. Each later turn saw the other openings and preceding follow-ups, not future replies. No repository inspection was requested. This used a local spike rather than the production coordinator or structured question/agreement protocol; its transcript is `artifacts/consensus-conversation/self-review-results.json`.
+
+**[finding]** Luna and Haiku challenged DeepSeek's proposed two-of-twelve success threshold; DeepSeek withdrew it. Hydrogen challenged the use of planted errors in half the test questions as insufficient for measuring organic blind spots. These are observable interactions, but this one discussion has no independent-answer-plus-summary control and does not establish an improvement in correctness. The participants proposed a blinded, budget-matched comparison on checkable questions, counting errors caught and introduced and preserving dissent. The appropriate question set and planted-error proportion remain open.
+
+**[verification]** Providers reported approximately 64,910 Luna, 8,398 Haiku, 25,221 DeepSeek and 31,291 Hydrogen input tokens across turns (129,820 total, including cached input where reported). Provider counters and reasoning token treatment differ; costs and subscription usage are not fully known. This spike did not produce a video.
+
+### 2026-11-14 — DeepSeek and Hydrogen coordinator adapters
+
+**[decision]** Integrate OpenCode DeepSeek V4.1 Flash and Antigravity Hydrogen Low into the bounded coordinator. Both resume individual CLI sessions, retain read/search tools, capture available tool events and usage, and apply per-run restrictions to writes and commands. Deny rules and plan mode do not isolate hooks or other processes, and repository paths are not a confidentiality boundary.
+
+**[verification]** In a scratch directory both providers read a test file. Hydrogen attempted `write_file` and received an explicit deny; DeepSeek reported no edit tool available and did not attempt a write. Both files remained unchanged. This probes one route rather than proving complete write prevention. Fourteen coordinator tests and the library build passed.
+
+**[finding]** The first real four-provider coordinator run stopped after six accepted turns when DeepSeek supplied an invalid question response; the coordinator preserved prior turns and counted the rejected call's usage. Prompts now specify which questions may be resolved, and subsequent invalid replies are stored as rejected turns for diagnosis. A subsequent two-provider run with DeepSeek and Hydrogen completed four turns, each resuming its own session; reported input was 50,659 tokens including cached input. A complete four-provider run still requires verification.
+
+**[finding]** The next four-provider run exposed a parser bug: fenced JSON followed by a newline was rejected. A regression test covers the fix. The final four-provider run completed eight turns across two rounds with reported input of 138,348 tokens. Each adapter checked that continuation used the original session. Full transcripts are local under `artifacts/consensus-conversation/`.
+
+**[verification]** Across both scratch-file probes, the completed two-provider run, two failed four-provider attempts and the completed four-provider run, providers reported 402,630 input tokens including cached input; failed or timed-out usage may be missing, and costs remain partial. Fifteen coordinator tests passed after the fixes. These checks demonstrate continuation and protocol behavior, not the quality or value of the models' advice.
+
+### 2026-11-14 — Designing a JSDoc experiment
+
+**[finding]** A four-model discussion considered no comments, ad hoc comments, a purpose/value and update policy, and stale or misleading comments. Follow-ups favored a small first comparison using the same real code, tasks and tests with no JSDoc versus purpose/why comments; independently authored historical rationale and blinded review would reduce bias. Measure task correctness, time, token usage and recovery of non-obvious rationale. Stale comments should be tested explicitly: most suggested a separate stress run, while DeepSeek favored folding the risk into the assessment if budget permits. This is an experiment proposal, not a verified policy or evidence that JSDoc helps.
+
+**[verification]** The coordinator stopped after two accepted openings when DeepSeek returned malformed JSON; its original rejected answer was retained. A local recovery corrected one misplaced JSON escape and used five further calls, giving eight calls total and 116,263 reported input tokens including cached input. Hydrogen's follow-up resumed its session; the other three used fresh sessions supplied with their own and their peers' openings, so this was not an uninterrupted native coordinator run. The local records are `artifacts/consensus-conversation/jsdoc-experiment.json` and `artifacts/consensus-conversation/jsdoc-experiment-recovered.json`. Per-model billing and total costs remain unavailable.
+
+### 2026-11-14 — Future one-time guest input
+
+**[decision]** Park an optional guest role until the core discussion is reliable. A guest is a role independent of model tier: one or more configurable models can each receive the question, relevant evidence and conversation context and contribute once, without repository tools or further back-and-forth. Main participants may consider the input in their normal remaining turns. Configure separate guest usage limits; identify missing evidence and avoid presenting unverified claims as repository facts. Relative model tiers and availability depend on the chosen conversation and provider, not a fixed hierarchy. Do not test expensive guests yet.
+
+### 2026-11-14 — Bounded response correction
+
+**[action]** Save invalid participant replies and request one correction in the same provider session. Corrections share the existing call, elapsed-time and reported token limits; rejected replies remain separate from accepted model turns. An exhausted limit stops the run, and a second invalid reply fails with the partial discussion preserved.
+
+**[verification]** Coordinator tests exercise session reuse, rejected-output persistence, usage accounting and call/token limits with simulated providers; real CLI correction is not yet verified.
+
+### 2026-11-14 — Response quality visibility
+
+**[action]** Added a minimal response-format example and a per-model response-quality summary to saved runs and the CLI. Rejected replies, correction calls and corrected turns are counted separately, including when a limit prevents a retry. Original invalid responses and validation errors remain available for prompt review.
+
+**[verification]** Coordinator tests cover example validity, correction accounting, repeated failures and limits using simulated providers. The example's effect on live model reliability has not been measured.
+
+### 2026-11-14 — CLI schema output experiment
+
+**[action]** Added opt-in participant response schemas for Codex, Claude and Antigravity, retaining semantic validation and bounded corrections. OpenCode's run CLI has no schema flag; its existing prompt-based output remains unchanged. Facilitator output is unchanged. Provider-internal schema retries are not visible in coordinator correction counts.
+
+**[verification]** One bounded live run completed two turns each for Luna, Haiku and Hydrogen using resumed sessions with no coordinator rejections. It reported 118,755 input and 2,182 output tokens; the 100,000 input threshold was exceeded by the last in-flight call. The mixed cost is incomplete. One run does not measure reliability improvement; OpenCode schema output was not tested. Coordinator tests and the library build passed.
+
+### 2026-11-15 — CLI session compaction spike
+
+**[verification]** A small live session per provider tested compaction followed by a same-session recall question. Codex app-server `thread/compact/start` emitted a completed `contextCompaction` item; Claude `-p /compact` emitted `compact_result: success` and a manual `compact_boundary`; OpenCode 1.19.5's local `POST /session/{id}/summarize` returned success and its session export contained a compaction marker and generated summary. Antigravity `-p /compact` with slash expansion enabled reported the expanded system command and a completed checkpoint; this is indirect evidence of applied compaction, not an inspected summary. All four then recalled the two seeded facts. The OpenCode `run --command compact` attempt timed out and is not verified. These are short-session checks, not evidence of faithful preservation of a research discussion.
+
+**[finding]** The coordinator does not yet invoke or account for compaction. In particular, Claude's compaction result had zero top-level usage while its per-model usage recorded compaction tokens and cost; usage limits need provider-specific treatment. Antigravity currently disables slash expansion in coordinator turns, so a dedicated compaction path would be needed. Local spike output is under `artifacts/consensus-conversation/` and can contain session details.
+
+### 2026-11-15 — Native Claude compaction setting and visibility
+
+**[action]** Added optional `claudeAutoCompactWindowTokens` for Claude's native `--autocompact` window setting on every participant invocation. A completed `compact_boundary` from that session is saved in the transcript, including its trigger and reported before/after sizes; a start status is not treated as success. The shared transcript remains intact. Other providers' context-size reporting and coordinator control remain unverified and were not inferred from aggregate input usage.
+
+**[verification]** Coordinator tests cover event parsing, session matching, recording across a rejected reply, option propagation and configuration limits. A short live Haiku invocation accepted the setting but was too small to trigger automatic compaction. The earlier manual-compaction spike verified Claude's real boundary event; automatic triggering through the coordinator and compaction usage accounting remain unverified.
+
 ## Scope history
 
 <!-- tri:scope-history -->

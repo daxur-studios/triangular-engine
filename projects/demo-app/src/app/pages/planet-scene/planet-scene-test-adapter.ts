@@ -1,6 +1,7 @@
 import type { GpuPassKind, IFrameSampleSummary } from 'triangular-engine';
 import { modeActionMs, type TestCheck, type TestContext, type TestMetric, type TestObservation, type TestRecordingCapture, type TestRunAdapter, type TestScenario, type TestSetting } from 'triangular-engine/testing';
 import { CAP_SLACK } from 'triangular-engine/lod-surface/core';
+import { PLANET_RADIUS_M } from './planet-camera';
 import type { PlanetSceneTestSettings } from './planet-scene-tests';
 
 /** What the terrain and renderer did on the last frame. */
@@ -89,6 +90,22 @@ export function settingsMismatches(actual: PlanetSceneTestSettings, expected: Pl
   // Omitted clouds mean on and omitted water means off (v1 to v4 had the shell always on and no water).
   if ((actual.clouds ?? true) !== (expected.clouds ?? true)) out.push(`clouds: expected ${expected.clouds ?? true}, found ${actual.clouds ?? true}`);
   if ((actual.water ?? false) !== (expected.water ?? false)) out.push(`water: expected ${expected.water ?? false}, found ${actual.water ?? false}`);
+  // Visual v4's attribution switches; omitted means on.
+  for (const key of ['sky', 'haze', 'shellFade'] as const) {
+    if ((actual[key] ?? true) !== (expected[key] ?? true)) out.push(`${key}: expected ${expected[key] ?? true}, found ${actual[key] ?? true}`);
+  }
+  // Visual v5's camera-on-the-bend and reference cubes; omitted means off.
+  for (const key of ['followBend', 'references'] as const) {
+    if ((actual[key] ?? false) !== (expected[key] ?? false)) out.push(`${key}: expected ${expected[key] ?? false}, found ${actual[key] ?? false}`);
+  }
+  // The selector's own culling; omitted means on.
+  if ((actual.terrainCull ?? true) !== (expected.terrainCull ?? true)) {
+    out.push(`terrainCull: expected ${expected.terrainCull ?? true}, found ${actual.terrainCull ?? true}`);
+  }
+  // The ground-only ladder's world size; omitted means the page default.
+  if ((actual.radiusM ?? PLANET_RADIUS_M) !== (expected.radiusM ?? PLANET_RADIUS_M)) {
+    out.push(`radiusM: expected ${expected.radiusM ?? PLANET_RADIUS_M}, found ${actual.radiusM ?? PLANET_RADIUS_M}`);
+  }
   return out;
 }
 

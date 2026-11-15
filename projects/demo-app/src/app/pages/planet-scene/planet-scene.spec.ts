@@ -2,10 +2,10 @@ import { buildTestBatchLaunchUrl, buildTestLaunchUrl, parseTestLaunch, validateT
 import {
   COAST_ALTITUDE_M, EYE_ALTITUDE_M, GROUND_PITCH_RAD, MID_ALTITUDE_M, ORBIT_ALTITUDE_M, ORBIT_PITCH_RAD, PLANET_RADIUS_M,
   descentView, morphSweepValue, motionMorph, motionView, morphSweepView, nearPlaneFor, planetPoseView, resolvePlanetCamera,
-  sceneSunDirection, yawView,
+  REFERENCE_CUBES, referenceCubeGround, referenceCubeLift, sceneSunDirection, yawView, EARTH_RADIUS_M, EARTH_SCALE_TIERS, referenceCubesFor,
 } from './planet-camera';
 import { createPlanetSceneTestAdapter, settingsMismatches, type PlanetSceneTestHost } from './planet-scene-test-adapter';
-import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_SCENE_RUNNER_SUITES, PLANET_SCENE_TEST_HISTORY, PLANET_SCENE_VISUAL_V1, type PlanetSceneTestSettings } from './planet-scene-tests';
+import { DEFAULT_PLANET_SCENE_SETTINGS, PLANET_GROUND_CULL_AB, PLANET_GROUND_EARTH_SUITES, PLANET_SCENE_RUNNER_SUITES, PLANET_SCENE_TEST_HISTORY, PLANET_SCENE_VISUAL_V1, PLANET_SCENE_VISUAL_V5, type PlanetSceneTestSettings } from './planet-scene-tests';
 
 /** The final entry of the history: the version the runner selects. */
 /** v3, the suite most of these specs describe; v4 has its own specs below. */
@@ -68,6 +68,27 @@ describe('planet-scene visual suite', () => {
     expect(PLANET_SCENE_VISUAL_V1.scenarios.map((scenario) => scenario.id)).toEqual(['descent-full-stack', 'morph-sweep-full-stack']);
     expect(PLANET_SCENE_VISUAL_V1.scenarios.every((scenario) => scenario.settings.motion !== undefined && !scenario.budgets)).toBeTrue();
     expect(PLANET_SCENE_RUNNER_SUITES.at(-1)).toBe(PLANET_SCENE_TEST_HISTORY[4]);
+  });
+
+  it('v5 sweeps the morph at each pose with the cubes in and the camera on the bend, and the older cases have neither', () => {
+    const sweeps = PLANET_SCENE_VISUAL_V5.scenarios.filter((scenario) => scenario.settings.motion === 'morphSweep');
+    expect(sweeps.map((scenario) => scenario.settings.pose)).toEqual(['orbit', 'mid-20km', 'ground']);
+    expect(PLANET_SCENE_VISUAL_V5.scenarios.every((scenario) => scenario.settings.followBend && scenario.settings.references)).toBeTrue();
+    expect(PLANET_SCENE_VISUAL_V1.scenarios.some((scenario) => scenario.settings.followBend || scenario.settings.references)).toBeFalse();
+    expect(settingsMismatches({ ...DEFAULT_PLANET_SCENE_SETTINGS, followBend: false }, DEFAULT_PLANET_SCENE_SETTINGS)).toEqual([]);
+    expect(settingsMismatches({ ...DEFAULT_PLANET_SCENE_SETTINGS, references: true }, DEFAULT_PLANET_SCENE_SETTINGS)).toEqual([
+      'references: expected false, found true',
+    ]);
+  });
+
+  it('sizes the reference cubes a factor of about 30 apart and lifts each to sit on the curved ground', () => {
+    const sizes = REFERENCE_CUBES.map((cube) => cube.sizeM);
+    expect(sizes).toEqual([100, 3000, 100_000]);
+    for (const cube of REFERENCE_CUBES) {
+      expect(Math.hypot(...referenceCubeGround(cube))).toBeCloseTo(1, 12);
+      expect(referenceCubeLift(cube, PLANET_RADIUS_M)).toBeLessThan(cube.sizeM / 2);
+    }
+    expect(motionView('morphSweep', 0.5, 'ground')).toEqual(planetPoseView('ground'));
   });
 });
 
@@ -568,5 +589,98 @@ describe('Plan 059 G5 planet-scene adapter', () => {
     await createPlanetSceneTestAdapter(made.host).restore!(snapshot, made.context);
     expect(cleared).toEqual([undefined]);
     expect(made.applied).toEqual([snapshot]);
+  });
+});
+
+describe('ground-only ladder, step 1 (world sizes)', () => {
+  it('has one suite per Earth tier: ground only, 9 cases, radius = tier x Earth', () => {
+    expect(PLANET_GROUND_EARTH_SUITES.map((suite) => suite.id)).toEqual([
+      'planet-ground-earth-0-001x', 'planet-ground-earth-0-01x', 'planet-ground-earth-0-1x', 'planet-ground-earth-1x',
+    ]);
+    expect(() => validateTestHistory(PLANET_SCENE_RUNNER_SUITES)).not.toThrow();
+    PLANET_GROUND_EARTH_SUITES.forEach((suite, i) => {
+      expect(suite.version).toBe(1);
+      expect(suite.purpose).toBe('functional');
+      expect(suite.requiresVisualReview).toBeTrue();
+      expect(PLANET_SCENE_RUNNER_SUITES).toContain(suite);
+      expect(suite.scenarios.length).toBe(9);
+      const sweeps = suite.scenarios.filter((scenario) => scenario.settings.motion === 'morphSweep');
+      expect(sweeps.map((scenario) => scenario.settings.pose)).toEqual(['orbit', 'mid-20km', 'ground']);
+      const stills = suite.scenarios.filter((scenario) => !scenario.settings.motion);
+      expect(stills.map((scenario) => `${scenario.settings.pose}@${scenario.settings.morph}`)).toEqual([
+        'orbit@0', 'orbit@0.5', 'orbit@1', 'ground@0', 'ground@0.5', 'ground@1',
+      ]);
+      for (const scenario of suite.scenarios) {
+        const settings = scenario.settings;
+        expect(settings.radiusM).toBeCloseTo(EARTH_SCALE_TIERS[i] * EARTH_RADIUS_M, 6);
+        expect(settings.terrain).toBeTrue();
+        expect(settings.atmosphere).toBeFalse();
+        expect(settings.water).toBeFalse();
+        expect(settings.clouds).toBeFalse();
+        expect(settings.sky).toBeFalse();
+        expect(settings.haze).toBeFalse();
+        expect(settings.shellFade).toBeFalse();
+        expect(settings.followBend).toBeTrue();
+        expect(settings.references).toBeTrue();
+        expect(settings.plainMaterial ?? false).toBeFalse();
+      }
+    });
+  });
+
+  it('shows only the reference cubes that fit the world', () => {
+    const sizes = (tier: number) => referenceCubesFor(tier * EARTH_RADIUS_M).map((cube) => cube.sizeM);
+    expect(sizes(0.001)).toEqual([100]);
+    expect(sizes(0.01)).toEqual([100, 3000]);
+    expect(sizes(0.1)).toEqual([100, 3000, 100_000]);
+    expect(sizes(1)).toEqual([100, 3000, 100_000]);
+  });
+
+  it('puts the orbit altitude at two radii, whatever the radius', () => {
+    for (const radius of [6371, 63_710, PLANET_RADIUS_M, EARTH_RADIUS_M]) {
+      expect(planetPoseView('orbit', radius).altitudeM).toBe(2 * radius);
+      expect(motionView('morphSweep', 0.3, 'orbit', radius).altitudeM).toBe(2 * radius);
+      expect(descentView(0, radius).altitudeM).toBe(2 * radius);
+      expect(descentView(1, radius).altitudeM).toBeCloseTo(EYE_ALTITUDE_M, 9);
+    }
+    expect(planetPoseView('orbit')).toEqual(planetPoseView('orbit', PLANET_RADIUS_M));
+    expect(planetPoseView('ground', 6371).altitudeM).toBe(EYE_ALTITUDE_M);
+    expect(planetPoseView('mid-20km', 6371).altitudeM).toBe(MID_ALTITUDE_M);
+  });
+
+  it('flags a radius mismatch and treats an omitted radius as the 600 km default', () => {
+    const big = { ...DEFAULT_PLANET_SCENE_SETTINGS, radiusM: 6371 };
+    expect(settingsMismatches(DEFAULT_PLANET_SCENE_SETTINGS, big)).toEqual([`radiusM: expected 6371, found ${PLANET_RADIUS_M}`]);
+    expect(settingsMismatches(big, DEFAULT_PLANET_SCENE_SETTINGS)).toEqual([`radiusM: expected ${PLANET_RADIUS_M}, found 6371`]);
+    expect(settingsMismatches({ ...DEFAULT_PLANET_SCENE_SETTINGS, radiusM: PLANET_RADIUS_M }, DEFAULT_PLANET_SCENE_SETTINGS)).toEqual([]);
+    expect(settingsMismatches(big, { ...DEFAULT_PLANET_SCENE_SETTINGS, radiusM: 6371 })).toEqual([]);
+  });
+});
+
+describe('ground cull A/B', () => {
+  it('is four ground-only morph sweeps at 0.1x, cull on and off', () => {
+    const suite = PLANET_GROUND_CULL_AB;
+    expect(suite.id).toBe('planet-ground-cull-ab');
+    expect(suite.version).toBe(1);
+    expect(suite.purpose).toBe('functional');
+    expect(suite.requiresVisualReview).toBeTrue();
+    expect(PLANET_SCENE_RUNNER_SUITES).toContain(suite);
+    expect(PLANET_SCENE_RUNNER_SUITES.indexOf(suite)).toBeGreaterThan(PLANET_SCENE_RUNNER_SUITES.indexOf(PLANET_GROUND_EARTH_SUITES[3]));
+    expect(suite.scenarios.map((s) => s.id)).toEqual([
+      'sweep-mid-20km-cull-on', 'sweep-mid-20km-cull-off', 'sweep-ground-cull-on', 'sweep-ground-cull-off',
+    ]);
+    for (const scenario of suite.scenarios) {
+      expect(scenario.settings.motion).toBe('morphSweep');
+      expect(scenario.settings.radiusM).toBeCloseTo(0.1 * EARTH_RADIUS_M, 6);
+      expect(scenario.settings.atmosphere).toBeFalse();
+      expect(scenario.settings.references).toBeTrue();
+      expect(scenario.settings.terrainCull).toBe(scenario.id.endsWith('off') ? false : undefined);
+    }
+  });
+
+  it('compares terrainCull with omitted meaning on', () => {
+    const off = { ...DEFAULT_PLANET_SCENE_SETTINGS, terrainCull: false };
+    expect(settingsMismatches(DEFAULT_PLANET_SCENE_SETTINGS, off)).toEqual(['terrainCull: expected false, found true']);
+    expect(settingsMismatches(off, DEFAULT_PLANET_SCENE_SETTINGS)).toEqual(['terrainCull: expected true, found false']);
+    expect(settingsMismatches({ ...DEFAULT_PLANET_SCENE_SETTINGS, terrainCull: true }, DEFAULT_PLANET_SCENE_SETTINGS)).toEqual([]);
   });
 });

@@ -3,9 +3,67 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { parseClaudeStream, parseCodexStream, resolveRepositories, runConversation as run, sourceContext } from './coordinator.mjs';
+import { parseReply, parseClaudeStream, parseCodexStream, parseDeepseekStream, parseHydrogenStream, replySchema, resolveRepositories, runConversation as run, sourceContext } from './coordinator.mjs';
 
 const runConversation = (config, options) => run({ synthesize: false, identityMode: 'names', ...config }, options);
+
+test('Claude compaction boundaries are recorded without mistaking other sessions or status for completed compaction', () => {
+  const events = [
+    { type: 'system', subtype: 'status', status: 'compacting', session_id: 's' },
+    { type: 'system', subtype: 'init', tools: [], mcp_servers: [] },
+    { type: 'system', subtype: 'compact_boundary', session_id: 'other', compact_metadata: { trigger: 'auto' } },
+    { type: 'system', subtype: 'compact_boundary', session_id: 's', compact_metadata: { trigger: 'auto', pre_tokens: 100000, post_tokens: 12000 } },
+    { type: 'result', session_id: 's', result: 'answer', usage: {} },
+  ];
+  assert.deepEqual(parseClaudeStream(events.map(JSON.stringify).join('\n')).compactions, [{ trigger: 'auto', beforeTokens: 100000, afterTokens: 12000 }]);
+});
+
+test('native Claude compaction settings and events survive rejected replies and resume', async () => {
+  const requests = [];
+  const result = await runConversation({ question: '?', participants: ['a', 'b'], rounds: 1, claudeAutoCompactWindowTokens: 100000 }, {
+    turn: async request => {
+      requests.push(request);
+      const first = requests.length === 1;
+      return { session: request.participant, text: first ? 'bad' : JSON.stringify({ action: 'speak', speech: 'view', readiness: 'ready', agreement: {}, questions: [], responses: [] }), compactions: first ? [{ trigger: 'auto', beforeTokens: 100000, afterTokens: 10000 }] : [], usage: {} };
+    }
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(requests[1].session, 'a');
+  assert.ok(requests.every(request => request.claudeAutoCompactWindowTokens === 100000));
+  assert.deepEqual(result.compactions, [{ participant: 'a', model: 'claude-haiku-5-5', round: 1, trigger: 'auto', beforeTokens: 100000, afterTokens: 10000 }]);
+  await assert.rejects(() => runConversation({ question: '?', participants: ['a', 'b'], claudeAutoCompactWindowTokens: 1000 }), /100000 to 1000000/);
+});
+
+test('schema output accepts unknown scores and passes per-participant schemas only to supported CLIs', async () => {
+  const calls = [];
+  const result = await runConversation({ question: '?', participants: [{ name: 'a', model: 'gpt-6-luna' }, { name: 'b', model: 'opencode-go/deepseek-v4.1-flash' }], schemaOutput: true, rounds: 1 }, {
+    turn: async request => {
+      calls.push(request);
+      return { session: request.participant, text: JSON.stringify({ action: 'speak', speech: 'view', readiness: 'ready', agreement: request.schema ? { b: null } : {}, questions: [], responses: [] }), usage: {} };
+    }
+  });
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.turns[0].agreement, {});
+  assert.deepEqual(calls[0].schema, replySchema('a', ['a', 'b']));
+  assert.equal(calls[1].schema, undefined);
+  assert.match(calls[0].prompt, /all agreement scores MUST be null/);
+});
+
+test('structured provider envelopes preserve returned speech and require structured output', () => {
+  const payload = { action: 'speak', speech: 'real words', readiness: 'ready', agreement: {}, questions: [], responses: [] };
+  const encode = rows => rows.map(row => JSON.stringify(row)).join('\n');
+  const claude = [{ type: 'system', subtype: 'init', tools: ['StructuredOutput'] }, { type: 'result', session_id: 's', result: '', structured_output: payload }];
+  assert.equal(JSON.parse(parseClaudeStream(encode(claude), true).text).speech, 'real words');
+  delete claude[1].structured_output;
+  assert.throws(() => parseClaudeStream(encode(claude), true), /missing structured output/);
+  const agy = [{ event: 'init' }, { event: 'result', result: { status: 'SUCCESS', conversation_id: 's', structured_output: payload } }];
+  assert.equal(JSON.parse(parseHydrogenStream(encode(agy), true).text).speech, 'real words');
+});
+
+test('accepts fenced JSON with trailing whitespace', () => {
+  const payload = { action: 'speak', speech: 'A view', readiness: 'ready', agreement: {}, questions: [], responses: [] };
+  assert.equal(parseReply(`\`\`\`json\n${JSON.stringify(payload)}\n\`\`\`\n`, 'a', ['a', 'b']).speech, 'A view');
+});
 
 test('independent opening, resumed sessions, previous round, and reported cumulative costs', async () => {
   const calls = [], snapshots = [];
@@ -47,7 +105,67 @@ test('call and token limits stop future calls; malformed output saves failure', 
   const limited = await runConversation({ question: '?', participants: ['a', 'b'], maxInputTokens: 50 }, { turn });
   assert.equal(limited.status, 'limit_reached'); assert.equal(calls, 1);
   const malformed = await runConversation({ question: '?', participants: ['a', 'b'] }, { turn: async () => ({ session: 'x', text: 'bad', usage: { inputTokens: 42 } }) });
-  assert.equal(malformed.status, 'failed'); assert.equal(malformed.usage.inputTokens, 42);
+  assert.equal(malformed.status, 'failed'); assert.equal(malformed.usage.inputTokens, 84);
+});
+
+test('malformed replies get one same-session correction, preserving rejected output and accounting for calls', async () => {
+  const calls = [], snapshots = [];
+  const result = await runConversation({ question: '?', participants: ['a', 'b'], rounds: 1 }, {
+    turn: async request => {
+      calls.push(request);
+      return { session: request.participant, text: calls.length === 1 ? '{bad' : JSON.stringify({ action: 'speak', speech: `Words from ${request.participant}`, readiness: 'ready', agreement: {}, questions: [], responses: [] }), usage: { inputTokens: 10, outputTokens: 2 } };
+    },
+    save: async state => snapshots.push(JSON.parse(JSON.stringify(state)))
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(calls.length, 3);
+  assert.equal(calls[1].session, 'a');
+  assert.match(calls[1].prompt, /preserving your intended speech/);
+  assert.equal(result.rejectedTurns[0].text, '{bad');
+  assert.ok(snapshots.some(state => state.rejectedTurns?.length && state.turns.length === 0));
+  assert.deepEqual(result.turns.map(t => t.speech), ['Words from a', 'Words from b']);
+  assert.equal(result.usage.inputTokens, 30);
+  assert.equal(result.usageByParticipant.a.inputTokens, 20);
+  assert.deepEqual(result.responseQuality, { rejectedReplies: 1, correctionCalls: 1, correctedTurns: 1, byModel: { 'claude-haiku-5-5': { rejectedReplies: 1, correctionCalls: 1, correctedTurns: 1 } } });
+  const example = calls[0].prompt.split('Example format only; replace the example speech with your own answer: ')[1];
+  assert.equal(parseReply(example, 'a', ['a', 'b'], [], true).speech, 'Your concise response.');
+});
+
+test('a correction cannot exceed call or token limits', async () => {
+  for (const limit of [{ maxTotalCalls: 1 }, { maxInputTokens: 10 }]) {
+    let calls = 0;
+    const result = await runConversation({ question: '?', participants: ['a', 'b'], ...limit }, {
+      turn: async () => { calls++; return { session: 'a', text: '{bad', usage: { inputTokens: 10 } }; }
+    });
+    assert.equal(result.status, 'limit_reached');
+    assert.equal(calls, 1);
+    assert.equal(result.rejectedTurns.length, 1);
+    assert.equal(result.turns.length, 0);
+    assert.equal(result.responseQuality.rejectedReplies, 1);
+    assert.equal(result.responseQuality.correctionCalls, 0);
+    assert.equal(result.responseQuality.correctedTurns, 0);
+  }
+});
+
+test('response quality counts repeated failures without claiming a successful correction', async () => {
+  const result = await runConversation({ question: '?', participants: ['a', 'b'], rounds: 1 }, {
+    turn: async () => ({ session: 'a', text: '{bad', usage: {} })
+  });
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(result.responseQuality, { rejectedReplies: 2, correctionCalls: 1, correctedTurns: 0, byModel: { 'claude-haiku-5-5': { rejectedReplies: 2, correctionCalls: 1, correctedTurns: 0 } } });
+  assert.equal(result.rejectedTurns.length, 2);
+});
+
+test('response quality groups duplicate participants by model', async () => {
+  const counts = new Map();
+  const result = await runConversation({ question: '?', participants: ['a', 'b'], rounds: 1 }, {
+    turn: async request => {
+      const count = (counts.get(request.participant) ?? 0) + 1;
+      counts.set(request.participant, count);
+      return { session: request.participant, text: count === 1 ? 'bad' : JSON.stringify({ action: 'speak', speech: 'view', readiness: 'ready', agreement: {}, questions: [], responses: [] }), usage: {} };
+    }
+  });
+  assert.deepEqual(result.responseQuality.byModel['claude-haiku-5-5'], { rejectedReplies: 2, correctionCalls: 2, correctedTurns: 2 });
 });
 
 test('source selection cannot escape the workspace', async () => {
@@ -103,6 +221,8 @@ test('a participant cannot resolve a question addressed to someone else', async 
   });
   assert.equal(result.status, 'failed');
   assert.match(result.error, /invalid question response/);
+  assert.equal(result.rejectedTurns[0].participant, 'b');
+  assert.match(result.rejectedTurns[0].text, /Q1/);
   assert.deepEqual(result.outcome.unresolvedQuestions, ['Q1']);
 });
 
@@ -135,6 +255,36 @@ test('mixed models have distinct labels, sessions and usage', async () => {
   assert.equal(requests[2].session, 'gpt-6-luna');
   assert.equal(result.usageByParticipant['gpt-6-luna'].inputTokens, 10);
   await assert.rejects(run({ question: '?', participants: [{ name: 'a', model: 'gpt-6-luna' }, 'b'], repositories: [] }), /requires a repository/);
+});
+
+test('new provider streams preserve sessions, usage, and reject failures', () => {
+  const deepseek = [
+    { type: 'text', sessionID: 'deep', part: { text: '{}' } },
+    { type: 'step_finish', sessionID: 'deep', part: { tokens: { input: 10, output: 2, reasoning: 3, cache: { read: 5, write: 1 } } } },
+  ].map(JSON.stringify).join('\n');
+  assert.deepEqual(parseDeepseekStream(deepseek).usage, { inputTokens: 16, cachedInputTokens: 5, outputTokens: 5, reportedCostUsd: null });
+  assert.equal(parseDeepseekStream(deepseek).session, 'deep');
+  assert.throws(() => parseDeepseekStream('{"type":"error"}'), /error or missing session/);
+  const hydrogen = [
+    { event: 'init', conversation_id: 'hydrogen', init: {} },
+    { event: 'result', result: { status: 'SUCCESS', conversation_id: 'hydrogen', response: '{}', usage: { input_tokens: 10, cache_read_tokens: 4, output_tokens: 3 } } },
+  ].map(JSON.stringify).join('\n');
+  assert.equal(parseHydrogenStream(hydrogen).session, 'hydrogen');
+  assert.equal(parseHydrogenStream(hydrogen).usage.inputTokens, 10);
+  assert.throws(() => parseHydrogenStream(hydrogen.replace('SUCCESS', 'ERROR')), /error or missing session/);
+});
+
+test('four providers preserve separate sessions and mark mixed cost as partial', async () => {
+  const models = ['gpt-6-luna', 'claude-haiku-5-5', 'opencode-go/deepseek-v4.1-flash', 'gemini-4-hydrogen-low'];
+  const requests = [];
+  const result = await run({ question: '?', participants: models.map((model, i) => ({ name: `p${i}`, model })), rounds: 2, minRounds: 2, maxTotalCalls: 8, synthesize: false }, {
+    turn: async request => { requests.push(request); return { session: request.session ?? request.model, text: JSON.stringify({ action: 'speak', speech: 'view', readiness: 'ready', agreement: {}, questions: [], responses: [] }), usage: { inputTokens: 5, reportedCostUsd: request.model === 'claude-haiku-5-5' ? 0.01 : null } }; }
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.turns.length, 8);
+  assert.deepEqual(requests.slice(4).map(r => r.session), models);
+  assert.equal(result.usage.inputTokens, 40);
+  assert.equal(result.usage.costIsPartial, true);
 });
 
 test('minimum rounds continue after early readiness and Codex events retain reported usage', async () => {

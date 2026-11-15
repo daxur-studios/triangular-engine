@@ -151,6 +151,11 @@ export class PlanetAtmosphere {
   /** Draw the sky and limb glow behind the planet. */
   sky = true;
   /**
+   * Dissolve the sky shell as the planet unrolls ({@link skyShellFade}). Off keeps the shell at full strength at any morph, for
+   * test stills that must show where the unbent shell sits. Default: on.
+   */
+  shellFade = true;
+  /**
    * Star brightness, 0 (default) for none. The stars are part of the sky: they fade as the sky behind them brightens
    * and show through the air's transmittance, and they go when {@link sky} is off.
    */
@@ -363,7 +368,9 @@ export class PlanetAtmosphere {
     const sun = this.sunDirection;
     binding.setSunBody(sun.x, sun.y, sun.z);
     binding.sync(camera, this.planet, backdrop);
-    const fade = skyShellFade(this.morph, binding.skyAltitude.value as number, this.model.uTopAltitude.value as number);
+    const fade = this.shellFade
+      ? skyShellFade(this.morph, binding.skyAltitude.value as number, this.model.uTopAltitude.value as number)
+      : 0;
     backdrop.opacity.value = 1 - fade;
     const wantSky = on && this.sky && fade < 1;
     backdrop.mesh.visible = wantSky;

@@ -78,6 +78,8 @@ export class PlanetAtmosphereComponent implements OnInit {
   readonly enabled = input(true);
   /** Draw the sky and limb glow behind the planet. */
   readonly sky = input(true);
+  /** Dissolve the sky shell as the planet unrolls (see `PlanetAtmosphere.shellFade`). Off for test stills. */
+  readonly shellFade = input(true);
   /** Star brightness, 0 for none (see `PlanetAtmosphere.stars`). Add moons with `atmosphere().addSkyBody()`. */
   readonly stars = input(0);
   /** Read the surface haze from a froxel table. Read when the component starts. */
@@ -153,6 +155,7 @@ export class PlanetAtmosphereComponent implements OnInit {
     atmosphere.planet = this.planet() ?? this.context?.planetObject?.() ?? this.engine.scene;
     atmosphere.enabled = this.enabled();
     atmosphere.sky = this.sky();
+    atmosphere.shellFade = this.shellFade();
     atmosphere.stars = this.stars();
     atmosphere.exposure = this.exposure();
     const sun = this.sunDirection() ?? this.context?.sunDirection() ?? DEFAULT_SUN;

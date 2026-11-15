@@ -19,13 +19,14 @@ Status: **in progress**. Evidence and decisions: [ER 087](/docs/engineering-reco
 
 ## Intended outcome
 
-Run bounded multi-turn discussions in separate model sessions, save attributed turns and agreement metadata for replay, and provide selected code as read-only context. Prevent uncontrolled calls and edits; report provider-specific usage honestly. The capsule scene and automatic compaction are later work.
+Run useful bounded multi-model, multi-provider discussions that expose blind spots, challenge assumptions and preserve disagreement, with selected code available for read-only investigation. Save attributed turns and actionable outcomes, prevent uncontrolled calls and edits, and report provider-specific usage honestly. Visual replay is secondary; the preferred review experience is a generated video presented using the share-media-in-chat skill standards. Automatic compaction is later work.
 
 ## Phases and acceptance
 
 - **coordinator** — Run and save bounded conversations. Acceptance: independent opening turns, shared later turns, validated metadata, recoverable partial output, per-participant and overall call limits, deadline and reported usage.
 - **providers** — Add provider adapters with verified restrictions. Acceptance: each enabled CLI resumes its own session and cannot make code changes through its model tools.
-- **scene** — Replay saved conversations with visible agreement and readiness. Acceptance: capsules move based on recorded metadata and preserve disagreement.
+- **discussion value** — Test a substantive mixed-provider discussion and assess whether it surfaces useful blind spots, evidence, unresolved disagreement and actionable next steps; retain attributed positions independently of any summary.
+- **scene** — Support discussion review with a generated video presented using the share-media-in-chat skill standards. Replay and capsule movement visualize recorded agreement and readiness, but visual polish and voting are secondary to useful outcomes.
 
 ## Relationships
 
@@ -38,9 +39,10 @@ Run bounded multi-turn discussions in separate model sessions, save attributed t
 | -------- | ------- |
 | coordinator | in_progress |
 | providers | in_progress |
+| discussion value | planned |
 | scene | in_progress |
 
-<!-- tri:review version="1" scope-hash="66bb896e1f302525eb7e453af37d09b3d88f6c4204660e4b67ea62e222c459ba" reviewed="2026-11-14" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="1b1b46586f523e7c430688406072a32b57d086d1f278c3fbb0c6eae9957c779a" reviewed="2026-11-14" reviewer="agent" -->
 <!-- tri:item id="Q1" kind="investigation" applies-to="providers" blocks="providers" state="open" -->
 
 - [ ] Establish enforceable read-only restrictions for each provider CLI.
