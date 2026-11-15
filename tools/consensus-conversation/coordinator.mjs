@@ -9,6 +9,8 @@ const MODEL = 'claude-haiku-5-5';
 const CODEX_MODEL = 'gpt-6-luna';
 const DEEPSEEK_MODEL = 'opencode-go/deepseek-v4.1-flash';
 const HYDROGEN_MODEL = 'gemini-4-hydrogen-low';
+const HYDROGEN_HIGH_MODEL = 'gemini-4-hydrogen-high';
+const HYDROGEN_MEDIUM_MODEL = 'gemini-4-hydrogen-medium';
 const MAX_SOURCE_BYTES = 20_000;
 const MAX_PROMPT_BYTES = 80_000;
 const MAX_OUTPUT_BYTES = 1_000_000;
@@ -21,7 +23,7 @@ export function validate(config) {
   const names = config.participants.map(p => typeof p === 'string' ? p : p?.name);
   if (names.some(p => typeof p !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/.test(p)) || new Set(names).size !== names.length)
     throw new Error('participant names must be unique simple identifiers');
-  if (config.participants.some(p => typeof p !== 'string' && (!p || ![MODEL, CODEX_MODEL, DEEPSEEK_MODEL, HYDROGEN_MODEL].includes(p.model)))) throw new Error('unsupported participant model');
+  if (config.participants.some(p => typeof p !== 'string' && (!p || ![MODEL, CODEX_MODEL, DEEPSEEK_MODEL, HYDROGEN_MODEL, HYDROGEN_MEDIUM_MODEL, HYDROGEN_HIGH_MODEL].includes(p.model)))) throw new Error('unsupported participant model');
   if (config.repositories?.length === 0 && config.participants.some(p => p?.model === CODEX_MODEL)) throw new Error('Codex requires a repository in this prototype');
   for (const [key, max, fallback] of [['rounds', 4, 2], ['secondsPerTurn', 120, 45], ['maxTotalCalls', 24, 8]]) {
     const value = config[key] ?? fallback;
@@ -39,6 +41,8 @@ export function validate(config) {
   if (config.synthesize != null && typeof config.synthesize !== 'boolean') throw new Error('synthesize must be a boolean');
   if (config.schemaOutput != null && typeof config.schemaOutput !== 'boolean') throw new Error('schemaOutput must be a boolean');
   if (config.observeOpenCodeCompaction != null && typeof config.observeOpenCodeCompaction !== 'boolean') throw new Error('observeOpenCodeCompaction must be a boolean');
+  if (config.effortByModel != null && (typeof config.effortByModel !== 'object' || Array.isArray(config.effortByModel) || Object.entries(config.effortByModel).some(([model, effort]) => ![MODEL, CODEX_MODEL].includes(model) || (effort != null && !['low', 'medium', 'high'].includes(effort))))) throw new Error('invalid effortByModel');
+  if (config.consensusHighEffort != null && typeof config.consensusHighEffort !== 'boolean') throw new Error('consensusHighEffort must be a boolean');
   if (config.observeCodexCompaction != null && typeof config.observeCodexCompaction !== 'boolean') throw new Error('observeCodexCompaction must be a boolean');
   if (config.observeHydrogenCompaction != null && typeof config.observeHydrogenCompaction !== 'boolean') throw new Error('observeHydrogenCompaction must be a boolean');
   if (config.claudeAutoCompactWindowTokens != null && (!Number.isInteger(config.claudeAutoCompactWindowTokens) || config.claudeAutoCompactWindowTokens < 100_000 || config.claudeAutoCompactWindowTokens > 1_000_000))
@@ -139,8 +143,9 @@ export function parseClaudeStream(output, structured = false) {
   return { session: data.session_id, text: structured ? JSON.stringify(data.structured_output) : data.result, toolCalls, compactions, usage: { inputTokens: input, cachedInputTokens: u.cache_read_input_tokens ?? null, outputTokens: u.output_tokens ?? null, reportedCostUsd: data.total_cost_usd ?? null } };
 }
 
-export async function claudeTurn({ prompt, session, timeoutMs, repositories = [], schema, claudeAutoCompactWindowTokens }) {
+export async function claudeTurn({ prompt, session, timeoutMs, repositories = [], schema, claudeAutoCompactWindowTokens, consensusHighEffort = false, effort }) {
   const args = ['-p', prompt, '--model', MODEL, '--restricted', '--tools', repositories.length ? 'Read,Glob,Grep' : '', '--strict-mcp-config', '--output-format', 'stream-json', '--verbose'];
+  if (effort ?? (consensusHighEffort ? 'high' : undefined)) args.push('--effort', effort ?? 'high');
   if (claudeAutoCompactWindowTokens != null) args.push('--autocompact', String(claudeAutoCompactWindowTokens));
   if (schema) args.push('--json-schema', JSON.stringify(schema));
   for (const directory of repositories.slice(1)) args.push('--add-dir', directory);
@@ -211,10 +216,11 @@ export function parseCodexCompactions(result) {
   return result.data.flatMap(turn => turn.status === 'completed' ? turn.items.filter(item => item.type === 'contextCompaction' && typeof item.id === 'string' && Number.isFinite(item.completedAtMs)).map(item => ({ id: item.id, trigger: 'unknown', beforeTokens: null, afterTokens: null })) : []);
 }
 
-export async function codexTurn({ prompt, session, timeoutMs, repositories, schema, observeCodexCompaction = false }) {
+export async function codexTurn({ prompt, session, timeoutMs, repositories, schema, observeCodexCompaction = false, consensusHighEffort = false, effort }) {
   const started = Date.now();
   if (!repositories.length) throw new Error('Codex requires a repository in this prototype');
   const common = ['--json', '-m', CODEX_MODEL, '--skip-git-repo-check'];
+  if (effort ?? (consensusHighEffort ? 'high' : undefined)) common.push('-c', `model_reasoning_effort=${effort ?? 'high'}`);
   const schemaDir = schema ? await mkdtemp(path.join(os.tmpdir(), 'discussion-schema-')) : null;
   if (schemaDir) { const schemaFile = path.join(schemaDir, 'schema.json'); await writeFile(schemaFile, JSON.stringify(schema)); common.push('--output-schema', schemaFile); }
   const args = session
@@ -333,8 +339,8 @@ export function parseHydrogenStream(output, structured = false, observeCompactio
   return parsed;
 }
 
-export async function hydrogenTurn({ prompt, session, timeoutMs, repositories = [], schema, observeHydrogenCompaction = false }) {
-  const args = ['-p', prompt, '--model', HYDROGEN_MODEL, '--sandbox', '--settings', agySettings(repositories.length > 0), '--disable-slash-commands', '--output-format', 'stream-json'];
+export async function hydrogenTurn({ prompt, session, timeoutMs, repositories = [], schema, observeHydrogenCompaction = false, model = HYDROGEN_MODEL }) {
+  const args = ['-p', prompt, '--model', model, '--sandbox', '--settings', agySettings(repositories.length > 0), '--disable-slash-commands', '--output-format', 'stream-json'];
   if (schema) args.push('--json-schema', JSON.stringify(schema));
   for (const directory of repositories.slice(1)) args.push('--add-dir', directory);
   if (session) args.push('--conversation', session);
@@ -348,7 +354,7 @@ export async function hydrogenTurn({ prompt, session, timeoutMs, repositories = 
 async function providerTurn(request) {
   if (request.model === CODEX_MODEL) return codexTurn(request);
   if (request.model === DEEPSEEK_MODEL) return deepseekTurn(request);
-  if (request.model === HYDROGEN_MODEL) return hydrogenTurn(request);
+  if ([HYDROGEN_MODEL, HYDROGEN_MEDIUM_MODEL, HYDROGEN_HIGH_MODEL].includes(request.model)) return hydrogenTurn(request);
   return claudeTurn(request);
 }
 
@@ -362,7 +368,7 @@ export async function runConversation(config, { root = process.cwd(), turn = pro
   config = { ...config, participants: labels };
   const repositories = await resolveRepositories(config, root);
   const source = repositories.length ? await sourceContext(repositories[0], config.sourceFiles) : '';
-  const run = { version: 4, question: config.question, participants: config.participants, identityMode, schemaOutput: config.schemaOutput ?? false, claudeAutoCompactWindowTokens: config.claudeAutoCompactWindowTokens ?? null, observeOpenCodeCompaction: config.observeOpenCodeCompaction ?? false, observeCodexCompaction: config.observeCodexCompaction ?? false, observeHydrogenCompaction: config.observeHydrogenCompaction ?? false, repositories, sourceFiles: config.sourceFiles ?? [], startedAt: new Date(now()).toISOString(), turns: [], compactions: [], compactionObservations: [], questions: [], status: 'running', usage: { inputTokens: 0, outputTokens: 0, reportedCostUsd: null }, usageByParticipant: {}, responseQuality: { rejectedReplies: 0, correctionCalls: 0, correctedTurns: 0, byModel: {} } };
+  const run = { version: 4, question: config.question, participants: config.participants, identityMode, schemaOutput: config.schemaOutput ?? false, consensusHighEffort: config.consensusHighEffort ?? false, effortByModel: config.effortByModel ?? {}, claudeAutoCompactWindowTokens: config.claudeAutoCompactWindowTokens ?? null, observeOpenCodeCompaction: config.observeOpenCodeCompaction ?? false, observeCodexCompaction: config.observeCodexCompaction ?? false, observeHydrogenCompaction: config.observeHydrogenCompaction ?? false, repositories, sourceFiles: config.sourceFiles ?? [], startedAt: new Date(now()).toISOString(), turns: [], compactions: [], compactionObservations: [], questions: [], status: 'running', usage: { inputTokens: 0, outputTokens: 0, reportedCostUsd: null }, usageByParticipant: {}, responseQuality: { rejectedReplies: 0, correctionCalls: 0, correctedTurns: 0, byModel: {} } };
   const sessions = new Map(), costs = new Map(), seenTurns = new Map(), facilitatorCost = Symbol('facilitator');
   const finish = async status => {
     run.status = status;
@@ -389,7 +395,7 @@ export async function runConversation(config, { root = process.cwd(), turn = pro
         run.outcome.synthesis = { status: 'running' };
         await save(run);
         try {
-          const response = await turn({ prompt, participant: null, role: 'facilitator', timeoutMs: Math.min((config.secondsPerTurn ?? 45) * 1000, Math.max(1, maxMs - (now() - start))), repositories: [] });
+          const response = await turn({ prompt, participant: null, role: 'facilitator', effort: config.effortByModel?.[MODEL], consensusHighEffort: config.consensusHighEffort, timeoutMs: Math.min((config.secondsPerTurn ?? 45) * 1000, Math.max(1, maxMs - (now() - start))), repositories: [] });
           run.usage.inputTokens += response.usage?.inputTokens ?? 0;
           run.usage.outputTokens += response.usage?.outputTokens ?? 0;
           run.usageByFacilitator = { model: MODEL, ...response.usage };
@@ -440,7 +446,7 @@ export async function runConversation(config, { root = process.cwd(), turn = pro
             await save(run);
           }
           const remaining = Math.max(1, maxMs - (now() - start));
-          response = await turn({ prompt, session: sessions.get(name), timeoutMs: Math.min((config.secondsPerTurn ?? 45) * 1000, remaining), participant: name, model: models.get(name), round, repositories, schema, claudeAutoCompactWindowTokens: config.claudeAutoCompactWindowTokens, observeOpenCodeCompaction: config.observeOpenCodeCompaction, observeCodexCompaction: config.observeCodexCompaction, observeHydrogenCompaction: config.observeHydrogenCompaction });
+          response = await turn({ prompt, session: sessions.get(name), timeoutMs: Math.min((config.secondsPerTurn ?? 45) * 1000, remaining), participant: name, model: models.get(name), round, repositories, schema, effort: config.effortByModel?.[models.get(name)], consensusHighEffort: config.consensusHighEffort, claudeAutoCompactWindowTokens: config.claudeAutoCompactWindowTokens, observeOpenCodeCompaction: config.observeOpenCodeCompaction, observeCodexCompaction: config.observeCodexCompaction, observeHydrogenCompaction: config.observeHydrogenCompaction });
           sessions.set(name, response.session);
           for (const compact of response.compactions ?? []) {
             if (!compact.id || !run.compactions.some(previous => previous.participant === name && previous.id === compact.id)) run.compactions.push({ participant: name, model: models.get(name), round, ...compact });

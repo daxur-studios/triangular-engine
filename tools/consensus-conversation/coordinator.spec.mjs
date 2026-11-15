@@ -402,3 +402,26 @@ test('invalid facilitator output preserves the discussion and counts its usage',
   assert.equal(result.usage.inputTokens, 11);
   assert.equal(result.turns.length, 2);
 });
+
+test('high-effort configuration reaches participants and facilitator', async () => {
+  const requests = [];
+  const result = await run({ question: '?', participants: [{ name: 'a', model: 'gemini-4-hydrogen-high' }, { name: 'b', model: 'gpt-6-luna' }], rounds: 1, consensusHighEffort: true, synthesize: true }, {
+    turn: async request => { requests.push(request); return { session: request.session ?? request.model ?? 'facilitator', text: JSON.stringify({ action: 'speak', speech: 'view', readiness: 'ready', agreement: {}, questions: [], responses: [] }) }; }
+  });
+  assert.ok(requests.length >= 2);
+  assert.ok(requests.every(request => request.consensusHighEffort === true));
+  assert.equal(result.consensusHighEffort, true);
+  await assert.rejects(run({ question: '?', participants: ['a', 'b'], consensusHighEffort: 'high' }), /boolean/);
+});
+
+
+test('per-model effort overrides reach each participant and facilitator', async () => {
+  const requests = [];
+  const result = await run({ question: '?', participants: [{ name: 'a', model: 'gemini-4-hydrogen-medium' }, { name: 'b', model: 'gpt-6-luna' }], rounds: 1, effortByModel: { 'gpt-6-luna': 'low', 'claude-haiku-5-5': 'medium' }, synthesize: true }, {
+    turn: async request => { requests.push(request); return { session: request.session ?? request.model ?? 'facilitator', text: JSON.stringify({ action: 'speak', speech: 'view', readiness: 'ready', agreement: {}, questions: [], responses: [] }) }; }
+  });
+  assert.equal(requests.find(r => r.model === 'gpt-6-luna').effort, 'low');
+  assert.equal(requests.find(r => r.role === 'facilitator').effort, 'medium');
+  assert.equal(result.effortByModel['gpt-6-luna'], 'low');
+  await assert.rejects(run({ question: '?', participants: ['a', 'b'], effortByModel: { 'gpt-6-luna': 'invalid' } }), /invalid effortByModel/);
+});
