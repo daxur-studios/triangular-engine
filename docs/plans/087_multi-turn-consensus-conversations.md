@@ -55,5 +55,16 @@ Run useful bounded multi-model, multi-provider discussions that expose blind spo
 
 Record dated milestones, evidence and material changes in the linked Engineering Record.
 
+The [coordinator guide](../../tools/consensus-conversation/README.md) is the starting point for future
+agents. Run a bounded substantive discussion and assess its value before calling V2 complete. Preserve
+positions and dissent in the outcome; proposal voting and ranking are deferred. Automated consensus
+document export, cross-provider consultation, persistent per-model/time-window budgets and reliable
+provider-quota checks remain future work. Current run-level limits are not cross-session quotas.
+
+The intended long-term owner of the coordinator and consensus workflow is the agentic environment,
+not this engine workspace. The scene may remain an optional engine-based replay. Assess and migrate
+the prototype into the existing agentic-environment consensus and agent tooling before treating its
+current location as permanent; preserve the working prototype during that transition.
+
 Scope history in the Engineering Record is append-only. Confirm a specific baseline only after
 explicit developer confirmation; document review and checked boxes do not imply confirmation.

@@ -9,6 +9,7 @@
 - `docs/plans/` — current and preserved historical work plans linked to their Engineering Records; [convention](docs/plans-and-runbooks.md).
 - `docs/handover/` — notes for picking up unfinished work from an earlier session; [convention](docs/handover/README.md).
 - `instructions/` — maintainer workflows and historical project notes.
+- `tools/consensus-conversation/README.md` — how to run the experimental multi-provider discussion coordinator, its limits and how to report outcomes.
 - `.daxur/token-map.json` — repository token documentation manifest (see `docs/engineering-records/029_token_map_usage_guide.md`).
 
 ## First steps

@@ -157,6 +157,50 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 
 **[verification]** Coordinator tests cover event parsing, session matching, recording across a rejected reply, option propagation and configuration limits. A short live Haiku invocation accepted the setting but was too small to trigger automatic compaction. The earlier manual-compaction spike verified Claude's real boundary event; automatic triggering through the coordinator and compaction usage accounting remain unverified.
 
+### 2026-11-15 — OpenCode compaction observation
+
+**[action]** Added opt-in local OpenCode session export inspection following DeepSeek replies. A completed same-session summary linked to a compaction marker is recorded once; unavailable inspections are recorded without discarding the reply. This makes no model call, does not itself trigger compaction, and is bounded by the remaining turn time, five seconds and the existing output-size cap. The reported round is the first observation, not necessarily the time of compaction. The export is processed in memory, and the coordinator does not infer context size or compaction usage from it.
+
+**[verification]** Tests cover linked completion, failed or wrong-session summaries, option propagation, unavailable checks and deduplication. A short live DeepSeek reply succeeded with inspection enabled; no compaction occurred in that short turn. The same export command and parser detected the completed manual compaction from the earlier real session. Automatic compaction detection in a live coordinator run, completeness of usage accounting, and equivalent Codex and Antigravity observation remain unverified.
+
+### 2026-11-15 — Codex compaction observation
+
+**[action]** Added opt-in observation of Codex's persisted thread through its local app-server after a reply, without another model call. Only completed compaction items in completed turns are recorded, deduplicated by item ID. Unavailable observations retain the reply. This is bounded by remaining turn time, five seconds, one page of 100 turns and 1 MB of protocol output; incomplete pages are explicitly unavailable. It does not infer a trigger, context size or compaction usage, and the recorded round is first observation. The coordinator does not configure or trigger Codex compaction.
+
+**[verification]** The observer found the completed manual compaction from the prior real Codex session via `thread/turns/list`. A short live Luna turn returned successfully with observation enabled and no compaction. Tests cover completed and failed turns, incomplete pages, setting propagation, deduplication and unavailable observations. Automatic compaction in a live conversation, its accounting, and Antigravity observation remain unverified.
+
+### 2026-11-15 — Antigravity possible compaction signal
+
+**[finding]** The installed Antigravity CLI 1.5.9 ACP session/load replay returned messages from the earlier manually compacted session but did not expose its checkpoint. Its local session database has checkpoint-like entries, but is an undocumented private format; no dependency on it is introduced. A completed checkpoint in a print stream is suggestive based on the manual spike, not proof that compaction occurred or that all compactions will emit it.
+
+**[action]** Added opt-in `observeHydrogenCompaction` to save same-session completed checkpoint step numbers as `signal_observed` in `compactionObservations`, never as confirmed `compactions`. An absent signal is `no_signal`; mismatched session IDs are `unavailable`. This inspects the existing response, makes no additional call and does not trigger compaction. It does not infer token savings or cost.
+
+**[verification]** The parser identified the actual prior manual spike's checkpoint, and a short live Hydrogen reply with observation enabled completed with no signal. Tests cover matching sessions, incomplete checkpoints, repeated events, configuration propagation and separation from confirmed compactions. Automatic compaction detection, checkpoint specificity and complete accounting remain unverified.
+
+### 2026-11-15 — Future consultation and usage controls
+
+**[decision]** Capture the current discussion workflow for future sessions and prioritize a useful, bounded outcome. Proposal voting and ranking are deferred; a facilitator may summarize evidence, positions, uncertainty and dissent without a vote. The existing consensus document CLI can record a review manually; automatic export is not implemented. Do not mark the prototype complete until its value and remaining limitations have been assessed.
+
+**[decision]** Consider an on-demand cross-provider consultation alongside group discussions: a working agent sends a focused question to another provider, receives its actual attributed answer, and decides how to use it. Possible patterns include a stronger lead seeking independent lower-cost critiques, lower-cost research followed by a single stronger review, and the previously noted one-time guest. Roles are contextual, not fixed model hierarchies. These are future ideas, not implemented subagents; preserve independent challenges and visible dissent. No expensive-model testing is authorized by this decision.
+
+**[question]** Investigate shared, persistent provider/model call and reported-token allowances over configurable time windows, including failed attempts and concurrent sessions. A central ledger would cover only activity it observes; other chats may consume the same account quota, usage reports can be missing or cumulative, and one in-flight request can overshoot. Keep model-tier defaults configurable and distinct from provider quota. Check supported provider-reported account windows when available, with timestamps, unknown/stale states and no invented remaining balance. Do not use estimates as a billing guarantee. Current controls apply to a single run and provide no cross-session enforcement.
+
+**[finding]** The locally generated Codex app-server protocol includes `account/rateLimits/read` and nullable rate-limit data, but this has not been integrated or checked against this account. Installed Claude CLI help advertises a print-mode API dollar budget, not a confirmed programmatic subscription-quota read; OpenCode advertises local usage statistics, not a verified subscription balance. Availability and interpretation must be tested separately per provider and account. API spend limits are not interchangeable with subscription quotas.
+
+### 2026-11-15 — Ownership direction
+
+**[decision]** The agentic environment should own the multi-provider conversation and consensus
+workflow across repositories. The engine-based capsule scene is an optional presentation of its
+transcripts. The coordinator remains a prototype in this workspace until a deliberate migration;
+this decision does not mean that migration or integration has already been implemented.
+
+**[finding]** The coordinator imports Node built-ins rather than engine packages, but its current
+working-directory and artifact conventions, documentation, tests and replay scripts need review
+during extraction. An existing agentic-environment consensus command already runs independent first
+rounds; assess that command and its agent catalog before choosing how to integrate multi-turn sessions,
+usage limits and consensus records. Avoid building a competing permanent workflow. Preserve existing
+reviews and transcript compatibility, and verify the migrated workflow before retiring the prototype.
+
 ## Scope history
 
 <!-- tri:scope-history -->

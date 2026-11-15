@@ -3,9 +3,80 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { parseReply, parseClaudeStream, parseCodexStream, parseDeepseekStream, parseHydrogenStream, replySchema, resolveRepositories, runConversation as run, sourceContext } from './coordinator.mjs';
+import { parseReply, parseClaudeStream, parseCodexStream, parseCodexCompactions, parseDeepseekStream, parseOpenCodeCompactions, parseHydrogenStream, replySchema, resolveRepositories, runConversation as run, sourceContext } from './coordinator.mjs';
 
 const runConversation = (config, options) => run({ synthesize: false, identityMode: 'names', ...config }, options);
+
+test('Antigravity checkpoint is a possible signal, never a confirmed compaction', () => {
+  const init = { event: 'init', conversation_id: 's' };
+  const result = { event: 'result', result: { status: 'SUCCESS', conversation_id: 's', response: 'answer' } };
+  const checkpoint = { event: 'step_update', step_update: { conversation_id: 's', step_type: 'checkpoint', state: 'DONE', step_index: 4 } };
+  const parse = events => parseHydrogenStream(events.map(JSON.stringify).join('\n'), false, true);
+  const observed = parse([init, checkpoint, checkpoint, result]);
+  assert.deepEqual(observed.compactionObservation, { status: 'signal_observed', signal: 'completed_checkpoint', checkpointSteps: [4] });
+  assert.equal(observed.compactions, undefined);
+  assert.equal(parse([init, { ...checkpoint, step_update: { ...checkpoint.step_update, state: 'RUNNING' } }, result]).compactionObservation.status, 'no_signal');
+  assert.equal(parse([init, { ...checkpoint, step_update: { ...checkpoint.step_update, conversation_id: 'other' } }, result]).compactionObservation.status, 'no_signal');
+  assert.equal(parse([{ ...init, conversation_id: 'other' }, result]).compactionObservation.status, 'unavailable');
+  assert.equal(parseHydrogenStream([init, checkpoint, result].map(JSON.stringify).join('\n')).compactionObservation, undefined);
+});
+
+test('Antigravity checkpoint observation option and signal are saved', async () => {
+  const result = await runConversation({ question: '?', participants: [{ name: 'a', model: 'gemini-4-hydrogen-low' }, 'b'], rounds: 1, observeHydrogenCompaction: true }, {
+    turn: async request => {
+      assert.equal(request.observeHydrogenCompaction, true);
+      return { session: request.participant, text: JSON.stringify({ action: 'speak', speech: 'view', readiness: 'ready', agreement: {}, questions: [], responses: [] }), usage: {}, ...(request.participant === 'a' ? { compactionObservation: { status: 'signal_observed', signal: 'completed_checkpoint', checkpointSteps: [4] } } : {}) };
+    }
+  });
+  assert.equal(result.compactionObservations[0].status, 'signal_observed');
+  assert.equal(result.compactions.length, 0);
+  await assert.rejects(runConversation({ question: '?', participants: ['a', 'b'], observeHydrogenCompaction: 'yes' }), /observeHydrogenCompaction/);
+});
+
+test('Codex observation requires completed compaction in a completed turn and complete pages', () => {
+  const item = { type: 'contextCompaction', id: 'compact-1', completedAtMs: 123 };
+  const turn = { status: 'completed', itemsView: 'full', items: [item] };
+  assert.deepEqual(parseCodexCompactions({ data: [turn], nextCursor: null }), [{ id: 'compact-1', trigger: 'unknown', beforeTokens: null, afterTokens: null }]);
+  assert.deepEqual(parseCodexCompactions({ data: [{ ...turn, status: 'failed' }, { ...turn, items: [{ ...item, completedAtMs: null }] }] }), []);
+  assert.throws(() => parseCodexCompactions({ data: [turn], nextCursor: 'more' }), /incomplete/);
+  assert.throws(() => parseCodexCompactions({ data: [{ ...turn, itemsView: 'summary' }] }), /full items/);
+});
+
+test('Codex observation is optional, recorded and deduplicated', async () => {
+  let calls = 0;
+  const result = await runConversation({ question: '?', participants: [{ name: 'a', model: 'gpt-6-luna' }, 'b'], rounds: 2, minRounds: 2, observeCodexCompaction: true }, {
+    turn: async request => {
+      if (request.participant === 'a') { assert.equal(request.observeCodexCompaction, true); calls++; }
+      return { session: request.participant, text: JSON.stringify({ action: 'speak', speech: 'view', readiness: 'ready', agreement: {}, questions: [], responses: [] }), usage: {}, ...(request.participant === 'a' ? { compactions: [{ id: 'marker', trigger: 'unknown' }], compactionObservation: calls === 1 ? { status: 'checked' } : { status: 'unavailable', reason: 'inspection failed' } } : {}) };
+    }
+  });
+  assert.equal(result.compactions.length, 1);
+  assert.deepEqual(result.compactionObservations.map(x => x.status), ['checked', 'unavailable']);
+  await assert.rejects(runConversation({ question: '?', participants: ['a', 'b'], observeCodexCompaction: 'yes' }), /observeCodexCompaction/);
+});
+
+test('OpenCode export requires a completed summary linked to a same-session compaction marker', () => {
+  const marker = { info: { id: 'm', sessionID: 's', role: 'user' }, parts: [{ type: 'compaction', id: 'p', sessionID: 's', messageID: 'm', auto: true }] };
+  const summary = { info: { id: 'answer', parentID: 'm', sessionID: 's', role: 'assistant', summary: true, finish: 'stop', time: { completed: 10 } } };
+  const exportOf = messages => JSON.stringify({ info: { id: 's' }, messages });
+  assert.deepEqual(parseOpenCodeCompactions(exportOf([marker, summary]), 's'), [{ id: 'p', trigger: 'auto', beforeTokens: null, afterTokens: null }]);
+  assert.deepEqual(parseOpenCodeCompactions(exportOf([marker, { info: { ...summary.info, finish: 'error' } }]), 's'), []);
+  assert.deepEqual(parseOpenCodeCompactions(exportOf([marker, { info: { ...summary.info, sessionID: 'other' } }]), 's'), []);
+  assert.throws(() => parseOpenCodeCompactions(exportOf([marker, summary]), 'other'), /unexpected session/);
+});
+
+test('OpenCode compaction observations persist and repeated export markers are deduplicated', async () => {
+  let calls = 0;
+  const result = await runConversation({ question: '?', participants: [{ name: 'a', model: 'opencode-go/deepseek-v4.1-flash' }, 'b'], rounds: 2, minRounds: 2, observeOpenCodeCompaction: true }, {
+    turn: async request => {
+      if (request.participant === 'a') { assert.equal(request.observeOpenCodeCompaction, true); calls++; }
+      return { session: request.participant, text: JSON.stringify({ action: 'speak', speech: 'view', readiness: 'ready', agreement: {}, questions: [], responses: [] }), usage: {}, ...(request.participant === 'a' ? { compactions: [{ id: 'marker', trigger: 'auto' }], compactionObservation: calls === 1 ? { status: 'checked' } : { status: 'unavailable', reason: 'export failed' } } : {}) };
+    }
+  });
+  assert.equal(result.compactions.length, 1);
+  assert.deepEqual(result.compactionObservations.map(x => x.status), ['checked', 'unavailable']);
+  await assert.rejects(runConversation({ question: '?', participants: ['a', 'b'], observeOpenCodeCompaction: 'yes' }), /observeOpenCodeCompaction/);
+});
 
 test('Claude compaction boundaries are recorded without mistaking other sessions or status for completed compaction', () => {
   const events = [

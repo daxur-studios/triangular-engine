@@ -38,6 +38,9 @@ export function validate(config) {
   if (config.identityMode != null && !['names', 'models'].includes(config.identityMode)) throw new Error('identityMode must be names or models');
   if (config.synthesize != null && typeof config.synthesize !== 'boolean') throw new Error('synthesize must be a boolean');
   if (config.schemaOutput != null && typeof config.schemaOutput !== 'boolean') throw new Error('schemaOutput must be a boolean');
+  if (config.observeOpenCodeCompaction != null && typeof config.observeOpenCodeCompaction !== 'boolean') throw new Error('observeOpenCodeCompaction must be a boolean');
+  if (config.observeCodexCompaction != null && typeof config.observeCodexCompaction !== 'boolean') throw new Error('observeCodexCompaction must be a boolean');
+  if (config.observeHydrogenCompaction != null && typeof config.observeHydrogenCompaction !== 'boolean') throw new Error('observeHydrogenCompaction must be a boolean');
   if (config.claudeAutoCompactWindowTokens != null && (!Number.isInteger(config.claudeAutoCompactWindowTokens) || config.claudeAutoCompactWindowTokens < 100_000 || config.claudeAutoCompactWindowTokens > 1_000_000))
     throw new Error('claudeAutoCompactWindowTokens must be an integer from 100000 to 1000000');
 }
@@ -164,7 +167,52 @@ export function parseCodexStream(output) {
   return { session, text: message, toolCalls, usage: { inputTokens: completed.usage?.input_tokens ?? null, cachedInputTokens: completed.usage?.cached_input_tokens ?? null, outputTokens: completed.usage?.output_tokens ?? null, reportedCostUsd: null } };
 }
 
-export async function codexTurn({ prompt, session, timeoutMs, repositories, schema }) {
+export async function observeCodexCompactions(session, { cwd, timeoutMs }) {
+  const cli = process.platform === 'win32' ? path.join(process.env.APPDATA, 'npm/node_modules/@openai/codex/bin/codex.js') : 'codex';
+  const child = spawn(process.platform === 'win32' ? process.execPath : cli, process.platform === 'win32' ? [cli, 'app-server'] : ['app-server'], { cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  let buffer = '', bytes = 0, nextId = 0, stopped = false;
+  const pending = new Map();
+  const fail = error => { if (!stopped) { stopped = true; for (const request of pending.values()) request.reject(error); pending.clear(); } };
+  const timer = setTimeout(() => fail(new Error('Codex compaction observation timed out')), timeoutMs);
+  child.stderr.resume();
+  child.on('error', fail);
+  child.on('close', () => fail(new Error('Codex compaction observer exited')));
+  child.stdin.on('error', fail);
+  child.stdout.on('data', chunk => {
+    bytes += chunk.length;
+    if (bytes > MAX_OUTPUT_BYTES) return fail(new Error('Codex compaction observation exceeded limit'));
+    buffer += chunk.toString();
+    const lines = buffer.split('\n'); buffer = lines.pop();
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line);
+        const request = pending.get(event.id);
+        if (request) { pending.delete(event.id); event.error ? request.reject(new Error('Codex compaction observation request failed')) : request.resolve(event.result); }
+      } catch { fail(new Error('Codex compaction observation returned invalid JSON')); }
+    }
+  });
+  const send = (method, params) => new Promise((resolve, reject) => {
+    if (stopped) return reject(new Error('Codex compaction observer unavailable'));
+    const id = ++nextId; pending.set(id, { resolve, reject });
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+  });
+  try {
+    await send('initialize', { clientInfo: { name: 'consensus-observer', version: '1' }, capabilities: null });
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'initialized' }) + '\n');
+    const result = await send('thread/turns/list', { threadId: session, itemsView: 'full', limit: 100 });
+    if (!Array.isArray(result?.data) || result.nextCursor) throw new Error('Codex compaction observation incomplete');
+    return parseCodexCompactions(result);
+  } finally { clearTimeout(timer); stopped = true; child.kill(); }
+}
+
+export function parseCodexCompactions(result) {
+  if (!Array.isArray(result?.data) || result.nextCursor) throw new Error('Codex compaction observation incomplete');
+  if (result.data.some(turn => turn.itemsView !== 'full' || !Array.isArray(turn.items))) throw new Error('Codex compaction observation missing full items');
+  return result.data.flatMap(turn => turn.status === 'completed' ? turn.items.filter(item => item.type === 'contextCompaction' && typeof item.id === 'string' && Number.isFinite(item.completedAtMs)).map(item => ({ id: item.id, trigger: 'unknown', beforeTokens: null, afterTokens: null })) : []);
+}
+
+export async function codexTurn({ prompt, session, timeoutMs, repositories, schema, observeCodexCompaction = false }) {
+  const started = Date.now();
   if (!repositories.length) throw new Error('Codex requires a repository in this prototype');
   const common = ['--json', '-m', CODEX_MODEL, '--skip-git-repo-check'];
   const schemaDir = schema ? await mkdtemp(path.join(os.tmpdir(), 'discussion-schema-')) : null;
@@ -187,6 +235,14 @@ export async function codexTurn({ prompt, session, timeoutMs, repositories, sche
   }); } finally { if (schemaDir) await rm(schemaDir, { recursive: true, force: true }); }
   const parsed = parseCodexStream(result);
   if (session && parsed.session !== session) throw new Error('Codex resumed a different session');
+  if (observeCodexCompaction) {
+    try {
+      const remaining = Math.min(5000, timeoutMs - (Date.now() - started));
+      if (remaining <= 0) throw new Error('no time remaining for Codex compaction observation');
+      parsed.compactions = await observeCodexCompactions(parsed.session, { cwd: repositories[0], timeoutMs: remaining });
+      parsed.compactionObservation = { status: 'checked' };
+    } catch (error) { parsed.compactionObservation = { status: 'unavailable', reason: error.message }; }
+  }
   return parsed;
 }
 
@@ -217,7 +273,27 @@ export function parseDeepseekStream(output) {
   return { session, text, toolCalls, usage: { inputTokens: (tokens.input ?? 0) + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0), cachedInputTokens: tokens.cache?.read ?? null, outputTokens: (tokens.output ?? 0) + (tokens.reasoning ?? 0), reportedCostUsd: null } };
 }
 
-export async function deepseekTurn({ prompt, session, timeoutMs, repositories = [] }) {
+export function parseOpenCodeCompactions(output, session) {
+  const data = JSON.parse(output);
+  if (data.info?.id !== session || !Array.isArray(data.messages)) throw new Error('OpenCode export has an unexpected session or format');
+  const markers = new Map();
+  for (const message of data.messages) {
+    if (message.info?.sessionID !== session || message.info?.role !== 'user') continue;
+    for (const part of message.parts ?? []) {
+      if (part.type === 'compaction' && part.sessionID === session && part.messageID === message.info.id && part.id)
+        markers.set(message.info.id, part);
+    }
+  }
+  return data.messages.flatMap(message => {
+    const info = message.info;
+    const marker = markers.get(info?.parentID);
+    if (!marker || info.sessionID !== session || info.role !== 'assistant' || info.summary !== true || info.finish !== 'stop' || !info.time?.completed || info.error) return [];
+    return [{ id: marker.id, trigger: marker.auto === true ? 'auto' : marker.auto === false ? 'manual' : 'unknown', beforeTokens: null, afterTokens: null }];
+  });
+}
+
+export async function deepseekTurn({ prompt, session, timeoutMs, repositories = [], observeOpenCodeCompaction = false }) {
+  const started = Date.now();
   const args = ['run', '--pure', '--agent', 'plan', '--format', 'json', '--model', DEEPSEEK_MODEL];
   if (session) args.push('--session', session);
   args.push(prompt);
@@ -225,27 +301,46 @@ export async function deepseekTurn({ prompt, session, timeoutMs, repositories = 
   const output = await runAdapter(executable, args, { cwd: repositories[0] ?? os.tmpdir(), timeoutMs, env: { ...process.env, OPENCODE_PERMISSION: openCodePermissions(repositories.length > 0) } });
   const parsed = parseDeepseekStream(output);
   if (session && parsed.session !== session) throw new Error('OpenCode resumed a different session');
+  if (observeOpenCodeCompaction) {
+    const remaining = timeoutMs - (Date.now() - started);
+    try {
+      if (remaining <= 0) throw new Error('no time remaining for session export');
+      const exported = await runAdapter(executable, ['export', '--pure', parsed.session], { cwd: repositories[0] ?? os.tmpdir(), timeoutMs: Math.min(remaining, 5000), env: { ...process.env, OPENCODE_PERMISSION: openCodePermissions(repositories.length > 0) } });
+      parsed.compactions = parseOpenCodeCompactions(exported, parsed.session);
+      parsed.compactionObservation = { status: 'checked' };
+    } catch (error) {
+      parsed.compactionObservation = { status: 'unavailable', reason: error.message };
+    }
+  }
   return parsed;
 }
 
-export function parseHydrogenStream(output, structured = false) {
+export function parseHydrogenStream(output, structured = false, observeCompaction = false) {
   const events = output.trim().split(/\r?\n/).map(line => JSON.parse(line));
   const init = events.find(event => event.event === 'init');
   const result = events.findLast(event => event.event === 'result')?.result;
   if (!init || !result || result.status !== 'SUCCESS' || !result.conversation_id || (structured ? !result.structured_output : typeof result.response !== 'string')) throw new Error('Antigravity returned an error or missing session or missing structured output');
   const toolCalls = events.filter(event => event.event === 'step_update' && /tool/i.test(event.step_update?.step_type ?? '')).map(event => ({ name: event.step_update?.step_type, detail: event.step_update?.tool_name ?? null }));
   const usage = result.usage ?? {};
-  return { session: result.conversation_id, text: structured ? JSON.stringify(result.structured_output) : result.response, toolCalls, usage: { inputTokens: usage.input_tokens ?? null, cachedInputTokens: usage.cache_read_tokens ?? null, outputTokens: usage.output_tokens ?? null, reportedCostUsd: null } };
+  const parsed = { session: result.conversation_id, text: structured ? JSON.stringify(result.structured_output) : result.response, toolCalls, usage: { inputTokens: usage.input_tokens ?? null, cachedInputTokens: usage.cache_read_tokens ?? null, outputTokens: usage.output_tokens ?? null, reportedCostUsd: null } };
+  if (observeCompaction) {
+    if (init.conversation_id !== result.conversation_id) parsed.compactionObservation = { status: 'unavailable', reason: 'Antigravity returned inconsistent session IDs' };
+    else {
+      const checkpointSteps = events.filter(event => event.event === 'step_update' && event.step_update?.conversation_id === result.conversation_id && event.step_update?.step_type === 'checkpoint' && event.step_update?.state === 'DONE' && Number.isInteger(event.step_update?.step_index)).map(event => event.step_update.step_index);
+      parsed.compactionObservation = checkpointSteps.length ? { status: 'signal_observed', signal: 'completed_checkpoint', checkpointSteps: [...new Set(checkpointSteps)] } : { status: 'no_signal' };
+    }
+  }
+  return parsed;
 }
 
-export async function hydrogenTurn({ prompt, session, timeoutMs, repositories = [], schema }) {
+export async function hydrogenTurn({ prompt, session, timeoutMs, repositories = [], schema, observeHydrogenCompaction = false }) {
   const args = ['-p', prompt, '--model', HYDROGEN_MODEL, '--sandbox', '--settings', agySettings(repositories.length > 0), '--disable-slash-commands', '--output-format', 'stream-json'];
   if (schema) args.push('--json-schema', JSON.stringify(schema));
   for (const directory of repositories.slice(1)) args.push('--add-dir', directory);
   if (session) args.push('--conversation', session);
   const executable = process.platform === 'win32' ? path.join(process.env.LOCALAPPDATA, 'agy/bin/agy.exe') : 'agy';
   const output = await runAdapter(executable, args, { cwd: repositories[0] ?? os.tmpdir(), timeoutMs });
-  const parsed = parseHydrogenStream(output, !!schema);
+  const parsed = parseHydrogenStream(output, !!schema, observeHydrogenCompaction);
   if (session && parsed.session !== session) throw new Error('Antigravity resumed a different session');
   return parsed;
 }
@@ -267,7 +362,7 @@ export async function runConversation(config, { root = process.cwd(), turn = pro
   config = { ...config, participants: labels };
   const repositories = await resolveRepositories(config, root);
   const source = repositories.length ? await sourceContext(repositories[0], config.sourceFiles) : '';
-  const run = { version: 4, question: config.question, participants: config.participants, identityMode, schemaOutput: config.schemaOutput ?? false, claudeAutoCompactWindowTokens: config.claudeAutoCompactWindowTokens ?? null, repositories, sourceFiles: config.sourceFiles ?? [], startedAt: new Date(now()).toISOString(), turns: [], compactions: [], questions: [], status: 'running', usage: { inputTokens: 0, outputTokens: 0, reportedCostUsd: null }, usageByParticipant: {}, responseQuality: { rejectedReplies: 0, correctionCalls: 0, correctedTurns: 0, byModel: {} } };
+  const run = { version: 4, question: config.question, participants: config.participants, identityMode, schemaOutput: config.schemaOutput ?? false, claudeAutoCompactWindowTokens: config.claudeAutoCompactWindowTokens ?? null, observeOpenCodeCompaction: config.observeOpenCodeCompaction ?? false, observeCodexCompaction: config.observeCodexCompaction ?? false, observeHydrogenCompaction: config.observeHydrogenCompaction ?? false, repositories, sourceFiles: config.sourceFiles ?? [], startedAt: new Date(now()).toISOString(), turns: [], compactions: [], compactionObservations: [], questions: [], status: 'running', usage: { inputTokens: 0, outputTokens: 0, reportedCostUsd: null }, usageByParticipant: {}, responseQuality: { rejectedReplies: 0, correctionCalls: 0, correctedTurns: 0, byModel: {} } };
   const sessions = new Map(), costs = new Map(), seenTurns = new Map(), facilitatorCost = Symbol('facilitator');
   const finish = async status => {
     run.status = status;
@@ -345,9 +440,12 @@ export async function runConversation(config, { root = process.cwd(), turn = pro
             await save(run);
           }
           const remaining = Math.max(1, maxMs - (now() - start));
-          response = await turn({ prompt, session: sessions.get(name), timeoutMs: Math.min((config.secondsPerTurn ?? 45) * 1000, remaining), participant: name, model: models.get(name), round, repositories, schema, claudeAutoCompactWindowTokens: config.claudeAutoCompactWindowTokens });
+          response = await turn({ prompt, session: sessions.get(name), timeoutMs: Math.min((config.secondsPerTurn ?? 45) * 1000, remaining), participant: name, model: models.get(name), round, repositories, schema, claudeAutoCompactWindowTokens: config.claudeAutoCompactWindowTokens, observeOpenCodeCompaction: config.observeOpenCodeCompaction, observeCodexCompaction: config.observeCodexCompaction, observeHydrogenCompaction: config.observeHydrogenCompaction });
           sessions.set(name, response.session);
-          for (const compact of response.compactions ?? []) run.compactions.push({ participant: name, model: models.get(name), round, ...compact });
+          for (const compact of response.compactions ?? []) {
+            if (!compact.id || !run.compactions.some(previous => previous.participant === name && previous.id === compact.id)) run.compactions.push({ participant: name, model: models.get(name), round, ...compact });
+          }
+          if (response.compactionObservation) run.compactionObservations.push({ participant: name, model: models.get(name), round, ...response.compactionObservation });
           // Count even a malformed response: it consumed provider usage.
           run.usage.inputTokens += response.usage?.inputTokens ?? 0;
           run.usage.outputTokens += response.usage?.outputTokens ?? 0;
