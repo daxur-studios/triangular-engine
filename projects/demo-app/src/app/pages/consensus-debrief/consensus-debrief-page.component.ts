@@ -4,7 +4,7 @@ import { Color, Mesh, MeshStandardMaterial, PlaneGeometry, TorusGeometry, Vector
 import { EngineModule, EngineService } from 'triangular-engine';
 import { preProcessText, wordsToVisemes, type ExtendedEmotionName, type VisemeKeyframe } from 'triangular-engine/characters';
 import { CapsuleCharacterActor } from 'triangular-engine/procedural';
-import { readTranscript, replayPositions, replayState, replayWalkStep, type ReplayTranscript } from './conversation-replay';
+import { readTranscript, replayPositions, replayState, replayWalkStep, speakerCameraPosition, type ReplayTranscript } from './conversation-replay';
 import { QUESTION_REPLAY_SAMPLE } from './question-replay-sample';
 
 /** One debrief participant seated in the circle. */
@@ -45,7 +45,6 @@ const CIRCLE_RADIUS_M = 3.0;
 const SPEAKER_SCALE = 1.07;
 const TURN_RATE_PER_S = 7;
 const CAMERA_FOLLOW_RATE_PER_S = 3.2;
-const SHOT_BLEND = 0.92;
 const SHOT_DISTANCE_M = 4.3;
 const SHOT_HEIGHT_M = 1.7;
 const SHOT_TARGET_HEIGHT_M = 1.0;
@@ -366,11 +365,10 @@ export class ConsensusDebriefPageComponent {
     if (this.replayMode) active = undefined;
     if (active) {
       const p = active.actor.root.position;
-      const out = new Vector3(CAMERA_POSITION[0] - p.x, 0, CAMERA_POSITION[2] - p.z).normalize();
+      const [cameraX, cameraZ] = speakerCameraPosition(p.x, p.z, SHOT_DISTANCE_M);
       this.desiredPosition
-        .set(p.x + out.x * SHOT_DISTANCE_M, SHOT_HEIGHT_M, p.z + out.z * SHOT_DISTANCE_M)
-        .lerp(this.projected.set(...CAMERA_POSITION), 1 - SHOT_BLEND);
-      this.desiredTarget.set(p.x, SHOT_TARGET_HEIGHT_M, p.z).lerp(this.projected.set(...CAMERA_TARGET), 1 - SHOT_BLEND);
+        .set(cameraX, SHOT_HEIGHT_M, cameraZ);
+      this.desiredTarget.set(p.x, SHOT_TARGET_HEIGHT_M, p.z);
     } else {
       this.desiredPosition.set(...CAMERA_POSITION);
       this.desiredTarget.set(...CAMERA_TARGET);
@@ -426,6 +424,7 @@ export class ConsensusDebriefPageComponent {
       seat.label.style.left = `${((this.projected.x + 1) / 2) * this.host.clientWidth}px`;
       seat.label.style.top = `${((1 - this.projected.y) / 2) * this.host.clientHeight}px`;
       seat.label.style.borderColor = isActive ? LABEL_ACTIVE_BORDER : LABEL_IDLE_BORDER;
+      seat.label.style.visibility = !this.replayMode && active && !isActive ? 'hidden' : 'visible';
     }
   }
 }

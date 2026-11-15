@@ -1,6 +1,13 @@
-import { readTranscript, replayPositions, replayState, replayWalkStep } from './conversation-replay';
+import { readTranscript, replayPositions, replayState, replayWalkStep, speakerCameraPosition } from './conversation-replay';
 
 describe('conversation replay', () => {
+  it('places the speaker camera outside the circle for each seat', () => {
+    for (const [x, z] of [[3, 0], [-3, 0], [0, 3], [0, -3]]) {
+      const [cx, cz] = speakerCameraPosition(x, z, 4);
+      expect(cx * x + cz * z).toBeGreaterThan(x * x + z * z);
+      expect(Math.hypot(cx - x, cz - z)).toBeCloseTo(4);
+    }
+  });
   const transcript = readTranscript({
     question: 'Example?', participants: ['A', 'B'], turns: [
       { round: 1, participant: 'A', action: 'speak', speech: 'Question', readiness: 'discussing', agreement: {}, questions: [{ id: 'Q1', to: 'B', question: 'Why?' }], responses: [] },

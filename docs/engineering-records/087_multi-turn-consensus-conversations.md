@@ -201,6 +201,12 @@ rounds; assess that command and its agent catalog before choosing how to integra
 usage limits and consensus records. Avoid building a competing permanent workflow. Preserve existing
 reviews and transcript compatibility, and verify the migrated workflow before retiring the prototype.
 
+### 2026-11-15 — Speaker camera
+
+**[action]** Speaker-focused presentations now place the camera outside the seating circle,
+looking toward the active speaker. This reduces other characters crossing the line of sight;
+the agreement replay retains its wide camera. The change does not alter participant positions.
+
 ## Scope history
 
 <!-- tri:scope-history -->

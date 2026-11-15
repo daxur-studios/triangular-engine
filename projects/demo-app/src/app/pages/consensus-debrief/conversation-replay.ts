@@ -15,6 +15,14 @@ export interface ReplayTranscript {
   turns: ReplayTurn[];
 }
 
+/** Place the speaker camera outside the circle so other seats are behind the speaker. */
+export function speakerCameraPosition(x: number, z: number, distance: number): [number, number] {
+  const radius = Math.hypot(x, z);
+  const dx = radius > 0.001 ? x / radius : 0;
+  const dz = radius > 0.001 ? z / radius : 1;
+  return [x + dx * distance, z + dz * distance];
+}
+
 /** Move at a steady walking pace and stop exactly at the destination. */
 export function replayWalkStep(x: number, z: number, destination: readonly [number, number], dt: number) {
   const dx = destination[0] - x, dz = destination[1] - z;
