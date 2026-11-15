@@ -242,19 +242,35 @@ export class PlanetCloudShell {
     this.object.scale.setScalar(this.bendUniforms ? 1 : shellRadius);
   }
 
+  /**
+   * The cloud cover the shell draws at a direction, as a TSL node, so something other than the shell can read the same
+   * clouds (a ground shadow, for one). It is the exact function the fragment stage uses for its alpha: the same noise,
+   * scale, drift, coverage and softness, read live from the shell's uniforms.
+   * @param direction A `vec3` node: the direction from the planet's centre (it is normalised for you), in the planet's
+   *   frame, unbent.
+   * @returns A `float` node, 0 (clear sky) to 1 (full cloud).
+   */
+  coverageAt(direction: any): any {
+    const density = this.densityAt(normalize(direction));
+    const threshold = float(1).sub(this.uCoverage);
+    return smoothstep(threshold, threshold.add(this.uSoftness), density);
+  }
+
+  /** The noise density at a point on or near the unit sphere (not normalised here: the sun tap is a small offset). */
+  private densityAt(point: any): any {
+    const drift = vec3(this.uTime.mul(this.uDrift), 0, 0);
+    const p = point.mul(this.uScale).add(drift);
+    return clamp(mx_fractal_noise_float(p, int(5), float(2.0), float(0.5)).mul(0.5).add(0.5), 0, 1);
+  }
+
   private buildFragmentNode() {
     // Unit direction from the planet's centre, interpolated from the sphere's vertices. It is the unbent geometry
     // direction, so the cloud pattern stays on the globe's geography while the vertices bend.
     const dir = varying(normalize(positionGeometry));
-    const drift = vec3(this.uTime.mul(this.uDrift), 0, 0);
-    const fractal = (p: any) =>
-      clamp(mx_fractal_noise_float(p, int(5), float(2.0), float(0.5)).mul(0.5).add(0.5), 0, 1);
-
-    const density = fractal(normalize(dir).mul(this.uScale).add(drift));
+    const density = this.densityAt(normalize(dir));
     // One extra tap toward the sun gives fake thickness: a cloud between the sun and this point darkens it.
-    const densitySun = fractal(normalize(dir).add(this.uSun.mul(SUN_TAP_OFFSET)).mul(this.uScale).add(drift));
-    const threshold = float(1).sub(this.uCoverage);
-    const alpha = smoothstep(threshold, threshold.add(this.uSoftness), density);
+    const densitySun = this.densityAt(normalize(dir).add(this.uSun.mul(SUN_TAP_OFFSET)));
+    const alpha = this.coverageAt(dir);
     const shade = clamp(float(1).sub(densitySun.sub(density).mul(2.0)), 0.35, 1);
 
     // Analytic sun on the shell point (the same shape as the surface lighting): orange near the terminator, dark at night.

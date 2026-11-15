@@ -100,6 +100,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'cloud-ground-shadows-spike',
+    loadComponent: () =>
+      import('./cloud-ground-shadows-spike/cloud-ground-shadows-spike.component').then(
+        (m) => m.CloudGroundShadowsSpikeComponent,
+      ),
+  },
+  {
     path: 'lod-surface-morph-spike',
     loadComponent: () =>
       import('./lod-surface-morph-spike/lod-surface-morph-spike.component').then(

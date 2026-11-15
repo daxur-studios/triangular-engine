@@ -1,0 +1,50 @@
+<scene [showFps]="true">
+  <planet [radius]="radiusM" [sunDirection]="sun()" [world]="world" [bake]="bake">
+    <planetTerrain #terrainBody [cellPixels]="cellPixels()" [leafCap]="1024" />
+    <planetAtmosphere preset="earth" [lighting]="false" />
+    <planetClouds [coverage]="0.45" [enabled]="cloudsOn()" [altitude]="cloudHeightM()" />
+  </planet>
+  <orbitControls
+    [isActive]="orbitOn()"
+    [near]="1"
+    [far]="1000000000"
+  />
+</scene>
+
+<ng-template portalTarget="overlay" lane="topStart" [order]="10">
+  <aside class="diagnostics">
+    <a routerLink="/spikes">← Spikes</a>
+    <strong>Cloud shadows on the ground · Plan 051</strong>
+    <span>A cloud density read where the sun ray crosses the cloud layer, as <code>directShadow</code>. No ray march.</span>
+    <span>shadow stage: {{ installed() ? 'on the terrain' : 'waiting for the terrain' }} · draw calls: {{ drawCalls() }} · triangles: {{ triangles().toLocaleString() }}</span>
+    <div class="actions">
+      @for (view of views; track view.altitudeM) {
+        <button [class.active]="altitudeM() === view.altitudeM" (click)="jump(view)">{{ view.label }}</button>
+      }
+    </div>
+    <div class="actions">
+      <button [class.active]="shadowsOn()" (click)="shadowsOn.set(!shadowsOn())">Shadows</button>
+      <button [class.active]="cloudsOn()" (click)="cloudsOn.set(!cloudsOn())">Clouds</button>
+      <button [class.active]="orbitOn()" (click)="toggleOrbit()">Orbit controls</button>
+    </div>
+    <label>sun elevation {{ sunElevationDeg() }}°
+      <input type="range" min="3" max="85" step="1" [value]="sunElevationDeg()" (input)="setNumber('sunElevationDeg', $event)" />
+    </label>
+    <label>sun azimuth {{ sunAzimuthDeg() }}°
+      <input type="range" min="0" max="360" step="5" [value]="sunAzimuthDeg()" (input)="setNumber('sunAzimuthDeg', $event)" />
+    </label>
+    <label>cloud height {{ cloudHeightM().toLocaleString() }} m
+      <input type="range" min="200" max="30000" step="100" [value]="cloudHeightM()" (input)="setNumber('cloudHeightM', $event)" />
+    </label>
+    <label>terrain cell size {{ cellPixels() }} px (bigger = fewer triangles)
+      <input type="range" min="4" max="64" step="2" [value]="cellPixels()" (input)="setNumber('cellPixels', $event)" />
+    </label>
+    <label>pitch {{ pitchDeg() }}°
+      <input type="range" min="-90" max="-5" step="1" [value]="pitchDeg()" (input)="setNumber('pitchDeg', $event)" />
+    </label>
+    <p>
+      Pass: the dark patch sits under the cloud that casts it (turn Clouds off to see the shadow alone, and drop the sun
+      low so the offset is plain), edges stay soft, and it looks the same at all four heights.
+    </p>
+  </aside>
+</ng-template>

@@ -115,6 +115,19 @@ export const SPIKES: readonly ISpikeItem[] = [
     runbookPath: 'docs/plans/080_lod-water.md',
     dateISO: '2026-11-03',
   },
+  {
+    id: 'cloud-ground-shadows-spike',
+    number: '8',
+    title: 'Cloud shadows on the planet ground (Plan 051)',
+    route: '/cloud-ground-shadows-spike',
+    status: 'pending',
+    hypothesis:
+      'A cloud density function evaluated analytically along the sun ray and fed to the planet lighting stage directShadow input puts smooth cloud shadows on the terrain at the same ground position as the clouds drawn above it, with no ray march, at every zoom.',
+    description:
+      'Planet with terrain, atmosphere and the cloud shell; the shell density drives a ground shadow. The mechanism is not built yet: the core factory is a TODO.',
+    runbookPath: 'docs/plans/051_cloud_volumes.md',
+    dateISO: '2026-11-15',
+  },
 ];
 
 const STATUS_LABEL: Record<SpikeStatus, string> = {
