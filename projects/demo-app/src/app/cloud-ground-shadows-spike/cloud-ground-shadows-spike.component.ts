@@ -112,8 +112,6 @@ export class CloudGroundShadowsSpikeComponent implements AfterViewInit {
         atmosphere,
         shell,
         surface: surface as { setLightingStage(entry: { id: string; stage: unknown } | null): unknown },
-        radiusUnits: this.radiusM,
-        altitudeUnits: this.radiusM * 0.0015,
       });
       this.installed.set(true);
     });
@@ -133,15 +131,12 @@ export class CloudGroundShadowsSpikeComponent implements AfterViewInit {
     // Read the signals before the optional `shadow`, or a first run with no shadow yet would track nothing.
     effect(() => {
       const strength = this.shadowsOn() ? 1 : 0;
-      const altitude = this.cloudHeightM();
       this.installed();
       this.shadow?.setStrength(strength);
-      this.shadow?.setAltitude(altitude);
     });
 
     const tick = this.engine.tick$.subscribe(() => {
       if (!this.viewReady()) return;
-      this.shadow?.update();
       if (!this.orbitOn()) this.placeCamera();
       const now = performance.now();
       if (now - this.lastDiagMs >= 500) {

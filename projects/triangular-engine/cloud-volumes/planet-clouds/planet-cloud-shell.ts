@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Camera, FrontSide, Mesh, Object3D, SphereGeometry, Vector3 } from 'three';
+import { BackSide, Camera, FrontSide, Mesh, Object3D, SphereGeometry, Vector3 } from 'three';
 import { NodeMaterial } from 'three/webgpu';
-import { clamp, dot, float, int, max, mix, mx_fractal_noise_float, normalize, positionGeometry, smoothstep, uniform, varying, vec3, vec4 } from 'three/tsl';
+import { clamp, dot, float, int, max, mix, mx_fractal_noise_float, normalize, positionGeometry, smoothstep, sqrt, uniform, varying, vec3, vec4 } from 'three/tsl';
 import type { IPlanetMorphUniforms } from 'triangular-engine/planet-material';
 import { cloudShellBendPosition } from './planet-cloud-bend';
 
@@ -91,6 +91,8 @@ export class PlanetCloudShell {
   private readonly uOpacity = uniform(1);
   /** The shell's radius in world units (radius plus altitude), for the bend. Written by `applyScale`. */
   private readonly uShellRadius = uniform(0);
+  /** The planet's radius in world units, for the ground shadow. Written by `applyScale`. */
+  private readonly uRadius = uniform(0);
   private readonly bendUniforms: IPlanetMorphUniforms | undefined;
 
   private radiusUnitsValue: number;
@@ -220,6 +222,13 @@ export class PlanetCloudShell {
     const cameraFade = cloudShellCameraFade(this.eye.distanceTo(this.centre), shellRadius, altitude);
     const morphOpacity = this.bendUniforms ? 1 : 1 - cloudShellMorphFade(this.morphValue);
 
+    // From inside the shell (on the ground, under the clouds) the sphere's outward faces are back faces: draw the inside.
+    const side = this.eye.distanceTo(this.centre) < shellRadius ? BackSide : FrontSide;
+    if (this.material.side !== side) {
+      this.material.side = side;
+      this.material.needsUpdate = true;
+    }
+
     const opacity = this.enabledValue ? morphOpacity * cameraFade : 0;
     this.uOpacity.value = opacity;
     this.object.visible = opacity > 0;
@@ -238,6 +247,7 @@ export class PlanetCloudShell {
   private applyScale(): void {
     const shellRadius = this.radiusUnitsValue + this.altitude;
     this.uShellRadius.value = shellRadius;
+    this.uRadius.value = this.radiusUnitsValue;
     // A bent shell is placed in world units by its vertex stage, so its mesh is not scaled.
     this.object.scale.setScalar(this.bendUniforms ? 1 : shellRadius);
   }
@@ -254,6 +264,28 @@ export class PlanetCloudShell {
     const density = this.densityAt(normalize(direction));
     const threshold = float(1).sub(this.uCoverage);
     return smoothstep(threshold, threshold.add(this.uSoftness), density);
+  }
+
+  /**
+   * The sunlight left at a ground point after the clouds above it, as a TSL node: the shell's density read where the sun's
+   * ray from the ground crosses the cloud layer. No ray march: the crossing is one analytic distance,
+   * `t = sqrt(R²·mu² + 2·R·h + h²) − R·mu` (R the planet radius, h the layer height, mu the sun's cosine at the point).
+   * It uses the shell's own sun, radius and height, so the shadow lies under the cloud that casts it. Feed it to a
+   * lighting stage's `directShadow` (for the atmosphere: `atmosphere.binding.lighting({ directShadow })`).
+   *
+   * Approximation: the ground is taken at the planet's radius, so terrain relief shifts the true shadow slightly.
+   * @param groundNormal A `vec3` node: the unit direction from the planet's centre to the ground point.
+   * @param strength A `float` node or number, 0 (no shadow) to 1 (full). Default 1. A full shadow keeps 15% of the sun.
+   * @returns A `float` node: 1 in full sun, down to 0.15 under thick cloud.
+   */
+  groundShadowAt(groundNormal: any, strength: any = 1): any {
+    const R = this.uRadius;
+    const h = this.uShellRadius.sub(R);
+    const up = normalize(groundNormal);
+    const mu = dot(up, this.uSun);
+    const t = sqrt(mu.mul(mu).mul(R).mul(R).add(h.mul(R).mul(2)).add(h.mul(h))).sub(mu.mul(R));
+    const crossing = up.mul(R).add(this.uSun.mul(t));
+    return float(1).sub(this.coverageAt(crossing).mul(strength).mul(0.85));
   }
 
   /** The noise density at a point on or near the unit sphere (not normalised here: the sun tap is a small offset). */
