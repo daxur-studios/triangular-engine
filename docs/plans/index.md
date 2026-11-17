@@ -54,5 +54,6 @@ tags: [plans, index]
 | [Moon Boop cat care and treat guns](/docs/plans/085_moon-boop-cat-care.md) | implemented; owner review pending | [ER 085](/docs/engineering-records/085_moon-boop-cat-care.md) |
 | [Island crowd navigation](/docs/plans/086_island-crowd-navigation.md) | planned | [ER 086](/docs/engineering-records/086_island-crowd-navigation.md) |
 | [Multi-turn consensus conversations](/docs/plans/087_multi-turn-consensus-conversations.md) | planned | [ER 087](/docs/engineering-records/087_multi-turn-consensus-conversations.md) |
+| [Concept reference fitting](/docs/plans/088_concept-reference-fitting.md) | planned | [ER 088](/docs/engineering-records/088_concept-reference-fitting.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

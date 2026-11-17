@@ -1,0 +1,282 @@
+{
+  "schema": 1,
+  "sheet": {
+    "name": "headshots-and-angles",
+    "sha256": "80f1ef2cb1ddc0dd5a4cbeaa000ae804a0271eb26af9ddca26b44a17384cb8f3",
+    "width": 1792,
+    "height": 2400,
+    "note": "Located by content hash in a local concept folder; the path is never recorded here."
+  },
+  "subjects": [
+    {
+      "id": "orange-pigtails",
+      "label": "Orange pigtails",
+      "include": true
+    },
+    {
+      "id": "goofy",
+      "label": "Goofy AF",
+      "include": true
+    },
+    {
+      "id": "wacky-helmet",
+      "label": "Wacky hair (helmet)",
+      "include": false,
+      "reason": "Helmet reflections and glass edges; kept for a later measurement trial under I1."
+    },
+    {
+      "id": "variant-c",
+      "label": "Variant C (headphones)",
+      "include": true
+    }
+  ],
+  "views": [
+    "front",
+    "three-quarter",
+    "profile",
+    "up",
+    "down"
+  ],
+  "crops": [
+    {
+      "id": "orange-pigtails-front",
+      "subject": "orange-pigtails",
+      "view": "front",
+      "include": true,
+      "rect": {
+        "x": 10,
+        "y": 315,
+        "w": 480,
+        "h": 360
+      }
+    },
+    {
+      "id": "orange-pigtails-three-quarter",
+      "subject": "orange-pigtails",
+      "view": "three-quarter",
+      "include": true,
+      "rect": {
+        "x": 487,
+        "y": 315,
+        "w": 291,
+        "h": 360
+      }
+    },
+    {
+      "id": "orange-pigtails-profile",
+      "subject": "orange-pigtails",
+      "view": "profile",
+      "include": true,
+      "rect": {
+        "x": 795,
+        "y": 315,
+        "w": 324,
+        "h": 360
+      }
+    },
+    {
+      "id": "orange-pigtails-up",
+      "subject": "orange-pigtails",
+      "view": "up",
+      "include": true,
+      "rect": {
+        "x": 1120,
+        "y": 315,
+        "w": 257,
+        "h": 360
+      }
+    },
+    {
+      "id": "orange-pigtails-down",
+      "subject": "orange-pigtails",
+      "view": "down",
+      "include": true,
+      "rect": {
+        "x": 1380,
+        "y": 315,
+        "w": 316,
+        "h": 360
+      }
+    },
+    {
+      "id": "goofy-front",
+      "subject": "goofy",
+      "view": "front",
+      "include": true,
+      "rect": {
+        "x": 95,
+        "y": 864,
+        "w": 300,
+        "h": 410
+      }
+    },
+    {
+      "id": "goofy-three-quarter",
+      "subject": "goofy",
+      "view": "three-quarter",
+      "include": true,
+      "rect": {
+        "x": 455,
+        "y": 864,
+        "w": 295,
+        "h": 410
+      }
+    },
+    {
+      "id": "goofy-profile",
+      "subject": "goofy",
+      "view": "profile",
+      "include": true,
+      "rect": {
+        "x": 795,
+        "y": 864,
+        "w": 290,
+        "h": 410
+      }
+    },
+    {
+      "id": "goofy-up",
+      "subject": "goofy",
+      "view": "up",
+      "include": true,
+      "rect": {
+        "x": 1105,
+        "y": 864,
+        "w": 295,
+        "h": 410
+      }
+    },
+    {
+      "id": "goofy-down",
+      "subject": "goofy",
+      "view": "down",
+      "include": true,
+      "rect": {
+        "x": 1420,
+        "y": 864,
+        "w": 295,
+        "h": 410
+      }
+    },
+    {
+      "id": "wacky-helmet-front",
+      "subject": "wacky-helmet",
+      "view": "front",
+      "include": false,
+      "rect": {
+        "x": 59,
+        "y": 1415,
+        "w": 341,
+        "h": 367
+      }
+    },
+    {
+      "id": "wacky-helmet-three-quarter",
+      "subject": "wacky-helmet",
+      "view": "three-quarter",
+      "include": false,
+      "rect": {
+        "x": 416,
+        "y": 1415,
+        "w": 345,
+        "h": 367
+      }
+    },
+    {
+      "id": "wacky-helmet-profile",
+      "subject": "wacky-helmet",
+      "view": "profile",
+      "include": false,
+      "rect": {
+        "x": 767,
+        "y": 1415,
+        "w": 329,
+        "h": 367
+      }
+    },
+    {
+      "id": "wacky-helmet-up",
+      "subject": "wacky-helmet",
+      "view": "up",
+      "include": false,
+      "rect": {
+        "x": 1112,
+        "y": 1415,
+        "w": 292,
+        "h": 367
+      }
+    },
+    {
+      "id": "wacky-helmet-down",
+      "subject": "wacky-helmet",
+      "view": "down",
+      "include": false,
+      "rect": {
+        "x": 1415,
+        "y": 1415,
+        "w": 324,
+        "h": 367
+      }
+    },
+    {
+      "id": "variant-c-front",
+      "subject": "variant-c",
+      "view": "front",
+      "include": true,
+      "rect": {
+        "x": 62,
+        "y": 1948,
+        "w": 335,
+        "h": 379
+      }
+    },
+    {
+      "id": "variant-c-three-quarter",
+      "subject": "variant-c",
+      "view": "three-quarter",
+      "include": true,
+      "rect": {
+        "x": 430,
+        "y": 1948,
+        "w": 312,
+        "h": 379
+      }
+    },
+    {
+      "id": "variant-c-profile",
+      "subject": "variant-c",
+      "view": "profile",
+      "include": true,
+      "rect": {
+        "x": 785,
+        "y": 1948,
+        "w": 290,
+        "h": 379
+      }
+    },
+    {
+      "id": "variant-c-up",
+      "subject": "variant-c",
+      "view": "up",
+      "include": true,
+      "rect": {
+        "x": 1085,
+        "y": 1948,
+        "w": 340,
+        "h": 379
+      }
+    },
+    {
+      "id": "variant-c-down",
+      "subject": "variant-c",
+      "view": "down",
+      "include": true,
+      "rect": {
+        "x": 1415,
+        "y": 1948,
+        "w": 315,
+        "h": 379
+      }
+    }
+  ]
+}
