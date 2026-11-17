@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import sharp from 'sharp';
 import { sha256 } from './crop-board.mjs';
-import { decode, fitCircle, fitParallelEdges, measureCrop, ratios, run } from './measure.mjs';
+import { decode, fitCircle, fitParallelEdges, measureCrop, mergeSplitEyeball, ratios, run, segment } from './measure.mjs';
 
 const BACKGROUND = [245, 235, 220];
 const SKIN = [230, 170, 130];
@@ -13,13 +13,16 @@ const HAIR = [230, 120, 40];
 const WHITE = [240, 240, 235];
 const GREY = [200, 200, 200];
 const DARK = [40, 30, 30];
+/** Shaded eyeball: low enough in value and high enough in saturation to be classed as skin. */
+const SHADE = [190, 165, 140];
 
 /**
  * A synthetic clay head: a 200 px wide skin cylinder under a hair cap, two eye whites of radius 30
  * with pupils, a dark mouth line and a small grey disc with a dark centre (a headset stand-in that
- * must not count as an eye).
+ * must not count as an eye). With `shade`, the part of each eye more than `shade` radii below its
+ * centre is drawn in shaded eyeball colour, as on the concept art. `rightRadius` sets the right eye.
  */
-function drawFace({ upsideDown = false } = {}) {
+function drawFace({ upsideDown = false, shade = null, rightRadius = 30 } = {}) {
   const w = 400, h = 500;
   const rgb = Buffer.alloc(w * h * 3);
   const put = (x, y, c) => rgb.set(c, ((upsideDown ? h - 1 - y : y) * w + x) * 3);
@@ -32,8 +35,14 @@ function drawFace({ upsideDown = false } = {}) {
   rect(0, 0, w, h, BACKGROUND);
   rect(100, 140, 300, 460, SKIN);
   rect(90, 60, 310, 150, HAIR);
-  disc(160, 230, 30, WHITE);
-  disc(240, 232, 30, WHITE);
+  for (const [cx, cy, r] of [[160, 230, 30], [240, 232, rightRadius]]) {
+    disc(cx, cy, r, WHITE);
+    if (shade !== null) {
+      for (let y = Math.ceil(cy + shade * r); y <= Math.ceil(cy + r); y++) {
+        for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= r) put(x, y, SHADE);
+      }
+    }
+  }
   disc(165, 235, 7, DARK);
   disc(245, 236, 7, DARK);
   rect(175, 330, 225, 334, DARK);
@@ -83,6 +92,47 @@ test('a synthetic head is measured without flags and the decoy disc is dropped',
   const r = ratios(landmarks);
   assert.ok(Math.abs(r.eyeSpacing - 0.4) < 0.01 && Math.abs(r.mouthWidth - 0.245) < 0.01, JSON.stringify(r));
   assert.ok(r.mouthBelowEyes > 0.45);
+});
+
+test('an eye circle includes the shaded underside of the eyeball', () => {
+  const { landmarks, flags } = measureFace({ shade: 0.3 });
+  assert.deepEqual(flags, []);
+  for (const [eye, cx, cy] of [[landmarks.eyes[0], 160, 230], [landmarks.eyes[1], 240, 232]]) {
+    assert.equal(eye.fit, 'eyeball');
+    assert.ok(Math.hypot(eye.cx - cx, eye.cy - cy) < 1, `eye centre ${eye.cx},${eye.cy}`);
+    assert.ok(Math.abs(eye.r - 30) < 1.5, `eye radius ${eye.r}`);
+  }
+});
+
+test('eyes of very different radius are flagged', () => {
+  const { landmarks, flags } = measureFace({ rightRadius: 18 });
+  assert.equal(landmarks.eyes.length, 2);
+  assert.ok(flags.some((f) => f.startsWith('eye radii differ')), JSON.stringify(flags));
+});
+
+/** A skin rectangle with plain eye-white discs [cx, cy, r], decoded and segmented. */
+function eyeDiscs(discs) {
+  const w = 400, h = 500, rgb = Buffer.alloc(w * h * 3);
+  const put = (x, y, c) => rgb.set(c, (y * w + x) * 3);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) put(x, y, x >= 100 && x < 300 && y >= 140 && y < 460 ? SKIN : BACKGROUND);
+  for (const [cx, cy, r] of discs) {
+    for (let y = Math.floor(cy - r); y <= cy + r; y++) for (let x = Math.floor(cx - r); x <= cx + r; x++) if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= r) put(x, y, WHITE);
+  }
+  const img = decode(rgb, w, h, 3);
+  return { img, cls: segment(img).cls, w, h };
+}
+const eyeAt = (cx, cy, r) => ({ circle: { cx, cy, r, coverage: 0.3 }, own: [], white: 0.9, area: 100 });
+
+test('two small circles on halves of one eyeball are merged into the eyeball', () => {
+  const { img, cls, w, h } = eyeDiscs([[200, 240, 40]]);
+  const merged = mergeSplitEyeball(img, cls, w, h, [eyeAt(188, 228, 22), eyeAt(211, 252, 24)]);
+  assert.ok(merged?.merged, 'expected a merged eye');
+  assert.ok(Math.hypot(merged.circle.cx - 200, merged.circle.cy - 240) < 1 && Math.abs(merged.circle.r - 40) < 1.5, JSON.stringify(merged.circle));
+});
+
+test('two overlapping eyes are not merged', () => {
+  const { img, cls, w, h } = eyeDiscs([[170, 240, 30], [222, 242, 30]]);
+  assert.equal(mergeSplitEyeball(img, cls, w, h, [eyeAt(170, 240, 30), eyeAt(222, 242, 30)]), null);
 });
 
 test('the mouth is found on an upside-down head without assuming which side is down', () => {

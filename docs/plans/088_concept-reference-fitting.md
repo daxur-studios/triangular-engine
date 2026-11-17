@@ -84,7 +84,7 @@ generation itself. ER 088 lists these as candidate later plans.
 | body-proportions     | planned |
 | second-asset-class   | planned |
 
-<!-- tri:review version="1" scope-hash="85a44467a9d1188132e477669238e42211cfecbcac23dc0329e94f58bfbccfbe" reviewed="2026-11-17" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="4d9725373fb1866c5393da01845db4bde6a9bd1d6e77ca2c5f89d1fcd4c2610f" reviewed="2026-11-17" reviewer="agent" -->
 <!-- tri:item id="Q1" kind="intent" applies-to="concept-measurement,preset-regression" blocks="none" state="open" -->
 
 - [ ] Where do concept images and measured specs live: may crops be committed to this public repository, or do
@@ -113,8 +113,9 @@ generation itself. ER 088 lists these as candidate later plans.
   - Next action: an agent runs the measurement on the fifteen crops and records repeatability and the number of
     developer corrections in the ER.
   - Resolution: yes. The developer corrected 4 of 15 crops (7 of 27 eye circles, all placed high). Every miss was
-    flagged and reruns are identical. The corrections share one cause, a shaded eyeball underside, which the
-    script can learn (ER 088, 2026-11-17).
+    flagged and reruns are identical. The corrections share one cause, a shaded eyeball underside. The script
+    now measures the whole eyeball, the developer approved its output without corrections, and the overrides
+    were retired (ER 088, 2026-11-17).
     <!-- /tri:item -->
 
 <!-- tri:item id="I2" kind="investigation" applies-to="camera-and-shape-fit,calibration" blocks="calibration" state="open" -->

@@ -290,6 +290,128 @@ colours, or with coloured marker dots. The agent's view, a judgement and not tes
 - The fallback for I2 already names fixed-layout sheets made from the Plan 068 reference prompts. If I2 fails, a
   regenerated sheet should ask for flat colours there.
 
+### 2026-11-17 — Second-model review of phase 1 (Fable subagent, Q&A; corrections to the entry above)
+
+The developer asked for a Fable review of the phase-1 work. The image-generation idea above is parked. The agent
+checked the review's concrete claims against the spec and on close-ups.
+
+**Corrections to the previous entry.**
+
+- "Front-view eye radius is 0.24 to 0.27" holds only for the two overridden fronts. orange-pigtails-front is still
+  0.21 to 0.22. The spec now mixes two methods: 7 circles from the loose whole-eyeball mask, 20 from the strict
+  eye-white mask. The 20 probably carry a smaller bias of the same sign.
+- "Every miss was flagged" is misleading. The flags covered the misses (landmarks not found). They did not cover the
+  errors that mattered: two of the four corrected crops had no flags at all, and no flag pointed at the eye bias.
+- Two further unflagged errors were missed by both the agent and the board review, and the agent confirmed them on
+  close-ups:
+  - goofy-profile: the far eye circle has a 19 px radius against 40 px for the near eye; the visible crescent
+    belongs to a full-size eyeball.
+  - variant-c-profile: two 21 px circles sit on one large near eyeball, which has a radius of roughly 35 to 40 px.
+- The board is too small to show a 3 px bias. The zoomed overlays, not the board, settled the corrections.
+
+**I1 stands, with a caveat.** The correction count is low, but unflagged errors exist, so the checkpoint cannot
+yet be limited to flagged crops. The helmet row has not been tried.
+
+**Risks the review raised in `measure.mjs`** (not yet acted on):
+
+- No flag fires when two eye radii differ strongly, or when one pupil could belong to two circles.
+- Overrides are applied after measurement, so head, mouth and flags are not recomputed. Overrides replace the whole
+  eyes array and are keyed by crop id without the crop hash.
+- Ratios use image axes, not head axes, so they are wrong under roll.
+- The tests have no shaded, overlapping or tilted eye, and no test makes a flag fire.
+- The refit that produced the override values lives in a scratch script outside the tool.
+
+**Proposed order (the review's ranking, which the agent agrees with).**
+
+1. Teach the script the shaded eyeball and add an eye-radius mismatch flag. Acceptance: it reproduces the seven
+   corrected circles within about 2 px without overrides. This moves the other 20 circles, so the developer needs
+   one more board review, against the plan's "approved values are frozen" rule. Say so when asking.
+2. Then a quick check that the views agree, using only measured ratios that do not depend on yaw.
+3. Model-probes in parallel.
+4. Ask Q1 and declare `sharp`.
+
+The review also lists gaps in the plan: a defined mapping from concept landmark to model probe, a way to mark
+landmarks that are visible but missed, weights per landmark for the solver, and a trial on a second sheet.
+
+### 2026-11-17 — concept-measurement: the script measures the whole eyeball; board sent for a second review
+
+The developer approved item 1 of the order above ("Yes, fix the script").
+
+**Change in `measure.mjs`.** Each eye circle fitted to the eye-white class is refitted to the whole eyeball
+(`refitEyeball`):
+
+- The eyeball mask takes every non-background pixel within 1.5 radii of the first circle whose saturation is under
+  0.38 with a value over 140, or whose value is under 80.
+- The fit uses the connected region with the most pixels inside the first circle, with holes filled.
+- Rim points on the search window or the image edge are ignored. The circle is fitted once, then again without
+  points more than 3 px off.
+- The refit is rejected, and the first circle kept, if the radius shrinks by more than 10%, more than doubles, or
+  the centre moves outside the first circle.
+- The whiteness test in eye selection still uses the first circle. The spec records which fit each eye has
+  (`fit: "eyeball"` or `"eye-white"`).
+- A new flag fires when the smaller eye radius is under 0.7 of the larger (`EYE_RADIUS_RATIO_LIMIT`). Far eyes in
+  three-quarter views measure 0.75 to 0.8 on this sheet.
+
+Head edges and mouths are unchanged to within 1 px.
+
+**Acceptance against the seven corrected circles, run without overrides.**
+
+| Circle | Distance from the override (px) |
+| --- | --- |
+| variant-c-front, both eyes; goofy-front, both eyes; goofy-three-quarter left; variant-c-three-quarter left | 0.07 or less |
+| variant-c-three-quarter right | 3.25 (centre 3 px lower than the override) |
+
+The scratch refit that produced the overrides also counted background pixels. The tool does not, and that explains
+the 3.25 px gap. Counting background reproduces all seven within 0.07 px, but it lets the far eye of
+goofy-three-quarter grow into the background and drops an eye on variant-c-profile. So the tool keeps background
+out. The far eye is an oval, which a circle cannot match exactly; both fits fall inside it.
+
+**Other changes on the board.**
+
+- All other eye circles grow by 3 to 13 px in radius and move down to cover the shaded underside. Zoomed overlays
+  of all five up and down views, both profiles and orange-pigtails-front show the new circles on the eyeball
+  outline.
+- goofy-three-quarter right eye, which the developer had accepted as measured, moves 7.6 px. The radius goes from
+  28.9 to 33.0 px.
+- goofy-profile: the too-small far eye is gone, and the crop is flagged "found 1 eye". The near eye now covers
+  the whole eyeball (r 47.8 px).
+- orange-pigtails-profile is newly flagged "eye radii differ: 29.33 px against 42.41 px".
+- Two "rim visible on under 25%" flags disappear: goofy-three-quarter and goofy-up far eyes.
+- Not fixed: variant-c-profile still has two 22 to 24 px circles on one large eyeball. The crop stays flagged
+  ("eye 0: no pupil inside the circle"), but the flag does not name the real problem.
+
+**Tests.** Two specs were added. In the first, a synthetic eye with its lower part drawn in a shaded colour, which
+segmentation classes as skin, must come out within 1 px of its true centre and radius. Without the shaded pixels
+the same eye measures 6.4 px high and 4.8 px small. In the second, a 18 px eye beside a 30 px eye must raise the
+radius flag. All 11 specs pass. Two reruns without overrides give an identical spec (sha256 `3570ca06…ca1b`) and
+an identical board.
+
+**Overrides.** The overrides file is unchanged. The output under `artifacts/` was written without it, so the board
+shows only the script. The developer reviews that board. If it is approved, the overrides become redundant and
+can be retired, so all 27 circles come from one method. This second review is an exception to the plan's
+"approved values are frozen" rule, because every eye circle moved.
+
+### 2026-11-17 — concept-measurement: developer approves the script-only board; overrides retired
+
+**Developer review.** The developer checked the script-only board (spec sha256 `3570ca06…ca1b`, board sha256
+`f0c8cf5a…cf43`) and answered "Looks right". No corrections were asked for. This includes the three cases the
+previous entry pointed out: the variant-c-three-quarter far eye 3 px below its old override, the moved
+goofy-three-quarter right eye and the dropped goofy-profile far eye.
+
+**Overrides retired.** `tools/concept-fitting/manifests/headshots-and-angles.overrides.json` was deleted from the
+working tree; the staged copy in the index is still there until the developer stages the deletion. The four
+corrected crops are recorded in the entry "concept-measurement done: developer review, 4 corrections" above, and
+the override mechanism and its spec stay in place for future corrections. Two runs of the default command, now
+without overrides, gave spec sha256 `3570ca06…ca1b` and the same board. This is the approved measurement for this
+sheet. All 27 eye circles come from one method.
+
+**Still open from this phase, not blocking model-probes.**
+
+- variant-c-profile has two small circles on one large eyeball. The developer accepted the board with this crop
+  flagged. The camera-and-shape-fit phase must not use its eyes until the flag names the real fault or the crop
+  is corrected.
+- `sharp` is still an undeclared dependency, and Q1 (where concept images and specs live) is still open.
+
 ## Scope history
 
 <!-- tri:scope-history -->

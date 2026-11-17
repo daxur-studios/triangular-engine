@@ -25,6 +25,13 @@ export const BACKGROUND_TOLERANCE = 9;
  */
 export const RIM_RESIDUAL_LIMIT = 2;
 
+/**
+ * Smallest ratio of the smaller to the larger eye radius in one crop before it is flagged. Both eyes
+ * are drawn the same size; the far eye of a three-quarter view measures 0.75 to 0.8 of the near one
+ * on the first sheet, while a circle fitted to part of an eye measures under 0.5.
+ */
+export const EYE_RADIUS_RATIO_LIMIT = 0.7;
+
 export const CLASS = { background: 0, skin: 1, eyeWhite: 2, dark: 3, hair: 4, lip: 5, other: 6 };
 
 const round = (value) => Math.round(value * 100) / 100;
@@ -393,7 +400,7 @@ function ringAround(list, w, h, steps) {
   return layer;
 }
 
-function measureEyes(cls, w, h, pupils) {
+function measureEyes(cls, w, h, pupils, img) {
   const white = open(cls.map((c) => (c === CLASS.eyeWhite ? 1 : 0)), w, h, 2);
   for (const p of pupils) for (const i of p.pixels) white[i] = 1;
   const { labels, pixels } = components(white, w, h);
@@ -424,14 +431,115 @@ function measureEyes(cls, w, h, pupils) {
       }
       if (second >= 0) seeds.push({ cx: (second % w) + 0.5, cy: Math.floor(second / w) + 0.5, r: dist[second] });
     }
-    for (const circle of fitCircles(points, seeds)) {
+    for (const strict of fitCircles(points, seeds)) {
+      // The eye-white class keeps only the bright part of the eyeball. The whiteness test runs on
+      // that fit; the reported circle is the whole eyeball, shaded underside included.
+      const white = whiteInside(cls, w, h, strict);
+      const circle = img ? (refitEyeball(img, cls, w, h, strict) ?? strict) : strict;
       const pupil = own
         .map((p) => ({ p, d: Math.hypot(p.cx - circle.cx, p.cy - circle.cy) }))
         .sort((a, b) => a.d - b.d)[0];
-      eyes.push({ circle, pupil: pupil && pupil.d <= circle.r * 1.05 ? pupil.p : null, area: pixels[l].length });
+      eyes.push({ circle, strict, white, own, pupil: pupil && pupil.d <= circle.r * 1.05 ? pupil.p : null, area: pixels[l].length });
     }
   }
-  return selectEyes(cls, w, h, eyes);
+  const selected = selectEyes(cls, w, h, eyes);
+  if (!img || selected.eyes.length !== 2) return selected;
+  const merged = mergeSplitEyeball(img, cls, w, h, selected.eyes);
+  return merged ? { eyes: [merged], dropped: selected.dropped + 1 } : selected;
+}
+
+/** Two eye circles closer than this share of their radius sum are tried as one split eyeball. */
+export const SPLIT_EYEBALL_RATIO = 1.1;
+
+/**
+ * Returns one eye in place of the two selected eyes when they are halves of one eyeball, or null.
+ * A bright highlight the colour of the backdrop can join the background and cut an eye white in
+ * two; each half then gets its own small circle. A pair closer than SPLIT_EYEBALL_RATIO of its
+ * radius sum is refitted as one eyeball from a circle around both, and merged only when that fit
+ * is tight (rim residual within RIM_RESIDUAL_LIMIT) and sees at least as much rim as either half.
+ * Two separate eyes fail this, because no one circle follows both outlines.
+ */
+export function mergeSplitEyeball(img, cls, w, h, [a, b]) {
+  const p = a.circle, q = b.circle;
+  const d = Math.hypot(p.cx - q.cx, p.cy - q.cy);
+  if (d >= SPLIT_EYEBALL_RATIO * (p.r + q.r)) return null;
+  const around = { cx: (p.cx + q.cx) / 2, cy: (p.cy + q.cy) / 2, r: 0.75 * (d / 2 + Math.max(p.r, q.r)) };
+  const fit = refitEyeball(img, cls, w, h, around);
+  if (!fit || fit.rms > RIM_RESIDUAL_LIMIT || fit.coverage < Math.max(p.coverage ?? 0, q.coverage ?? 0)) return null;
+  const own = [...new Set([...a.own, ...b.own])];
+  const pupil = own.map((o) => ({ o, d: Math.hypot(o.cx - fit.cx, o.cy - fit.cy) })).sort((x, y) => x.d - y.d)[0];
+  return {
+    circle: fit, strict: null, merged: true, own, area: a.area + b.area,
+    white: Math.max(a.white, b.white),
+    pupil: pupil && pupil.d <= fit.r * 1.05 ? pupil.o : null,
+  };
+}
+
+/** Saturation below which, with value above EYEBALL_MIN_VALUE, a pixel can be shaded eyeball. */
+export const EYEBALL_MAX_SATURATION = 0.38;
+/** Value above which, with low saturation, a pixel can be shaded eyeball. */
+export const EYEBALL_MIN_VALUE = 140;
+
+/** Inlier count, RMS residual and angular coverage (36 bins) of rim points within 2 px of a circle. */
+function rimStats(points, c) {
+  const inliers = points.filter(([x, y]) => Math.abs(Math.hypot(x - c.cx, y - c.cy) - c.r) <= 2);
+  const bins = new Set(inliers.map(([x, y]) => Math.floor(((Math.atan2(y - c.cy, x - c.cx) + Math.PI) / (2 * Math.PI)) * 36) % 36));
+  const rms = inliers.length ? Math.sqrt(inliers.reduce((s, [x, y]) => s + (Math.hypot(x - c.cx, y - c.cy) - c.r) ** 2, 0) / inliers.length) : Infinity;
+  return { rms, coverage: bins.size / 36, inliers: inliers.length };
+}
+
+/**
+ * Refits an eye circle to the whole eyeball. The eye-white class stops where the eyeball turns to
+ * shade, so a circle fitted to it sits high and small. Here the eyeball is every pale, unsaturated
+ * or dark pixel within 1.5 radii of the first circle, taken as the connected region with most
+ * pixels inside it; its outline is fitted, ignoring points on the search window, and refitted once
+ * without points more than 3 px off. Returns null, keeping the first circle, when the refit is not
+ * plausibly the same eye: it shrinks by more than 10%, more than doubles, or moves its centre
+ * outside the first circle.
+ */
+export function refitEyeball(img, cls, w, h, first) {
+  const R = 1.5 * first.r;
+  const inside = (x, y, r) => Math.hypot(x + 0.5 - first.cx, y + 0.5 - first.cy) <= r;
+  const x0 = Math.max(0, Math.floor(first.cx - R)), x1 = Math.min(w - 1, Math.ceil(first.cx + R));
+  const y0 = Math.max(0, Math.floor(first.cy - R)), y1 = Math.min(h - 1, Math.ceil(first.cy + R));
+  const mask = new Uint8Array(w * h);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const i = y * w + x;
+      if (cls[i] === CLASS.background || !inside(x, y, R)) continue;
+      const S = img.sat[i], V = img.val[i];
+      mask[i] = (S < EYEBALL_MAX_SATURATION && V > EYEBALL_MIN_VALUE) || V < 80 ? 1 : 0;
+    }
+  }
+  const { labels, pixels } = components(mask, w, h);
+  const votes = new Map();
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const l = labels[y * w + x];
+      if (l && inside(x, y, first.r)) votes.set(l, (votes.get(l) ?? 0) + 1);
+    }
+  }
+  const top = [...votes].sort((a, b) => (b[1] - a[1]) || (a[0] - b[0]))[0];
+  if (!top) return null;
+  const region = new Uint8Array(w * h);
+  for (const i of pixels[top[0]]) region[i] = 1;
+  const solid = fillHoles(region, w, h);
+  const points = [];
+  for (let y = Math.max(1, y0); y <= Math.min(h - 2, y1); y++) {
+    for (let x = Math.max(1, x0); x <= Math.min(w - 2, x1); x++) {
+      const i = y * w + x;
+      if (!solid[i] || !neighbours4(i, w, h).some((j) => !solid[j]) || !inside(x, y, R - 1.5)) continue;
+      points.push([x + 0.5, y + 0.5]);
+    }
+  }
+  if (points.length < 12) return null;
+  let fit = fitCircle(points);
+  if (!fit) return null;
+  const near = points.filter(([x, y]) => Math.abs(Math.hypot(x - fit.cx, y - fit.cy) - fit.r) < 3);
+  if (near.length < 12) return null;
+  fit = fitCircle(near, fit);
+  if (!fit || !(fit.r >= 0.9 * first.r) || fit.r > 2 * first.r || Math.hypot(fit.cx - first.cx, fit.cy - first.cy) > first.r) return null;
+  return { ...fit, ...rimStats(near, fit) };
 }
 
 /** Share of the pixels inside a circle that are eye white or pupil. */
@@ -458,7 +566,7 @@ function whiteInside(cls, w, h, c) {
  */
 function selectEyes(cls, w, h, eyes) {
   const scored = eyes
-    .map((e) => ({ ...e, white: whiteInside(cls, w, h, e.circle) }))
+    .map((e) => ({ ...e, white: e.white ?? whiteInside(cls, w, h, e.circle) }))
     .filter((e) => e.white >= 0.5 && e.circle.inliers >= 8)
     .sort((a, b) => (b.circle.coverage * b.white - a.circle.coverage * a.white) || (a.circle.cx - b.circle.cx));
   const distinct = [];
@@ -601,7 +709,7 @@ export function measureCrop(img) {
   const { cls, headPixels } = segment(img);
   const { width: w, height: h } = img;
   const pupils = findPupils(cls, w, h, headPixels);
-  const { eyes, dropped } = measureEyes(cls, w, h, pupils);
+  const { eyes, dropped } = measureEyes(cls, w, h, pupils, img);
   const head = measureHeadEdges(cls, w, h, eyes);
   const mouth = measureMouth(cls, w, h, eyes, head);
   const flags = [];
@@ -610,6 +718,10 @@ export function measureCrop(img) {
     if (!e.pupil) flags.push(`eye ${k}: no pupil inside the circle`);
     if (e.circle.coverage < 0.25) flags.push(`eye ${k}: rim visible on ${Math.round(e.circle.coverage * 100)}% of the circle`);
     if (e.circle.rms > RIM_RESIDUAL_LIMIT) flags.push(`eye ${k}: rim residual ${round(e.circle.rms)} px`);
+  }
+  if (eyes.length === 2) {
+    const [small, large] = eyes.map((e) => e.circle.r).sort((a, b) => a - b);
+    if (small < EYE_RADIUS_RATIO_LIMIT * large) flags.push(`eye radii differ: ${round(small)} px against ${round(large)} px`);
   }
   if (!head) flags.push('head edges not found');
   else {
@@ -622,7 +734,7 @@ export function measureCrop(img) {
   const landmarks = {
     eyes: eyes.map((e) => ({
       cx: round(e.circle.cx), cy: round(e.circle.cy), r: round(e.circle.r),
-      rmsPx: round(e.circle.rms), rimCoverage: round(e.circle.coverage),
+      rmsPx: round(e.circle.rms), rimCoverage: round(e.circle.coverage), fit: e.merged ? 'merged-eyeball' : e.circle === e.strict ? 'eye-white' : 'eyeball',
       pupil: e.pupil ? { cx: round(e.pupil.cx), cy: round(e.pupil.cy), areaPx: e.pupil.area } : null,
     })),
     head,
