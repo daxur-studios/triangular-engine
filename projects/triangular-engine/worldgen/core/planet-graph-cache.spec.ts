@@ -1,9 +1,16 @@
 import { buildPlanetGraphCore, planetGraphCacheKey, prewarmPlanetGraphs } from './planet-graph';
 
 describe('planet graph cache', () => {
-  it('returns the same graph for the same recipe', () => {
+  it('returns independent graphs for the same recipe', () => {
     const recipe = { cellCount: 60, seed: 9101, relaxationIterations: 1 };
-    expect(buildPlanetGraphCore(recipe)).toBe(buildPlanetGraphCore({ ...recipe }));
+    const first = buildPlanetGraphCore(recipe);
+    const originalCenter = first.cells[0].center.x;
+    first.cells[0].center.x = 123;
+    first.cells[0].neighbors.length = 0;
+    const second = buildPlanetGraphCore({ ...recipe });
+    expect(second).not.toBe(first);
+    expect(second.cells[0].center.x).toBe(originalCenter);
+    expect(second.cells[0].neighbors.length).toBeGreaterThan(0);
   });
 
   it('keys differ by seed and cell count, and fill in defaults', () => {

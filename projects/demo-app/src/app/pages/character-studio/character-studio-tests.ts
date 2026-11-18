@@ -10,8 +10,8 @@ import {
   type CapsuleHairStyleId,
   type CapsuleHandActionMode,
   type CapsuleLocomotionMode,
-  type ExtendedEmotionName,
 } from 'triangular-engine/characters';
+import type { CharacterStudioExpression } from './character-studio-contributions';
 import type { VisualFocusTargetId } from './character-studio-focus';
 
 export type CameraFramingPreset = 'front' | 'back' | 'face-close-up' | 'head-close-up' | 'three-quarter' | 'profile' | 'full-shot';
@@ -25,7 +25,7 @@ export type CharacterStudioPerformanceMotion = 'idle' | 'walk' | 'walk-path';
 export interface CharacterStudioTestSettings {
   readonly characterType: 'cat' | 'human';
   readonly presetId: string;
-  readonly emotion: ExtendedEmotionName;
+  readonly emotion: CharacterStudioExpression;
   readonly gait: CapsuleCatGaitMode | CapsuleLocomotionMode;
   readonly cameraFraming: CameraFramingPreset;
   readonly cameraFovDegrees?: number;

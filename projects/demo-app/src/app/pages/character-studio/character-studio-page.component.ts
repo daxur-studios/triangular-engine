@@ -24,7 +24,8 @@ import { CapsuleCharacterActor } from 'triangular-engine/procedural';
 import {
   ALL_CAPSULE_CHARACTER_PRESETS,
   EXTENDED_EMOTION_NAMES,
-  type ExtendedEmotionName,
+  preProcessText,
+  wordsToVisemes,
 } from 'triangular-engine/characters';
 import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestSetting } from 'triangular-engine/testing';
@@ -53,11 +54,15 @@ import type { VisualFocusTargetId } from './character-studio-focus';
 import {
   createCharacterStudioContributions,
   type CharacterStudioContribution,
+  type CharacterStudioExpression,
   type CharacterStudioFamilyId,
 } from './character-studio-contributions';
-import { EXPERIMENTAL_PIGTAIL_HEAD_ID } from './experimental-pigtail-head';
+import { EXPERIMENTAL_PIGTAIL_PRESETS } from './experimental-pigtail-head';
 
 type CharacterStudioView = 'front' | 'three-quarter' | 'profile' | 'back' | 'face' | 'hair';
+
+const speechPreviewText = 'Hello, look at me talk!';
+const speechPreviewTrack = wordsToVisemes(preProcessText(speechPreviewText));
 
 interface PerformanceActorPlacement {
   readonly root: Group;
@@ -86,6 +91,7 @@ export class CharacterStudioPageComponent {
   private readonly screenshot = inject(ScreenshotService);
   private readonly contributions = createCharacterStudioContributions();
   private readonly controlsRevision = signal(0);
+  private speechUtterance?: SpeechSynthesisUtterance;
   private elapsedSeconds = 0;
   private variantSeed = 1;
   private cameraFraming: CameraFramingPreset = 'three-quarter';
@@ -113,9 +119,11 @@ export class CharacterStudioPageComponent {
   readonly selectedFamilyId = signal<CharacterStudioFamilyId>('human');
   readonly activeFamily = computed(() => this.contributions[this.selectedFamilyId()]);
   readonly selectedPresetId = signal(this.contributions.human.defaultPresetId);
-  readonly experimentalHeadSelected = computed(() => this.selectedPresetId() === EXPERIMENTAL_PIGTAIL_HEAD_ID);
+  readonly experimentalHeadSelected = computed(() =>
+    EXPERIMENTAL_PIGTAIL_PRESETS.some(preset => preset.value === this.selectedPresetId()));
+  readonly speechPreviewNotice = signal('');
   readonly selectedMotionId = signal('idle');
-  readonly selectedExpression = signal<ExtendedEmotionName>('happy');
+  readonly selectedExpression = signal<CharacterStudioExpression>('happy');
   readonly autoRotate = signal(false);
   readonly runnerReady = signal(false);
   readonly runnerBusy = signal(false);
@@ -132,8 +140,12 @@ export class CharacterStudioPageComponent {
     { id: 'face', label: 'Face' },
     { id: 'hair', label: 'Head' },
   ];
-  readonly expressionOptions: readonly { readonly id: ExtendedEmotionName; readonly label: string }[] =
-    EXTENDED_EMOTION_NAMES.map((id) => ({ id, label: id.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) }));
+  readonly expressionOptions = computed(() => {
+    const ids: readonly CharacterStudioExpression[] = this.experimentalHeadSelected()
+      ? [...EXTENDED_EMOTION_NAMES, 'awe']
+      : EXTENDED_EMOTION_NAMES;
+    return ids.map(id => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
+  });
   readonly testHistory = [
     CAPSULE_VISUAL_VERIFICATION_SUITE_V1,
     CAPSULE_FACIAL_EMOTIONS_SUITE_V1,
@@ -227,8 +239,7 @@ export class CharacterStudioPageComponent {
       this.selectedPresetId.set(settings.presetId);
       family.setMotion(settings.gait);
       this.selectedMotionId.set(settings.gait);
-      family.setExpression(settings.emotion);
-      this.selectedExpression.set(settings.emotion);
+      this.selectExpression(settings.emotion);
       if (settings.hairStyleId !== undefined) family.setControl('hairStyleId', settings.hairStyleId);
       if (settings.facialHairId !== undefined) family.setControl('facialHairId', settings.facialHairId);
       if (settings.hairColor !== undefined) family.setControl('hairColor', settings.hairColor);
@@ -381,6 +392,7 @@ export class CharacterStudioPageComponent {
       });
 
     this.destroyRef.onDestroy(() => {
+      this.stopSpeechPreview();
       this.clearPerformanceScenario();
       for (const family of this.familyOptions) {
         this.engine.scene.remove(family.root);
@@ -397,6 +409,7 @@ export class CharacterStudioPageComponent {
 
   selectFamily(id: CharacterStudioFamilyId): void {
     if (id === this.selectedFamilyId()) return;
+    this.stopSpeechPreview();
     this.selectedFamilyId.set(id);
     const family = this.activeFamily();
     this.selectedPresetId.set(family.defaultPresetId);
@@ -404,7 +417,7 @@ export class CharacterStudioPageComponent {
     this.selectedMotionId.set(initialMotion);
     family.setMotion(initialMotion);
     family.selectPreset(family.defaultPresetId);
-    family.setExpression(this.selectedExpression());
+    this.selectExpression(this.selectedExpression());
     this.syncFamilyVisibility();
     this.activeFocusTarget = undefined;
     this.applyView('three-quarter');
@@ -414,9 +427,14 @@ export class CharacterStudioPageComponent {
   selectPreset(presetId: string): void {
     if (presetId === 'custom') return;
     const wasExperimental = this.experimentalHeadSelected();
+    const changed = presetId !== this.selectedPresetId();
+    if (wasExperimental && changed) this.stopSpeechPreview();
     this.activeFamily().selectPreset(presetId);
     this.selectedPresetId.set(presetId);
-    if (wasExperimental !== this.experimentalHeadSelected()) this.applyView(this.activeView());
+    if (changed && (wasExperimental || this.experimentalHeadSelected())) {
+      this.selectExpression(this.selectedExpression());
+      this.applyView(this.activeView());
+    }
     this.refreshControls();
   }
 
@@ -425,9 +443,53 @@ export class CharacterStudioPageComponent {
     this.selectedMotionId.set(motionId);
   }
 
-  selectExpression(expression: ExtendedEmotionName): void {
-    this.activeFamily().setExpression(expression);
-    this.selectedExpression.set(expression);
+  selectExpression(expression: CharacterStudioExpression): void {
+    const available = expression === 'awe' && !this.experimentalHeadSelected() ? 'neutral' : expression;
+    this.activeFamily().setExpression(available);
+    this.selectedExpression.set(available);
+  }
+
+  previewSpeech(): void {
+    const preview = this.contributions.human.speechPreview;
+    if (!this.experimentalHeadSelected() || this.runnerBusy() || !preview) return;
+    this.stopSpeechPreview();
+
+    const playWithoutVoice = () => {
+      preview.play(speechPreviewTrack);
+      this.speechPreviewNotice.set('Voice unavailable. Playing the mouth animation.');
+    };
+    if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') {
+      playWithoutVoice();
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(speechPreviewText);
+    utterance.lang = 'en';
+    this.speechUtterance = utterance;
+    let started = false;
+    utterance.onstart = () => {
+      if (this.speechUtterance !== utterance) return;
+      started = true;
+      preview.play(speechPreviewTrack);
+    };
+    utterance.onend = () => {
+      if (this.speechUtterance === utterance) this.speechUtterance = undefined;
+    };
+    utterance.onerror = () => {
+      if (this.speechUtterance !== utterance) return;
+      this.speechUtterance = undefined;
+      if (!started) playWithoutVoice();
+    };
+    window.speechSynthesis.speak(utterance);
+  }
+
+  private stopSpeechPreview(): void {
+    if (this.speechUtterance) {
+      this.speechUtterance = undefined;
+      window.speechSynthesis.cancel();
+    }
+    this.contributions.human.speechPreview?.stop();
+    this.speechPreviewNotice.set('');
   }
 
   setControl(controlId: string, value: string): void {
@@ -444,6 +506,7 @@ export class CharacterStudioPageComponent {
   }
 
   resetCharacter(): void {
+    this.stopSpeechPreview();
     const family = this.activeFamily();
     family.selectPreset(family.defaultPresetId);
     family.setMotion(family.id === 'cat' ? 'goofy_walk' : 'idle');
@@ -468,16 +531,18 @@ export class CharacterStudioPageComponent {
   applyView(view: CharacterStudioView): void {
     const family = this.activeFamily();
     const centerY = family.cameraTargetY;
-    this.activeView.set(view);
     this.activeFocusTarget = undefined;
 
     if (this.experimentalHeadSelected()) {
+      const experimentalView = view === 'hair' ? 'face' : view;
+      this.activeView.set(experimentalView);
       this.autoRotate.set(false);
-      this.cameraFraming = view === 'face' ? 'face-close-up' : view === 'hair' ? 'head-close-up' : view;
-      this.applyFocusTargetFraming('human-head-hair');
+      this.cameraFraming = experimentalView === 'face' ? 'face-close-up' : experimentalView;
+      this.applyFocusTargetFraming(experimentalView === 'face' ? 'human-head-hair' : 'human-full-body');
       return;
     }
 
+    this.activeView.set(view);
     switch (view) {
       case 'front':
         this.cameraFraming = 'front';
@@ -661,6 +726,7 @@ export class CharacterStudioPageComponent {
   }
 
   onTestProgress(progress: TestProgress | null): void {
+    if (progress && !this.runnerBusy() && this.experimentalHeadSelected()) this.stopSpeechPreview();
     this.runnerBusy.set(progress !== null);
     this.activeTestScenario.set(progress?.label ?? null);
   }

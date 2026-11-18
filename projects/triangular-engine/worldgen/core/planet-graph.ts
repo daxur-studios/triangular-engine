@@ -1,4 +1,4 @@
-import { createPersistentCache } from 'triangular-engine';
+import { createPersistentCache } from 'triangular-engine/cache';
 import { computeConvexHull3 } from './convex-hull3';
 import { buildDualCells } from './dual-cells';
 import { fibonacciSpherePoints } from './fibonacci-sphere';
@@ -62,13 +62,13 @@ export function prewarmPlanetGraphs(recipes: readonly IPlanetGraphCoreParams[]):
   return graphCache.preload(recipes.map(planetGraphCacheKey));
 }
 
-/** Builds the graph, or returns the stored copy when this recipe has been built before. */
+/** Builds a graph, reusing cached generation while giving each caller an independent mutable copy. */
 export function buildPlanetGraphCore(params: IPlanetGraphCoreParams): IPlanetGraphCore {
   const key = planetGraphCacheKey(params);
   const stored = graphCache.get(key);
-  if (stored) return stored;
+  if (stored) return structuredClone(stored);
   const graph = computePlanetGraphCore(params);
-  graphCache.set(key, graph);
+  graphCache.set(key, structuredClone(graph));
   return graph;
 }
 

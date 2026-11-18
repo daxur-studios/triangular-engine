@@ -149,6 +149,52 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 ### 2026-11-18 — Experimental pigtail head
 
 - **[decision]** Bring the approved pigtail head preview into Character Studio as an experimental human preset. Use the existing facial controller and check the neutral, happy and surprised expressions from the front and at 45° before generating variants.
+- **[action]** Added Orange Pigtails (Experimental Head) to the human presets. Its rounded capsule and curls come from the preview. Studio drives the surface mouth, brows, pupils and eyelids through the human actor's existing facial controller and projection.
+- **[verification]** Six focused headless specs passed. Captures from the running Studio showed the closed neutral mouth, upward smile and surprised O from both angles. Reset restored the original human and its motion controls. The expression sheet is local and can be regenerated with `node artifacts/concept-turnaround/check-studio-pigtails.mjs` followed by `python artifacts/concept-turnaround/studio-expression-sheet.py`.
+- **[verification]** The engine library build passed. The records check reported existing issues in Plans 081, 087 and 088 and reported no issue for Plan 074.
+
+### 2026-11-18 — Experimental pigtail speech
+
+- **[action]** Reused the earlier capsule mouth material on the experimental head. The head's proportions set the mouth position and scale. The same facial controller drives the rim, opening and tongue alongside the expression.
+- **[action]** Added a fixed speech line to the Studio expression panel. Browser speech starts the existing text-based mouth animation. If the voice is unavailable, the button still animates the line and shows an explanation. The tongue appears with the mouth opening.
+- **[verification]** Seven focused specs and the engine build passed. The demo app needed the cache entry in its own path map before the live build succeeded. Headless Chromium started and finished the native utterance in both views, and the mouth opened, exposed the tongue and returned to rest. The check also exercised reset and the silent fallback. The local contact sheet can be recreated with `node artifacts/concept-turnaround/check-studio-speech.mjs` followed by `python artifacts/concept-turnaround/studio-speech-sheet.py`. The preview uses estimated timing from text.
+
+### 2026-11-18 — Experimental pigtail eyes and Awe
+
+- **[action]** Replaced intersecting eyelid meshes with a continuous eye surface. Rounded the eyelid join visible in profile and attached the lashes to the animated upper eye. The lids cover the pupils during blinks.
+- **[action]** Added Awe to the experimental preset. The eyes look upward with pupils about twice their neutral diameter, the brows rise and the mouth parts slightly. Speech drives the mouth while the raised gaze holds, then the mouth settles back into Awe.
+- **[verification]** All 24 focused Studio specs and the engine build passed. Reviewed front, 45° and profile captures from the running demo. Live browser interaction checks confirmed speech release, reset and switching to the cat. Local-only contact sheet can be regenerated with `node artifacts/concept-turnaround/check-studio-eyes.mjs` followed by `python artifacts/concept-turnaround/studio-eyes-sheet.py`.
+
+### 2026-11-18 — Seeded pigtail heads
+
+- **[action]** Added Plum (7), Honey (4), and Chestnut (25) to the Studio preset list. One recipe varies head proportions, curl shape, palette and freckle placement. The approved orange preset uses the original proportions and colours. All four use the same facial controller and mouth and eye geometry in head-local coordinates.
+- **[verification]** All 28 focused Studio specs and the engine build passed. Returning to a seed reproduced its appearance. Reviewed front, 45° and profile captures and Awe at 45° for each variant. The live browser check observed a blink, speech with visible tongue, and return to Awe on all three seeds. Local-only contact sheet can be regenerated with `node artifacts/concept-turnaround/check-studio-variants.mjs` followed by `python artifacts/concept-turnaround/studio-variants-sheet.py`.
+- **[next]** Review the head silhouettes with the owner before choosing body proportions.
+
+### 2026-11-18 — Shared standing body for the pigtail presets
+
+- **[action]** Bruno reviewed the head lineup and approved proceeding with a shared body. The four presets now use one short teal torso, a neck matched to the selected head, and the existing procedural gloves, boots and curved limb meshes in a standing pose. The original preset is now labelled Orange Pigtails (Experimental).
+- **[action]** Front, 3/4, Profile and Back frame the entire character. Face frames the head for expression and speech checks.
+- **[verification]** All 29 focused Studio specs passed. In the live demo, front, 45° and profile stills showed the same grounded body on all four presets. Face zoomed in, Awe enlarged the pupils, and speech exposed the tongue and returned to Awe on all four. Switching back to the existing human and cat restored their controls. Local-only lineup: `artifacts/concept-turnaround/studio-body-sheet.png`. Regenerate with `node artifacts/concept-turnaround/check-studio-bodies.mjs` followed by `python artifacts/concept-turnaround/studio-body-sheet.py`.
+- **[verification]** The engine library build passed. The records check continues to report existing issues in Plans 081, 087 and 088. Plan 074 reported no issues.
+- **[next]** Review the full-body proportions before animating the standing rig.
+
+### 2026-11-18 — Synchronized concept and 3D review
+
+- **[finding]** The standing-body implementation was checked for grounded feet, connected limbs and working expressions. Its short teal torso and legs depart from the original full-body Orange Pigtails figure. The head preview gave a more direct visual check by putting the concept next to the live model at corresponding angles.
+- **[decision]** Carry the same slider, angle presets and overlay into the next Orange Pigtails body blockout. Use one character to compare the full silhouette to the original art before sharing the proportions across seeds or adding motion.
+- **[action]** Prepare one cropped reference per available angle with an explicit yaw, a scale and an anchor. Start with the original pigtail figure. Use front, three-quarter and profile references where available, keeping the pose and proportions consistent. Match the apparent angle in the art. For a standing character, anchor each crop on the floor under the body centre and normalize the reference set using a shared measurement such as head width.
+- **[action]** Use one yaw value for both panes. On slider input, orbit the live camera around a fixed target and display the reference cutout with the closest recorded yaw. Label the actual model yaw and cutout angle. Angle buttons set the yaw to a reference exactly. Use the same pixels-per-world-unit scale and baseline in both panes. For overlay, snap to a reference yaw and draw its cutout over the model at about half opacity. Suppress the overlay and show an alignment prompt when the slider moves away from a reference yaw.
+- **[action]** Compare the collar join, torso width, exposed leg length and boot size in the matched overlay before judging detail or adding variants. The working head example is local under `artifacts/concept-turnaround/`. Open `blockout-preview.html` to try it. The slider and overlay implementation is in `capsule-compare.mjs`, its markup in `blockout-template.html`, and its browser check in `check-blockout.mjs`. To adapt it, supply the new reference crops and scene model.
+- **[verification]** In headless Chromium, the model redrew at a one-degree slider step while the cutout held. The cutout switched when the slider crossed the midpoint to the next reference. The overlay snapped to 45°, cleared at 46° with an alignment prompt, and returned at the 45° preset.
+- **[action]** Extracted one transparent full-body Orange Pigtails reference from the original three-quarter concept using ImageGen and built a separate procedural blockout around the approved head. The overlay guided adjustments to the collar and torso widths, boot spacing, glove size and backpack. The concept angle is estimated at 38°. Front and profile currently show the 3D model alongside the fixed concept view.
+- **[verification]** Confirmed alpha around the figure and between the legs. Headless Chromium verified the orbit, fixed reference, overlay snapping and narrow layout. Evidence is local under `artifacts/concept-turnaround/`. From the saved cutout, run `node artifacts/concept-turnaround/build-full-body.mjs artifacts/concept-turnaround` to rebuild the fragment. The local browser preview is `full-body-preview.html`.
+
+### 2026-11-18 — Approved full-body spacesuit in Character Studio
+
+- **[action]** Replaced the small teal standing body in `experimental-pigtail-body.ts` with the approved cream spacesuit blockout (`artifacts/concept-turnaround/capsule-full-body.mjs`): cream torso and sleeves, charcoal collar/shoulders/cuffs/gloves/legs, orange chest badge, orange backpack with side panels and nozzles, and chunky cream boots with dark soles grounded on the pedestal. Kept the approved head, expressions, Awe, speech, and seeded head variants.
+- **[action]** Deleted the old teal-body renders (`artifacts/concept-turnaround/studio-body-*.png`) and the teal-body image-only experiment output folder (`artifacts/sprite-impostor-poc/`). Preserved the original concept art, approved head assets, and new full-body assets.
+- **[verification]** All 10 focused specs in `experimental-pigtail-head.spec.ts` passed. Live Character Studio verification (`node artifacts/concept-turnaround/check-studio-bodies.mjs` + `python artifacts/concept-turnaround/studio-body-sheet.py`) confirmed grounded boots, collar join, three-quarter match to `orange-pigtails-full-body.png`, Awe, speech, and switching back to standard human/cat controls with zero console or page errors.
 
 ## Scope history
 
@@ -167,6 +213,26 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - Summary: Add the approved procedural pigtail head as an experimental human preset in Character Studio.
 - Reason: Check that the approved head can change expression before building a family of variations.
 - Impact: Port the head geometry to the demo app and use the existing facial controller to verify neutral, happy and surprised expressions at two angles.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-PIGTAIL-SPEECH" date="2026-11-18" kind="addition" origin="requested" disposition="accepted" scope-ids="experimental-pigtail-speech" -->
+- Summary: Fit the V1/V2 mouth to the experimental pigtail head and preview speech in Studio.
+- Reason: The earlier render showed a shaded opening, upper teeth and tongue during speech. The experimental head's surface mouth lost those details.
+- Impact: Reuse the existing capsule renderer and facial controller in the experimental preset and verify speech and expressions from two views.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-PIGTAIL-EYES" date="2026-11-18" kind="addition" origin="requested" disposition="accepted" scope-ids="experimental-pigtail-eyes" -->
+- Summary: Refine the experimental pigtail head's eyelids and add an Awe expression.
+- Reason: Owner screenshots showed angular eyelid edges at oblique angles. Oversized, upward-looking pupils give the character a way to react to something overhead.
+- Impact: Update the experimental preset's eye surface and expression options in Character Studio.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-PIGTAIL-VARIANTS" date="2026-11-18" kind="addition" origin="requested" disposition="accepted" scope-ids="experimental-pigtail-variants" -->
+- Summary: Add three repeatable variations of the approved concept head to Character Studio.
+- Reason: Check whether a shared procedural recipe can generate distinct characters with the same expressive face.
+- Impact: Parameterize the head and curls within bounded ranges, and check alternate proportions, palettes and freckles with the existing animation.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-PIGTAIL-BODY" date="2026-11-18" kind="addition" origin="requested" disposition="accepted" scope-ids="experimental-pigtail-body" -->
+- Summary: Fit the four reviewed pigtail heads to one small capsule body in Character Studio.
+- Reason: Check that the approved head proportions still read well once the characters have torsos, hands and feet.
+- Impact: Use one standing body and head attachment across the presets. Fit the wide camera views to the whole character and retain the head close-up.
 <!-- /tri:scope-change -->
 <!-- tri:scope-baseline state="unconfirmed" -->
 <!-- /tri:scope-baseline -->

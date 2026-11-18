@@ -2,7 +2,9 @@ import { earthAtmosphereProfile, marsAtmosphereProfile } from './atmosphere-pres
 import { scaleAtmosphereProfile } from './atmosphere-scaling';
 import {
   atmosphereRadii,
+  atmosphereLutCacheKey,
   bakeAtmosphereLuts,
+  prewarmAtmosphereLuts,
   multiScatteringTableFromLut,
   sampleIrradianceLut,
   sampleMultiScatterLut,
@@ -15,6 +17,22 @@ import {
 } from './atmosphere-luts';
 import { integrateRadiance, sunTransmittance } from './atmosphere-reference-integrator';
 import { PhysicalAtmosphereProfile } from './atmosphere-profile';
+
+describe('atmosphere LUT cache', () => {
+  it('keys by profile and options and reuses the same baked images', async () => {
+    const profile = earthAtmosphereProfile();
+    const options = { transmittanceSize: [4, 4] as [number, number], multiScatterSize: [4, 4] as [number, number], irradianceSize: [4, 4] as [number, number], multiScatterDirections: 2, irradianceDirections: 2 };
+    expect(atmosphereLutCacheKey(profile, options)).toBe(atmosphereLutCacheKey(earthAtmosphereProfile(), { ...options }));
+    expect(atmosphereLutCacheKey(profile, options)).not.toBe(atmosphereLutCacheKey(marsAtmosphereProfile(), options));
+    expect(atmosphereLutCacheKey(profile, options)).not.toBe(atmosphereLutCacheKey(profile, { ...options, irradianceDirections: 3 }));
+    await prewarmAtmosphereLuts([{ profile, options }]);
+    const first = bakeAtmosphereLuts(profile, options);
+    const second = bakeAtmosphereLuts(earthAtmosphereProfile(), options);
+    expect(second.transmittance).toBe(first.transmittance);
+    expect(second.multiScatter).toBe(first.multiScatter);
+    expect(second.irradiance).toBe(first.irradiance);
+  });
+});
 
 describe('atmosphere LUT parameterization', () => {
   const profile = earthAtmosphereProfile();

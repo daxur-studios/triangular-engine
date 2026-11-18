@@ -5,6 +5,7 @@
   "compilerOptions": {
     "paths": {
       "triangular-engine": ["projects/triangular-engine/src/public-api"],
+      "triangular-engine/cache": ["projects/triangular-engine/cache/public-api"],
       "triangular-engine/development-map": [
         "projects/triangular-engine/development-map/public-api"
       ],

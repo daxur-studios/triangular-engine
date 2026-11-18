@@ -21,6 +21,7 @@ import {
   type CapsuleHairStyleId,
   type CapsuleLocomotionMode,
   type ExtendedEmotionName,
+  type VisemeKeyframe,
 } from 'triangular-engine/characters';
 import { CapsuleCatActor, CapsuleCharacterActor } from 'triangular-engine/procedural';
 import { Box3, Group, Quaternion, Vector3 } from 'three';
@@ -31,9 +32,11 @@ import {
   type ResolvedFocusFraming,
   type VisualFocusTargetId,
 } from './character-studio-focus';
-import { buildExperimentalPigtailHead, EXPERIMENTAL_PIGTAIL_HEAD_ID } from './experimental-pigtail-head';
+import { buildExperimentalPigtailHead, EXPERIMENTAL_PIGTAIL_PRESETS } from './experimental-pigtail-head';
+import { buildExperimentalPigtailBody } from './experimental-pigtail-body';
 
 export type CharacterStudioFamilyId = 'human' | 'cat';
+export type CharacterStudioExpression = ExtendedEmotionName | 'awe';
 
 export interface CharacterStudioChoice {
   readonly value: string;
@@ -71,11 +74,15 @@ export interface CharacterStudioContribution {
   readonly defaultPresetId: string;
   readonly presets: readonly CharacterStudioPreset[];
   readonly motions: readonly CharacterStudioChoice[];
+  readonly speechPreview?: {
+    play(track: readonly VisemeKeyframe[]): void;
+    stop(): void;
+  };
   controlGroups(): readonly CharacterStudioControlGroup[];
   resolveFocusFraming(targetId: VisualFocusTargetId, options?: CameraFocusFitOptions): ResolvedFocusFraming;
   selectPreset(presetId: string): void;
   setMotion(motionId: string): void;
-  setExpression(expression: ExtendedEmotionName): void;
+  setExpression(expression: CharacterStudioExpression): void;
   setControl(controlId: string, value: string): void;
   randomize(seed: number): void;
   update(deltaSeconds: number): void;
@@ -121,9 +128,11 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
   });
   const humanRoot = new Group();
   humanRoot.add(humanActor.root);
+  let experimentalBody: ReturnType<typeof buildExperimentalPigtailBody> | undefined;
   let experimentalHead: ReturnType<typeof buildExperimentalPigtailHead> | undefined;
+  let experimentalPreset: typeof EXPERIMENTAL_PIGTAIL_PRESETS[number] | undefined;
   const humanPresets = [
-    { value: EXPERIMENTAL_PIGTAIL_HEAD_ID, label: 'Orange Pigtails (Experimental Head)' },
+    ...EXPERIMENTAL_PIGTAIL_PRESETS,
     ...presets(ALL_CAPSULE_CHARACTER_PRESETS),
   ];
   const humanDefault = 'wacky-helmet-waver';
@@ -141,21 +150,24 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
     faceTargetY: 1.52,
     defaultPresetId: humanDefault,
     presets: humanPresets,
-    get motions() { return experimentalHead?.head.visible ? [] : humanMotions; },
-    resolveFocusFraming: (targetId, options) => fitCameraToFocusTarget(
-      experimentalHead?.head.visible ? {
+    get motions() { return experimentalBody?.root.visible ? [] : humanMotions; },
+    resolveFocusFraming: (targetId, options) => {
+      if (!experimentalBody?.root.visible || !experimentalHead) {
+        return fitCameraToFocusTarget(resolveCharacterStudioFocusTarget(targetId, { humanActor }), options);
+      }
+      const fullBody = targetId === 'human-full-body';
+      return fitCameraToFocusTarget({
         id: targetId,
-        label: 'Experimental Pigtail Head',
+        label: fullBody ? 'Experimental Pigtail Character' : 'Experimental Pigtail Head',
         boundsKind: 'scene-object',
-        worldBounds: new Box3().setFromObject(experimentalHead.head, true),
+        worldBounds: new Box3().setFromObject(fullBody ? experimentalBody.root : experimentalHead.head, true),
         forwardNormal: new Vector3(0, 0, 1).applyQuaternion(humanRoot.getWorldQuaternion(new Quaternion())),
         defaultPadding: .12,
         subBounds: {},
         limitations: [],
-      } : resolveCharacterStudioFocusTarget(targetId, { humanActor }),
-      options,
-    ),
-    controlGroups: () => experimentalHead?.head.visible ? [] : [
+      }, options);
+    },
+    controlGroups: () => experimentalBody?.root.visible ? [] : [
       {
         id: 'appearance',
         label: 'Appearance',
@@ -193,25 +205,44 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
       },
     ],
     selectPreset: (presetId) => {
-      if (presetId === EXPERIMENTAL_PIGTAIL_HEAD_ID) {
-        if (!experimentalHead) {
-          experimentalHead = buildExperimentalPigtailHead(humanActor.facialController);
-          humanRoot.add(experimentalHead.head);
+      const nextExperimentalPreset = EXPERIMENTAL_PIGTAIL_PRESETS.find(preset => preset.value === presetId);
+      if (nextExperimentalPreset) {
+        if (!experimentalBody) {
+          experimentalBody = buildExperimentalPigtailBody();
+          humanRoot.add(experimentalBody.root);
         }
-        experimentalHead.head.visible = true;
+        if (!experimentalHead || experimentalPreset !== nextExperimentalPreset) {
+          experimentalHead?.head.removeFromParent();
+          experimentalHead?.dispose();
+          experimentalHead = buildExperimentalPigtailHead(humanActor.facialController, nextExperimentalPreset.seed);
+          experimentalPreset = nextExperimentalPreset;
+          experimentalBody.headSocket.add(experimentalHead.head);
+        }
+        experimentalBody.root.visible = true;
         humanActor.root.visible = false;
+        experimentalBody.root.updateMatrixWorld(true);
         experimentalHead.update(0);
         return;
       }
       const preset = ALL_CAPSULE_CHARACTER_PRESETS.find((candidate) => candidate.id === presetId);
       if (preset || presetId === 'custom') {
-        if (experimentalHead) experimentalHead.head.visible = false;
+        experimentalHead?.setAwe(false);
+        if (experimentalBody) experimentalBody.root.visible = false;
         humanActor.root.visible = true;
         if (preset) humanActor.setDna(preset);
       }
     },
     setMotion: (motionId) => humanActor.setLocomotion(motionId as CapsuleLocomotionMode),
-    setExpression: (expression) => humanActor.facialController.setExpression(expression, 1, 0.2),
+    setExpression: (expression) => {
+      experimentalHead?.setAwe(expression === 'awe' && experimentalBody?.root.visible === true);
+      humanActor.facialController.setExpression(expression === 'awe' ? 'neutral' : expression, 1, 0.2);
+    },
+    speechPreview: {
+      play: (track) => {
+        if (experimentalBody?.root.visible) humanActor.facialController.playVisemes(track);
+      },
+      stop: () => humanActor.facialController.stopSpeech(),
+    },
     setControl: (controlId, value) => {
       switch (controlId) {
         case 'hairStyleId': humanActor.setDna({ hairStyleId: value as CapsuleHairStyleId }); break;
@@ -234,11 +265,12 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
     },
     randomize: (seed) => humanActor.setSeed(`character-studio-human-${seed}`),
     update: (deltaSeconds) => {
-      if (experimentalHead?.head.visible) experimentalHead.update(deltaSeconds);
+      if (experimentalBody?.root.visible) experimentalHead?.update(deltaSeconds);
       else humanActor.update(deltaSeconds);
     },
     dispose: () => {
       experimentalHead?.dispose();
+      experimentalBody?.dispose();
       humanActor.dispose();
     },
   };
@@ -298,7 +330,7 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
       if (preset) catActor.setDna(preset);
     },
     setMotion: (motionId) => catActor.setLocomotion(motionId as CapsuleCatGaitMode),
-    setExpression: (expression) => catActor.facialController.setExpression(expression, 1, 0.2),
+    setExpression: (expression) => catActor.facialController.setExpression(expression === 'awe' ? 'neutral' : expression, 1, 0.2),
     setControl: (controlId, value) => {
       switch (controlId) {
         case 'bodyPatternId': catActor.setDna({ bodyPattern: value as CapsuleCatBodyPatternId }); break;

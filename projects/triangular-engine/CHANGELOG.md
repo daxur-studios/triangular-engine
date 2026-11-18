@@ -1,5 +1,7 @@
 # Changelog
 
+- `triangular-engine/cache`: expose the persistent cache through a worker-safe entry; planet graph caching no longer pulls Angular into terrain bake workers.
+
 - `triangular-engine/atmosphere`, `planet-material`: finite foreground-atmosphere haze for opaque planet surfaces, including a moon seen through another planet's limb. `foregroundPerspective()` composes after the body's own haze through the new ordered atmosphere overlays. It marches per fragment and currently assumes a spherical atmosphere and an unscaled planet root.
 
 - `triangular-engine/cloud-volumes`: `PlanetCloudShell.coverageAt` samples the visible shell's procedural coverage as a TSL node. `groundShadowAt` samples the sun ray's crossing of that shell for use as a direct-light shadow; use the terrain's `radialDirection`, and note that terrain elevation and map morph are approximations. See the cloud-volumes README.

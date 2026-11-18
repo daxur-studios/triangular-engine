@@ -257,6 +257,7 @@ scene { position: absolute; z-index: 0; inset: 0; display: flex; width: 100%; he
 .motion-button { display: flex; align-items: center; gap: 0.45rem; min-height: 34px; padding: 0.4rem 0.52rem; border: 1px solid #30343e; border-radius: 6px; background: #191c24; color: #a0a4ae; font-size: 0.63rem; text-align: left; }
 .motion-button:hover { border-color: #626773; color: #fff; }
 .motion-button.active { border-color: #786044; background: rgba(164, 111, 71, 0.14); color: #e8bd94; }
+.speech-preview { margin-top: 0.65rem; }
 .motion-symbol { width: 15px; color: #c89970; text-align: center; }
 .verification-details { margin: 0.8rem 0; border: 1px solid #30343e; border-radius: 7px; background: #151820; }
 .verification-details > summary { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.7rem; color: #d8d5d0; font-size: 0.68rem; font-weight: 650; cursor: pointer; list-style: none; }

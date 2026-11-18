@@ -93,6 +93,8 @@ one (see "Radius is app-owned" below).
 
 ### `graph = buildPlanetGraphCore(...)` → `IPlanetGraphCore`
 
+Graph generation is cached in memory and, where available, in IndexedDB. Await `prewarmPlanetGraphs([recipe])` before building to load a persisted graph; a miss generates it normally. Each call returns its own graph, so a caller can change it without affecting later builds. Bump the graph cache version when changing the generator.
+
 ```ts
 {
   seed: number;

@@ -1,6 +1,6 @@
 import {
-  BufferGeometry, CatmullRomCurve3, Float32BufferAttribute, Group, Mesh,
-  MeshBasicMaterial, MeshStandardMaterial, SphereGeometry, TubeGeometry, Vector3,
+  BufferGeometry, CatmullRomCurve3, Float32BufferAttribute, Group, MathUtils, Mesh,
+  MeshStandardMaterial, SphereGeometry, TubeGeometry, Vector3,
   type Material,
 } from 'three';
 import {
@@ -8,11 +8,19 @@ import {
   projectCapsuleFaceState,
   type CapsuleBrowRigPose,
   type CapsuleEyeRigPose,
-  type CapsuleSdfMouthUniforms,
   type FacialAnimationController,
 } from 'triangular-engine/characters';
+import { createCapsuleBodyMaterial } from 'triangular-engine/procedural';
+import { createPigtailEyeMaterial } from './pigtail-eye-material';
 
 export const EXPERIMENTAL_PIGTAIL_HEAD_ID = 'experimental-pigtail-head';
+
+export const EXPERIMENTAL_PIGTAIL_PRESETS = [
+  { value: EXPERIMENTAL_PIGTAIL_HEAD_ID, label: 'Orange Pigtails (Experimental)', seed: undefined },
+  { value: 'experimental-pigtail-7', label: 'Plum Pigtails (Seed 7)', seed: 7 },
+  { value: 'experimental-pigtail-4', label: 'Honey Pigtails (Seed 4)', seed: 4 },
+  { value: 'experimental-pigtail-25', label: 'Chestnut Pigtails (Seed 25)', seed: 25 },
+] as const;
 
 type Point = readonly [number, number, number];
 
@@ -20,6 +28,43 @@ const width = 2.72;
 const depth = 2.78;
 const height = 4.35;
 const vertical = new Vector3(0, 1, 0);
+
+const orangePalette = {
+  skin: '#eab995', nose: 0xd9885b, brow: 0xb46430, hair: 0xc06730, curl: 0xd37a37, band: 0x505b63, freckle: 0xb67554,
+};
+const variantPalettes = [
+  { skin: '#bc855f', nose: 0xa56353, brow: 0x523244, hair: 0x442a40, curl: 0x6b425c, band: 0xb0ad8e, freckle: 0x754738 },
+  { skin: '#ce9874', nose: 0xb9755b, brow: 0x573329, hair: 0x5d392f, curl: 0x845240, band: 0x698d87, freckle: 0x9e614c },
+  { skin: '#f1c4a9', nose: 0xda9474, brow: 0xa67039, hair: 0xbe8c42, curl: 0xd9ab59, band: 0x9b7062, freckle: 0xbd7c5c },
+];
+
+function pigtailAppearance(seed: number | undefined) {
+  if (seed === undefined) {
+    return { palette: orangePalette, scale: [1, 1, 1] as Point, curls: [1, 1, 1] as Point, freckles: [] };
+  }
+
+  let state = seed >>> 0;
+  // Mulberry32 uses per-head state so Studio updates cannot affect the generated appearance.
+  const random = () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let hash = Math.imul(state ^ (state >>> 15), 1 | state);
+    hash = (hash + Math.imul(hash ^ (hash >>> 7), 61 | hash)) ^ hash;
+    return ((hash ^ (hash >>> 14)) >>> 0) / 4294967296;
+  };
+  const sample = (min: number, max: number) => MathUtils.lerp(min, max, random());
+  const palette = variantPalettes[Math.floor(random() * variantPalettes.length)];
+  const scale: Point = [sample(.90, 1.10), sample(.90, 1.10), sample(.94, 1.06)];
+  const curls: Point = [sample(.80, 1.24), sample(.70, 1.28), sample(.90, 1.16)];
+  const count = [0, 3, 5][Math.floor(random() * 3)];
+  const freckles = [-1, 1].flatMap(side => [
+    [.30, 1.66], [.43, 1.69], [.56, 1.66], [.38, 1.52], [.51, 1.53],
+  ].slice(0, count).map(([angle, y]) => ({
+    angle: side * (angle + sample(-.021, .021)),
+    y: y + sample(-.034, .034),
+    radius: sample(.022, .039),
+  })));
+  return { palette, scale, curls, freckles };
+}
 
 function buildSkin(profile: readonly Vector3[]): BufferGeometry {
   const sides = 64;
@@ -46,11 +91,14 @@ function buildSkin(profile: readonly Vector3[]): BufferGeometry {
   return geometry;
 }
 
-/** The approved head geometry in the Studio scene, with the shared expression controller. */
-export function buildExperimentalPigtailHead(face: FacialAnimationController) {
+/** The approved head geometry, optionally varied by seed, with the shared expression controller. */
+export function buildExperimentalPigtailHead(face: FacialAnimationController, seed?: number) {
+  const appearance = pigtailAppearance(seed);
+  const { palette } = appearance;
   const head = new Group();
   head.name = EXPERIMENTAL_PIGTAIL_HEAD_ID;
-  head.scale.setScalar(0.35);
+  // Scale the assembled face so its features and the mouth shader stay registered to the skin.
+  head.scale.set(...appearance.scale).multiplyScalar(.35);
 
   const profileCurve = new CatmullRomCurve3([
     [0, .001], [0, .63], [.006, .83], [.019, .951], [.04, .99], [.09, 1],
@@ -64,13 +112,23 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController) {
 
   const sphere = new SphereGeometry(1, 32, 24);
   const mat = (color: number, roughness = .76) => new MeshStandardMaterial({ color, roughness });
-  const skin = mat(0xecc4a4);
-  const white = mat(0xfff9f0, .49);
+  const faceDna = { ...DEFAULT_CAPSULE_DNA, bodyRadius: width / 2, pupilScale: .30, buckTeeth: false };
+  const skinTone = palette.skin;
+  const { material: headSkin, uniforms: mouthUniforms } = createCapsuleBodyMaterial({
+    ...faceDna,
+    skinTone,
+    // Set the mouth scale in head-local units and put the suit seam below the head.
+    bodyRadius: 1.62,
+    suitSplitY: -height,
+  });
+  mouthUniforms.uMouthCenterY.value = 1.29;
+  headSkin.roughness = .76;
+  headSkin.metalness = 0;
   const ink = mat(0x2b211b, .54);
-  const hair = mat(0xc97235, .66);
-  const curl = mat(0xd7813e, .66);
-  const band = mat(0x505b63);
-  const brow = mat(0xb46430);
+  const hair = mat(palette.hair, .66);
+  const curl = mat(palette.curl, .66);
+  const band = mat(palette.band);
+  const brow = mat(palette.brow);
   const x = width / 2;
   const y = height;
   const z = depth / 2;
@@ -101,15 +159,27 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController) {
     mesh.quaternion.setFromUnitVectors(vertical, delta.normalize());
   }
 
-  head.add(new Mesh(buildSkin(profile), skin));
+  const skinMesh = new Mesh(buildSkin(profile), headSkin);
+  skinMesh.name = 'pigtail-skin';
+  head.add(skinMesh);
   ellipsoid(head, hair, [0, y * .811, -.16 * z], [x * 1.075, y * .207, z * 1.03]);
   ellipsoid(head, hair, [0, y * .695, -.68 * z], [x * .98, y * .24, z * .55]);
-  ellipsoid(head, mat(0xd9885b), [.018, 1.78, z * 1.011], [.098, .097, .096]);
+  ellipsoid(head, mat(palette.nose), [.018, 1.78, z * 1.011], [.098, .097, .096]);
+
+  if (appearance.freckles.length) {
+    const freckle = mat(palette.freckle);
+    for (const { angle, y: cheekY, radius } of appearance.freckles) {
+      // The cheeks are on the constant-radius part of the capsule profile.
+      const sin = Math.sin(angle);
+      const cos = Math.cos(angle);
+      const spot = ellipsoid(head, freckle, [x * sin, cheekY, z * cos], [radius, radius * .78, .009]);
+      spot.name = 'pigtail-freckle';
+      spot.rotation.y = Math.atan2(sin / x, cos / z);
+    }
+  }
 
   const eyeRadius = .625;
-  const lidRadius = eyeRadius * 1.031;
-  const upperLidGeometry = new SphereGeometry(lidRadius, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2);
-  const lowerLidGeometry = new SphereGeometry(lidRadius, 28, 14, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+  const eyeGeometry = new SphereGeometry(1, 48, 32);
   const curlOffsets = [
     [-.24, .76, .85, .43], [.31, .77, .63, .44], [.66, .38, 1.04, .44],
     [.20, .34, .79, .49], [-.34, .25, .60, .37], [.67, -.12, .98, .43],
@@ -121,29 +191,27 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController) {
   const updateEye = [-1, 1].map(side => {
     const eye = new Group();
     eye.position.set(side * .825, 2.26, z * .8);
+    eye.scale.set(eyeRadius, eyeRadius * 1.014, eyeRadius * .99);
     head.add(eye);
-    ellipsoid(eye, white, [0, 0, 0], [eyeRadius, eyeRadius * 1.014, eyeRadius * .99]);
-    const gaze = new Group();
-    eye.add(gaze);
-    const pupil = ellipsoid(gaze, ink, [-.025 * side, .035, eyeRadius * .966], [1, 1, 1]);
+    const eyeSurface = createPigtailEyeMaterial(skinTone, side);
+    const eyeball = new Mesh(eyeGeometry, eyeSurface.material);
+    eyeball.name = side < 0 ? 'pigtail-eye-left' : 'pigtail-eye-right';
+    eye.add(eyeball);
 
-    const lids = new Group();
-    const upperLid = new Mesh(upperLidGeometry, skin);
-    const lowerLid = new Mesh(lowerLidGeometry, skin);
-    const upperLidPivot = new Group();
     const lashes = new Group();
-    upperLidPivot.add(upperLid, lashes);
-    lashes.rotation.x = 1.34;
-    lids.add(upperLidPivot, lowerLid);
-    eye.add(lids);
+    eye.add(lashes);
 
     for (let lash = 0; lash < 3; lash++) {
-      const dx = .50 - lash * .047;
-      const lashY = .18 + lash * .13;
+      const lashX = .58 + lash * .125;
+      const lashAngle = .84 - lash * .13;
+      const crossSection = Math.sqrt(1 - lashX * lashX);
+      const root = new Vector3(side * lashX, Math.sin(lashAngle) * crossSection, Math.cos(lashAngle) * crossSection);
+      const tip = root.clone().add(new Vector3(side * .12, .22 - lash * .045, -.055));
+      root.multiplyScalar(.98);
       roundedStroke(lashes, ink, [
-        [side * dx, lashY, .24],
-        [side * (dx + .17 - lash * .02), lashY + .083 + lash * .047, .24 - lash * .027],
-      ], .028);
+        [root.x, root.y, root.z],
+        [tip.x, tip.y, tip.z],
+      ], .042 - lash * .004);
     }
 
     const browPivot = new Group();
@@ -162,40 +230,64 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController) {
     lock(hair, [side * .77 * x, y * .812, z * .12], [side * .86 * x, y * .543, -.99 * z], .30, .32);
     lock(band, [side * 1.12 * x, y * .920, -.37], [side * 1.22 * x, y * .780, -.61], .17, .265);
 
-    const bunchX = side * (x + .99);
-    const bunchY = y * .713;
-    const bunchZ = -1.08;
-    ellipsoid(head, hair, [bunchX, bunchY, bunchZ], [.65, 1.02, .73]);
+    // Stretch curls around the tie to keep them attached across the allowed shapes.
+    const tuft = new Group();
+    tuft.name = side < 0 ? 'pigtail-tuft-left' : 'pigtail-tuft-right';
+    tuft.position.set(side * 1.17 * x, y * .85, -.49);
+    tuft.scale.set(...appearance.curls);
+    head.add(tuft);
+    const bunchX = side * (x + .99) - tuft.position.x;
+    const bunchY = y * .713 - tuft.position.y;
+    const bunchZ = -1.08 - tuft.position.z;
+    ellipsoid(tuft, hair, [bunchX, bunchY, bunchZ], [.65, 1.02, .73]);
     curlOffsets.forEach(([dx, dy, dz, radius], index) => {
-      ellipsoid(head, index % 3 === 0 ? hair : curl,
+      ellipsoid(tuft, index % 3 === 0 ? hair : curl,
         [bunchX + side * dx, bunchY + dy, bunchZ + dz],
         [radius, radius * (index === 9 ? 1.43 : 1.1), radius * 1.08], -side * .19);
     });
 
-    return (pose: CapsuleEyeRigPose, browPose: CapsuleBrowRigPose) => {
-      gaze.rotation.set(pose.gazePitch, pose.gazeYaw, 0);
-      const size = eyeRadius * pose.pupilScale;
-      pupil.scale.set(size, size, size * .287);
-      upperLidPivot.rotation.x = -1.34 + pose.upperLidAngle;
-      lowerLid.rotation.x = 1.18 - pose.lowerLidAngle;
-      lids.rotation.z = pose.lidTiltZ;
+    return (pose: CapsuleEyeRigPose, browPose: CapsuleBrowRigPose, blink: number, awe: number) => {
+      eyeSurface.update(pose, blink, awe);
+      lashes.rotation.set(pose.upperLidAngle * .52, 0, pose.lidTiltZ, 'ZXY');
       browPivot.position.y = browY + browPose.heightOffset;
       browPivot.rotation.z = browPose.zRotation;
     };
   });
 
-  const updateMouth = buildMouth(head, profile);
-  const faceDna = { ...DEFAULT_CAPSULE_DNA, bodyRadius: x, pupilScale: .30, buckTeeth: false };
+  let elapsedSeconds = 0;
+  let aweTarget = 0;
+  let awe = 0;
 
   function update(deltaSeconds: number): void {
-    const pose = projectCapsuleFaceState(face.update(deltaSeconds), faceDna);
-    updateMouth(pose.mouth);
-    updateEye[0](pose.leftEye, pose.leftBrow);
-    updateEye[1](pose.rightEye, pose.rightBrow);
+    const delta = Math.max(0, deltaSeconds);
+    elapsedSeconds += delta;
+    awe = MathUtils.damp(awe, aweTarget, 16, delta);
+    const frame = face.update(delta);
+    const channels = frame.channels;
+    if (awe > .001) {
+      channels['brow.raise'] = MathUtils.lerp(channels['brow.raise'] ?? 0, .52, awe);
+      if (!frame.isSpeaking) {
+        channels['mouth.jawOpen'] = MathUtils.lerp(channels['mouth.jawOpen'] ?? 0, .31, awe);
+        channels['mouth.round'] = MathUtils.lerp(channels['mouth.round'] ?? 0, .50, awe);
+        channels['mouth.smile'] = MathUtils.lerp(channels['mouth.smile'] ?? 0, .13, awe);
+      }
+    }
+    const pose = projectCapsuleFaceState(frame, faceDna, { elapsedSeconds });
+    const { mouthOpen, mouthWidth, mouthCurve, mouthWave, tongueVisible } = pose.mouth;
+    mouthUniforms.uMouthOpen.value = mouthOpen;
+    mouthUniforms.uMouthWidth.value = mouthWidth;
+    mouthUniforms.uMouthCurve.value = mouthCurve;
+    mouthUniforms.uMouthWave.value = mouthWave;
+    mouthUniforms.uTongueVisible.value = tongueVisible;
+    const blink = channels['eye.blink'] ?? 0;
+    updateEye[0](pose.leftEye, pose.leftBrow, Math.max(blink, channels['eye.blink.left'] ?? 0), awe);
+    updateEye[1](pose.rightEye, pose.rightBrow, Math.max(blink, channels['eye.blink.right'] ?? 0), awe);
   }
 
   return {
     head,
+    skinTone,
+    setAwe: (active: boolean) => { aweTarget = active ? 1 : 0; },
     update,
     dispose: () => {
       const geometries = new Set<BufferGeometry>();
@@ -211,64 +303,5 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController) {
       geometries.forEach(geometry => geometry.dispose());
       materials.forEach(material => material.dispose());
     },
-  };
-}
-
-function buildMouth(head: Group, profile: readonly Vector3[]) {
-  const segments = 40;
-  const positions = new Float32BufferAttribute(new Float32Array((segments + 1) * 4 * 3), 3);
-  const indices: number[] = [];
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', positions);
-  for (let row = 0; row < 2; row++) {
-    const start = indices.length;
-    for (let step = 0; step < segments; step++) {
-      const a = row * 2 * (segments + 1) + step * 2;
-      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-    }
-    geometry.addGroup(start, indices.length - start, row);
-  }
-  geometry.setIndex(indices);
-  const mouth = new Mesh(geometry, [
-    new MeshBasicMaterial({ color: 0x291c19 }),
-    new MeshBasicMaterial({ color: 0xc56d53 }),
-  ]);
-  mouth.name = 'pigtail-mouth';
-  mouth.frustumCulled = false;
-  head.add(mouth);
-
-  // Sample the same radius profile used for the skin mesh so the lip and
-  // opening sweep across the head surface in every view.
-  function placeVertex(index: number, x: number, y: number): void {
-    const normalizedY = y / height;
-    const upper = profile.findIndex(ring => ring.y >= normalizedY);
-    const a = profile[upper - 1];
-    const b = profile[upper];
-    const t = (normalizedY - a.y) / (b.y - a.y);
-    const radius = a.x + (b.x - a.x) * t;
-    const z = depth / 2 * Math.sqrt(Math.max(0, radius * radius - (2 * x / width) ** 2));
-    positions.setXYZ(index, x, y, z + .018);
-  }
-
-  return ({ mouthOpen, mouthWidth, mouthCurve, mouthWave }: CapsuleSdfMouthUniforms) => {
-    const halfWidth = mouthWidth * .56;
-    const smile = Math.max(0, mouthCurve);
-    const aperture = mouthOpen * (1.20 - .94 * smile);
-    for (let step = 0; step <= segments; step++) {
-      const u = step * 2 / segments - 1;
-      const taper = Math.sqrt(Math.max(0, 1 - u * u));
-      const x = halfWidth * u;
-      const center = 1.29 + .18 * mouthCurve * (u * u - .15) + mouthWave * .05 * Math.sin(u * Math.PI * 2);
-      const upper = center + (aperture * .36 + .029) * taper;
-      const lower = center - (aperture * .64 + .029) * taper;
-      const lip = lower - (.012 + .105 * smile) * taper ** 3;
-      placeVertex(step * 2, x, upper);
-      placeVertex(step * 2 + 1, x, lower);
-      const lipIndex = (segments + 1) * 2 + step * 2;
-      placeVertex(lipIndex, x, lower);
-      placeVertex(lipIndex + 1, x, lip);
-    }
-    positions.needsUpdate = true;
-    geometry.computeBoundingBox();
   };
 }

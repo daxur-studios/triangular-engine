@@ -125,12 +125,14 @@
       <ng-template portalTarget="overlay" lane="bottomStart">
         <div class="view-switcher" aria-label="Camera view">
           @for (view of viewOptions; track view.id) {
-            <button
-              type="button"
-              [disabled]="runnerBusy()"
-              [class.active]="activeView() === view.id"
-              (click)="applyView(view.id)"
-            >{{ view.id === 'hair' && selectedFamilyId() === 'human' ? 'Hair' : view.label }}</button>
+            @if (view.id !== 'hair' || !experimentalHeadSelected()) {
+              <button
+                type="button"
+                [disabled]="runnerBusy()"
+                [class.active]="activeView() === view.id"
+                (click)="applyView(view.id)"
+              >{{ view.id === 'hair' && selectedFamilyId() === 'human' ? 'Hair' : view.label }}</button>
+            }
           }
         </div>
       </ng-template>
@@ -149,7 +151,7 @@
         <span class="inspector-badge">PROCEDURAL</span>
       </div>
 
-      <p class="family-summary">{{ experimentalHeadSelected() ? 'Experimental head preset for expression and silhouette review.' : activeFamily().summary }}</p>
+      <p class="family-summary">{{ experimentalHeadSelected() ? 'Experimental pigtail character in a standing pose.' : activeFamily().summary }}</p>
 
       <section class="inspector-section">
         <div class="section-heading section-heading--large">
@@ -157,16 +159,25 @@
           <span class="section-caption">Face</span>
         </div>
         <div class="expression-grid">
-          @for (expression of expressionOptions; track expression.id) {
+          @for (expression of expressionOptions(); track expression.id) {
             <button
               class="expression-button"
               type="button"
               [disabled]="runnerBusy()"
               [class.active]="selectedExpression() === expression.id"
+              [attr.aria-pressed]="selectedExpression() === expression.id"
               (click)="selectExpression(expression.id)"
             >{{ expression.label }}</button>
           }
         </div>
+        @if (experimentalHeadSelected()) {
+          <button class="motion-button speech-preview" type="button" [disabled]="runnerBusy()" (click)="previewSpeech()">
+            Preview speech
+          </button>
+          @if (speechPreviewNotice(); as notice) {
+            <p class="section-caption" role="status">{{ notice }}</p>
+          }
+        }
       </section>
 
       @for (group of activeControls(); track group.id) {

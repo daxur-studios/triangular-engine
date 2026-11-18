@@ -15,6 +15,8 @@ Status: **preview.** The atmosphere is drawn on a plain sphere (`AtmosphereBackd
 | `AtmosphereBackdrop` | A full-screen mesh that draws the sky and an analytic ground sphere from the model. |
 | `integrateRadiance`, `sunTransmittance`, ... | The float64 CPU reference the GPU path is tested against. |
 
+Atmosphere tables are cached in memory and, where available, IndexedDB. To reuse persisted tables on startup, await `prewarmAtmosphereLuts([{ profile, options }])` before creating the atmosphere, using the exact profile and table options it will use. A miss bakes normally. Bump the LUT cache version when changing the bake maths.
+
 ## Minimal use
 
 ```ts
