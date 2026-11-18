@@ -1,6 +1,6 @@
 import { Group, Matrix4, Quaternion, Vector3, type Camera, type IUniform, type Object3D } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
-import { If, cameraPosition, float, mix, normalize, positionWorld, smoothstep, uniform } from 'three/tsl';
+import { Fn, If, cameraPosition, float, length, mix, normalize, positionWorld, smoothstep, uniform, vec3 } from 'three/tsl';
 import type { AtmosphereAerialPerspectiveOptions } from './atmosphere-aerial-perspective';
 import { AtmosphereBackdrop, type AtmosphereBackdropOptions } from './atmosphere-backdrop';
 import { AtmosphereGpuModel } from './atmosphere-gpu-model';
@@ -244,6 +244,36 @@ export class PlanetAtmosphere {
   /** The sky behind the planet and the bodies in it (a group holding {@link backdrop}'s mesh); add it to the scene. */
   get object(): Object3D {
     return this.root;
+  }
+
+  /**
+   * Air between the camera and a finite point, in world direction `worldDir` and world-unit distance `distance`.
+   * Returns display-referred in-scattering and per-channel transmittance. Call inside a TSL `Fn` after `update`.
+   * Only spherical atmospheres with an unscaled planet root are supported; the march costs per affected fragment.
+   */
+  foregroundAir(worldDir: any, distance: any): { inscatter: any; transmittance: any } {
+    const backdrop = this.backdrop;
+    const dir = normalize(backdrop.frame.mul(normalize(worldDir)));
+    const air = this.model.march({
+      altitude: backdrop.altitude,
+      dir,
+      sunDir: this.model.sunDirection,
+      maxDistance: distance.mul(this.binding.metersPerUnit),
+    });
+    const amount = this.amount.mul(backdrop.opacity).mul(backdrop.objectAir);
+    return {
+      inscatter: air.radiance.mul(backdrop.exposure).mul(backdrop.sunVisibility).mul(amount),
+      transmittance: mix(vec3(1), air.transmittance, amount),
+    };
+  }
+
+  /** A planet-material overlay for an opaque surface seen through this planet's foreground air. */
+  foregroundPerspective(): AtmosphereHazeStage {
+    return (_context, color) => Fn(() => {
+      const ray = positionWorld.sub(cameraPosition);
+      const air = this.foregroundAir(ray, length(ray));
+      return color.mul(air.transmittance).add(air.inscatter);
+    })();
   }
 
   /** The bodies added with {@link addSkyBody}. */

@@ -12,6 +12,9 @@ performance:
   - id: body-tint-spike-v1
     url: http://triangular-demo.localhost:4200/atmosphere-multi-lab?spike=body-tint&testSuite=body-tint-spike&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1
     status: runnable-visual-review-pending
+  - id: moon-limb-visual-v1
+    url: http://triangular-demo.localhost:4200/atmosphere-multi-lab?spike=moon-limb&testSuite=moon-limb-visual&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1
+    status: runnable-visual-review-pending
 ---
 
 # Engineering Record 081: Body tint for meshes in atmosphere
@@ -62,6 +65,14 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **Build fix.** The spike output node is built inside TSL `Fn`. Calling `If` during plain construction threw `Cannot read properties of null (reading 'If')` in `skyAlong`. The lab page now binds one typed `<tri-test-runner>` per mode, because a union of the two suite types failed to compile. The Daxur build is clean (0 errors).
 - **Saved run.** Headless hardware, `--noisy`, standard mode, fingerprint `9c815587-5d2fd051`, GPU nvidia/webgpu, saved at 2026-11-01T23:59 (`body-tint-spike@v1/2026-11-01T23-59-06-362Z_headless-hardware_9c815587-5d2fd051.json`). Result: `auto=pass`, `perf=not-run`, `visual=pending`. The readout recorded no metrics, as expected for a functional spike. The run is not a timing result; it was taken under load from other apps (gpu 43/87%).
 - **Review.** Owner's screenshot in their RTX 3080 Chrome for the blend band is still pending. P1 is not signed off.
+
+### 2026-11-17 — Moon behind the limb: visual experiment
+
+- The lab has a demo-only finite camera-to-moon ray march and a four-case visual suite, comparing the original and corrected image from space and the ground. The space case includes air from a planet between the camera and the moon; this is an experiment beyond the original plan's non-owner limb exclusion, not a completed engine API.
+- [Run the visual comparison](http://triangular-demo.localhost:4200/atmosphere-multi-lab?spike=moon-limb&testSuite=moon-limb-visual&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1). Automated checks cover the applied settings and rendered canvas; appearance requires owner review.
+- Headless hardware run: `auto=pass`, `perf=not-run`, `visual=pending`, NVIDIA/WebGPU. Images and run data are local only; regenerate through the link or the headless `test:run` launcher. No performance claim is made from this run.
+- Bruno reviewed the space and ground comparison images in chat and approved their appearance on 2026-11-17. The two claim-scoped human reviews are recorded beside the local run; this approval does not establish performance or game integration.
+- Follow-up: the finite ray became `PlanetAtmosphere.foregroundPerspective()` with a separate ordered `PlanetSurfaceMaterial` overlay, preserving a body's own haze. The lab uses the engine method. The headless ground and space corrected stills are pixel-identical to the approved experiment; finite-ray GPU specs cover a point before the air, a limb crossing and a missed atmosphere. Scaled planet roots, map morph and non-planet materials remain out of scope.
 
 ## Scope history
 

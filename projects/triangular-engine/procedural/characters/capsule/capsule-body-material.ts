@@ -19,10 +19,51 @@ import {
   Vector3,
   type WebGLProgramParametersWithUniforms,
 } from 'three';
-import type {
-  CapsuleCharacterDNA,
-  CapsuleSdfMouthUniforms,
+import {
+  computeCapsuleMouthCenterY,
+  type CapsuleCharacterDNA,
+  type CapsuleSdfMouthUniforms,
 } from 'triangular-engine/characters';
+
+/**
+ * GLSL for the capsule mouth outline, shared by the shaded body and the ID-colour body.
+ *
+ * Defines `sdRoundedBox2D` and `capsuleMouthDistance(mp, width, open, curve, wave, out q,
+ * out halfW, out halfH, out openAmt)`. `mp` is the torso-frame point in face units
+ * (`x / max(0.15, r)`, `(y - mouthCenterY) / max(0.15, r)`); the result is negative inside
+ * the mouth. The framework-free probes in `triangular-engine/characters` mirror it.
+ */
+export const CAPSULE_MOUTH_SDF_GLSL = /* glsl */ `
+float sdRoundedBox2D(vec2 p, vec2 b, vec4 r) {
+  r.xy = (p.x > 0.0) ? r.xy : r.zw;
+  r.x  = (p.y > 0.0) ? r.x  : r.y;
+  vec2 q = abs(p) - b + r.x;
+  return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r.x;
+}
+
+float capsuleMouthDistance(
+  vec2 mp, float mouthWidth, float mouthOpen, float mouthCurve, float mouthWave,
+  out vec2 q, out float halfW, out float halfH, out float openAmt
+) {
+  halfW = clamp(mouthWidth * 0.34, 0.08, 0.42);
+  openAmt = clamp(mouthOpen, 0.0, 1.0);
+  halfH = mix(0.014, 0.19, openAmt);
+
+  // Parabolic smile/frown curvature + optional nervous sine wave
+  float xNorm = clamp(mp.x / max(0.05, halfW), -1.5, 1.5);
+  float parabola = (xNorm * xNorm - 0.35) * mouthCurve * 0.085;
+  float waveOffset = sin(mp.x * 28.0) * mouthWave * 0.024;
+  q = vec2(mp.x, mp.y - parabola - waveOffset);
+
+  // D-shape asymmetric corner radii:
+  // Happy (:D, curve > 0): flatter top corners, deeply rounded bottom corners
+  // Panicked/Sad (D:, curve < 0): deeply rounded top, flatter bottom
+  float maxR = min(halfW, halfH) * 0.95;
+  float topR = mix(maxR * 0.85, maxR * 0.28, clamp(mouthCurve, 0.0, 1.0));
+  float botR = mix(maxR * 0.85, maxR * 0.28, clamp(-mouthCurve, 0.0, 1.0));
+  return sdRoundedBox2D(q, vec2(halfW, halfH), vec4(topR, botR, topR, botR));
+}
+`;
 
 export interface CapsuleBodyUniformMap {
   uSkinColor: { value: Color };
@@ -82,7 +123,7 @@ export function computeCapsuleMouthLocalBounds(
 }
 
 export function createCapsuleBodyUniforms(dna: CapsuleCharacterDNA): CapsuleBodyUniformMap {
-  const mouthCenterY = dna.suitSplitY + dna.bodyHeight * 0.16;
+  const mouthCenterY = computeCapsuleMouthCenterY(dna);
   return {
     uSkinColor: { value: new Color(dna.skinTone) },
     uSuitColor: { value: new Color(dna.suitColor) },
@@ -151,12 +192,7 @@ uniform float uMouthWave;
 uniform float uBuckTeeth;
 uniform float uTongueVisible;
 
-float sdRoundedBox2D(vec2 p, vec2 b, vec4 r) {
-  r.xy = (p.x > 0.0) ? r.xy : r.zw;
-  r.x  = (p.y > 0.0) ? r.x  : r.y;
-  vec2 q = abs(p) - b + r.x;
-  return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r.x;
-}`,
+${CAPSULE_MOUTH_SDF_GLSL}`,
       )
       .replace(
         '#include <color_fragment>',
@@ -182,25 +218,11 @@ float sdRoundedBox2D(vec2 p, vec2 b, vec4 r) {
       (vCapsuleLocalPos.y - uMouthCenterY) / max(0.15, uBodyRadius)
     );
 
-    float halfW = clamp(uMouthWidth * 0.34, 0.08, 0.42);
-    float openAmt = clamp(uMouthOpen, 0.0, 1.0);
-    float halfH = mix(0.014, 0.19, openAmt);
-
-    // Parabolic smile/frown curvature + optional nervous sine wave
-    float xNorm = clamp(mp.x / max(0.05, halfW), -1.5, 1.5);
-    float parabola = (xNorm * xNorm - 0.35) * uMouthCurve * 0.085;
-    float waveOffset = sin(mp.x * 28.0) * uMouthWave * 0.024;
-    vec2 q = vec2(mp.x, mp.y - parabola - waveOffset);
-
-    // D-shape asymmetric corner radii:
-    // Happy (:D, uMouthCurve > 0): flatter top corners, deeply rounded bottom corners
-    // Panicked/Sad (D:, uMouthCurve < 0): deeply rounded top, flatter bottom
-    float maxR = min(halfW, halfH) * 0.95;
-    float topR = mix(maxR * 0.85, maxR * 0.28, clamp(uMouthCurve, 0.0, 1.0));
-    float botR = mix(maxR * 0.85, maxR * 0.28, clamp(-uMouthCurve, 0.0, 1.0));
-    vec4 cornerRadii = vec4(topR, botR, topR, botR);
-
-    float dMouth = sdRoundedBox2D(q, vec2(halfW, halfH), cornerRadii);
+    vec2 q;
+    float halfW;
+    float halfH;
+    float openAmt;
+    float dMouth = capsuleMouthDistance(mp, uMouthWidth, uMouthOpen, uMouthCurve, uMouthWave, q, halfW, halfH, openAmt);
     float aa = max(fwidth(dMouth) * 1.35, 0.004);
 
     // Subtle outer lip crease / shadow around mouth rim
@@ -270,7 +292,7 @@ export function buildCapsuleBodyMesh(dna: CapsuleCharacterDNA): CapsuleBodyMeshR
     uniforms.uSkinColor.value.set(nextDna.skinTone);
     uniforms.uSuitColor.value.set(nextDna.suitColor);
     uniforms.uSuitSplitY.value = nextDna.suitSplitY;
-    uniforms.uMouthCenterY.value = nextDna.suitSplitY + nextDna.bodyHeight * 0.16;
+    uniforms.uMouthCenterY.value = computeCapsuleMouthCenterY(nextDna);
     uniforms.uBodyRadius.value = nextDna.bodyRadius;
     uniforms.uBuckTeeth.value = nextDna.buckTeeth ? 1.0 : 0.0;
   };

@@ -5,6 +5,20 @@ import { SURFACE_LAYER_ORDER } from './planet-surface-layers';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 describe('PlanetSurfaceMaterial', () => {
+  it('keeps foreground atmosphere overlays separate from the surface atmosphere', () => {
+    const material = new PlanetSurfaceMaterial();
+    const stage = (_context: any, color: any) => color;
+    material.setAtmosphereStage({ id: 'own-air', stage });
+    material.addAtmosphereOverlay({ id: 'foreground', stage });
+    expect(material.stackKey).toContain('atmosphere:own-air');
+    expect(material.stackKey).toContain('atmosphereOverlays:foreground');
+    expect(() => material.addAtmosphereOverlay({ id: 'foreground', stage })).toThrow();
+    expect(material.removeAtmosphereOverlay('foreground')).toBeTrue();
+    expect(material.removeAtmosphereOverlay('foreground')).toBeFalse();
+    expect(material.stackKey).toContain('atmosphere:own-air');
+    expect(material.stackKey).not.toContain('atmosphereOverlays');
+    material.dispose();
+  });
   const layer = (name: string, calls: string[]) => () => {
     calls.push(name);
     return { albedo: vec3(1, 0, 0), roughness: vec3(1).x, metalness: vec3(0).x };

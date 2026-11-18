@@ -166,7 +166,7 @@ export const equatorRoad: SurfaceLayer = (context, below) => {
 material.addSurfaceLayer({ id: 'road', order: SURFACE_LAYER_ORDER.game, layer: equatorRoad });
 ```
 
-A sun occluder is `(context) => number node` (1 = lit), an emissive is `(context, surface) => vec3 node`, a lighting stage is `(context, { color, sunVisibility, surface, emissive }) => vec3 node` (`emissive` is the emissive stack's sum, already in `color`, or null), an atmosphere stage is `(context, color) => vec3 node`.
+A sun occluder is `(context) => number node` (1 = lit), an emissive is `(context, surface) => vec3 node`, a lighting stage is `(context, { color, sunVisibility, surface, emissive }) => vec3 node` (`emissive` is the emissive stack's sum, already in `color`, or null), an atmosphere stage is `(context, color) => vec3 node`. `addAtmosphereOverlay({ id, order, stage })` applies additional ordered stages after the surface's own atmosphere; `removeAtmosphereOverlay(id)` removes one without changing that atmosphere.
 
 ## Rules that keep it fast
 

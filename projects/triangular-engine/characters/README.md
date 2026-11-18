@@ -213,6 +213,25 @@ Open `/characters-lab` in the demo application:
 
 The corresponding Three.js procedural assembly (`CapsuleCharacterActor`, `buildCapsuleBodyMesh`, `buildCapsuleFaceRig`, `RubberHoseLimbMesh`, `buildCapsuleHairKit`, `buildCapsuleSpaceGear`) lives in `triangular-engine/procedural`.
 
+### Capsule face probes and camera projection
+
+The capsule face's placement maths is exported as named probes. `buildCapsuleFaceRig` builds from the same functions, so a probe is where the rig mesh is.
+
+- `computeCapsuleFaceProbes(dna, pose?)` returns, in the torso frame (+Y up, +Z forward, origin at the centre of the capsule's cylinder):
+  - `head`: the capsule axis, its radius and the skin bottom.
+  - `leftEye` / `rightEye`: the eye placement, the eye-white ellipsoid, the pupil centre and the pupil ellipsoid. Pass the eye poses from `projectCapsuleFaceState` to follow the gaze.
+  - `mouth`: the centre, the shape and the two corners on the head surface. Pass the mouth state to follow the expression.
+  - Brow and nose placements.
+- The parts are also exported on their own: `computeCapsuleEyePlacement`, `computeCapsuleBrowPlacement`, `computeCapsuleNosePlacement`, `computeCapsuleMouthCenterY`, `computeCapsuleMouthShape`, `computeCapsuleMouthProbes`, `computeCapsuleEyeProbes`, `computeCapsuleHeadProbes` and `computeCapsuleFrontSurfaceZ`.
+- Camera projection (no three.js): `CharacterPinholeCamera` (position, target, up, vertical field of view, image size) matches a three.js `PerspectiveCamera` that looks at the target.
+  - `projectCharacterPoint` returns pixel coordinates with y pointing down; pixel (col, row) has its centre at (col + 0.5, row + 0.5).
+  - `projectCharacterEllipsoid` returns an ellipsoid's outline as an image ellipse. `characterProjectedEllipseDistance` gives a point's signed distance to that ellipse.
+  - `characterEllipsoidContour` and `characterCapsuleSideContour` give the 3D outline points.
+  - `characterSegmentEllipsoidEntry` and `characterSegmentCapsuleEntry` test whether something blocks a line of sight.
+  - `transformCharacterPoint`, `transformCharacterEllipsoid` and `transformCharacterCapsule` take probes from the torso frame to the world with a column-major 4×4 matrix (`torsoGroup.matrixWorld.elements`).
+
+A Karma spec in `triangular-engine/procedural` checks the projected probes against a flat ID-colour render of the actor. At 640×360 they agree within one pixel in front, three-quarter and profile views.
+
 ### Capsule Space Cats (four-legged)
 
 The same entry also exports the framework-free cat contract and locomotion for the horizontal four-legged Capsule Doodle Space Cats:

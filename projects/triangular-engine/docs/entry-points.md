@@ -5,6 +5,7 @@ Import optional features from their secondary entry point so applications only s
 | Import | Purpose | Required dependencies for this entry |
 | --- | --- | --- |
 | `triangular-engine` | Core Angular/Three.js scene graph, cameras, lights, geometry, materials, GLTF, services, portal UI, and renderer lifecycle. | Angular Common/Core/Forms/CDK, Portal Layout, `three`, `dexie`, `three-mesh-bvh`, `rxjs` |
+| `triangular-engine/cloud-volumes` | Procedural planet cloud shells, ground-shadow sampling and bounded 3D cloud volumes. See [cloud volumes](../cloud-volumes/README.md). | `three` |
 | `triangular-engine/development-map` | Data-driven development view for example branches, plan readiness, scope history, Mermaid relationship cards and saved evidence. Host apps supply their own normalized model. See [development-map](../development-map/README.md). | Angular Common/Core; optional `@daxur-studios/mermaid-runtime` |
 | `triangular-engine/scene-tree` | Opt-in Material Scene Tree inspection UI; provides its panel to core engine UI. | `@angular/material` |
 | `triangular-engine/testing` | Standalone repeatable-test panel, versioned launch/result DTOs and application-neutral adapter executor. See [testing](../testing/README.md). | Angular Core/Common/Forms |

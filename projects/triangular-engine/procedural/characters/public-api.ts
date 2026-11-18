@@ -3,6 +3,7 @@ export * from './character-body-mesh';
 export * from './character-face';
 export * from './reference-face-builder';
 export * from './capsule/capsule-body-material';
+export * from './capsule/capsule-id-colours';
 export * from './capsule/capsule-face-rig';
 export * from './capsule/capsule-rubber-hose-limb';
 export * from './capsule/capsule-hands-and-boots';

@@ -128,3 +128,24 @@ export const BODY_TINT_SPIKE_HISTORY: readonly TestSuite<BodyTintSpikeSettings>[
     ],
   },
 ];
+
+/** A fixed camera and correction setting for the real-moon atmosphere experiment. */
+export interface MoonLimbSettings {
+  readonly view: 'space' | 'ground';
+  readonly correction: boolean;
+}
+
+export const MOON_LIMB_HISTORY: readonly TestSuite<MoonLimbSettings>[] = [{
+  id: 'moon-limb-visual',
+  version: 1,
+  title: 'Moon behind atmospheric air',
+  purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: (['space', 'ground'] as const).flatMap(view => [false, true].map(correction => ({
+    id: `${view}-${correction ? 'corrected' : 'original'}`,
+    label: `${view} · ${correction ? 'corrected' : 'original'}`,
+    settings: { view, correction },
+    durationMs: 500,
+    warmupMs: 500,
+  }))),
+}];

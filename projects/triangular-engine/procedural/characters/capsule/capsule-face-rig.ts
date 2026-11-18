@@ -16,12 +16,20 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
-import type {
-  CapsuleBrowRigPose,
-  CapsuleCharacterDNA,
-  CapsuleEyeRigPose,
-  CapsuleFaceProjection,
+import {
+  CAPSULE_GAZE_ROTATION_SCALE,
+  CAPSULE_PUPIL_DEPTH_SCALE,
+  CAPSULE_PUPIL_FORWARD_OFFSET,
+  CAPSULE_SCLERA_DEPTH_SCALE,
+  computeCapsuleBrowPlacement,
+  computeCapsuleEyePlacement,
+  computeCapsuleNosePlacement,
+  type CapsuleBrowRigPose,
+  type CapsuleCharacterDNA,
+  type CapsuleEyeRigPose,
+  type CapsuleFaceProjection,
 } from 'triangular-engine/characters';
+import { tagCapsulePart } from './capsule-id-colours';
 
 export interface CapsuleEyeAssembly {
   readonly root: Group;
@@ -55,29 +63,23 @@ function buildSingleGooglyEye(
   catchlightMat: MeshStandardMaterial,
   lashMat: MeshStandardMaterial,
 ): CapsuleEyeAssembly {
-  const sign = side === 'left' ? -1 : 1;
-  const sizeAsym = (dna.eyeSizeAsymmetry ?? 0) * sign * 0.5;
-  const sideEyeScale = Math.max(0.55, dna.eyeScale * (1 + sizeAsym));
-  const eyeRadius = dna.bodyRadius * 0.385 * sideEyeScale;
+  // Placement comes from the framework-free face probes, so probes and meshes always agree.
+  const placement = computeCapsuleEyePlacement(dna, side);
+  const sign = placement.sign;
+  const eyeRadius = placement.radius;
 
   const root = new Group();
   root.name = `capsule-eye-${side}`;
 
   // Place on the front surface of the upper capsule head with full googly-eye protrusion
-  const angle = sign * Math.max(0.45, dna.eyeSpacing * 1.72);
-  const heightShift = (dna.eyeHeightAsymmetry ?? 0) * sign * dna.bodyRadius;
-  const eyeY = dna.suitSplitY + dna.bodyHeight * 0.365 + dna.bodyRadius * 0.04 + heightShift;
-  root.position.set(
-    Math.sin(angle) * dna.bodyRadius * 1.04,
-    eyeY,
-    Math.cos(angle) * dna.bodyRadius * 1.08,
-  );
-  root.rotation.y = angle * 0.38;
+  root.position.set(placement.position.x, placement.position.y, placement.position.z);
+  root.rotation.y = placement.yaw;
 
   // Nearly spherical bulging white eyeball for clean 3/4 and profile silhouettes
   const scleraGeo = new SphereGeometry(eyeRadius, 24, 18);
   const scleraMesh = new Mesh(scleraGeo, scleraMat);
-  scleraMesh.scale.set(1, 1, 0.94);
+  scleraMesh.scale.set(1, 1, CAPSULE_SCLERA_DEPTH_SCALE);
+  tagCapsulePart(scleraMesh, 'eyeWhite');
   scleraMesh.castShadow = true;
   scleraMesh.receiveShadow = true;
   root.add(scleraMesh);
@@ -90,14 +92,16 @@ function buildSingleGooglyEye(
   const pupilGeo = new SphereGeometry(eyeRadius, 18, 14);
   const pupilMesh = new Mesh(pupilGeo, pupilMat);
   const pScale = dna.pupilScale;
-  pupilMesh.scale.set(pScale, pScale, pScale * 0.38);
-  pupilMesh.position.set(0, 0, eyeRadius * 0.90);
+  pupilMesh.scale.set(pScale, pScale, pScale * CAPSULE_PUPIL_DEPTH_SCALE);
+  pupilMesh.position.set(0, 0, eyeRadius * CAPSULE_PUPIL_FORWARD_OFFSET);
+  tagCapsulePart(pupilMesh, 'pupil');
   gazePivot.add(pupilMesh);
 
   // Subtle tiny specular highlight tucked in upper corner so pupils read as clean black dots
   const catchGeo = new SphereGeometry(eyeRadius * 0.032, 10, 8);
   const catchMesh = new Mesh(catchGeo, catchlightMat);
   catchMesh.position.set(-eyeRadius * 0.09, eyeRadius * 0.10, eyeRadius * 0.96);
+  tagCapsulePart(catchMesh, 'pupil');
   gazePivot.add(catchMesh);
 
   // Eyelid tilt container (rotates on Z for angry glare vs worried/sad look)
@@ -110,6 +114,7 @@ function buildSingleGooglyEye(
   const upperLidGeo = new SphereGeometry(lidRadius, 22, 12, 0, Math.PI * 2, 0, Math.PI * 0.5);
   const upperLidMesh = new Mesh(upperLidGeo, skinMat);
   upperLidMesh.castShadow = true;
+  tagCapsulePart(upperLidMesh, 'eyelid');
 
   const upperLidPivot = new Group();
   // In rest state (open), tuck upper lid high behind the eye so profile views show the full sclera sphere
@@ -134,6 +139,7 @@ function buildSingleGooglyEye(
     lash.position.copy(lashDir).multiplyScalar(lidRadius + eyeRadius * 0.045);
     lash.quaternion.setFromUnitVectors(upAxis, lashDir);
     lash.castShadow = true;
+    tagCapsulePart(lash, 'eyelid');
     lashesGroup.add(lash);
   }
   eyelidTiltGroup.add(lashesGroup);
@@ -149,6 +155,7 @@ function buildSingleGooglyEye(
     Math.PI * 0.5,
   );
   const lowerLidMesh = new Mesh(lowerLidGeo, skinMat);
+  tagCapsulePart(lowerLidMesh, 'eyelid');
   const lowerLidPivot = new Group();
   lowerLidPivot.rotation.x = 1.18;
   lowerLidPivot.add(lowerLidMesh);
@@ -255,42 +262,28 @@ function buildFloatingEyebrow(
   const browMesh = new Mesh(browGeo, browMat);
   browMesh.name = `capsule-brow-${side}`;
   browMesh.castShadow = true;
+  tagCapsulePart(browMesh, 'brow');
 
-  const angle = sign * Math.max(0.45, dna.eyeSpacing * 1.72);
-  const sizeAsym = (dna.eyeSizeAsymmetry ?? 0) * sign * 0.5;
-  const sideEyeScale = Math.max(0.55, dna.eyeScale * (1 + sizeAsym));
-  const eyeRadius = r * 0.385 * sideEyeScale;
-  const heightShift = (dna.eyeHeightAsymmetry ?? 0) * sign * r;
-  const eyeY = dna.suitSplitY + dna.bodyHeight * 0.365 + r * 0.04 + heightShift;
-  const baseBrowY = eyeY + eyeRadius * 1.03;
-
-  browMesh.position.set(
-    Math.sin(angle) * r * 0.96,
-    baseBrowY,
-    Math.cos(angle) * r * 1.08,
-  );
-  browMesh.rotation.y = angle * 0.55;
-  browMesh.userData['baseY'] = baseBrowY;
+  const placement = computeCapsuleBrowPlacement(dna, side);
+  browMesh.position.set(placement.position.x, placement.position.y, placement.position.z);
+  browMesh.rotation.y = placement.yaw;
+  browMesh.userData['baseY'] = placement.position.y;
 
   return browMesh;
 }
 
 function buildButtonNose(dna: CapsuleCharacterDNA, noseMat: MeshStandardMaterial): Mesh {
-  const r = dna.bodyRadius;
-  const noseGeo = new SphereGeometry(r * 0.082, 16, 12);
+  const placement = computeCapsuleNosePlacement(dna);
+  const noseGeo = new SphereGeometry(placement.baseRadius, 16, 12);
   noseGeo.scale(1.08, 0.88, 0.95);
   const noseMesh = new Mesh(noseGeo, noseMat);
   noseMesh.name = 'capsule-button-nose';
   noseMesh.castShadow = true;
   noseMesh.receiveShadow = true;
-  const nScale = Math.max(0, dna.noseScale ?? 0);
-  noseMesh.visible = nScale > 0.01;
-  noseMesh.scale.setScalar(Math.max(0.01, nScale));
-  noseMesh.position.set(
-    0,
-    dna.suitSplitY + dna.bodyHeight * 0.245,
-    r * 0.99,
-  );
+  tagCapsulePart(noseMesh, 'nose');
+  noseMesh.visible = placement.visible;
+  noseMesh.scale.setScalar(placement.scale);
+  noseMesh.position.set(placement.position.x, placement.position.y, placement.position.z);
   return noseMesh;
 }
 
@@ -369,9 +362,13 @@ export function buildCapsuleFaceRig(dna: CapsuleCharacterDNA): CapsuleFaceRigRes
   root.add(leftEye.root, rightEye.root, leftBrow, rightBrow, noseMesh);
 
   const applyEyePose = (eye: CapsuleEyeAssembly, pose: CapsuleEyeRigPose): void => {
-    eye.gazePivot.rotation.set(pose.gazePitch * 0.75, pose.gazeYaw * 0.75, 0);
+    eye.gazePivot.rotation.set(
+      pose.gazePitch * CAPSULE_GAZE_ROTATION_SCALE,
+      pose.gazeYaw * CAPSULE_GAZE_ROTATION_SCALE,
+      0,
+    );
     const pScale = pose.pupilScale;
-    eye.pupilMesh.scale.set(pScale, pScale, pScale * 0.38);
+    eye.pupilMesh.scale.set(pScale, pScale, pScale * CAPSULE_PUPIL_DEPTH_SCALE);
 
     // Rest open angle is -1.34 rad; closing rotates forward toward +0.21 rad
     eye.upperLidPivot.rotation.x = -1.34 + pose.upperLidAngle;
@@ -399,9 +396,9 @@ export function buildCapsuleFaceRig(dna: CapsuleCharacterDNA): CapsuleFaceRigRes
     browMat.color.set(nextDna.hairColor);
     leftEye.lashesGroup.visible = nextDna.eyelashes;
     rightEye.lashesGroup.visible = nextDna.eyelashes;
-    const nScale = Math.max(0, nextDna.noseScale ?? 0);
-    noseMesh.visible = nScale > 0.01;
-    noseMesh.scale.setScalar(Math.max(0.01, nScale));
+    const nose = computeCapsuleNosePlacement(nextDna);
+    noseMesh.visible = nose.visible;
+    noseMesh.scale.setScalar(nose.scale);
   };
 
   const dispose = (): void => {

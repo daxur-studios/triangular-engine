@@ -23,11 +23,13 @@ import {
   MOON_CENTRE,
   MOON_RADIUS_M,
   MOON_RADIUS_UNITS,
+  MOON_LIMB_HISTORY,
   MULTI_ATMOSPHERE_TEST_HISTORY,
   SUN_DIRECTION,
   VIEW_POSES,
   type BodyTintSpikeSettings,
   type MultiAtmosphereSettings,
+  type MoonLimbSettings,
 } from './atmosphere-multi-lab-tests';
 
 /** Plan 078 spike-measure: two `PlanetAtmosphere` instances in one scene (planet A, moon B), for the lab suite. */
@@ -133,7 +135,7 @@ function finiteSamples(value: number): number[] {
   }),
   host: { class: 'flex-page' },
   template: `
-    <scene [logarithmicDepthBuffer]="true">
+    <scene [logarithmicDepthBuffer]="true" [showFps]="true">
       <ng-template portalTarget="overlay" lane="topStart">
         <a class="back-link" routerLink="/">← Examples</a>
         <section class="scope" aria-label="Two atmospheres">
@@ -143,7 +145,12 @@ function finiteSamples(value: number): number[] {
             The nearer atmosphere owns the sky; the other draws only its bounded air.
             Showing: {{ shown() }}
           </p>
-          @if (spikeMode) {
+          @if (moonLimbMode) {
+            <p>Compare the moon behind the air from space and from the ground. The correction is experimental.</p>
+            @if (!testBusy()) {
+              <p><a href="?spike=moon-limb&amp;view=space">Space</a> · <a href="?spike=moon-limb&amp;view=ground">Ground</a> · <a [href]="moonComparisonLink">{{ moonCorrection ? 'Turn correction off' : 'Turn correction on' }}</a></p>
+            }
+          } @else if (spikeMode) {
             <tri-test-runner
               [suites]="spikeTestHistory"
               [adapter]="spikeAdapter"
@@ -164,6 +171,13 @@ function finiteSamples(value: number): number[] {
           }
         </section>
       </ng-template>
+      @if (moonLimbMode) {
+        <ng-template portalTarget="rightSidebar" lane="content">
+          <tri-test-runner [suites]="moonLimbHistory" [adapter]="moonLimbAdapter"
+            [available]="testAvailable()" [allowAutoStart]="allowTestAutoStart"
+            [resultSink]="true" (progressChange)="onTestProgress($event)" />
+        </ng-template>
+      }
     </scene>
   `,
   styles: `
@@ -195,8 +209,13 @@ export class AtmosphereMultiLabPageComponent {
 
   /** `?spike=body-tint`: the Plan 081 spike page, with its own suite and adapter. */
   readonly spikeMode = new URLSearchParams(location.search).get('spike') === 'body-tint';
+  readonly moonLimbMode = new URLSearchParams(location.search).get('spike') === 'moon-limb';
+  readonly moonView = new URLSearchParams(location.search).get('view') === 'ground' ? 'ground' : 'space';
+  readonly moonCorrection = new URLSearchParams(location.search).get('correction') !== 'off';
+  readonly moonComparisonLink = `?spike=moon-limb&view=${this.moonView}${this.moonCorrection ? '&correction=off' : ''}`;
   readonly labTestHistory = MULTI_ATMOSPHERE_TEST_HISTORY;
   readonly spikeTestHistory = BODY_TINT_SPIKE_HISTORY;
+  readonly moonLimbHistory = MOON_LIMB_HISTORY;
   readonly allowTestAutoStart = isDevMode();
   readonly shown = signal('');
   readonly testBusy = signal(false);
@@ -206,6 +225,7 @@ export class AtmosphereMultiLabPageComponent {
   /** Planet A's rim luma from the half-resolution run, read by the full-resolution run of the same view (Q1). */
   private halfRim?: Float32Array;
   private bodyTintSpike?: BodyTintSpike;
+  private moonSettings: MoonLimbSettings = { view: this.moonView, correction: this.moonCorrection };
 
   private readonly materialA = new PlanetSurfaceMaterial();
   private readonly materialB = new PlanetSurfaceMaterial();
@@ -237,6 +257,7 @@ export class AtmosphereMultiLabPageComponent {
       });
       this.shown.set(`body-tint spike · left froxel · right sky · red line at range limit ${Math.round(this.bodyTintSpike.rangeMaxM / 1000)} km`);
     }
+    if (this.moonLimbMode) this.applyMoonLimbSettings(this.moonSettings);
 
     const tick = this.engine.beforeRender$.subscribe(() => {
       this.assignSkyOwner();
@@ -260,6 +281,36 @@ export class AtmosphereMultiLabPageComponent {
       this.bodyA.geometry.dispose();
       this.bodyB.geometry.dispose();
     });
+  }
+
+  /** Demo-only finite view-ray march: the moon receives only the air in front of its actual surface. */
+  private applyMoonLimbSettings(settings: MoonLimbSettings): void {
+    this.moonSettings = { ...settings };
+    const camera = this.engine.camera as PerspectiveCamera;
+    camera.fov = 24;
+    camera.updateProjectionMatrix();
+    this.atmosphereA.configure({ thickness: 0.12 });
+    this.atmosphereB.sky = false;
+    this.atmosphereA.exposure = 2;
+    this.atmosphereB.exposure = 2;
+    if (settings.view === 'ground') {
+      camera.up.set(0, 0, 1);
+      camera.position.set(0, 0, 1 + 2_000 / EARTH_RADIUS_M);
+      this.bodyB.position.set(3, 0, 1.30);
+      camera.lookAt(3, 0, 1.25);
+    } else {
+      camera.up.set(0, 1, 0);
+      camera.position.set(0, 0, 3);
+      this.bodyB.position.set(1.95, 0, -2);
+      camera.lookAt(0.95, 0, 0);
+    }
+    camera.updateMatrixWorld();
+    this.materialB.setAtmosphereStage(null);
+    this.materialB.removeAtmosphereOverlay('moon-limb-experiment');
+    if (settings.correction) {
+      this.materialB.addAtmosphereOverlay({ id: 'moon-limb-experiment', stage: this.atmosphereA.foregroundPerspective() });
+    }
+    this.shown.set(`moon limb experiment · ${settings.view} · correction ${settings.correction ? 'on' : 'off'}`);
   }
 
   /**
@@ -342,6 +393,29 @@ export class AtmosphereMultiLabPageComponent {
     measure: () => this.measureSpike(),
     restore: () => undefined,
     environment: () => this.environment(),
+  };
+
+  readonly moonLimbAdapter: TestRunAdapter<MoonLimbSettings, MoonLimbSettings> = {
+    windowModes: false,
+    capture: () => ({ ...this.moonSettings }),
+    apply: scenario => this.applyMoonLimbSettings(scenario.settings),
+    ready: (context) => this.waitForFrames(3, context),
+    measure: async (scenario, context) => {
+      await context.wait(scenario.durationMs);
+      const canvas = this.engine.canvas;
+      const expected = scenario.settings;
+      return {
+        metrics: [],
+        checks: [
+          { name: 'requested view and correction applied', passed: this.moonSettings.view === expected.view && this.moonSettings.correction === expected.correction },
+          { name: 'rendered canvas available', passed: canvas.isConnected && canvas.width > 0 && canvas.height > 0 },
+        ],
+        limitations: ['Appearance requires visual review; a functional pass does not establish a correct atmosphere.'],
+      };
+    },
+    restore: snapshot => this.applyMoonLimbSettings(snapshot),
+    environment: () => this.environment(),
+    thumbnail: async (_scenario, context) => context.repetition > 1 ? undefined : [await this.captureThumbnail(context.signal, 640)],
   };
 
   private async measureSpike(): Promise<TestObservation> {
@@ -467,11 +541,11 @@ export class AtmosphereMultiLabPageComponent {
     };
   }
 
-  private async captureThumbnail(signal: AbortSignal): Promise<Blob> {
+  private async captureThumbnail(signal: AbortSignal, maxWidth = THUMBNAIL_WIDTH): Promise<Blob> {
     const canvas = this.engine.canvas;
     this.engine.render(this.engine.fpsController.lastRenderTime, true);
     const small = document.createElement('canvas');
-    small.width = Math.min(THUMBNAIL_WIDTH, canvas.width);
+    small.width = Math.min(maxWidth, canvas.width);
     small.height = Math.max(1, Math.round((canvas.height * small.width) / canvas.width));
     small.getContext('2d')?.drawImage(canvas, 0, 0, small.width, small.height);
     if (signal.aborted) throw signal.reason;

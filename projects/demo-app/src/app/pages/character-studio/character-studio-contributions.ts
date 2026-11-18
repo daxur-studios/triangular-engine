@@ -108,6 +108,10 @@ function control(
 }
 
 const booleanChoices = choices(['true', 'false']);
+const renderModeChoices: readonly CharacterStudioChoice[] = [
+  { value: 'shaded', label: 'Shaded' },
+  { value: 'id_colours', label: 'ID colours' },
+];
 
 export function createCharacterStudioContributions(): Readonly<Record<CharacterStudioFamilyId, CharacterStudioContribution>> {
   const humanActor = new CapsuleCharacterActor({
@@ -163,6 +167,14 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
           control('leftHandAction', 'Left hand', leftHandAction, choices(['none', 'wave', 'point', 'hold_gadget', 'salute', 'reach'])),
         ],
       },
+      {
+        id: 'render',
+        label: 'Render',
+        controls: [
+          // Flat ID colours: one unlit colour per face part, for checking face probes against a render.
+          control('renderMode', 'Render mode', humanActor.idColourModeEnabled ? 'id_colours' : 'shaded', renderModeChoices),
+        ],
+      },
     ],
     selectPreset: (presetId) => {
       const preset = ALL_CAPSULE_CHARACTER_PRESETS.find((candidate) => candidate.id === presetId);
@@ -187,6 +199,7 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
           leftHandAction = value as typeof leftHandAction;
           humanActor.setHandAction('left', leftHandAction);
           break;
+        case 'renderMode': humanActor.setIdColourMode(value === 'id_colours'); break;
       }
     },
     randomize: (seed) => humanActor.setSeed(`character-studio-human-${seed}`),

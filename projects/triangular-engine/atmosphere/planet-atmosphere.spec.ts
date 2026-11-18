@@ -1,6 +1,6 @@
 import { Object3D, PerspectiveCamera, Scene, Vector3 } from 'three';
-import { uniform } from 'three/tsl';
-import { getEvalRenderer } from '../planet-material/gpu-eval.testing';
+import { Fn, uniform, vec3, vec4 } from 'three/tsl';
+import { evaluateOnGpu, getEvalRenderer } from '../planet-material/gpu-eval.testing';
 import { PlanetSurfaceMaterial } from '../planet-material/planet-surface-material';
 import { PlanetAtmosphere, skyShellFade, type IAtmosphereSurface, type PlanetAtmosphereOptions } from './planet-atmosphere';
 
@@ -45,6 +45,31 @@ class FakeSurface implements IAtmosphereSurface {
 }
 
 describe('PlanetAtmosphere', () => {
+  it('applies foreground air only to the part of a finite ray inside the atmosphere', async () => {
+    const atmosphere = smallAtmosphere({ thickness: 0.12 });
+    atmosphere.backdrop.altitude.value = RADIUS_M * 0.5;
+    const run = () => evaluateOnGpu([
+      [[Math.sqrt(0.51), -0.7, 0, 0.05]], // ends before entering the air
+      [[Math.sqrt(0.51), -0.7, 0, 3]], // passes through the limb
+      [[Math.sqrt(0.51), 0.7, 0, 3]], // points away from the planet
+    ], at => Fn(() => {
+      const row = at(0);
+      const air = atmosphere.foregroundAir(vec3(row.x, row.y, row.z), row.w);
+      return vec4(air.transmittance, air.inscatter.z);
+    })());
+    const pixels = await run();
+    expect(pixels[0]).toBeCloseTo(1, 4);
+    expect(pixels[3]).toBeCloseTo(0, 5);
+    expect(pixels[4]).toBeLessThan(0.99);
+    expect(pixels[7]).toBeGreaterThan(0);
+    expect(pixels[8]).toBeCloseTo(1, 4);
+    expect(pixels[11]).toBeCloseTo(0, 5);
+    atmosphere.backdrop.objectAir.value = 0;
+    const hidden = await run();
+    expect(hidden[4]).toBeCloseTo(1, 4);
+    expect(hidden[7]).toBeCloseTo(0, 5);
+    atmosphere.dispose();
+  });
   it('builds the model at the given radius and scales metres to world units', () => {
     const atmosphere = smallAtmosphere();
     expect(atmosphere.model.profile.planetRadiusM).toBeCloseTo(RADIUS_M, 3);

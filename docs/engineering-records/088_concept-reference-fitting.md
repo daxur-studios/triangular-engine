@@ -412,6 +412,199 @@ sheet. All 27 eye circles come from one method.
   is corrected.
 - `sharp` is still an undeclared dependency, and Q1 (where concept images and specs live) is still open.
 
+### 2026-11-17 — concept-measurement: variant-c-profile's split eyeball merged; developer check pending
+
+The developer asked for the variant-c-profile fix (the first open item above).
+
+**Cause.** The near eyeball has a bright highlight arc the colour of the backdrop. Where the arc reaches the
+eyeball's front rim, the background fill runs into it. The eye white is left C-shaped, and the circle fitter puts
+one small circle on each half (r 22 and 24 px, centres 48 px apart). The two circles came from one eyeball; the
+second pupil-like mark past the rim is the far eye.
+
+**Change in `measure.mjs` (`mergeSplitEyeball`).** After the two eyes are selected, a pair whose centre distance is
+under 1.1 times the sum of their radii (`SPLIT_EYEBALL_RATIO`) is refitted as one eyeball. The refit starts from a
+circle around both and uses `refitEyeball`. The pair is replaced by the one circle only when the fit's rim residual
+is within `RIM_RESIDUAL_LIMIT` (2 px) and it sees at least as much rim as either half. The spec marks such an eye
+`fit: "merged-eyeball"`. Applying the merge to all candidate circles, before selection, also moved three approved
+crops (variant-c-three-quarter far eye by 6 px, orange-pigtails-up by 12 px, goofy-front by 0.5 px), because
+duplicate fits of one eye were merged into a wider fit. The merge was therefore limited to the final pair.
+
+**Result.** variant-c-profile now has one eye: centre (220.78, 196.07), r 39.39 px, rim residual 1.09 px, rim
+visible on 69%. The pupil is found, and the flag "no pupil inside the circle" becomes "found 1 eye", as on
+goofy-profile. The eyeball is a slightly tall oval, about 81 px wide and 84 px high, so the circle's top sits about
+4 px inside the drawn top. Close pairs on the other crops have centre distances of 1.17 to 1.33 times their radius
+sum; there the merge is not tried. Every other crop's landmarks and flags are identical to the approved spec. Two
+reruns gave spec sha256 `da3c39e4…ad6f` and board sha256 `e45a4900…5256`.
+
+**Tests.** Two specs were added. Two small circles on halves of one 40 px eyeball must merge to within 1 px of its
+centre and 1.5 px of its radius. Two overlapping 30 px eyes must not merge. A full synthetic face that reproduces
+the background leak was tried and did not split the eye the same way, so the merge rule is tested directly. All
+13 specs pass.
+
+**Review.** The before-and-after zoom and the new board were sent to the developer. This one crop changes the
+approved measurement, so it needed the developer's check. The developer answered "Looks right" on 2026-11-17.
+Spec sha256 `da3c39e4…ad6f` is now the approved measurement for this sheet, and the camera-and-shape-fit phase may
+use variant-c-profile's eye.
+
+### 2026-11-17 — model-probes done: probes, projection and ID render agree within one pixel
+
+The developer asked to start the model-probes phase.
+
+**Change.**
+
+- **Probes** (`characters/core/capsule-face-probes.ts`). The face placement maths now lives in the framework-free core.
+  - `computeCapsuleFaceProbes(dna, pose)` returns the head axis, radius and skin bottom; eye-white and pupil ellipsoids, which follow the gaze; mouth centre and corners on the head surface, which follow the mouth state; and the brows and nose.
+  - `buildCapsuleFaceRig` builds from these functions. A spec checks that every rig mesh lies on its probe to 1e-9 for two DNAs.
+- **Projection** (`characters/core/character-camera-projection.ts`). A pinhole camera matching three.js `lookAt`, plus:
+  - point and ellipsoid projection, with the outline as an image ellipse and a signed pixel distance to it;
+  - 3D contour points for ellipsoids and capsule sides;
+  - line-of-sight tests and torso-to-world transforms.
+- **ID render** (`procedural/characters/capsule/capsule-id-colours.ts`). `CapsuleCharacterActor.setIdColourMode` draws each part in one flat, unlit colour. The colour components are 0, 0.5 or 1, so any two parts differ by at least 128 in one channel.
+  - The body uses a shader that shares the shaded body's suit split and mouth outline (`CAPSULE_MOUTH_SDF_GLSL`). The mouth edge in the ID render is therefore the same maths as in the shaded render.
+  - The helmet dome is not drawn.
+  - The mode is restored and reapplied when `setDna` rebuilds the face.
+  - The character studio has a Render mode control: shaded or ID colours.
+
+**Decision: the agreement test is a Karma ChromeHeadless spec, not a `triangular-engine/testing` suite.** The plan says
+renders go through `triangular-engine/testing`. That harness runs pages in the served demo app and saves media and
+timings. This check needs neither: WebGL works in plain headless Karma (Chrome 157), and the test reads its pixels back
+in memory. A Karma spec runs with the other unit specs on every `npm run test:triangular-engine:procedural`, needs no
+served app and saves nothing. The calibration phase, which compares renders with the concept sheets, may still need
+the testing harness.
+
+**Test** (`capsule-face-probe-agreement.spec.ts`).
+
+- **Benchmark actor:** the curly-pigtails preset without helmet or jetpack, with orange pigtails, happy expression, idle, after 10 updates of 0.1 s.
+- **Camera:** framed on the head the way the studio frames it, FOV 25°, elevation 0.04 rad. Azimuths: front 0, three-quarter −0.55, profile −1.18.
+- **Resolution:** 640×360, the capture size of the benchmark sheets in phase 1. At this size the head is about 200 px per world unit, an eye white about 27 px in radius and a pupil about 7 px.
+- **Method:** sample each probe outline at 360 points and drop the samples another part hides. Hidden means behind the head capsule or the other eye white. A pupil is also dropped behind its own eye white, with a slack of 0.02 eye radius.
+  - **Safety net:** a sample counts only when the pixel 3 px inside is the part's own ID and the pixel 3 px outside is an allowed neighbour. The 3 samples on each side must pass too.
+  - **Residual:** for each pixel centre within 3.5 px, the test compares the ID with the side of the analytic edge. Each disagreement counts as its distance to the edge.
+  - **Head sides:** checked against the capsule's projected side lines.
+  - **Mouth corners:** the farthest mouth pixel along the projected surface tangent.
+
+**Result: all three views pass; the worst residual is 0.56 px.**
+
+| Probe              | Front n / max (px) | Three-quarter n / max (px) | Profile n / max (px) |
+| ------------------ | ------------------ | -------------------------- | -------------------- |
+| left eye white     | 112 / 0.000        | 187 / 0.202                | 26 / 0.036           |
+| left pupil         | 360 / 0.058        | 360 / 0.063                | 190 / 0.017          |
+| right eye white    | 110 / 0.000        | 96 / 0.109                 | 127 / 0.079          |
+| right pupil        | 360 / 0.068        | 206 / 0.024                | 107 / 0.000          |
+| head edges         | 62 / 0.000         | 76 / 0.096                 | 61 / 0.000           |
+| right mouth corner | 1 / 0.560          | 1 / 0.146                  | not measured         |
+| left mouth corner  | 1 / 0.529          | 1 / 0.042                  | not measured         |
+
+The front mouth corners measure about half a pixel because the extreme mouth pixel centre can lie up to one pixel
+from the true corner. This is quantisation, not a placement error.
+
+**Sensitivity.** With a 1.5 px safety net, a 3% larger eye white was not caught: the net threw out exactly the
+samples that were wrong. The final 3 px net and 3.5 px window catch it.
+
+- **About 2 px errors:** eye white ×1.08, pupil ×1.3 and head radius ×1.03 failed all three views. Residuals were 1.1 to 2.4 px, or the probe's samples dropped to zero.
+- **Mouth corner:** x ×1.04 was caught at 1.7 px.
+- **Sub-pixel changes:** these reported 0.4 to 0.95 px and passed. The test proves "within one pixel", not tighter.
+
+The mutations were temporary edits and were reverted.
+
+**Limits.**
+
+- **Profile eyes:** in profile the near eye white is mostly covered by the lids, with the far eye white behind it, and the far pupil stands out against the background.
+  - The profile view therefore requires one of the two eye whites, one of the two pupils and the head edges, not every probe.
+  - Mouth corners are not measured past |azimuth| 1.
+- **Covered eye outlines:** in the front view, lids and brows cover about two thirds of each eye-white outline. Those samples are dropped, not measured.
+- **Scope:** only the benchmark DNA and expression are tested. The rig-to-probe spec covers a second, asymmetric DNA without a render.
+- **Studio toggle:** not checked in the served demo app. Its control is wired and the studio specs pass.
+
+**Verification.**
+
+- procedural: 278 specs SUCCESS
+- characters: 153 SUCCESS
+- character-studio demo specs: 19 SUCCESS
+- `npm run build:triangular-engine`: exit 0
+
+### 2026-11-17 — camera-and-shape-fit done: solver, synthetic recovery, fit report and board
+
+**Where it lives.** `tools/concept-fitting/fit.mjs` (solver, report, board), `fit.spec.mjs`, `load-core.mjs` and `core-entry.ts`.
+The solver imports the framework-free core (probes, projection, side contour) by bundling `core-entry.ts` in memory with esbuild, so it runs in node with no browser and no second copy of the face mathematics.
+
+```bash
+node tools/concept-fitting/fit.mjs --spec artifacts/concept-fitting/headshots-and-angles/measured-spec.json
+```
+
+It writes `fit-report.json` and `fit-board.png` next to the spec. Both stay local under `artifacts/` (Q1 is still open).
+
+**Model.**
+
+- **Camera per view:** an orbit camera aimed at the capsule centre. Parameters are yaw, pitch, field of view, `logPpm` (pixels per metre at the head centre, which sets scale and distance) and an image offset `ox`, `oy`.
+- **Shared per head:** eye spacing, eye scale, eye size and height asymmetry, body height, mouth width and four gaze angles. They use the DNA ranges. Body radius (0.36) and suit split are fixed.
+- **Not fitted:** pupil scale. The measurement records pupil centres only, so a size would be unconstrained.
+- **Residuals:** pixels divided by one fitted head width in pixels, with a soft-L1 loss (delta 0.03). Left and right are matched to the model by the best assignment, because which eye is "left" depends on the view.
+- **Terms:** eye centre, eye radius, pupil centre, mouth corners and head side edges (point to the projected side contour). Hidden-surface and unmeasured-eye terms are soft penalties. Each view also carries a weak field-of-view prior and soft limits on yaw and pitch from its label, so a profile cannot become a front view.
+- **Solve:** Levenberg–Marquardt on parameters scaled to [0,1]. First the front view alone with shared parameters free, then each other view's camera from label-informed starts, then all views jointly.
+
+**Flagging.** A view is judged on its held-out RMS: shared parameters are refitted without it, then only its camera is fitted.
+
+- **Why held out:** the in-sample RMS alone rewards a flexible camera.
+- **Rule (provisional, calibration sets the final values):** flagged above 0.06 head widths, or above 3× the median of the other views (median floored at 0.01).
+- **After flagging:** the shared parameters are refitted without the flagged views, then the flagged views' cameras are fitted alone, so a flagged view is shown but does not pull the head.
+- **Weak views:** each view reports its measured numbers minus its six camera parameters. Under 4 is marked `weak`, and its low residual is not evidence.
+
+**Synthetic recovery (acceptance).** Five views of a known head (yaw 2° to 75°, pitch −35° to 30°) with 0.6 px Gaussian noise.
+
+| Quantity               | Worst error, six seeds | Tolerance in the spec |
+| ---------------------- | ---------------------- | --------------------- |
+| eye spacing            | 0.0055                 | 0.015                 |
+| eye scale              | 0.013                  | 0.04                  |
+| body height            | 0.013                  | 0.06                  |
+| mouth width            | 0.020                  | 0.08                  |
+| yaw                    | 1.0°                   | 3°                    |
+| pitch                  | 7.0°                   | 10°                   |
+| scale (`logPpm`)       | 0.009                  | 0.03                  |
+| in-sample RMS          | 0.0034                 | 0.01                  |
+
+Pitch is the loosest camera angle because it trades against the vertical offset. No view was flagged in any seed.
+A view with its eyes moved 40 px and mouth corners 30 px is flagged, nothing else is, and the shared parameters stay within tolerance.
+Two runs are byte-identical. `fit.spec.mjs` has 6 specs, and the three concept-fitting spec files pass together (19).
+
+**Result on the three approved heads.** Held-out RMS in head widths (in-sample RMS is lower).
+
+| Head            | front  | three-quarter | profile | up     | down              |
+| --------------- | ------ | ------------- | ------- | ------ | ----------------- |
+| orange-pigtails | 0.024  | 0.016         | 0.020   | 0.010* | 0.036             |
+| goofy           | 0.010  | 0.011         | 0.012*  | 0.014  | **0.048 flagged** |
+| variant-c       | 0.031  | 0.024         | 0.007*  | 0.017  | 0.026             |
+
+`*` weak view (fewer than 4 measured numbers beyond its camera).
+
+**I2 (are the five views of one head consistent enough to share parameters?).** Yes, with one caveat. No head has more than one view in five flagged, so no no-go is recorded. Only goofy-down is flagged, and that is exactly one in five.
+Every other view is within 0.036 head widths held out. The thresholds are provisional, and calibration decides whether 0.06 is tight enough to catch the wrong variants.
+
+**A1 (up and down views).** The solver used eyes, pupils, mouth corners and side edges only, never the flat cut base.
+
+- The up views fit well (held out 0.010 to 0.017), though orange-pigtails-up is weak.
+- The down views fit worst for all three heads. goofy-down is flagged, with head-edge residual 0.075 and a pitch of about 59°. orange-pigtails-down is next, with eye centres at 0.050.
+- Reading: the model has no counterpart for what the concept draws from below. A1 stays open. The down view is the first thing to check if calibration finds a gap.
+
+**Findings to carry into calibration.**
+
+- **Mouth width at its bound:** goofy fits 0.22, the bottom of the DNA range. Its mouth corners are measured in the front view only, so the concept mouth may be narrower than the generator allows.
+- **Body height:** goofy fits 1.397, just under the 1.4 bound. The head-only crops constrain it weakly, so treat it as unidentified, not as a measurement.
+- **Field of view:** several views settle at the 10° lower bound (pigtails three-quarter and up, goofy profile, up and down). Field of view is not identifiable from these crops, so it is held with a weak prior and not reported as a result.
+- **Profile yaw:** the fitted yaws are 43° (pigtails), 59° (goofy) and 71° (variant-c), not 90°. The label prior is soft, so the data pulled them back. Either the concept profiles are not true profiles or the model eye placement differs from the concept. Calibration should check this before trusting a profile residual.
+- **Gaze:** the four gaze angles can absorb pupil offsets. They are fitted, so the pupil residuals are low by construction. Calibration's "pupil offset" variant is the check on that.
+
+**Not checked.**
+
+- **Boards:** the fit board was sent to the developer. Only the first version was viewed by the agent, so the final board has not been checked for drawing errors.
+- **Real-data accuracy:** none. There is no ground truth for the concept art, so recovery is proven on synthetic data only.
+- **Studio render:** the studio Render-mode toggle is still unchecked in the browser, as in the model-probes entry.
+
+**Verification.**
+
+- `node --test tools/concept-fitting/*.spec.mjs`: 19 passed
+- No engine code changed in this phase, so no library build was run.
+
 ## Scope history
 
 <!-- tri:scope-history -->

@@ -76,15 +76,15 @@ generation itself. ER 088 lists these as candidate later plans.
 | Phase                | State   |
 | -------------------- | ------- |
 | concept-measurement  | done    |
-| model-probes         | planned |
-| camera-and-shape-fit | planned |
+| model-probes         | done    |
+| camera-and-shape-fit | done    |
 | calibration          | planned |
 | preset-regression    | planned |
 | organic-silhouette   | planned |
 | body-proportions     | planned |
 | second-asset-class   | planned |
 
-<!-- tri:review version="1" scope-hash="4d9725373fb1866c5393da01845db4bde6a9bd1d6e77ca2c5f89d1fcd4c2610f" reviewed="2026-11-17" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="c8c7536607dbb3309237402f2b98075b77b0e00cf3b9d8bd73bdf9cd9619c9ed" reviewed="2026-11-17" reviewer="agent" -->
 <!-- tri:item id="Q1" kind="intent" applies-to="concept-measurement,preset-regression" blocks="none" state="open" -->
 
 - [ ] Where do concept images and measured specs live: may crops be committed to this public repository, or do
@@ -118,14 +118,16 @@ generation itself. ER 088 lists these as candidate later plans.
     were retired (ER 088, 2026-11-17).
     <!-- /tri:item -->
 
-<!-- tri:item id="I2" kind="investigation" applies-to="camera-and-shape-fit,calibration" blocks="calibration" state="open" -->
+<!-- tri:item id="I2" kind="investigation" applies-to="camera-and-shape-fit,calibration" blocks="calibration" state="resolved" -->
 
-- [ ] Are the five concept views of one head consistent enough to share one set of face parameters?
+- [x] Are the five concept views of one head consistent enough to share one set of face parameters?
   - Why it matters: the sheets are generated images and each view may be a slightly different head. If they
     disagree, a fit across views chases noise.
   - Next action: the fit report records residuals per view. If more than one view in five is flagged for a head,
     record a no-go and either fit front and profile only or generate fixed-layout sheets with the Plan 068
     reference prompts.
+  - Resolution: yes, with one caveat. On held-out residuals only goofy-down is flagged (one view in five), so
+    no head is a no-go. The flag thresholds are provisional until calibration (ER 088, 2026-11-17).
     <!-- /tri:item -->
 
 <!-- tri:item id="A1" kind="assumption" applies-to="model-probes,camera-and-shape-fit" blocks="none" state="open" -->

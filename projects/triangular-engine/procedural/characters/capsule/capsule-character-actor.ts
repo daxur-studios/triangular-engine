@@ -43,6 +43,7 @@ import {
   buildCapsuleFaceRig,
   type CapsuleFaceRigResult,
 } from './capsule-face-rig';
+import { CapsuleIdColourSwap, tagCapsulePart } from './capsule-id-colours';
 import {
   buildCapsuleHairKit,
   type CapsuleHairKitResult,
@@ -108,6 +109,8 @@ export class CapsuleCharacterActor {
   private lastLocomotionSample?: CapsuleLocomotionSample;
   private lastFaceProjection?: CapsuleFaceProjection;
   private readonly tmpQuat = new Quaternion();
+  private readonly idColours = new CapsuleIdColourSwap();
+  private idColourMode = false;
 
   constructor(options: CapsuleCharacterActorOptions = {}) {
     const baseDna =
@@ -138,6 +141,7 @@ export class CapsuleCharacterActor {
 
     // 3. Modular Hair & Facial Hair
     this.hairKit = buildCapsuleHairKit(this.currentDna);
+    tagCapsulePart(this.hairKit.root, 'hair');
     this.torsoGroup.add(this.hairKit.root);
 
     // 4. Space Gear (Bubble Helmet, Jetpack, Headset, Walkie-Talkie, Chest Patch)
@@ -227,6 +231,26 @@ export class CapsuleCharacterActor {
     return this.spaceGear;
   }
 
+  /** Whether the actor currently renders in flat ID colours. */
+  get idColourModeEnabled(): boolean {
+    return this.idColourMode;
+  }
+
+  /**
+   * Renders the actor in flat, unlit ID colours (see `CAPSULE_ID_COLOURS`): head skin, suit,
+   * mouth, eye whites, pupils, eyelids, brows, nose and hair each get one colour, and
+   * everything else is `'other'`. A see-through helmet dome is not drawn. The mode survives
+   * {@link setDna}; turning it off restores the shaded materials.
+   */
+  setIdColourMode(enabled: boolean): void {
+    this.idColourMode = enabled;
+    if (enabled) {
+      this.idColours.apply(this.root, this.body);
+    } else {
+      this.idColours.restore();
+    }
+  }
+
   /**
    * Updates the character's DNA in-place, rebuilding geometry only when structural
    * dimensions or modular style IDs change.
@@ -235,6 +259,8 @@ export class CapsuleCharacterActor {
     const prev = this.currentDna;
     const next = normalizeCapsuleCharacterDNA({ ...prev, ...partial });
     this.currentDna = next;
+    // Rebuilds below may dispose or replace materials; swap back first.
+    this.idColours.restore();
 
     const geometryChanged =
       prev.bodyRadius !== next.bodyRadius || prev.bodyHeight !== next.bodyHeight;
@@ -266,6 +292,9 @@ export class CapsuleCharacterActor {
     this.limbMaterial.color.set(next.limbColor);
     this.leftBoot.setBootColor(next.bootColor);
     this.rightBoot.setBootColor(next.bootColor);
+    if (this.idColourMode) {
+      this.idColours.apply(this.root, this.body);
+    }
 
     this.update(0);
   }
@@ -413,6 +442,7 @@ export class CapsuleCharacterActor {
   }
 
   dispose(): void {
+    this.idColours.dispose();
     this.body.mesh.geometry.dispose();
     this.body.mesh.material.dispose();
     this.faceRig.dispose();

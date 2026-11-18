@@ -92,6 +92,7 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
   private readonly layers = new OrderedSlots<SurfaceLayer>();
   private readonly occluders = new OrderedSlots<SunOcclusion>();
   private readonly emissives = new OrderedSlots<EmissiveLayer>();
+  private readonly atmosphereOverlays = new OrderedSlots<AtmosphereStage>();
   private sunVisibilityNode: any = float(1);
   private lightingEntry?: { readonly id: string; readonly stage: LightingStage };
   private atmosphereEntry?: { readonly id: string; readonly stage: AtmosphereStage };
@@ -219,6 +220,20 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
     return this;
   }
 
+  /** Adds haze after the surface's own atmosphere, for example air belonging to a foreground planet. */
+  addAtmosphereOverlay(entry: { id: string; order?: number; stage: AtmosphereStage }): this {
+    this.atmosphereOverlays.add({ id: entry.id, order: entry.order ?? 0, value: entry.stage });
+    this.needsUpdate = true;
+    return this;
+  }
+
+  /** Removes a foreground haze stage without changing the surface's own atmosphere. */
+  removeAtmosphereOverlay(id: string): boolean {
+    const removed = this.atmosphereOverlays.remove(id);
+    if (removed) this.needsUpdate = true;
+    return removed;
+  }
+
   /**
    * Stages 4 and 6 run on the final lit colour: lighting (the occluders' product reaches it), then
    * atmosphere. With neither stage and no occluder the output is untouched.
@@ -227,13 +242,14 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
     const lighting =
       this.lightingEntry?.stage ?? (this.occluders.size > 0 ? sunVisibilityLighting() : undefined);
     const atmosphere = this.atmosphereEntry?.stage;
-    if (!lighting && !atmosphere) return super.setupOutput(builder, outputNode);
+    if (!lighting && !atmosphere && !this.atmosphereOverlays.size) return super.setupOutput(builder, outputNode);
 
     let color: any = outputNode.rgb;
     if (lighting) {
       color = lighting(this.context, { color, sunVisibility: this.sunVisibilityNode, surface: this.lastSample, emissive: this.emissiveNode });
     }
     if (atmosphere) color = atmosphere(this.context, color);
+    for (const overlay of this.atmosphereOverlays.entries) color = overlay.value(this.context, color);
     return super.setupOutput(builder, vec4(color, outputNode.a));
   }
 
@@ -246,7 +262,8 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
   get stackKey(): string {
     const stages =
       (this.lightingEntry ? `;lighting:${this.lightingEntry.id}` : '') +
-      (this.atmosphereEntry ? `;atmosphere:${this.atmosphereEntry.id}` : '');
+      (this.atmosphereEntry ? `;atmosphere:${this.atmosphereEntry.id}` : '') +
+      (this.atmosphereOverlays.size ? `;atmosphereOverlays:${this.atmosphereOverlays.key()}` : '');
     return `morph:${this.morphOptionsKey};layers:${this.layers.key()};occluders:${this.occluders.key()};emissives:${this.emissives.key()}${stages}`;
   }
 
