@@ -78,8 +78,8 @@ generation itself. ER 088 lists these as candidate later plans.
 | concept-measurement  | done    |
 | model-probes         | done    |
 | camera-and-shape-fit | done    |
-| calibration          | planned |
-| preset-regression    | planned |
+| calibration          | done    |
+| preset-regression    | started |
 | organic-silhouette   | planned |
 | body-proportions     | planned |
 | second-asset-class   | planned |
@@ -127,7 +127,7 @@ generation itself. ER 088 lists these as candidate later plans.
     record a no-go and either fit front and profile only or generate fixed-layout sheets with the Plan 068
     reference prompts.
   - Resolution: yes, with one caveat. On held-out residuals only goofy-down is flagged (one view in five), so
-    no head is a no-go. The flag thresholds are provisional until calibration (ER 088, 2026-11-17).
+    no head is a no-go. The flag thresholds are provisional until calibration (ER 088, 2026-11-17). Calibration done 2026-11-18: go, with limits (ER 088).
     <!-- /tri:item -->
 
 <!-- tri:item id="A1" kind="assumption" applies-to="model-probes,camera-and-shape-fit" blocks="none" state="open" -->

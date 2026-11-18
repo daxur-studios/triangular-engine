@@ -34,6 +34,7 @@ This plan covers separating the capsule character experience from the mixed-purp
 - **legacy-lab-separation** — Remove capsule customization from `/characters-lab` after its tests and evidence workflow have moved. Acceptance: `/characters-lab` continues to host its face-rig and general humanoid demonstrations without duplicate capsule controls or suites.
 - **hair-generation-coverage** — Add deterministic, close-up visual verification for procedural human hairstyles across representative presets and head views. Acceptance: reviewed front, side and rear evidence covers the selected generated styles and identifies attachment, silhouette, coverage, floating or head-intersection issues; fixes can be reproduced from the recorded recipe.
 - **hair-motion-and-helmet** — Verify representative hairstyles during walking and inside a clear dome-style space helmet. Acceptance: focused motion and helmet-fit cases produce reviewable close-up evidence, define expected hair movement and helmet interaction, and pass human review for unintended clipping, occlusion or detachment; implement any behavior changes established by that review.
+- **experimental-pigtail-head** — Add an experimental capsule human head preset using the approved pigtail geometry and the existing face controller. Acceptance: the preset can be selected in Character Studio and shows distinct neutral, happy and surprised expressions from the front and at 45°.
 - **character-performance-matrix** — Measure one and many procedural humans while idle, walking in place and moving on repeatable scene paths. Acceptance: a visible-browser performance run records actor-update CPU time, render-submit CPU time, frame cadence, draw calls, triangles and scenario setup time at populations of 1, 16 and 48; scenario setup includes constructing additional actors, arranging the population and fitting the camera, but excludes construction of the studio's pre-existing primary human. The 16.7 ms p95 frame-cadence budget is labeled as an initial 60 Hz target hypothesis, and no hardware baseline is accepted before reviewing a clean run on the intended device.
 
 ## Relationships
@@ -52,9 +53,10 @@ This plan covers separating the capsule character experience from the mixed-purp
 | legacy-lab-separation  | done        |
 | hair-generation-coverage | in_progress |
 | hair-motion-and-helmet | planned     |
+| experimental-pigtail-head | in_progress |
 | character-performance-matrix | in_progress |
 
-<!-- tri:review version="1" scope-hash="b93cfe7b2642c1484a175013ade107f6892717707276403ca857fe6c442903be" reviewed="2026-11-14" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="d9f0700c92fd046b2ea911ab5e979148f091bc37459fa67bcabfb11a24feb8c2" reviewed="2026-11-18" reviewer="agent" -->
 <!-- /tri:review -->
 
 ## Delivery progress

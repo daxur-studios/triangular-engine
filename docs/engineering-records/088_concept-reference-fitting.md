@@ -605,6 +605,72 @@ Every other view is within 0.036 head widths held out. The thresholds are provis
 - `node --test tools/concept-fitting/*.spec.mjs`: 19 passed
 - No engine code changed in this phase, so no library build was run.
 
+### 2026-11-18 — calibration done: the gate catches every wrong variant, but only in its final form; go with limits
+
+**What was done.** `tools/concept-fitting/calibrate.mjs` builds eight deliberately wrong variants of each of the three fitted heads (24 in all) and runs them through the gate against the real measurements. Results are in `artifacts/concept-fitting/headshots-and-angles/calibration.json` (local, regenerable).
+
+Variants: eyes moved out or in by 10% of head width, eye radius ±15%, both pupils offset by 0.3 rad (yaw, then pitch), head height ±10%.
+
+**The first gate did not work.** Refitting every view's camera and judging one mean residual let the cameras absorb the error. Eye radius, pupil offset and head aspect came out at only 1.03 to 1.35 times the good head, inside the spread between good heads (0.012 to 0.018). Eye moved in was 1.02 times on goofy.
+
+**The gate that works.** Hold the fitted cameras fixed and compare each landmark kind (eye centre, eye radius, pupil, mouth corner, head edge) with the same kind in the head's own fit. A model fails when any kind rises by more than a factor of 1.25 and by at least 0.003 head widths (`GATE_FACTOR`, `GATE_MIN_RISE`).
+
+| | Result |
+| --- | --- |
+| Wrong variants that fail | 24 of 24 |
+| Smallest margin (worst kind, vs the good head) | 1.59 times (goofy, eye radius −15%); threshold is 1.25 |
+| Eye moved 10% | 2.2 to 7.0 times |
+| Pupil offset | 2.2 to 2.7 times |
+| Head height ±10% | 3.3 to 5.2 times |
+| Good heads | 1.0 by construction |
+
+**Go or no-go: go, with two limits.**
+
+1. The concept sheets are consistent enough to fit (Q I2: one view in five flagged, goofy-down only), and the gate separates wrong variants from the fit with margin.
+2. The gate compares a model with the head's own fit, so it detects *drift from the accepted fit*. It does not prove the fit matches the artist's intent: there is still no ground truth. Fine for preset-regression; do not read it as "the face is right".
+3. The 1.25 factor is untested against re-measurement noise (a fresh measurement of the same sheet). Preset-regression should accept a measurement re-run before the factor is called final.
+
+**Not checked.** Variant sizes beyond those listed (a 5% eye move was not tried). The pupil variants shift both eyes the same way. The final fit board is still unviewed by the agent.
+
+**Verification.** `node --test tools/concept-fitting/*.spec.mjs`: 21 passed (2 new in `calibrate.spec.mjs`, synthetic head, every variant fails). No engine code changed.
+
+### 2026-11-18 — preset-regression: three presets and the ratio check are in; the pupil gate fails and the contact sheet is not made
+
+**What was done.**
+
+- `CAPSULE_CONCEPT_FIT_PRESETS` in `characters/core/capsule-dna.ts`: `concept-fit-orange-pigtails`, `concept-fit-goofy`, `concept-fit-variant-c`, appended to `ALL_CAPSULE_CHARACTER_PRESETS` so the studio lists them. Only the fitted face fields are set; the rest is the default astronaut (orange pigtails also gets pigtail hair).
+- `tools/concept-fitting/preset-ratios.mjs` prints ten probe ratios (in head widths) for all 23 presets and fails on drift above 0.002 against `preset-ratios.baseline.json`. `--accept` rewrites the baseline after a reviewed change; `--spec` also gates the three concept presets against the measurements.
+- No hidden floors: the check reads the model's own probes, and the presets store the fitted numbers unchanged.
+
+**Gate result: the presets fail on pupils only.** With the fitted cameras held, eye centre, eye radius, mouth corner and head edge match the fit exactly. The pupil residual is 0.033, 0.037 and 0.022 against 0.010, 0.013 and 0.013 for the fit (2.3 to 3.4 times; the limit is 1.25). Two reasons, both in the DNA and not the fit:
+
+1. The fit used a shared gaze direction per eye. DNA keeps only the difference between the eyes (`gazeAsymmetryYaw`), and all three fitted a difference beyond the ±0.45 rad limit, so they sit at the clamp.
+2. DNA has no resting gaze direction at all.
+
+Also at a limit: goofy `bodyHeight` 1.397 against 1.40.
+
+**Not done.**
+
+- **Contact sheet:** not rendered, so the single visual check by the developer has not happened.
+- **Studio benchmark:** the presets were not run through the studio benchmark in a browser.
+- **Pupil gate:** left failing on purpose. Fixing it means either a resting-gaze field in the DNA (a public API change) or wider asymmetry limits. Developer decision.
+
+**Verification.** `node --test tools/concept-fitting/*.spec.mjs`: 25 passed. `npm run test:triangular-engine:characters`: 153 passed. No library build run.
+
+### 2026-11-18 — preset-regression: resting gaze added, all three presets pass the gate
+
+Developer approved adding a resting gaze to the DNA. `gazeRestYaw` and `gazeRestPitch` ([-0.6, 0.6], default 0) are added to every character's gaze, in `capsule-face-projection.ts`. A search over the four gaze values per head, against the measured pupils with the fitted cameras held, gave the preset values.
+
+**One further public change, flagged:** the means alone were not enough (variant C and orange pigtails still failed at 1.43 and 2.6 times). The fit needs a larger eye-to-eye yaw difference than ±0.45, so `gazeAsymmetryYaw` is now limited to ±1.2. Orange pigtails sits at -1.15 rad, which is a strongly cross-eyed look. The fit says the concept pupils are placed that way, but it may also be the gaze absorbing a different pupil placement in the model; the contact sheet is the check.
+
+**Gate result.** All three concept presets pass: pupil residual 0.0089, 0.0122 and 0.0125 against 0.0096, 0.0125 and 0.0129 for the fit. The baseline table was re-accepted.
+
+**Verification.** 25 fitting specs and 153 character specs pass. The DNA spec's clamp test now expects 1.2.
+
+**Visual check (2026-11-18).** Contact sheet of the three presets in the studio Face view (dark backdrop) sent to the developer, who judged it fine, including the orange pigtails gaze. Local copy: `artifacts/concept-fitting/headshots-and-angles/preset-contact-sheet.png`. The library build passes.
+
+**Still not done.** The studio benchmark run in a browser, and a light-backdrop render.
+
 ## Scope history
 
 <!-- tri:scope-history -->

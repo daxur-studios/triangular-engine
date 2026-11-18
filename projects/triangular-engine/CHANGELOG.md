@@ -336,6 +336,9 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `triangular-engine/characters`: `CAPSULE_CONCEPT_FIT_PRESETS`, three capsule heads fitted to concept art, now part of `ALL_CAPSULE_CHARACTER_PRESETS`.
+- `triangular-engine/characters`: `gazeRestYaw` and `gazeRestPitch` on `CapsuleCharacterDNA` (resting gaze of both eyes); `gazeAsymmetryYaw` now accepts ±1.2 rad (was ±0.45).
+
 - New secondary entry point `triangular-engine/planet-material` (Plan 050): the
   cell-planet surface as one TSL node material for `WebGPURenderer` (native
   WebGPU or `forceWebGL`). `PlanetSurfaceMaterial` runs a sphere/flat morph

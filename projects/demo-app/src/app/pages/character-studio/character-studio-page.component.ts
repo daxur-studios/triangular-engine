@@ -55,6 +55,7 @@ import {
   type CharacterStudioContribution,
   type CharacterStudioFamilyId,
 } from './character-studio-contributions';
+import { EXPERIMENTAL_PIGTAIL_HEAD_ID } from './experimental-pigtail-head';
 
 type CharacterStudioView = 'front' | 'three-quarter' | 'profile' | 'back' | 'face' | 'hair';
 
@@ -112,6 +113,7 @@ export class CharacterStudioPageComponent {
   readonly selectedFamilyId = signal<CharacterStudioFamilyId>('human');
   readonly activeFamily = computed(() => this.contributions[this.selectedFamilyId()]);
   readonly selectedPresetId = signal(this.contributions.human.defaultPresetId);
+  readonly experimentalHeadSelected = computed(() => this.selectedPresetId() === EXPERIMENTAL_PIGTAIL_HEAD_ID);
   readonly selectedMotionId = signal('idle');
   readonly selectedExpression = signal<ExtendedEmotionName>('happy');
   readonly autoRotate = signal(false);
@@ -411,8 +413,10 @@ export class CharacterStudioPageComponent {
 
   selectPreset(presetId: string): void {
     if (presetId === 'custom') return;
+    const wasExperimental = this.experimentalHeadSelected();
     this.activeFamily().selectPreset(presetId);
     this.selectedPresetId.set(presetId);
+    if (wasExperimental !== this.experimentalHeadSelected()) this.applyView(this.activeView());
     this.refreshControls();
   }
 
@@ -433,6 +437,7 @@ export class CharacterStudioPageComponent {
   }
 
   randomize(): void {
+    if (this.experimentalHeadSelected()) return;
     this.activeFamily().randomize(this.variantSeed++);
     this.selectedPresetId.set('custom');
     this.refreshControls();
@@ -465,6 +470,13 @@ export class CharacterStudioPageComponent {
     const centerY = family.cameraTargetY;
     this.activeView.set(view);
     this.activeFocusTarget = undefined;
+
+    if (this.experimentalHeadSelected()) {
+      this.autoRotate.set(false);
+      this.cameraFraming = view === 'face' ? 'face-close-up' : view === 'hair' ? 'head-close-up' : view;
+      this.applyFocusTargetFraming('human-head-hair');
+      return;
+    }
 
     switch (view) {
       case 'front':
@@ -515,9 +527,9 @@ export class CharacterStudioPageComponent {
 
   private framingAzimuthRadians(framing: CameraFramingPreset): number {
     switch (framing) {
-      case 'profile': return -1.18;
+      case 'profile': return this.experimentalHeadSelected() ? -Math.PI / 2 : -1.18;
       case 'back': return Math.PI;
-      case 'three-quarter': return -0.55;
+      case 'three-quarter': return this.experimentalHeadSelected() ? -Math.PI / 4 : -0.55;
       default: return 0;
     }
   }
@@ -531,6 +543,7 @@ export class CharacterStudioPageComponent {
       fovDegrees: camera instanceof PerspectiveCamera ? camera.fov : 42,
       aspect: bounds.height > 0 ? bounds.width / bounds.height : 16 / 9,
       azimuthRadians: this.framingAzimuthRadians(this.cameraFraming),
+      ...(this.experimentalHeadSelected() ? { elevationRadians: 0 } : {}),
     });
     this.cameraPosition.set([...framing.cameraPosition]);
     this.cameraTarget.set([...framing.cameraTarget]);

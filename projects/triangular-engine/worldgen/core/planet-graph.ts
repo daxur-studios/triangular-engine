@@ -1,3 +1,4 @@
+import { createPersistentCache } from 'triangular-engine';
 import { computeConvexHull3 } from './convex-hull3';
 import { buildDualCells } from './dual-cells';
 import { fibonacciSpherePoints } from './fibonacci-sphere';
@@ -36,7 +37,42 @@ export interface IPlanetGraphCoreParams {
 
 const DEFAULT_RELAXATION_ITERATIONS = 2;
 
+/**
+ * Bump when the graph maths changes (points, relaxation, hull, dual cells), so graphs stored by an older
+ * build are never read. Part of every cache key.
+ */
+const GRAPH_BUILD_VERSION = 1;
+
+/** Built graphs, shared by every game on this origin through IndexedDB (a few hundred KB for 3000 cells). */
+const graphCache = createPersistentCache<IPlanetGraphCore>({ namespace: 'planet-graph', maxEntries: 40 });
+
+/** The cache key: the resolved recipe (defaults filled in) plus the build version. */
+export function planetGraphCacheKey(params: IPlanetGraphCoreParams): string {
+  const { cellCount, seed = 0, relaxationIterations = DEFAULT_RELAXATION_ITERATIONS } = params;
+  const jitter = params.jitter ?? 0.15 / Math.sqrt(cellCount);
+  return JSON.stringify([GRAPH_BUILD_VERSION, cellCount, seed, relaxationIterations, jitter]);
+}
+
+/**
+ * Loads stored graphs for these recipes into memory, so the next `buildPlanetGraphCore` with the same
+ * params returns at once instead of building (about 5 s for 3000 cells). Await it before the planet is built.
+ * A recipe with nothing stored is built as before and stored afterwards.
+ */
+export function prewarmPlanetGraphs(recipes: readonly IPlanetGraphCoreParams[]): Promise<void> {
+  return graphCache.preload(recipes.map(planetGraphCacheKey));
+}
+
+/** Builds the graph, or returns the stored copy when this recipe has been built before. */
 export function buildPlanetGraphCore(params: IPlanetGraphCoreParams): IPlanetGraphCore {
+  const key = planetGraphCacheKey(params);
+  const stored = graphCache.get(key);
+  if (stored) return stored;
+  const graph = computePlanetGraphCore(params);
+  graphCache.set(key, graph);
+  return graph;
+}
+
+function computePlanetGraphCore(params: IPlanetGraphCoreParams): IPlanetGraphCore {
   const {
     cellCount,
     seed = 0,

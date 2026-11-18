@@ -23,7 +23,7 @@ import {
   type ExtendedEmotionName,
 } from 'triangular-engine/characters';
 import { CapsuleCatActor, CapsuleCharacterActor } from 'triangular-engine/procedural';
-import { Group } from 'three';
+import { Box3, Group, Quaternion, Vector3 } from 'three';
 import {
   fitCameraToFocusTarget,
   resolveCharacterStudioFocusTarget,
@@ -31,6 +31,7 @@ import {
   type ResolvedFocusFraming,
   type VisualFocusTargetId,
 } from './character-studio-focus';
+import { buildExperimentalPigtailHead, EXPERIMENTAL_PIGTAIL_HEAD_ID } from './experimental-pigtail-head';
 
 export type CharacterStudioFamilyId = 'human' | 'cat';
 
@@ -118,7 +119,13 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
     dna: CAPSULE_CHARACTER_PRESETS.find((preset) => preset.id === 'wacky-helmet-waver'),
     autoBlink: true,
   });
-  const humanPresets = presets(ALL_CAPSULE_CHARACTER_PRESETS);
+  const humanRoot = new Group();
+  humanRoot.add(humanActor.root);
+  let experimentalHead: ReturnType<typeof buildExperimentalPigtailHead> | undefined;
+  const humanPresets = [
+    { value: EXPERIMENTAL_PIGTAIL_HEAD_ID, label: 'Orange Pigtails (Experimental Head)' },
+    ...presets(ALL_CAPSULE_CHARACTER_PRESETS),
+  ];
   const humanDefault = 'wacky-helmet-waver';
   const humanMotions = choices(['idle', 'walk', 'run', 'float']);
   let rightHandAction: 'none' | 'wave' | 'point' | 'hold_gadget' | 'salute' | 'reach' = 'none';
@@ -129,17 +136,26 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
     name: 'Capsule Human',
     category: 'Humanoid',
     summary: 'A procedural capsule character with expressive face, hair and modular space gear.',
-    root: humanActor.root,
+    root: humanRoot,
     cameraTargetY: 0.98,
     faceTargetY: 1.52,
     defaultPresetId: humanDefault,
     presets: humanPresets,
-    motions: humanMotions,
+    get motions() { return experimentalHead?.head.visible ? [] : humanMotions; },
     resolveFocusFraming: (targetId, options) => fitCameraToFocusTarget(
-      resolveCharacterStudioFocusTarget(targetId, { humanActor }),
+      experimentalHead?.head.visible ? {
+        id: targetId,
+        label: 'Experimental Pigtail Head',
+        boundsKind: 'scene-object',
+        worldBounds: new Box3().setFromObject(experimentalHead.head, true),
+        forwardNormal: new Vector3(0, 0, 1).applyQuaternion(humanRoot.getWorldQuaternion(new Quaternion())),
+        defaultPadding: .12,
+        subBounds: {},
+        limitations: [],
+      } : resolveCharacterStudioFocusTarget(targetId, { humanActor }),
       options,
     ),
-    controlGroups: () => [
+    controlGroups: () => experimentalHead?.head.visible ? [] : [
       {
         id: 'appearance',
         label: 'Appearance',
@@ -177,8 +193,22 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
       },
     ],
     selectPreset: (presetId) => {
+      if (presetId === EXPERIMENTAL_PIGTAIL_HEAD_ID) {
+        if (!experimentalHead) {
+          experimentalHead = buildExperimentalPigtailHead(humanActor.facialController);
+          humanRoot.add(experimentalHead.head);
+        }
+        experimentalHead.head.visible = true;
+        humanActor.root.visible = false;
+        experimentalHead.update(0);
+        return;
+      }
       const preset = ALL_CAPSULE_CHARACTER_PRESETS.find((candidate) => candidate.id === presetId);
-      if (preset) humanActor.setDna(preset);
+      if (preset || presetId === 'custom') {
+        if (experimentalHead) experimentalHead.head.visible = false;
+        humanActor.root.visible = true;
+        if (preset) humanActor.setDna(preset);
+      }
     },
     setMotion: (motionId) => humanActor.setLocomotion(motionId as CapsuleLocomotionMode),
     setExpression: (expression) => humanActor.facialController.setExpression(expression, 1, 0.2),
@@ -203,8 +233,14 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
       }
     },
     randomize: (seed) => humanActor.setSeed(`character-studio-human-${seed}`),
-    update: (deltaSeconds) => humanActor.update(deltaSeconds),
-    dispose: () => humanActor.dispose(),
+    update: (deltaSeconds) => {
+      if (experimentalHead?.head.visible) experimentalHead.update(deltaSeconds);
+      else humanActor.update(deltaSeconds);
+    },
+    dispose: () => {
+      experimentalHead?.dispose();
+      humanActor.dispose();
+    },
   };
 
   const catActor = new CapsuleCatActor({ dna: CAPSULE_CAT_PRESETS[0], autoBlink: true });

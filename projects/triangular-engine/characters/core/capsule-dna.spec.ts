@@ -1,6 +1,7 @@
 import {
   ALL_CAPSULE_CHARACTER_PRESETS,
   CAPSULE_ALT_CHARACTER_PRESETS,
+  CAPSULE_CONCEPT_FIT_PRESETS,
   CAPSULE_CHARACTER_PRESETS,
   CAPSULE_HAIR_STYLE_IDS,
   DEFAULT_CAPSULE_DNA,
@@ -18,7 +19,7 @@ describe('capsule-dna', () => {
       pupilScale: 0.99,
       eyeSizeAsymmetry: 0.9,
       eyeHeightAsymmetry: -0.5,
-      gazeAsymmetryYaw: 1.2,
+      gazeAsymmetryYaw: 1.5,
       gazeAsymmetryPitch: -0.9,
       noseScale: 3.0,
       buckTeeth: true,
@@ -31,7 +32,7 @@ describe('capsule-dna', () => {
     expect(normalized.pupilScale).toBe(0.55);
     expect(normalized.eyeSizeAsymmetry).toBe(0.35);
     expect(normalized.eyeHeightAsymmetry).toBe(-0.08);
-    expect(normalized.gazeAsymmetryYaw).toBe(0.45);
+    expect(normalized.gazeAsymmetryYaw).toBe(1.2);
     expect(normalized.gazeAsymmetryPitch).toBe(-0.35);
     expect(normalized.noseScale).toBe(1.4);
     expect(normalized.buckTeeth).toBeTrue();
@@ -54,7 +55,9 @@ describe('capsule-dna', () => {
     expect(CAPSULE_CHARACTER_PRESETS.length).toBe(10);
     expect(CAPSULE_ALT_CHARACTER_PRESETS.length).toBeGreaterThanOrEqual(8);
     expect(ALL_CAPSULE_CHARACTER_PRESETS.length).toBe(
-      CAPSULE_CHARACTER_PRESETS.length + CAPSULE_ALT_CHARACTER_PRESETS.length,
+      CAPSULE_CHARACTER_PRESETS.length +
+        CAPSULE_ALT_CHARACTER_PRESETS.length +
+        CAPSULE_CONCEPT_FIT_PRESETS.length,
     );
     for (const preset of ALL_CAPSULE_CHARACTER_PRESETS) {
       const checked = normalizeCapsuleCharacterDNA(preset);

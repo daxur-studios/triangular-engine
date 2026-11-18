@@ -1,3 +1,4 @@
+import { prewarmPlanetGraphs } from 'triangular-engine/worldgen';
 import { bakeBuffers, type BakeLayout } from './lod-height-bake';
 import { runBake, type BakeOutput, type BakedSourceId } from './lod-height-noise';
 import { parseCellPlanet, type CellPlanetDescription } from './lod-height-terrain';
@@ -57,8 +58,15 @@ export function answerBakeRequest(request: BakeRequest): { readonly reply: BakeR
 /** Makes a worker global scope (`self`) answer bake requests from {@link createBakeClient}. Call it once from the worker file. */
 export function serveBakeRequests(scope: BakeWorkerScope): void {
   scope.addEventListener('message', ({ data }) => {
-    const { reply, transfer } = answerBakeRequest(data);
-    scope.postMessage(reply, transfer);
+    // A stored planet graph is loaded first, so the world build below skips its slow graph step.
+    const d = data.planet;
+    const stored = d
+      ? prewarmPlanetGraphs([{ cellCount: d.cellCount, seed: d.seed, relaxationIterations: d.relaxationIterations, jitter: d.jitter ?? 0.15 }]).catch(() => undefined)
+      : Promise.resolve();
+    void stored.then(() => {
+      const { reply, transfer } = answerBakeRequest(data);
+      scope.postMessage(reply, transfer);
+    });
   });
 }
 

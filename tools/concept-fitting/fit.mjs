@@ -369,7 +369,7 @@ function fit(core, crops, state, { freeShared, ids }) {
   return { state: apply(result.u), cost: result.cost };
 }
 
-function fitCamera(core, crop, shared) {
+export function fitCamera(core, crop, shared) {
   let best = null;
   for (const pose of startPoses(crop.view)) {
     const state = { shared, views: { [crop.id]: initialView(core, shared, crop, pose) } };

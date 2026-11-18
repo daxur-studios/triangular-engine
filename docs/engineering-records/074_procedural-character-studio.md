@@ -146,6 +146,10 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **Decision.** Bruno selected 25° as the starting perspective for Orange Pigtails comparisons. Added `capsule-orange-pigtails-benchmark@v2` with the four existing views and explicit 25° FOV; v1 retains its 42° behavior. The studio captures and restores its prior FOV, and focus framing uses the active camera projection.
 - **Verification.** The demo build succeeded; the focused adapter suite passed 15/15. Benchmark v2 run `2026-11-14T20-33-18-818Z_headless-hardware_894a23c3-d02ea780` passed all four automated cases (visual review pending). A browser check observed 42° before, 25° during and 42° after restoration. Local-only stills are under `artifacts/test-runs/capsule-orange-pigtails-benchmark@v2/`; regenerate with `npm run test:run '--' --url http://triangular-demo.localhost:4200/character-studio --suite capsule-orange-pigtails-benchmark --version 2 --profile headless-hardware --noisy`.
 
+### 2026-11-18 — Experimental pigtail head
+
+- **[decision]** Bring the approved pigtail head preview into Character Studio as an experimental human preset. Use the existing facial controller and check the neutral, happy and surprised expressions from the front and at 45° before generating variants.
+
 ## Scope history
 
 <!-- tri:scope-history -->
@@ -158,6 +162,11 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - Summary: Add later visual-verification phases for procedural hair generation, walking behavior and clear dome-helmet fit.
 - Reason: Hair is a prominent procedural feature whose silhouette and attachment need close-up multi-view review; walking and helmet cases can expose motion, clipping and occlusion issues that ordinary character sheets miss.
 - Impact: Extend Plan 074 with deterministic hair-focused evidence and targeted correction work while leaving physics-based simulation undecided.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-PIGTAIL-HEAD" date="2026-11-18" kind="addition" origin="requested" disposition="accepted" scope-ids="experimental-pigtail-head" -->
+- Summary: Add the approved procedural pigtail head as an experimental human preset in Character Studio.
+- Reason: Check that the approved head can change expression before building a family of variations.
+- Impact: Port the head geometry to the demo app and use the existing facial controller to verify neutral, happy and surprised expressions at two angles.
 <!-- /tri:scope-change -->
 <!-- tri:scope-baseline state="unconfirmed" -->
 <!-- /tri:scope-baseline -->

@@ -15,7 +15,7 @@
 
     <div class="top-actions">
       <button class="quiet-button" type="button" [disabled]="runnerBusy()" (click)="resetCharacter()">Reset</button>
-      <button class="primary-button" type="button" [disabled]="runnerBusy()" (click)="randomize()">
+      <button class="primary-button" type="button" [disabled]="runnerBusy() || experimentalHeadSelected()" (click)="randomize()">
         <span aria-hidden="true">✳</span>
         Generate variant
       </button>
@@ -149,7 +149,7 @@
         <span class="inspector-badge">PROCEDURAL</span>
       </div>
 
-      <p class="family-summary">{{ activeFamily().summary }}</p>
+      <p class="family-summary">{{ experimentalHeadSelected() ? 'Experimental head preset for expression and silhouette review.' : activeFamily().summary }}</p>
 
       <section class="inspector-section">
         <div class="section-heading section-heading--large">
@@ -190,26 +190,28 @@
         </section>
       }
 
-      <section class="inspector-section motion-section">
-        <div class="section-heading section-heading--large">
-          <span>Motion</span>
-          <span class="section-caption">Preview</span>
-        </div>
-        <div class="motion-list">
-          @for (motion of activeFamily().motions; track motion.value) {
-            <button
-              class="motion-button"
-              type="button"
-              [disabled]="runnerBusy()"
-              [class.active]="selectedMotionId() === motion.value"
-              (click)="selectMotion(motion.value)"
-            >
-              <span class="motion-symbol" aria-hidden="true">{{ motion.value === 'idle' ? 'Ⅱ' : '↗' }}</span>
-              <span>{{ motion.label }}</span>
-            </button>
-          }
-        </div>
-      </section>
+      @if (activeFamily().motions.length) {
+        <section class="inspector-section motion-section">
+          <div class="section-heading section-heading--large">
+            <span>Motion</span>
+            <span class="section-caption">Preview</span>
+          </div>
+          <div class="motion-list">
+            @for (motion of activeFamily().motions; track motion.value) {
+              <button
+                class="motion-button"
+                type="button"
+                [disabled]="runnerBusy()"
+                [class.active]="selectedMotionId() === motion.value"
+                (click)="selectMotion(motion.value)"
+              >
+                <span class="motion-symbol" aria-hidden="true">{{ motion.value === 'idle' ? 'Ⅱ' : '↗' }}</span>
+                <span>{{ motion.label }}</span>
+              </button>
+            }
+          </div>
+        </section>
+      }
 
       <details class="verification-details">
         <summary>

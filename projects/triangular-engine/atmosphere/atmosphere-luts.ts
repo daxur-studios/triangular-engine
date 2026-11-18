@@ -13,6 +13,7 @@
  * which is what makes baking fast enough to redo when a profile changes. The GPU reads the same data.
  * All tables are RGBA float32 (alpha unused = 1) so they upload as textures without repacking.
  */
+import { createPersistentCache } from 'triangular-engine';
 import { AtmosphereRgb, AtmosphereVec3, PhysicalAtmosphereProfile } from './atmosphere-profile';
 import {
   MultiScatteringTable,
@@ -222,7 +223,52 @@ function bakeIrradiance(
 }
 
 /** Bakes the three tables for a profile. About a second at the default sizes. */
+/**
+ * Bump when the bake maths changes, so tables stored by an older build are never read.
+ * Part of every cache key.
+ */
+const LUT_BAKE_VERSION = 1;
+
+interface IStoredLutImages {
+  readonly transmittance: AtmosphereLutImage;
+  readonly multiScatter: AtmosphereLutImage;
+  readonly irradiance: AtmosphereLutImage;
+}
+
+/** Baked tables, shared by every game on this origin through IndexedDB (about 300 KB each). */
+const lutCache = createPersistentCache<IStoredLutImages>({ namespace: 'atmosphere-luts', maxEntries: 24 });
+
+/** The cache key: the whole recipe (profile and options) plus the bake version. */
+export function atmosphereLutCacheKey(profile: PhysicalAtmosphereProfile, options: AtmosphereLutOptions = {}): string {
+  return JSON.stringify([LUT_BAKE_VERSION, profile, options]);
+}
+
+/**
+ * Loads stored tables for these recipes into memory, so the next `bakeAtmosphereLuts` with the same
+ * profile and options returns at once instead of baking (about 4 s per atmosphere). Await it before the
+ * atmosphere is created. A recipe with nothing stored is simply baked as before and stored afterwards.
+ */
+export function prewarmAtmosphereLuts(
+  recipes: readonly { readonly profile: PhysicalAtmosphereProfile; readonly options?: AtmosphereLutOptions }[],
+): Promise<void> {
+  return lutCache.preload(recipes.map((recipe) => atmosphereLutCacheKey(recipe.profile, recipe.options ?? {})));
+}
+
+/** Bakes the tables, or returns the stored copy when this recipe has been baked before. */
 export function bakeAtmosphereLuts(profile: PhysicalAtmosphereProfile, options: AtmosphereLutOptions = {}): AtmosphereLuts {
+  const key = atmosphereLutCacheKey(profile, options);
+  const stored = lutCache.get(key);
+  if (stored) return { profile, ...stored };
+  const luts = computeAtmosphereLuts(profile, options);
+  lutCache.set(key, {
+    transmittance: luts.transmittance,
+    multiScatter: luts.multiScatter,
+    irradiance: luts.irradiance,
+  });
+  return luts;
+}
+
+function computeAtmosphereLuts(profile: PhysicalAtmosphereProfile, options: AtmosphereLutOptions): AtmosphereLuts {
   const [tw, th] = options.transmittanceSize ?? DEFAULT_TRANSMITTANCE_SIZE;
   const [mw, mh] = options.multiScatterSize ?? DEFAULT_MULTI_SCATTER_SIZE;
   const [iw, ih] = options.irradianceSize ?? DEFAULT_IRRADIANCE_SIZE;

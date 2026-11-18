@@ -105,7 +105,7 @@ export interface CapsuleCharacterDNA {
    */
   readonly eyeHeightAsymmetry: number;
   /**
-   * Horizontal pupil gaze divergence/convergence in radians ([-0.45, 0.45], default 0).
+   * Horizontal pupil gaze divergence/convergence in radians ([-1.2, 1.2], default 0).
    * Positive values push pupils slightly outward (wall-eyed); negative values pull them inward (cross-eyed).
    */
   readonly gazeAsymmetryYaw: number;
@@ -113,6 +113,13 @@ export interface CapsuleCharacterDNA {
    * Vertical pupil gaze offset between left and right eyes in radians ([-0.35, 0.35], default 0).
    */
   readonly gazeAsymmetryPitch: number;
+  /**
+   * Resting horizontal gaze of both eyes together in radians ([-0.6, 0.6], default 0). Added to
+   * the live gaze, so a character can look slightly to one side while idle. Positive turns the pupils toward +X.
+   */
+  readonly gazeRestYaw: number;
+  /** Resting vertical gaze of both eyes together in radians ([-0.6, 0.6], default 0). */
+  readonly gazeRestPitch: number;
   /**
    * Rounded 3D button nose scale in [0, 1.4] (default 0 = no nose bump as in original baseline; 1.0 = standard button nose).
    */
@@ -185,6 +192,8 @@ export const DEFAULT_CAPSULE_DNA: CapsuleCharacterDNA = {
   eyeHeightAsymmetry: 0,
   gazeAsymmetryYaw: 0,
   gazeAsymmetryPitch: 0,
+  gazeRestYaw: 0,
+  gazeRestPitch: 0,
   noseScale: 0,
   eyelashes: false,
   buckTeeth: false,
@@ -604,9 +613,74 @@ export const CAPSULE_ALT_CHARACTER_PRESETS: readonly CapsuleCharacterDNA[] = [
   },
 ];
 
+/**
+ * Three heads whose face fields come from fitting the capsule face to the concept sheet's measured
+ * headshots (Plan 088, `tools/concept-fitting`). Only the fitted face fields are set; everything else
+ * is the default astronaut so the face is what these presets are about.
+ *
+ * Fitted values are used as they came out. The gaze fields are the fit's four gaze angles re-expressed
+ * as a resting direction (the mean of the two eyes) and an asymmetry (right minus left), searched
+ * against the measured pupils. Orange pigtails needs an asymmetry of -1.15 rad, which is why the yaw
+ * limit is ±1.2 and not the earlier ±0.45. `concept-fit-goofy` has `bodyHeight` 1.397 against a limit of
+ * 1.40. The mouth width is expression, not DNA, and is not stored here.
+ */
+export const CAPSULE_CONCEPT_FIT_PRESETS: readonly CapsuleCharacterDNA[] = [
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'concept-fit-orange-pigtails',
+    label: 'Concept fit: orange pigtails',
+    bodyHeight: 1.199,
+    eyeSpacing: 0.381,
+    eyeScale: 1.095,
+    eyeSizeAsymmetry: -0.01,
+    eyeHeightAsymmetry: 0.038,
+    gazeAsymmetryYaw: -1.15,
+    gazeAsymmetryPitch: 0.184,
+    gazeRestYaw: 0.106,
+    gazeRestPitch: -0.135,
+    hairStyleId: 'pigtails',
+    hairColor: '#d9641c',
+    helmet: false,
+    jetpack: false,
+  },
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'concept-fit-goofy',
+    label: 'Concept fit: goofy',
+    bodyHeight: 1.397,
+    eyeSpacing: 0.299,
+    eyeScale: 1.048,
+    eyeSizeAsymmetry: -0.028,
+    eyeHeightAsymmetry: 0.027,
+    gazeAsymmetryYaw: -0.537,
+    gazeAsymmetryPitch: -0.191,
+    gazeRestYaw: 0.372,
+    gazeRestPitch: -0.23,
+    helmet: false,
+    jetpack: false,
+  },
+  {
+    ...DEFAULT_CAPSULE_DNA,
+    id: 'concept-fit-variant-c',
+    label: 'Concept fit: variant C',
+    bodyHeight: 1.029,
+    eyeSpacing: 0.302,
+    eyeScale: 0.995,
+    eyeSizeAsymmetry: 0.069,
+    eyeHeightAsymmetry: 0.007,
+    gazeAsymmetryYaw: -0.8,
+    gazeAsymmetryPitch: 0.111,
+    gazeRestYaw: 0.026,
+    gazeRestPitch: -0.166,
+    helmet: false,
+    jetpack: false,
+  },
+];
+
 export const ALL_CAPSULE_CHARACTER_PRESETS: readonly CapsuleCharacterDNA[] = [
   ...CAPSULE_CHARACTER_PRESETS,
   ...CAPSULE_ALT_CHARACTER_PRESETS,
+  ...CAPSULE_CONCEPT_FIT_PRESETS,
 ];
 
 function clampNumber(value: number, min: number, max: number, fallback: number): number {
@@ -687,8 +761,8 @@ export function normalizeCapsuleCharacterDNA(
     ),
     gazeAsymmetryYaw: clampNumber(
       partial.gazeAsymmetryYaw ?? base.gazeAsymmetryYaw,
-      -0.45,
-      0.45,
+      -1.2,
+      1.2,
       base.gazeAsymmetryYaw,
     ),
     gazeAsymmetryPitch: clampNumber(
@@ -697,6 +771,8 @@ export function normalizeCapsuleCharacterDNA(
       0.35,
       base.gazeAsymmetryPitch,
     ),
+    gazeRestYaw: clampNumber(partial.gazeRestYaw ?? base.gazeRestYaw, -0.6, 0.6, base.gazeRestYaw),
+    gazeRestPitch: clampNumber(partial.gazeRestPitch ?? base.gazeRestPitch, -0.6, 0.6, base.gazeRestPitch),
     noseScale: clampNumber(partial.noseScale ?? base.noseScale, 0, 1.4, base.noseScale),
     eyelashes: Boolean(partial.eyelashes ?? base.eyelashes),
     buckTeeth: Boolean(partial.buckTeeth ?? base.buckTeeth),
