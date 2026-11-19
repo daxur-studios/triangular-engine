@@ -29,53 +29,64 @@
         <span class="live-dot"></span>
         <span>PLAYABLE SCENE</span>
         <i></i>
-        <strong
-          >{{ population() }} full character{{
-            population() === 1 ? "" : "s"
-          }}</strong
-        >
+        <strong>
+          @if (pigtailWalk()) {
+            Orange Pigtails
+          } @else {
+            {{ population() }} full character{{ population() === 1 ? "" : "s" }}
+          }
+        </strong>
       </div>
     </ng-template>
 
     <ng-template portalTarget="overlay" lane="topEnd" [order]="10">
-      <div class="population-control" aria-label="Character population">
-        <span>Show</span>
-        @for (count of populationOptions; track count) {
-          <button
-            type="button"
-            [class.active]="population() === count"
-            [attr.aria-pressed]="population() === count"
-            (click)="setPopulation(count)"
-          >
-            {{ count }}
-          </button>
+      <div class="population-control" aria-label="Sandbox controls">
+        <button class="character-switch" type="button" (click)="togglePigtailWalk()">
+          {{ pigtailWalk() ? "Classic sandbox" : "Walk Orange Pigtails" }}
+        </button>
+        @if (!pigtailWalk()) {
+          <span>Show</span>
+          @for (count of populationOptions; track count) {
+            <button
+              type="button"
+              [class.active]="population() === count"
+              [attr.aria-pressed]="population() === count"
+              (click)="setPopulation(count)"
+            >
+              {{ count }}
+            </button>
+          }
         }
       </div>
     </ng-template>
 
     <ng-template portalTarget="overlay" lane="bottomStart">
-      <div class="interaction-dock">
-        <div class="dock-heading">
-          <span class="dock-kicker">{{
-            selectedHumanNumber() | number: "2.0-0"
-          }}</span>
-          <div>
-            <strong>Human {{ selectedHumanNumber() | number: "2.0-0" }}</strong>
-            <small>{{ selectedHumanState() }}</small>
+      @if (pigtailWalk()) {
+        <div class="scene-chip">{{ selectedHumanState() }}</div>
+      } @else {
+        <div class="interaction-dock">
+          <div class="dock-heading">
+            <span class="dock-kicker">{{
+              selectedHumanNumber() | number: "2.0-0"
+            }}</span>
+            <div>
+              <strong>Human {{ selectedHumanNumber() | number: "2.0-0" }}</strong>
+              <small>{{ selectedHumanState() }}</small>
+            </div>
           </div>
-        </div>
-        <button type="button" (click)="pickUpRock()" [disabled]="rockIsHeld()">
-          Pick up rock
-        </button>
-        <button type="button" (click)="useChair()">
-          {{ selectedHumanState() === "Sitting" ? "Stand up" : "Sit in chair" }}
-        </button>
-        @if (rockIsHeld()) {
-          <button class="drop-button" type="button" (click)="dropRock()">
-            Drop rock
+          <button type="button" (click)="pickUpRock()" [disabled]="rockIsHeld()">
+            Pick up rock
           </button>
-        }
-      </div>
+          <button type="button" (click)="useChair()">
+            {{ selectedHumanState() === "Sitting" ? "Stand up" : "Sit in chair" }}
+          </button>
+          @if (rockIsHeld()) {
+            <button class="drop-button" type="button" (click)="dropRock()">
+              Drop rock
+            </button>
+          }
+        </div>
+      }
     </ng-template>
 
     <ng-template portalTarget="overlay" lane="bottomEnd" [order]="10">
@@ -90,10 +101,13 @@
   </main>
 
   <footer class="statusbar">
-    <span
-      >Click a human to select · click the ground to move · click the chair or
-      rock to interact</span
-    >
+    <span>
+      @if (pigtailWalk()) {
+        Click the ground to walk · drag to orbit
+      } @else {
+        Click a human to select · click the ground to move · click the chair or rock to interact
+      }
+    </span>
     <span
       >Live renderer counts are diagnostic, not a performance benchmark</span
     >

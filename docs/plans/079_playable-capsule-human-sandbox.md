@@ -66,3 +66,21 @@ First establish one human moving and interacting in a small fixed scene. Crowd c
 ## Delivery progress
 
 The first implementation slice now includes a playable scene, point-and-click movement, rock pickup/drop, chair sit/stand and 1/16/48 actor controls. Plan 074 already contains a diagnostic Character Studio matrix at 1, 16 and 48 humans; this plan will reuse its measurement approach and preserve separation between functional behavior, performance results and human visual review. The scene still needs a repeatable browser suite and a clean intended-device run.
+
+## Approved capsule human v1 tracker
+
+**20% milestone credit.** Proposed cumulative checkpoints for the approved cream spacesuit from [Character Studio](074_procedural-character-studio.md). Advance the score when the checkpoint is demonstrated on that character. The percentages are planning weights.
+
+| At completion | Milestone | Checkpoint |
+| --- | --- | --- |
+| **20% ✓** | Approved character | Cream spacesuit and four repeatable pigtail heads in Studio, with expressions, Awe and a speech preview. |
+| 45% | Walk and run | **First walk verified.** Orange Pigtails walks to a clicked point with planted boots and settles back to the approved pose. Running and smooth turns remain. |
+| 55% | Sit and stand | Approach a chair, sit without visible overlap, then stand and walk away. Reuse the sandbox's chair interaction. |
+| 70% | Emote and talk | Play dialogue with mouth shapes following the audio timing. Show blinking, gaze and emotion during speech and while moving. |
+| 80% | Custom actions | Add a reusable action sequence with approach, contact and release. Show pickup and one new action, such as pressing a panel, with a clean return to idle or movement. |
+| 90% | Dance | Loop one short beat-timed routine on the same rig, with a smooth entry and exit. |
+| 100% | Validate across seeds | Replay the same sequence on all four variants. Review foot and hand contact, clipping and interrupted transitions, and measure frame time on the intended device. |
+
+Use the approved standing comparison as the silhouette check for the rig. Keep body motion, gestures and the face independently controllable so they can play together. A sandbox walkthrough from walking to sitting, speaking, interacting and dancing gives each checkpoint a repeatable visual check.
+
+[Open the Orange Pigtails walk](http://triangular-demo.localhost:4200/capsule-human-sandbox?character=orange-pigtails). Click open ground to walk. A click during a walk queues the latest destination for after the current stop.

@@ -47,6 +47,17 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 
 **Next.** Add the repeatable browser suite for point movement, pickup/drop, sit/stand and crowd selection. Use a device-specific 1/16/48 run before drawing performance conclusions or trying LOD; the current counts show that full-actor crowd rendering needs measurement and likely simplification.
 
+## 2026-11-18 — Approved design to playable character
+
+- **[finding]** The approved cream spacesuit and expressive pigtail heads are in Character Studio. The new body is a standing model. The sandbox already demonstrates movement, chair use and pickup on the earlier actor. See [ER 074](074_procedural-character-studio.md#2026-11-18--approved-full-body-spacesuit-in-character-studio) for the Studio verification.
+- **[action]** Drafted a milestone tracker in [Plan 079](../plans/079_playable-capsule-human-sandbox.md#approved-capsule-human-v1-tracker) for bringing the new design into the sandbox. The first motion check is one clean walk with the approved model.
+
+## 2026-11-19 — First walk on the approved Orange Pigtails
+
+- **[action]** Added an Orange Pigtails walk mode to the playable sandbox. It uses the same cream suit and head builders as Character Studio. Distance traveled drives alternating planted boots and swinging sleeves. The walk slows into the original standing pose, and a second destination queues until the stop.
+- **[verification]** All 12 focused Studio and walker specs passed, along with the library build. A live Chromium check clicked a 2.8 m destination, observed both boot lifts and held the contact boot within 0.1 mm across 34 sampled frames. The same check returned to the classic sandbox, exercised pickup/drop and sit/stand, switched to 16 humans, and reopened Orange Pigtails without browser errors. Local-only captures can be regenerated with `node artifacts/concept-turnaround/check-pigtail-walk.mjs`.
+- **[next]** First walk is checked in the [tracker](../plans/079_playable-capsule-human-sandbox.md#approved-capsule-human-v1-tracker). The 45% checkpoint still requires running and smooth turns.
+
 ## Scope history
 
 <!-- tri:scope-history -->

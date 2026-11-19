@@ -8,7 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
   BoxGeometry,
   Color,
@@ -25,14 +25,17 @@ import {
 import { EngineModule, EngineService } from 'triangular-engine';
 import { ALL_CAPSULE_CHARACTER_PRESETS } from 'triangular-engine/characters';
 import { CapsuleCharacterActor } from 'triangular-engine/procedural';
+import { buildPigtailSandboxWalker } from './pigtail-sandbox-walker';
 
-interface SandboxHuman {
+type SandboxHuman = {
   readonly id: string;
-  readonly actor: CapsuleCharacterActor;
   readonly selectionRing: Mesh;
   target?: Vector3;
   sitting: boolean;
-}
+} & (
+  | { readonly kind: 'classic'; readonly actor: CapsuleCharacterActor }
+  | { readonly kind: 'pigtails'; readonly actor: ReturnType<typeof buildPigtailSandboxWalker> }
+);
 
 type InteractionKind = 'pickup' | 'sit';
 type SandboxHumanState =
@@ -76,6 +79,7 @@ export class CapsuleHumanSandboxPageComponent {
 
   readonly populationOptions = POPULATION_OPTIONS;
   readonly population = signal(1);
+  readonly pigtailWalk = signal(false);
   readonly selectedHumanId = signal('human-1');
   readonly selectedHumanState = signal<SandboxHumanState>('Ready');
   readonly status = signal(
@@ -121,7 +125,11 @@ export class CapsuleHumanSandboxPageComponent {
     this.chair.position.set(2.0, 0, 0.35);
     this.engine.scene.add(this.ground, this.rock, this.chair);
 
-    this.createPopulation(1);
+    if (inject(ActivatedRoute).snapshot.queryParamMap.get('character') === 'orange-pigtails') {
+      this.togglePigtailWalk();
+    } else {
+      this.createPopulation(1);
+    }
 
     this.engine.mousedown$
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -164,9 +172,12 @@ export class CapsuleHumanSandboxPageComponent {
       !POPULATION_OPTIONS.includes(count as (typeof POPULATION_OPTIONS)[number])
     )
       return;
-    if (count === this.population()) return;
+    if (count === this.population() && !this.pigtailWalk()) return;
     this.dropRock();
     this.cancelPendingInteraction();
+    this.pigtailWalk.set(false);
+    this.rock.visible = true;
+    this.chair.visible = true;
     this.createPopulation(count);
     this.population.set(count);
     this.selectedHumanId.set('human-1');
@@ -179,9 +190,28 @@ export class CapsuleHumanSandboxPageComponent {
     );
   }
 
+  togglePigtailWalk(): void {
+    if (this.pigtailWalk()) {
+      this.setPopulation(1);
+      return;
+    }
+    this.dropRock();
+    this.cancelPendingInteraction();
+    this.pigtailWalk.set(true);
+    this.rock.visible = false;
+    this.chair.visible = false;
+    this.createPopulation(1);
+    this.population.set(1);
+    this.selectedHumanId.set('human-1');
+    this.selectedHumanState.set('Ready');
+    this.cameraPosition.set([3.7, 2.75, 5.3]);
+    this.cameraTarget.set([0, 1.02, 0]);
+    this.status.set('Click the ground to move Orange Pigtails. Drag to orbit.');
+  }
+
   pickUpRock(): void {
     const human = this.getSelectedHuman();
-    if (!human) return;
+    if (human?.kind !== 'classic') return;
     if (this.heldByHumanId()) {
       this.status.set(
         'The rock is already being carried. Drop it before picking it up again.',
@@ -209,7 +239,7 @@ export class CapsuleHumanSandboxPageComponent {
 
   useChair(): void {
     const human = this.getSelectedHuman();
-    if (!human) return;
+    if (human?.kind !== 'classic') return;
     if (human.sitting) {
       this.stand(human);
       this.status.set(`${this.humanLabel(human)} stood up.`);
@@ -235,7 +265,7 @@ export class CapsuleHumanSandboxPageComponent {
     const heldByHumanId = this.heldByHumanId();
     if (!heldByHumanId) return;
     const holder = this.humans.find((human) => human.id === heldByHumanId);
-    if (!holder) {
+    if (holder?.kind !== 'classic') {
       this.heldByHumanId.set(undefined);
       return;
     }
@@ -269,20 +299,24 @@ export class CapsuleHumanSandboxPageComponent {
         ALL_CAPSULE_CHARACTER_PRESETS[
           (index * 5) % ALL_CAPSULE_CHARACTER_PRESETS.length
         ];
-      const actor = new CapsuleCharacterActor({ dna: preset, autoBlink: true });
-      actor.root.name = id;
-      actor.root.userData['sandboxHumanId'] = id;
-      actor.root.position.set(placements[index][0], 0, placements[index][1]);
       const ring = new Mesh(
         this.ringGeometry,
         index === 0 ? this.activeRingMaterial : this.inactiveRingMaterial,
       );
+      const common = { id, selectionRing: ring, sitting: false };
+      const human: SandboxHuman = this.pigtailWalk()
+        ? { ...common, kind: 'pigtails', actor: buildPigtailSandboxWalker() }
+        : { ...common, kind: 'classic', actor: new CapsuleCharacterActor({ dna: preset, autoBlink: true }) };
+      const { actor } = human;
+      actor.root.name = id;
+      actor.root.userData['sandboxHumanId'] = id;
+      actor.root.position.set(placements[index][0], human.kind === 'pigtails' ? this.ground.position.y : 0, placements[index][1]);
       ring.rotation.x = -Math.PI / 2;
       ring.position.y = 0.025;
       ring.name = `${id}-selection-ring`;
       ring.userData['sandboxHumanId'] = id;
-      actor.root.add(ring);
-      this.humans.push({ id, actor, selectionRing: ring, sitting: false });
+      if (human.kind === 'classic') actor.root.add(ring);
+      this.humans.push(human);
       this.engine.scene.add(actor.root);
     }
   }
@@ -351,15 +385,15 @@ export class CapsuleHumanSandboxPageComponent {
     );
     this.raycaster.setFromCamera(this.pointerNdc, this.engine.camera);
 
-    const rockHit = this.raycaster.intersectObject(this.rock, true)[0];
-    if (rockHit) {
-      this.pickUpRock();
-      return;
-    }
-    const chairHit = this.raycaster.intersectObject(this.chair, true)[0];
-    if (chairHit) {
-      this.useChair();
-      return;
+    if (!this.pigtailWalk()) {
+      if (this.raycaster.intersectObject(this.rock, true).length) {
+        this.pickUpRock();
+        return;
+      }
+      if (this.raycaster.intersectObject(this.chair, true).length) {
+        this.useChair();
+        return;
+      }
     }
     for (const human of this.humans) {
       const hit = this.raycaster.intersectObject(human.actor.root, true)[0];
@@ -372,6 +406,14 @@ export class CapsuleHumanSandboxPageComponent {
     if (!groundHit) return;
     const human = this.getSelectedHuman();
     if (!human) return;
+    if (human.kind === 'pigtails') {
+      const wasWalking = human.actor.walking;
+      if (human.actor.walkTo(groundHit.point)) {
+        this.syncSelectedHumanState(human);
+        this.status.set(wasWalking ? 'Next destination queued.' : 'Orange Pigtails is walking.');
+      }
+      return;
+    }
     this.cancelPendingInteraction();
     this.stand(human);
     human.target = new Vector3(groundHit.point.x, 0, groundHit.point.z);
@@ -399,6 +441,15 @@ export class CapsuleHumanSandboxPageComponent {
     // delta so navigation does not become half speed after a slow frame.
     const delta = Math.max(deltaSeconds, 0);
     for (const human of this.humans) {
+      if (human.kind === 'pigtails') {
+        const wasWalking = human.actor.walking;
+        human.actor.update(delta);
+        if (wasWalking && !human.actor.walking) {
+          this.syncSelectedHumanState(human);
+          this.status.set('Orange Pigtails arrived. Click the ground to walk again.');
+        }
+        continue;
+      }
       if (human.target) this.moveHuman(human, delta);
       human.actor.update(delta);
       if (human.sitting) this.applySeatedPose(human.actor);
@@ -406,7 +457,7 @@ export class CapsuleHumanSandboxPageComponent {
     this.advanceInteraction(delta);
   }
 
-  private moveHuman(human: SandboxHuman, delta: number): void {
+  private moveHuman(human: Extract<SandboxHuman, { kind: 'classic' }>, delta: number): void {
     const target = human.target;
     if (!target) return;
     const dx = target.x - human.actor.root.position.x;
@@ -427,7 +478,7 @@ export class CapsuleHumanSandboxPageComponent {
     human.actor.setLocomotion('walk');
   }
 
-  private onHumanArrived(human: SandboxHuman): void {
+  private onHumanArrived(human: Extract<SandboxHuman, { kind: 'classic' }>): void {
     const interaction = this.pendingInteraction;
     if (
       !interaction ||
@@ -473,7 +524,7 @@ export class CapsuleHumanSandboxPageComponent {
     const human = this.humans.find(
       (candidate) => candidate.id === interaction.humanId,
     );
-    if (!human) return;
+    if (human?.kind !== 'classic') return;
     this.rock.removeFromParent();
     human.actor.rightHand.propSocket.add(this.rock);
     this.rock.position.set(0, -0.11, 0.03);
@@ -536,7 +587,7 @@ export class CapsuleHumanSandboxPageComponent {
     actor.rightHand.setPose('open');
   }
 
-  private stand(human: SandboxHuman): void {
+  private stand(human: Extract<SandboxHuman, { kind: 'classic' }>): void {
     human.sitting = false;
     human.actor.setHandAction('right', 'none');
     this.syncSelectedHumanState(human);
@@ -544,6 +595,10 @@ export class CapsuleHumanSandboxPageComponent {
 
   private syncSelectedHumanState(human: SandboxHuman): void {
     if (human.id !== this.selectedHumanId()) return;
+    if (human.kind === 'pigtails') {
+      this.selectedHumanState.set(human.actor.walking ? 'Walking' : 'Ready');
+      return;
+    }
     if (human.sitting) this.selectedHumanState.set('Sitting');
     else if (this.heldByHumanId() === human.id) {
       this.selectedHumanState.set('Holding rock');
@@ -556,7 +611,7 @@ export class CapsuleHumanSandboxPageComponent {
       const human = this.humans.find(
         (candidate) => candidate.id === this.pendingInteraction?.humanId,
       );
-      human?.actor.setHandAction('right', 'none');
+      if (human?.kind === 'classic') human.actor.setHandAction('right', 'none');
     }
     this.pendingInteraction = undefined;
   }
@@ -574,6 +629,7 @@ export class CapsuleHumanSandboxPageComponent {
   }
 
   private humanLabel(human: SandboxHuman): string {
+    if (human.kind === 'pigtails') return 'Orange Pigtails';
     return `Human ${human.id.slice('human-'.length).padStart(2, '0')}`;
   }
 
