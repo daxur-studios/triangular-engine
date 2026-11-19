@@ -62,7 +62,59 @@
 
     <ng-template portalTarget="overlay" lane="bottomStart">
       @if (pigtailWalk()) {
-        <div class="scene-chip">{{ selectedHumanState() }}</div>
+        <div class="motion-race-dock" aria-label="Orange Pigtails locomotion strategies">
+          <div class="dock-heading">
+            <span class="dock-kicker">OP</span>
+            <div>
+              <strong>Orange Pigtails · Motion Race</strong>
+              <small>
+                @if (courseLabel(); as stage) {
+                  {{ stage }}
+                } @else {
+                  {{ selectedHumanState() }}
+                }
+              </small>
+            </div>
+          </div>
+          <div class="race-strategies">
+            @for (plugin of locomotionPlugins; track plugin.id) {
+              <button
+                type="button"
+                [class.active]="activePluginId() === plugin.id"
+                [attr.aria-pressed]="activePluginId() === plugin.id"
+                (click)="selectLocomotionPlugin(plugin.id)"
+              >
+                {{ plugin.label }}
+              </button>
+            }
+          </div>
+          <div class="race-actions">
+            <button type="button" (click)="runComparisonCourse()">Run course</button>
+            <button
+              type="button"
+              [class.active]="cameraPreset() === 'three-quarter'"
+              [attr.aria-pressed]="cameraPreset() === 'three-quarter'"
+              (click)="setCameraPreset('three-quarter')"
+            >
+              3/4 cam
+            </button>
+            <button
+              type="button"
+              [class.active]="cameraPreset() === 'side'"
+              [attr.aria-pressed]="cameraPreset() === 'side'"
+              (click)="setCameraPreset('side')"
+            >
+              Side cam
+            </button>
+          </div>
+          @if (walkMetrics(); as m) {
+            <div class="race-metrics">
+              Slip {{ m.slipMm | number: "1.1-2" }} mm · Lift
+              {{ m.liftCm | number: "1.1-1" }} cm · Peak
+              {{ m.speedMps | number: "1.2-2" }} m/s
+            </div>
+          }
+        </div>
       } @else {
         <div class="interaction-dock">
           <div class="dock-heading">

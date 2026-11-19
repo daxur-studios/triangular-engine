@@ -180,6 +180,7 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController, se
 
   const eyeRadius = .625;
   const eyeGeometry = new SphereGeometry(1, 48, 32);
+  const tufts: Group[] = [];
   const curlOffsets = [
     [-.24, .76, .85, .43], [.31, .77, .63, .44], [.66, .38, 1.04, .44],
     [.20, .34, .79, .49], [-.34, .25, .60, .37], [.67, -.12, .98, .43],
@@ -235,6 +236,7 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController, se
     tuft.name = side < 0 ? 'pigtail-tuft-left' : 'pigtail-tuft-right';
     tuft.position.set(side * 1.17 * x, y * .85, -.49);
     tuft.scale.set(...appearance.curls);
+    tufts.push(tuft);
     head.add(tuft);
     const bunchX = side * (x + .99) - tuft.position.x;
     const bunchY = y * .713 - tuft.position.y;
@@ -288,6 +290,11 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController, se
     head,
     skinTone,
     setAwe: (active: boolean) => { aweTarget = active ? 1 : 0; },
+    setPigtailLag: (pitch: number, roll: number) => {
+      const clampedPitch = MathUtils.clamp(pitch, -.28, .28);
+      const clampedRoll = MathUtils.clamp(roll, -.28, .28);
+      for (const tuft of tufts) tuft.rotation.set(clampedPitch, 0, clampedRoll);
+    },
     update,
     dispose: () => {
       const geometries = new Set<BufferGeometry>();

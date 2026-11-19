@@ -104,6 +104,7 @@ scene {
 .scene-chip,
 .population-control,
 .interaction-dock,
+.motion-race-dock,
 .scene-status {
   border: 1px solid rgba(116, 126, 140, 0.36);
   background: rgba(17, 21, 29, 0.9);
@@ -159,7 +160,8 @@ scene {
 }
 
 .population-control button,
-.interaction-dock button {
+.interaction-dock button,
+.motion-race-dock button {
   border: 1px solid #343a45;
   border-radius: 6px;
   background: #1a1f29;
@@ -173,11 +175,13 @@ scene {
   font-size: 0.61rem;
 }
 .population-control button:hover,
-.interaction-dock button:hover:not(:disabled) {
+.interaction-dock button:hover:not(:disabled),
+.motion-race-dock button:hover:not(:disabled) {
   border-color: #a37b53;
   color: #f3c08c;
 }
-.population-control button.active {
+.population-control button.active,
+.motion-race-dock button.active {
   border-color: #987249;
   background: #30261e;
   color: #f0bf8a;
@@ -242,6 +246,35 @@ scene {
 }
 .interaction-dock .drop-button {
   grid-column: 1 / -1;
+}
+
+.motion-race-dock {
+  display: grid;
+  width: min(355px, calc(100vw - 2rem));
+  gap: 0.36rem;
+  padding: 0.48rem;
+  border-radius: 9px;
+}
+
+.race-strategies,
+.race-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.3rem;
+}
+
+.motion-race-dock button {
+  min-height: 29px;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.57rem;
+}
+
+.race-metrics {
+  padding: 0.22rem 0.35rem 0.05rem;
+  border-top: 1px solid #2b303a;
+  color: #9aa2af;
+  font-size: 0.54rem;
+  letter-spacing: 0.02em;
 }
 
 .scene-status {

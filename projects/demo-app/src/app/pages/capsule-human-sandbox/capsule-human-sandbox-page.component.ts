@@ -25,6 +25,12 @@ import {
 import { EngineModule, EngineService } from 'triangular-engine';
 import { ALL_CAPSULE_CHARACTER_PRESETS } from 'triangular-engine/characters';
 import { CapsuleCharacterActor } from 'triangular-engine/procedural';
+import { createFlatGroundSampler } from './motion/capsule-motion-types';
+import {
+  createDefaultLocomotionPlugins,
+  DEFAULT_LOCOMOTION_PLUGIN_ID,
+  resolveLocomotionPlugin,
+} from './motion/locomotion-registry';
 import { buildPigtailSandboxWalker } from './pigtail-sandbox-walker';
 
 type SandboxHuman = {
@@ -80,6 +86,11 @@ export class CapsuleHumanSandboxPageComponent {
   readonly populationOptions = POPULATION_OPTIONS;
   readonly population = signal(1);
   readonly pigtailWalk = signal(false);
+  readonly locomotionPlugins = createDefaultLocomotionPlugins();
+  readonly activePluginId = signal<string>(DEFAULT_LOCOMOTION_PLUGIN_ID);
+  readonly cameraPreset = signal<'three-quarter' | 'side'>('three-quarter');
+  readonly walkMetrics = signal<{ slipMm: number; liftCm: number; speedMps: number } | null>(null);
+  readonly courseLabel = signal<string | null>(null);
   readonly selectedHumanId = signal('human-1');
   readonly selectedHumanState = signal<SandboxHumanState>('Ready');
   readonly status = signal(
@@ -125,7 +136,13 @@ export class CapsuleHumanSandboxPageComponent {
     this.chair.position.set(2.0, 0, 0.35);
     this.engine.scene.add(this.ground, this.rock, this.chair);
 
-    if (inject(ActivatedRoute).snapshot.queryParamMap.get('character') === 'orange-pigtails') {
+    const queryParams = inject(ActivatedRoute).snapshot.queryParamMap;
+    const requestedWalk = queryParams.get('walk');
+    if (requestedWalk) {
+      const resolved = resolveLocomotionPlugin(this.locomotionPlugins, requestedWalk);
+      this.activePluginId.set(resolved.id);
+    }
+    if (queryParams.get('character') === 'orange-pigtails') {
       this.togglePigtailWalk();
     } else {
       this.createPopulation(1);
@@ -200,13 +217,49 @@ export class CapsuleHumanSandboxPageComponent {
     this.pigtailWalk.set(true);
     this.rock.visible = false;
     this.chair.visible = false;
+    this.walkMetrics.set(null);
+    this.courseLabel.set(null);
     this.createPopulation(1);
     this.population.set(1);
     this.selectedHumanId.set('human-1');
     this.selectedHumanState.set('Ready');
-    this.cameraPosition.set([3.7, 2.75, 5.3]);
-    this.cameraTarget.set([0, 1.02, 0]);
-    this.status.set('Click the ground to move Orange Pigtails. Drag to orbit.');
+    this.setCameraPreset('three-quarter');
+    const plugin = resolveLocomotionPlugin(this.locomotionPlugins, this.activePluginId());
+    this.status.set(
+      `${plugin.label} (${plugin.approach}). Click the ground to walk or run the course.`,
+    );
+  }
+
+  selectLocomotionPlugin(pluginId: string): void {
+    const plugin = resolveLocomotionPlugin(this.locomotionPlugins, pluginId);
+    this.activePluginId.set(plugin.id);
+    const walker = this.getPigtailWalker();
+    if (walker) {
+      walker.setPlugin(plugin);
+      this.syncSelectedHumanState(this.humans[0]);
+    }
+    this.status.set(`${plugin.label} (${plugin.approach}): ${plugin.summary}`);
+  }
+
+  runComparisonCourse(): void {
+    const walker = this.getPigtailWalker();
+    if (!walker) return;
+    walker.startComparisonCourse();
+    this.walkMetrics.set(null);
+    this.courseLabel.set('Course 1/3 · Straight 2.5m');
+    this.syncSelectedHumanState(this.humans[0]);
+    this.status.set(`Running 3-leg comparison course with ${walker.plugin.label}.`);
+  }
+
+  setCameraPreset(preset: 'three-quarter' | 'side'): void {
+    this.cameraPreset.set(preset);
+    if (preset === 'side') {
+      this.cameraPosition.set([5.4, 1.45, -0.4]);
+      this.cameraTarget.set([0, 0.95, -0.4]);
+    } else {
+      this.cameraPosition.set([3.7, 2.75, 5.3]);
+      this.cameraTarget.set([0, 1.02, 0]);
+    }
   }
 
   pickUpRock(): void {
@@ -305,12 +358,26 @@ export class CapsuleHumanSandboxPageComponent {
       );
       const common = { id, selectionRing: ring, sitting: false };
       const human: SandboxHuman = this.pigtailWalk()
-        ? { ...common, kind: 'pigtails', actor: buildPigtailSandboxWalker() }
+        ? {
+            ...common,
+            kind: 'pigtails',
+            actor: buildPigtailSandboxWalker({
+              plugin: resolveLocomotionPlugin(this.locomotionPlugins, this.activePluginId()),
+              sampleGround: createFlatGroundSampler(this.ground.position.y),
+            }),
+          }
         : { ...common, kind: 'classic', actor: new CapsuleCharacterActor({ dna: preset, autoBlink: true }) };
       const { actor } = human;
       actor.root.name = id;
       actor.root.userData['sandboxHumanId'] = id;
-      actor.root.position.set(placements[index][0], human.kind === 'pigtails' ? this.ground.position.y : 0, placements[index][1]);
+      if (human.kind === 'pigtails') {
+        human.actor.resetTo(
+          { x: placements[index][0], y: this.ground.position.y, z: placements[index][1] },
+          0,
+        );
+      } else {
+        actor.root.position.set(placements[index][0], 0, placements[index][1]);
+      }
       ring.rotation.x = -Math.PI / 2;
       ring.position.y = 0.025;
       ring.name = `${id}-selection-ring`;
@@ -444,7 +511,26 @@ export class CapsuleHumanSandboxPageComponent {
       if (human.kind === 'pigtails') {
         const wasWalking = human.actor.walking;
         human.actor.update(delta);
+        const stage = human.actor.courseStage;
+        const nextCourseLabel = stage ? `Course ${stage.leg}/${stage.total} · ${stage.label}` : null;
+        if (nextCourseLabel !== this.courseLabel()) {
+          this.courseLabel.set(nextCourseLabel);
+        }
+        if (human.actor.walking && this.renderFrameCount % 8 === 0) {
+          const m = human.actor.metrics;
+          this.walkMetrics.set({
+            slipMm: m.maxFootSlipMm,
+            liftCm: m.maxFootLiftM * 100,
+            speedMps: m.peakSpeedMps,
+          });
+        }
         if (wasWalking && !human.actor.walking) {
+          const m = human.actor.metrics;
+          this.walkMetrics.set({
+            slipMm: m.maxFootSlipMm,
+            liftCm: m.maxFootLiftM * 100,
+            speedMps: m.peakSpeedMps,
+          });
           this.syncSelectedHumanState(human);
           this.status.set('Orange Pigtails arrived. Click the ground to walk again.');
         }
@@ -626,6 +712,11 @@ export class CapsuleHumanSandboxPageComponent {
 
   private getSelectedHuman(): SandboxHuman | undefined {
     return this.humans.find((human) => human.id === this.selectedHumanId());
+  }
+
+  private getPigtailWalker(): Extract<SandboxHuman, { kind: 'pigtails' }>['actor'] | undefined {
+    const human = this.humans[0];
+    return human?.kind === 'pigtails' ? human.actor : undefined;
   }
 
   private humanLabel(human: SandboxHuman): string {
