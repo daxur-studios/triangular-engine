@@ -1,15 +1,17 @@
 import {
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  Injector,
   computed,
   inject,
   isDevMode,
   signal,
 } from '@angular/core';
-import { UpperCasePipe } from '@angular/common';
+import { DecimalPipe, UpperCasePipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
   Color,
   CylinderGeometry,
@@ -57,7 +59,9 @@ import {
   type CharacterStudioExpression,
   type CharacterStudioFamilyId,
 } from './character-studio-contributions';
-import { EXPERIMENTAL_PIGTAIL_PRESETS } from './experimental-pigtail-head';
+import { EXPERIMENTAL_PIGTAIL_HEAD_ID, EXPERIMENTAL_PIGTAIL_PRESETS } from './experimental-pigtail-head';
+import { CapsulePartPreviewComponent } from './capsule-part-preview.component';
+import type { CapsuleHairStyle } from './experimental-capsule-hair';
 
 type CharacterStudioView = 'front' | 'three-quarter' | 'profile' | 'back' | 'face' | 'hair';
 
@@ -78,7 +82,7 @@ interface CharacterStudioViewOption {
 
 @Component({
   selector: 'app-character-studio-page',
-  imports: [EngineModule, RouterLink, UpperCasePipe, TestRunnerComponent],
+  imports: [EngineModule, RouterLink, DecimalPipe, UpperCasePipe, TestRunnerComponent, CapsulePartPreviewComponent],
   templateUrl: './character-studio-page.component.html',
   styleUrl: './character-studio-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -87,6 +91,7 @@ interface CharacterStudioViewOption {
 })
 export class CharacterStudioPageComponent {
   private readonly engine = inject(EngineService);
+  private readonly injector = inject(Injector);
   private readonly destroyRef = inject(DestroyRef);
   private readonly screenshot = inject(ScreenshotService);
   private readonly contributions = createCharacterStudioContributions();
@@ -121,6 +126,14 @@ export class CharacterStudioPageComponent {
   readonly selectedPresetId = signal(this.contributions.human.defaultPresetId);
   readonly experimentalHeadSelected = computed(() =>
     EXPERIMENTAL_PIGTAIL_PRESETS.some(preset => preset.value === this.selectedPresetId()));
+  readonly workshopOpen = signal(false);
+  readonly workshopHair = signal<CapsuleHairStyle>('pigtails');
+  readonly workshopLockLength = signal(1);
+  readonly workshopYaw = signal(35);
+  readonly workshopHairChoices = [
+    { id: 'pigtails', label: 'Pigtails' },
+    { id: 'shaggy', label: 'Shaggy' },
+  ] as const;
   readonly speechPreviewNotice = signal('');
   readonly selectedMotionId = signal('idle');
   readonly selectedExpression = signal<CharacterStudioExpression>('happy');
@@ -224,6 +237,10 @@ export class CharacterStudioPageComponent {
       };
     },
     apply: (settings) => {
+      if (this.workshopOpen()) {
+        this.setWorkshopHair('pigtails', 1);
+        this.workshopOpen.set(false);
+      }
       const fov = settings.cameraFovDegrees ?? 42;
       this.cameraFovDegrees.set(fov);
       if (this.engine.camera instanceof PerspectiveCamera) {
@@ -365,6 +382,9 @@ export class CharacterStudioPageComponent {
     this.engine.scene.add(this.floor, this.pedestal, ...this.familyOptions.map((family) => family.root));
     this.syncFamilyVisibility();
     this.applyView('three-quarter');
+    if (inject(ActivatedRoute).snapshot.queryParamMap.get('workshop') === '1') {
+      this.toggleWorkshop();
+    }
 
     this.engine.tick$
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -443,6 +463,26 @@ export class CharacterStudioPageComponent {
     this.selectedMotionId.set(motionId);
   }
 
+  toggleWorkshop(): void {
+    if (this.runnerBusy()) return;
+    if (this.workshopOpen()) {
+      this.setWorkshopHair('pigtails', 1);
+      this.workshopOpen.set(false);
+    } else {
+      this.selectFamily('human');
+      this.selectPreset(EXPERIMENTAL_PIGTAIL_HEAD_ID);
+      this.workshopOpen.set(true);
+      this.workshopYaw.set(35);
+    }
+    afterNextRender(() => this.applyView('three-quarter'), { injector: this.injector });
+  }
+
+  setWorkshopHair(style: CapsuleHairStyle, length = this.workshopLockLength()): void {
+    this.contributions.human.setExperimentalHair(style, length);
+    this.workshopHair.set(style);
+    this.workshopLockLength.set(length);
+  }
+
   selectExpression(expression: CharacterStudioExpression): void {
     const available = expression === 'awe' && !this.experimentalHeadSelected() ? 'neutral' : expression;
     this.activeFamily().setExpression(available);
@@ -507,6 +547,13 @@ export class CharacterStudioPageComponent {
 
   resetCharacter(): void {
     this.stopSpeechPreview();
+    if (this.workshopOpen()) {
+      this.setWorkshopHair('pigtails', 1);
+      this.workshopYaw.set(35);
+      this.selectExpression('happy');
+      this.applyView('three-quarter');
+      return;
+    }
     const family = this.activeFamily();
     family.selectPreset(family.defaultPresetId);
     family.setMotion(family.id === 'cat' ? 'goofy_walk' : 'idle');

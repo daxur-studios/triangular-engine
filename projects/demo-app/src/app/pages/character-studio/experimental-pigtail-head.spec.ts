@@ -4,7 +4,7 @@ import type { ExtendedEmotionName } from 'triangular-engine/characters';
 import type { CapsuleBodyUniformMap } from 'triangular-engine/procedural';
 import { createCharacterStudioContributions } from './character-studio-contributions';
 import {
-  buildExperimentalPigtailHead, EXPERIMENTAL_PIGTAIL_HEAD_ID, EXPERIMENTAL_PIGTAIL_PRESETS,
+  buildExperimentalHairPreview, buildExperimentalPigtailHead, EXPERIMENTAL_PIGTAIL_HEAD_ID, EXPERIMENTAL_PIGTAIL_PRESETS,
 } from './experimental-pigtail-head';
 
 describe('Character Studio experimental pigtail preset', () => {
@@ -23,6 +23,40 @@ describe('Character Studio experimental pigtail preset', () => {
   function captureMouthUniforms(): CapsuleBodyUniformMap {
     return captureUniforms(studio.human.root, 'pigtail-skin') as unknown as CapsuleBodyUniformMap;
   }
+
+  it('swaps the same hair recipe in the swatch and character without replacing the speaking face', () => {
+    const human = studio.human;
+    human.selectPreset(EXPERIMENTAL_PIGTAIL_HEAD_ID);
+    const body = human.root.getObjectByName('pigtail-standing-body');
+    const skin = human.root.getObjectByName('pigtail-skin');
+    const mouth = captureMouthUniforms();
+    const swatch = buildExperimentalHairPreview();
+
+    try {
+      human.setExpression('neutral');
+      human.update(.3);
+      const restingOpen = mouth.uMouthOpen.value;
+      human.speechPreview!.play([{ time: 0, viseme: 'A', duration: .4 }]);
+      human.setExperimentalHair('shaggy', 1.12);
+      swatch.setHair('shaggy', 1.12);
+      for (let frame = 0; frame < 12; frame++) human.update(1 / 60);
+
+      const style = human.root.getObjectByName('capsule-hair-shaggy')!;
+      const swatchStyle = swatch.root.getObjectByName('capsule-hair-shaggy')!;
+      expect(style.children.map(part => part.scale.toArray())).toEqual(swatchStyle.children.map(part => part.scale.toArray()));
+      expect(style.children.at(-1)?.scale.x).toBeCloseTo(1.12, 6);
+      expect(human.root.getObjectByName('pigtail-tuft-left')).toBeUndefined();
+      expect(human.root.getObjectByName('pigtail-skin')).toBe(skin);
+      expect(human.root.getObjectByName('pigtail-standing-body')).toBe(body);
+      expect(mouth.uMouthOpen.value).toBeGreaterThan(restingOpen);
+
+      human.setExperimentalHair('pigtails', 1);
+      expect(human.root.getObjectByName('capsule-hair-shaggy')).toBeUndefined();
+      expect(human.root.getObjectByName('pigtail-tuft-left')).toBeDefined();
+    } finally {
+      swatch.dispose();
+    }
+  });
 
   it('uses the Studio expression controller to widen the smile and open the surprised mouth', () => {
     const human = studio.human;

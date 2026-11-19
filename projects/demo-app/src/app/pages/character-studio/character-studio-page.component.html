@@ -15,14 +15,70 @@
 
     <div class="top-actions">
       <button class="quiet-button" type="button" [disabled]="runnerBusy()" (click)="resetCharacter()">Reset</button>
-      <button class="primary-button" type="button" [disabled]="runnerBusy() || experimentalHeadSelected()" (click)="randomize()">
-        <span aria-hidden="true">✳</span>
-        Generate variant
+      @if (!workshopOpen()) {
+        <button class="primary-button generate-button" type="button" [disabled]="runnerBusy() || experimentalHeadSelected()" (click)="randomize()">
+          <span aria-hidden="true">✳</span>
+          Generate variant
+        </button>
+      }
+      <button class="primary-button workshop-button" type="button" [disabled]="runnerBusy()" [attr.aria-pressed]="workshopOpen()" (click)="toggleWorkshop()">
+        {{ workshopOpen() ? 'Back to collection' : 'Parts workshop' }}
       </button>
     </div>
   </header>
 
-  <div class="workbench">
+  <div class="workbench" [class.workbench--workshop]="workshopOpen()">
+    @if (workshopOpen()) {
+      <aside class="parts-panel" aria-label="Character parts graph">
+        <h1>Character parts</h1>
+        <div class="parts-graph">
+          <section class="part-node part-node--hair" aria-labelledby="hair-node">
+            <h2 id="hair-node">Hair</h2>
+            <div class="hair-workbench">
+              <app-capsule-part-preview class="part-preview hair-preview" part="hair" role="img"
+                aria-label="3D hairstyle on a scalp"
+                [hairStyle]="workshopHair()" [lockLength]="workshopLockLength()" [yawDegrees]="workshopYaw()" />
+              <div class="hair-controls">
+                <div class="hair-styles" role="group" aria-label="Hairstyle">
+                  @for (style of workshopHairChoices; track style.id) {
+                    <button class="hair-style" type="button" [attr.aria-pressed]="workshopHair() === style.id"
+                      (click)="setWorkshopHair(style.id)">{{ style.label }}</button>
+                  }
+                </div>
+                @if (workshopHair() === 'shaggy') {
+                  <label class="workshop-range">
+                    <span>Lock length <output aria-hidden="true">{{ workshopLockLength() * 100 | number:'1.0-0' }}%</output></span>
+                    <input type="range" min="0.86" max="1.14" step="0.01" [value]="workshopLockLength()"
+                      aria-label="Lock length" [attr.aria-valuetext]="(workshopLockLength() * 100 | number:'1.0-0') + '%'"
+                      (input)="setWorkshopHair('shaggy', $any($event.target).valueAsNumber)">
+                  </label>
+                }
+                <label class="workshop-range">
+                  <span>Rotate hair <output aria-hidden="true">{{ workshopYaw() }}°</output></span>
+                  <input type="range" min="-180" max="180" step="1" [value]="workshopYaw()"
+                    aria-label="Rotate hair" [attr.aria-valuetext]="workshopYaw() + ' degrees'"
+                    (input)="workshopYaw.set($any($event.target).valueAsNumber)">
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <div class="hair-wire" aria-hidden="true"></div>
+          <div class="part-branches">
+            <section class="part-node part-node--face" aria-labelledby="face-node">
+              <h2 id="face-node">Head + face</h2>
+              <app-capsule-part-preview class="part-preview" part="face" role="img" aria-label="3D head with animated face rig" />
+            </section>
+            <section class="part-node part-node--suit" aria-labelledby="suit-node">
+              <h2 id="suit-node">Suit + limbs</h2>
+              <app-capsule-part-preview class="part-preview" part="suit" role="img" aria-label="3D spacesuit, gloves, boots and backpack" />
+            </section>
+          </div>
+          <div class="assembly-wires" aria-hidden="true"><span></span></div>
+          <div class="part-node assembly-node"><span class="assembly-dot" aria-hidden="true"></span> Assembled character</div>
+        </div>
+      </aside>
+    } @else {
     <aside class="library-panel" aria-label="Character collection">
       <div class="panel-kicker">Collection</div>
       <div class="collection-title-row">
@@ -88,6 +144,7 @@
         <p>Choose a character to explore its procedural parts and motion.</p>
       </div>
     </aside>
+    }
 
     <main
       class="viewport-panel"
@@ -103,11 +160,17 @@
       </scene>
 
       <ng-template portalTarget="overlay" lane="topStart">
-        <div class="viewport-live-label"><span class="live-dot"></span> Live preview</div>
+        <div class="viewport-live-label"><span class="live-dot"></span> {{ workshopOpen() ? 'Assembled character' : 'Live preview' }}</div>
       </ng-template>
 
       <ng-template portalTarget="overlay" lane="topCenter">
-        <div class="viewport-model-name">{{ activeFamily().name }} <span>/</span> {{ selectedPresetLabel() }}</div>
+        <div class="viewport-model-name">
+          @if (workshopOpen()) {
+            {{ workshopHair() === 'shaggy' ? 'Shaggy' : 'Orange Pigtails' }}
+          } @else {
+            {{ activeFamily().name }} <span>/</span> {{ selectedPresetLabel() }}
+          }
+        </div>
       </ng-template>
 
       <ng-template portalTarget="overlay" lane="topEnd" [order]="10">
@@ -117,10 +180,12 @@
         </button>
       </ng-template>
 
+      @if (!workshopOpen()) {
       <div class="viewport-side-label">
         <span class="side-label-index">01</span>
         <span>3D VIEWPORT</span>
       </div>
+      }
 
       <ng-template portalTarget="overlay" lane="bottomStart">
         <div class="view-switcher" aria-label="Camera view">
@@ -151,7 +216,9 @@
         <span class="inspector-badge">PROCEDURAL</span>
       </div>
 
-      <p class="family-summary">{{ experimentalHeadSelected() ? 'Experimental pigtail character in a standing pose.' : activeFamily().summary }}</p>
+      @if (!workshopOpen()) {
+        <p class="family-summary">{{ experimentalHeadSelected() ? 'Experimental pigtail character in a standing pose.' : activeFamily().summary }}</p>
+      }
 
       <section class="inspector-section">
         <div class="section-heading section-heading--large">
@@ -224,7 +291,7 @@
         </section>
       }
 
-      <details class="verification-details">
+      <details class="verification-details" [hidden]="workshopOpen()">
         <summary>
           <span>Visual verification</span>
           @if (activeTestScenario(); as current) {
@@ -245,7 +312,7 @@
         </div>
       </details>
 
-      <div class="inspector-footer">
+      <div class="inspector-footer" [hidden]="workshopOpen()">
         <span class="footer-sparkle" aria-hidden="true">✧</span>
         <span>Character details are generated from editable parts and settings.</span>
       </div>

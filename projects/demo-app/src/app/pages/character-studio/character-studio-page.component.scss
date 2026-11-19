@@ -276,8 +276,107 @@ scene { position: absolute; z-index: 0; inset: 0; display: flex; width: 100%; he
 .status-left i { width: 1px; height: 11px; background: #393d47; }
 .status-separator { color: #4d535e; }
 
+.workshop-button {
+  border-color: #8c6243;
+  background: #412e25;
+  color: #ffdebd;
+}
+.workshop-button:hover { background: #5d3d2a; }
+.workbench--workshop { grid-template-columns: minmax(330px, 400px) minmax(0, 1fr) minmax(200px, 250px); }
+.workbench--workshop .inspector-header { margin-bottom: 1rem; }
+.workbench--workshop .inspector-footer { display: none; }
+.parts-panel {
+  min-width: 0;
+  padding: 1.35rem 1rem;
+  border-right: 1px solid #2b303d;
+  background: #141820;
+  overflow: auto;
+}
+.parts-panel h1 {
+  margin: 0 0 1rem;
+  color: #f3eee9;
+  font-size: 1rem;
+  font-weight: 650;
+}
+.parts-graph {
+  --graph-wire: #8a786b;
+  --graph-gap: 1.25rem;
+  display: grid;
+  padding: 0.9rem;
+  border: 1px solid #303641;
+  border-radius: 10px;
+  background: radial-gradient(circle, #383b45 1px, transparent 1px) 0 0 / 15px 15px, #10131b;
+}
+.part-node {
+  min-width: 0;
+  padding: 0.6rem;
+  border: 1px solid #404754;
+  border-radius: 8px;
+  background: #1b2029;
+  box-shadow: 0 3px 8px #080a1090;
+}
+.part-node h2 { margin: 0 0 0.5rem; color: #eee9e4; font-size: 0.75rem; font-weight: 650; }
+.part-node--hair { border-color: #b2764b; }
+.part-node--hair h2 { color: #f3c194; }
+.part-preview { height: 103px; border: 1px solid #333b49; border-radius: 5px; background: #131720; }
+.hair-preview { height: 130px; }
+.hair-workbench { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 0.65rem; }
+.hair-controls { display: flex; min-width: 0; flex-direction: column; gap: 0.55rem; }
+.hair-styles { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; }
+.hair-style {
+  min-height: 31px;
+  padding: 0.25rem;
+  border: 1px solid #454b56;
+  border-radius: 5px;
+  background: #252b36;
+  color: #d4d5db;
+  font: inherit;
+  font-size: 0.69rem;
+  cursor: pointer;
+}
+.hair-style:hover { border-color: #af805e; }
+.hair-style[aria-pressed='true'] { border-color: #b2764b; background: #50382b; color: #ffe0c5; }
+.workshop-range { display: grid; color: #d0c8c2; font-size: 0.66rem; }
+.workshop-range > span { display: flex; justify-content: space-between; gap: 0.25rem; }
+.workshop-range output { color: #f0b98a; font-variant-numeric: tabular-nums; }
+.workshop-range input { width: 100%; height: 19px; margin: 0; accent-color: #e9a671; }
+.part-branches { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--graph-gap); }
+.hair-wire {
+  justify-self: start;
+  width: 2px;
+  height: 22px;
+  margin-left: calc((100% - var(--graph-gap)) / 4 - 1px);
+  background: var(--graph-wire);
+}
+.assembly-wires { display: grid; height: 24px; justify-items: center; }
+.assembly-wires::before {
+  content: '';
+  box-sizing: border-box;
+  width: calc((100% + var(--graph-gap)) / 2 + 2px);
+  height: 13px;
+  border: 2px solid var(--graph-wire);
+  border-top: 0;
+  border-radius: 0 0 7px 7px;
+}
+.assembly-wires span { width: 2px; height: 11px; background: var(--graph-wire); }
+.assembly-node {
+  display: flex;
+  justify-self: center;
+  align-items: center;
+  gap: 0.5rem;
+  border-color: #477168;
+  color: #c3e7dc;
+  font-size: 0.72rem;
+  font-weight: 640;
+}
+.assembly-dot { width: 7px; height: 7px; border-radius: 50%; background: #83c6a0; }
+
 @media (max-width: 1080px) {
   .workbench { grid-template-columns: minmax(185px, 215px) minmax(0, 1fr) minmax(255px, 285px); }
+  .workbench--workshop { grid-template-columns: minmax(320px, 345px) minmax(0, 1fr) minmax(178px, 205px); }
+  .workbench--workshop .expression-grid { grid-template-columns: repeat(3, 1fr); }
+  .workbench--workshop .viewport-model-name { display: none; }
+  .workbench--workshop .viewport-hint { display: none; }
   .library-panel { padding-inline: 0.8rem; }
   .inspector-panel { padding-inline: 0.85rem; }
 }
@@ -291,6 +390,8 @@ scene { position: absolute; z-index: 0; inset: 0; display: flex; width: 100%; he
   .top-actions { grid-column: 2; grid-row: 1 / span 2; }
   .top-actions .quiet-button { display: none; }
   .workbench { display: flex; flex-direction: column; min-height: 0; }
+  .parts-panel { border-right: 0; border-bottom: 1px solid #252a34; overflow: visible; }
+  .workbench--workshop .viewport-panel { min-height: 50vh; }
   .library-panel { order: 0; padding: 0.9rem 0.85rem 0.65rem; border-right: 0; border-bottom: 1px solid #252a34; overflow: visible; }
   .library-panel > .panel-kicker,
   .library-panel > .collection-title-row,
@@ -309,6 +410,8 @@ scene { position: absolute; z-index: 0; inset: 0; display: flex; width: 100%; he
 }
 
 @media (max-width: 460px) {
+  .top-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .top-actions .generate-button { order: 1; }
   .brand-mark { width: 29px; height: 29px; }
   .brand-title { font-size: 0.62rem; }
   .brand-subtitle { font-size: 0.5rem; }

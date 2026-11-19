@@ -39,6 +39,7 @@ This plan covers separating the capsule character experience from the mixed-purp
 - **experimental-pigtail-eyes** — Refine the experimental head's eyelids and add an Awe expression. Acceptance: eyelid edges follow the eye from the front, at 45°, and in profile. The lids can close over the pupils. Awe is selectable on the experimental head and shows a raised gaze, enlarged pupils and a softly parted mouth.
 - **experimental-pigtail-variants** — Generate three selectable heads from the pigtail recipe using fixed seeds. Acceptance: each seed recreates its head proportions, hair shape and colour, and freckle pattern. Check the front, 45°, and profile views, plus blinks, Awe and speech on each head.
 - **experimental-pigtail-body** — Fit one procedural body and standing pose to Orange, Plum, Honey and Chestnut Pigtails in Character Studio. Acceptance: front, 45° and profile show boots on the pedestal and connected limbs and neck for every preset. Head close-up, Awe, speech and switching to existing characters still work.
+- **capsule-parts-workshop** — Add a prewired graph for the approved spacesuit and shared animated face. Acceptance: Hair, Head and Suit each show a 3D preview. Swapping Pigtails and Shaggy hair updates the assembled character and preserves facial animation. Review Shaggy from multiple angles against the concept.
 - **character-performance-matrix** — Measure one and many procedural humans while idle, walking in place and moving on repeatable scene paths. Acceptance: a visible-browser performance run records actor-update CPU time, render-submit CPU time, frame cadence, draw calls, triangles and scenario setup time at populations of 1, 16 and 48; scenario setup includes constructing additional actors, arranging the population and fitting the camera, but excludes construction of the studio's pre-existing primary human. The 16.7 ms p95 frame-cadence budget is labeled as an initial 60 Hz target hypothesis, and no hardware baseline is accepted before reviewing a clean run on the intended device.
 
 ## Relationships
@@ -62,9 +63,10 @@ This plan covers separating the capsule character experience from the mixed-purp
 | experimental-pigtail-eyes | done        |
 | experimental-pigtail-variants | done        |
 | experimental-pigtail-body | done        |
+| capsule-parts-workshop | in_progress |
 | character-performance-matrix | in_progress |
 
-<!-- tri:review version="1" scope-hash="123be5e49bafa26cf0e26d08b53f1d41c4706b56b80b9c9911bf65edf4a77fe0" reviewed="2026-11-18" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="bd4b1b7e677867df61e09c25e110c86e457075b7fd0b0e9d9bf3038221b48cdf" reviewed="2026-11-19" reviewer="agent" -->
 <!-- /tri:review -->
 
 ## Delivery progress

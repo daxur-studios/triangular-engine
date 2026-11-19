@@ -196,6 +196,13 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **[action]** Deleted the old teal-body renders (`artifacts/concept-turnaround/studio-body-*.png`) and the teal-body image-only experiment output folder (`artifacts/sprite-impostor-poc/`). Preserved the original concept art, approved head assets, and new full-body assets.
 - **[verification]** All 10 focused specs in `experimental-pigtail-head.spec.ts` passed. Live Character Studio verification (`node artifacts/concept-turnaround/check-studio-bodies.mjs` + `python artifacts/concept-turnaround/studio-body-sheet.py`) confirmed grounded boots, collar join, three-quarter match to `orange-pigtails-full-body.png`, Awe, speech, and switching back to standard human/cat controls with zero console or page errors.
 
+### 2026-11-19 — Capsule parts workshop
+
+- **[decision]** Prototype a prewired parts graph inside Character Studio. Start with editable procedural Pigtails and Shaggy hair, and show how Hair, Head and Suit feed the live character.
+- **[action]** Added the [Parts workshop](http://triangular-demo.localhost:4200/character-studio?workshop=1). Each part has an on-demand 3D preview. The Hair node uses the same hairstyle recipe as the assembled human and provides a rotation slider and an adjustable length for the swept locks. Switching hair preserves the existing body and facial performance.
+- **[verification]** Passed 39 focused Studio and sandbox specs and the library build. The live demo rendered all three part previews and passed browser checks for style swaps, lock length, rotation, speech fallback, profile and back views, reopening the workshop, and a 390 px viewport. Screenshots are local only. Regenerate with `node artifacts/concept-turnaround/check-workshop.mjs`.
+- **[finding]** The first Shaggy recipe aims for the chunky front sweep and staggered nape in the supplied concept. Desktop and narrow renders were inspected. Developer review of the hairstyle and workshop layout is pending.
+
 ## Scope history
 
 <!-- tri:scope-history -->
@@ -233,6 +240,11 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - Summary: Fit the four reviewed pigtail heads to one small capsule body in Character Studio.
 - Reason: Check that the approved head proportions still read well once the characters have torsos, hands and feet.
 - Impact: Use one standing body and head attachment across the presets. Fit the wide camera views to the whole character and retain the head close-up.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-PARTS-WORKSHOP" date="2026-11-19" kind="addition" origin="requested" disposition="accepted" scope-ids="capsule-parts-workshop" -->
+- Summary: Add a capsule character parts graph with small 3D previews and interchangeable hair.
+- Reason: Compare distinct concept-art hairstyles on the same animated character and see how the parts assemble.
+- Impact: The app-local workshop adds a hairstyle recipe and previews of the shared head and suit.
 <!-- /tri:scope-change -->
 <!-- tri:scope-baseline state="unconfirmed" -->
 <!-- /tri:scope-baseline -->

@@ -34,6 +34,7 @@ import {
 } from './character-studio-focus';
 import { buildExperimentalPigtailHead, EXPERIMENTAL_PIGTAIL_PRESETS } from './experimental-pigtail-head';
 import { buildExperimentalPigtailBody } from './experimental-pigtail-body';
+import type { CapsuleHairStyle } from './experimental-capsule-hair';
 
 export type CharacterStudioFamilyId = 'human' | 'cat';
 export type CharacterStudioExpression = ExtendedEmotionName | 'awe';
@@ -89,6 +90,10 @@ export interface CharacterStudioContribution {
   dispose(): void;
 }
 
+interface CapsuleHumanContribution extends CharacterStudioContribution {
+  setExperimentalHair(style: CapsuleHairStyle, length: number): void;
+}
+
 function toLabel(value: string): string {
   return value
     .replaceAll('_', ' ')
@@ -121,7 +126,7 @@ const renderModeChoices: readonly CharacterStudioChoice[] = [
   { value: 'id_colours', label: 'ID colours' },
 ];
 
-export function createCharacterStudioContributions(): Readonly<Record<CharacterStudioFamilyId, CharacterStudioContribution>> {
+export function createCharacterStudioContributions() {
   const humanActor = new CapsuleCharacterActor({
     dna: CAPSULE_CHARACTER_PRESETS.find((preset) => preset.id === 'wacky-helmet-waver'),
     autoBlink: true,
@@ -140,7 +145,7 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
   let rightHandAction: 'none' | 'wave' | 'point' | 'hold_gadget' | 'salute' | 'reach' = 'none';
   let leftHandAction: 'none' | 'wave' | 'point' | 'hold_gadget' | 'salute' | 'reach' = 'none';
 
-  const human: CharacterStudioContribution = {
+  const human: CapsuleHumanContribution = {
     id: 'human',
     name: 'Capsule Human',
     category: 'Humanoid',
@@ -233,6 +238,9 @@ export function createCharacterStudioContributions(): Readonly<Record<CharacterS
       }
     },
     setMotion: (motionId) => humanActor.setLocomotion(motionId as CapsuleLocomotionMode),
+    setExperimentalHair: (style, length) => {
+      if (experimentalBody?.root.visible) experimentalHead?.setHair(style, length);
+    },
     setExpression: (expression) => {
       experimentalHead?.setAwe(expression === 'awe' && experimentalBody?.root.visible === true);
       humanActor.facialController.setExpression(expression === 'awe' ? 'neutral' : expression, 1, 0.2);
