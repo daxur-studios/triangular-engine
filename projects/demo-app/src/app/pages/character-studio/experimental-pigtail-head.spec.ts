@@ -1,4 +1,4 @@
-import { Box3, Matrix3, Mesh, MeshStandardMaterial, Vector2, Vector3, type Object3D, type WebGLProgramParametersWithUniforms, type WebGLRenderer } from 'three';
+import { Box3, Matrix3, Mesh, MeshStandardMaterial, Raycaster, Vector2, Vector3, type Object3D, type WebGLProgramParametersWithUniforms, type WebGLRenderer } from 'three';
 import { FacialAnimationController } from 'triangular-engine/characters';
 import type { ExtendedEmotionName } from 'triangular-engine/characters';
 import type { CapsuleBodyUniformMap } from 'triangular-engine/procedural';
@@ -29,15 +29,18 @@ describe('Character Studio experimental pigtail preset', () => {
     human.selectPreset(EXPERIMENTAL_PIGTAIL_HEAD_ID);
     const body = human.root.getObjectByName('pigtail-standing-body');
     const skin = human.root.getObjectByName('pigtail-skin');
+    const ears = human.root.getObjectByName('shaggy-ears')!;
     const mouth = captureMouthUniforms();
     const swatch = buildExperimentalHairPreview();
 
     try {
+      expect(ears.visible).toBeFalse();
       human.setExpression('neutral');
       human.update(.3);
       const restingOpen = mouth.uMouthOpen.value;
       human.speechPreview!.play([{ time: 0, viseme: 'A', duration: .4 }]);
       human.setExperimentalHair('shaggy', 1.12);
+      expect(ears.visible).toBeTrue();
       swatch.setHair('shaggy', 1.12);
       for (let frame = 0; frame < 12; frame++) human.update(1 / 60);
 
@@ -51,8 +54,95 @@ describe('Character Studio experimental pigtail preset', () => {
       expect(mouth.uMouthOpen.value).toBeGreaterThan(restingOpen);
 
       human.setExperimentalHair('pigtails', 1);
+      expect(ears.visible).toBeFalse();
       expect(human.root.getObjectByName('capsule-hair-shaggy')).toBeUndefined();
       expect(human.root.getObjectByName('pigtail-tuft-left')).toBeDefined();
+    } finally {
+      swatch.dispose();
+    }
+  });
+
+  it('sets each Shaggy ear flush against the temple with its bowl above the skin', () => {
+    const character = buildExperimentalPigtailHead(new FacialAnimationController());
+    const ray = new Raycaster();
+    try {
+      character.setHair('shaggy', 1);
+      character.head.updateMatrixWorld(true);
+      const ears = character.head.getObjectByName('shaggy-ears')!.children;
+      const skin = character.head.getObjectByName('pigtail-skin')!;
+      expect(ears.length).toBe(2);
+      for (const ear of ears) {
+        const side = Math.sign(ear.position.x);
+        expect(Math.abs(ear.position.z)).toBeLessThan(.20);
+        const direction = new Vector3(0, 0, -1).transformDirection(ear.matrixWorld);
+        expect(direction.x).toBeCloseTo(-side, 6);
+        expect(direction.z).toBeCloseTo(0, 6);
+
+        ray.set(ear.localToWorld(new Vector3(.01, .05, 1)), direction);
+        const templeX = ray.intersectObject(skin, false)[0]!.point.x;
+        const bounds = new Box3().setFromObject(ear, true);
+        const outerX = side > 0 ? bounds.max.x : bounds.min.x;
+        const innerX = side > 0 ? bounds.min.x : bounds.max.x;
+        const exposedDepth = side * (outerX - templeX);
+        expect(exposedDepth).toBeGreaterThan(.025);
+        expect(exposedDepth).toBeLessThan(.045);
+        expect(side * (templeX - innerX)).toBeGreaterThan(exposedDepth);
+
+        const depthAt = (x: number) => {
+          ray.set(ear.localToWorld(new Vector3(x, .05, 1)), direction);
+          const [hit] = ray.intersectObjects([ear, skin], false);
+          expect(hit?.object).toBe(ear);
+          return hit ? ear.worldToLocal(hit.point).z : NaN;
+        };
+        const bowl = depthAt(.01);
+        expect(depthAt(.16) - bowl).toBeGreaterThan(.05);
+      }
+    } finally {
+      character.dispose();
+    }
+  });
+
+  it('covers the scalp behind the Shaggy fringe when viewed from above', () => {
+    const swatch = buildExperimentalHairPreview();
+    const [scalp, hair] = swatch.root.children;
+    const ray = new Raycaster();
+    try {
+      for (const length of [.86, 1, 1.14]) {
+        swatch.setHair('shaggy', length);
+        swatch.root.updateMatrixWorld(true);
+        for (const azimuth of [-55, 0, 55]) {
+          const yaw = azimuth * Math.PI / 180;
+          const direction = new Vector3(-.6 * Math.sin(yaw), -.8, -.6 * Math.cos(yaw));
+          for (const x of [0, .15]) {
+            const origin = new Vector3(x, 3.8, 1.25).addScaledVector(direction, -4);
+            ray.set(swatch.root.localToWorld(origin), direction);
+            const [visible] = ray.intersectObjects([scalp, hair], true);
+            expect(visible?.object.parent).withContext(`length=${length}, yaw=${azimuth}, x=${x}`).toBe(hair.children[0]);
+          }
+        }
+      }
+    } finally {
+      swatch.dispose();
+    }
+  });
+
+  it('keeps the Shaggy scalp covered from crown to nape at either lock length limit', () => {
+    const swatch = buildExperimentalHairPreview();
+    const [scalp, hair] = swatch.root.children;
+    const ray = new Raycaster();
+    const rear = new Vector3(0, 0, 1);
+    try {
+      for (const length of [.86, 1.14]) {
+        swatch.setHair('shaggy', length);
+        swatch.root.updateMatrixWorld(true);
+        for (const height of [1.15, 1.80, 2.50, 3.30]) {
+          for (const x of [-.65, 0, .65]) {
+            ray.set(swatch.root.localToWorld(new Vector3(x, height, -4)), rear);
+            const [visible] = ray.intersectObjects([scalp, hair], true);
+            expect(visible?.object.parent).withContext(`length=${length}, height=${height}, x=${x}`).toBe(hair.children[0]);
+          }
+        }
+      }
     } finally {
       swatch.dispose();
     }

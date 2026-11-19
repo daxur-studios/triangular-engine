@@ -1,5 +1,6 @@
 import {
-  CatmullRomCurve3, Group, MathUtils, Mesh, MeshStandardMaterial, SphereGeometry, TubeGeometry, Vector3,
+  BufferGeometry, CatmullRomCurve3, Float32BufferAttribute, Group, MathUtils, Mesh,
+  MeshStandardMaterial, SphereGeometry, TubeGeometry, Vector3,
 } from 'three';
 
 export type CapsuleHairStyle = 'pigtails' | 'shaggy';
@@ -19,31 +20,92 @@ const curlOffsets = [
   [.52, .24, -.22, .40], [.43, -.32, -.24, .38],
 ];
 
-// Base, bend and tip of each lock in head-local coordinates. The front row
-// sweeps across the forehead, and longer locks form the silhouette at the nape.
-const shaggyLocks: readonly (readonly [Point, Point, Point, number])[] = [
-  [[-.14, 3.98, .34], [-.02, 4.51, .12], [-.45, 4.80, -.05], .31],
-  [[.06, 4.01, -.18], [.39, 4.51, -.27], [.80, 4.62, -.37], .34],
-  [[.25, 3.93, -.35], [.80, 4.25, -.49], [1.43, 4.31, -.68], .31],
-  [[-.33, 3.91, -.29], [-.82, 4.36, -.45], [-1.30, 4.45, -.70], .32],
-  [[-.59, 3.95, -.31], [-1.16, 4.20, -.51], [-1.72, 4.08, -.69], .31],
-  [[-.74, 3.84, -.28], [-1.30, 4.04, -.45], [-1.86, 3.80, -.54], .32],
-  [[-.71, 3.69, -.38], [-1.33, 3.81, -.59], [-1.86, 3.50, -.65], .32],
-  [[-.79, 3.55, -.52], [-1.35, 3.52, -.76], [-1.77, 3.13, -.81], .34],
-  [[-.82, 3.43, -.69], [-1.21, 3.16, -.91], [-1.51, 2.78, -.99], .31],
-  [[-.76, 3.25, -.83], [-1.17, 2.76, -1.03], [-1.47, 2.31, -1.12], .29],
-  [[-.48, 3.39, -1.02], [-.82, 2.89, -1.41], [-1.08, 2.14, -1.34], .32],
-  [[.03, 3.68, -1.03], [-.23, 3.10, -1.51], [-.50, 2.43, -1.58], .34],
-  [[.44, 3.63, -.94], [.52, 3.17, -1.45], [.27, 2.31, -1.57], .35],
-  [[.81, 3.65, -.60], [1.18, 3.43, -.95], [1.30, 3.03, -1.15], .31],
-  [[.58, 3.83, .18], [1.10, 3.77, .42], [1.44, 3.42, .51], .31],
-  [[.27, 4.04, .45], [.79, 3.98, .96], [1.16, 3.39, 1.08], .34],
-  [[.02, 4.13, .54], [.37, 4.01, 1.12], [.68, 3.49, 1.38], .31],
-  [[.04, 4.09, .58], [-.26, 3.84, 1.18], [-.31, 3.41, 1.43], .33],
-  [[-.19, 4.03, .49], [-.62, 3.67, 1.10], [-.92, 3.18, 1.20], .36],
-  [[-.38, 3.99, .24], [-.98, 3.64, .87], [-1.30, 3.10, .96], .34],
-  [[-.57, 3.86, -.02], [-1.21, 3.45, .52], [-1.52, 2.94, .59], .32],
+type ShaggyLock = readonly [base: Point, bend: Point, tip: Point, radius: number];
+
+// Sculpt the part and the long front sweep independently of the rear layers.
+const shaggyFringe: readonly ShaggyLock[] = [
+  [[.30, 3.98, .34], [.53, 4.58, .59], [.31, 5.18, .48], .35],
+  [[-.13, 4.06, .20], [-.42, 4.58, .15], [-.87, 4.89, .02], .34],
+  [[.29, 4.02, -.12], [.40, 4.49, -.48], [.78, 4.86, -.64], .34],
+  [[.22, 4.16, .42], [.41, 4.11, 1.29], [.12, 3.31, 1.53], .39],
+  [[.11, 4.16, .42], [-.31, 4.27, 1.10], [-1.12, 3.73, 1.49], .43],
+  [[-.17, 4.09, .48], [-.73, 3.92, 1.36], [-1.43, 3.00, 1.33], .45],
+  [[-.38, 3.91, .27], [-1.26, 3.68, 1.07], [-1.94, 2.99, .83], .43],
+  [[-.61, 3.76, .06], [-1.49, 3.43, .70], [-2.15, 2.73, .55], .37],
+  [[.29, 4.05, .31], [.95, 3.94, 1.08], [1.32, 3.03, 1.20], .36],
+  [[.56, 3.95, .14], [1.40, 3.90, .74], [1.96, 3.20, .69], .38],
+  [[.71, 3.76, .05], [1.54, 3.48, .48], [2.07, 2.67, .42], .38],
+  [[.94, 3.28, .30], [1.41, 2.65, .48], [1.40, 1.65, .49], .28],
+  [[-1.02, 3.23, .31], [-1.39, 2.66, .50], [-1.34, 1.68, .53], .28],
 ];
+
+const shaggyCrown: readonly ShaggyLock[] = [
+  [[-.21, 4.13, -.12], [-.32, 4.54, -.58], [-.66, 4.98, -.78], .32],
+  [[.12, 4.12, -.42], [.57, 4.46, -.87], [1.29, 4.52, -1.17], .36],
+  [[.08, 4.11, -.42], [-.02, 4.30, -1.17], [-.54, 3.70, -1.96], .41],
+];
+
+// Three staggered rows fan from the crown, overlap at the temples, and close at the nape.
+function shaggyRearLocks(): ShaggyLock[] {
+  const point = (angle: number, radius: number, y: number): Point => {
+    const radians = MathUtils.degToRad(angle);
+    const z = Math.cos(radians) * radius;
+    return [Math.sin(radians) * radius, y, z < 0 ? z * 1.12 : z];
+  };
+  const layer = (count: number, first: number, last: number,
+    base: readonly [radius: number, height: number],
+    bend: readonly [radius: number, height: number, sweepDegrees: number],
+    tip: readonly [radius: number, height: number, sweepDegrees: number],
+    thickness: number): ShaggyLock[] =>
+    Array.from({ length: count }, (_, index) => {
+      const fraction = index / (count - 1);
+      const angle = MathUtils.lerp(first, last, fraction);
+      const stagger = Math.sin(index * 2.35 + base[1]);
+      const sweep = .43 + .57 * stagger;
+      return [
+        point(angle, base[0], base[1]),
+        point(angle + bend[2] * sweep, bend[0] + .06 * stagger, bend[1] + .18 * stagger),
+        point(angle + tip[2] * sweep, tip[0] + .12 * stagger,
+          tip[1] + .18 * stagger + .44 * Math.abs(2 * fraction - 1)),
+        thickness + .045 * stagger,
+      ];
+    });
+  return [
+    ...layer(9, 63, 301, [.70, 4.01], [1.37, 4.20, 14], [2.33, 3.78, 21], .36),
+    ...layer(9, 77, 282, [1.12, 3.56], [1.68, 3.16, 11], [2.06, 2.07, 17], .41),
+    ...layer(8, 101, 259, [1.21, 2.73], [1.45, 1.89, 9], [1.34, .59, 15], .32),
+  ];
+}
+
+/** Low hairline under the rear locks. Its edges meet the scalp under the fringe and nape. */
+function shaggyRearCap(width: number, depth: number): BufferGeometry {
+  const rows = 14;
+  const columns = 42;
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let row = 0; row <= rows; row++) {
+    const rise = row / rows;
+    for (let column = 0; column <= columns; column++) {
+      const around = column / columns;
+      const angle = MathUtils.degToRad(MathUtils.lerp(70, 290, around));
+      const edge = 2.86 - 2.13 * Math.pow(Math.sin(Math.PI * around), .62) + .075 * Math.cos(11 * angle);
+      const y = MathUtils.lerp(edge, 3.89, rise);
+      const taper = Math.max(0, (y - 2.81) / 1.08);
+      const ease = Math.sin(Math.PI * rise) * Math.sin(Math.PI * around);
+      const radius = .985 - .20 * taper * taper + .096 * ease;
+      positions.push(width * radius * Math.sin(angle), y, depth * radius * Math.cos(angle));
+      if (row === rows || column === columns) continue;
+      const a = row * (columns + 1) + column;
+      const c = a + columns + 1;
+      indices.push(a, a + 1, c, a + 1, c + 1, c);
+    }
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
 
 /** Builds the hairstyle in scalp coordinates so a head and a preview can share the same recipe. */
 export function buildExperimentalCapsuleHair({ radii: [x, y, z], palette, curlScale }: HairFit) {
@@ -105,21 +167,24 @@ export function buildExperimentalCapsuleHair({ radii: [x, y, z], palette, curlSc
   root.add(pigtails);
 
   let shaggy: Group | undefined;
+  let rearCap: BufferGeometry | undefined;
   const lockMeshes: Mesh<TubeGeometry, MeshStandardMaterial>[] = [];
   const shaggyMaterials: MeshStandardMaterial[] = [];
 
   function buildShaggy() {
     const group = new Group();
     group.name = 'capsule-hair-shaggy';
-    shaggyMaterials.push(...[0x332824, 0x3b2e27, 0x42342b].map(color =>
-      new MeshStandardMaterial({ color, roughness: .73 })));
-    ellipsoid(group, shaggyMaterials[0], [0, 3.65, -.32], [1.31, .81, 1.27]);
-    ellipsoid(group, shaggyMaterials[0], [0, 3.28, -.72], [1.21, .86, .79]);
-    shaggyLocks.forEach(([base, bend, tip, radius], index) => {
+    shaggyMaterials.push(...[0x39322e, 0x413934, 0x49403a].map(color =>
+      new MeshStandardMaterial({ color, roughness: .67 })));
+    // Carry the crown under the fringe so the roots stay covered at every lock length.
+    ellipsoid(group, shaggyMaterials[0], [0, 3.65, -.10], [1.31, .81, 1.40]);
+    rearCap = shaggyRearCap(x, z);
+    group.add(new Mesh(rearCap, shaggyMaterials[0]));
+    [...shaggyFringe, ...shaggyCrown, ...shaggyRearLocks()].forEach(([base, bend, tip, radius], index) => {
       const origin = new Vector3(...base);
       const curve = new CatmullRomCurve3([new Vector3(), new Vector3(...bend).sub(origin), new Vector3(...tip).sub(origin)]);
-      const segments = 16;
-      const sides = 12;
+      const segments = 20;
+      const sides = 16;
       const geometry = new TubeGeometry(curve, segments, radius, sides);
       const positions = geometry.getAttribute('position');
       const point = new Vector3();
@@ -172,6 +237,7 @@ export function buildExperimentalCapsuleHair({ radii: [x, y, z], palette, curlSc
     },
     dispose() {
       sphere.dispose();
+      rearCap?.dispose();
       for (const lock of lockMeshes) lock.geometry.dispose();
       for (const material of [...pigtailMaterials, ...shaggyMaterials]) material.dispose();
     },

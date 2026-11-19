@@ -11,6 +11,7 @@ export function createPigtailEyeMaterial(skinTone: string, side: number) {
     uPupilRadius: { value: .30 },
     uLidAngles: { value: new Vector2() },
     uLidTilt: { value: 0 },
+    uEyeWrap: { value: 0 },
   };
   const gazeEuler = new Euler(0, 0, 0, 'YXZ');
   const gazeMatrix = new Matrix4();
@@ -29,6 +30,7 @@ export function createPigtailEyeMaterial(skinTone: string, side: number) {
         uniform float uPupilRadius;
         uniform vec2 uLidAngles;
         uniform float uLidTilt;
+        uniform float uEyeWrap;
 
         float softEdge(float distanceToEdge) {
           float edgeWidth = max(fwidth(distanceToEdge) * 0.65, 0.0001);
@@ -51,7 +53,7 @@ export function createPigtailEyeMaterial(skinTone: string, side: number) {
         float upperLid = lidY * cos(uLidAngles.x) + surface.z * sin(uLidAngles.x);
         float lowerLid = -lidY * cos(uLidAngles.y) + surface.z * sin(uLidAngles.y);
         float cornerBlend = max(1.0 - abs(upperLid - lowerLid) / 0.36, 0.0);
-        float lid = softEdge(max(upperLid, lowerLid) + 0.09 * cornerBlend * cornerBlend + 0.012);
+        float lid = softEdge(max(upperLid, lowerLid) + 0.09 * cornerBlend * cornerBlend + 0.012 - uEyeWrap);
         diffuseColor.rgb = mix(diffuseColor.rgb, uEyeSkin, lid);
       `)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
@@ -61,13 +63,15 @@ export function createPigtailEyeMaterial(skinTone: string, side: number) {
 
   return {
     material,
-    update(pose: CapsuleEyeRigPose, blink: number, awe: number): void {
+    update(pose: CapsuleEyeRigPose, blink: number, awe: number, roundedSclera: boolean): void {
       gazeEuler.set(pose.gazePitch - .056 - .32 * awe, pose.gazeYaw - .035 * side, 0);
       gazeMatrix.makeRotationFromEuler(gazeEuler);
       uniforms.uEyeGaze.value.setFromMatrix4(gazeMatrix).transpose();
       uniforms.uPupilRadius.value = pose.pupilScale + .32 * awe;
       uniforms.uLidAngles.value.set(-1.39 + pose.upperLidAngle, -1.40 + 1.75 * pose.lowerLidAngle + .85 * blink);
       uniforms.uLidTilt.value = pose.lidTiltZ;
+      // The Shaggy sclera extends around the sphere. Let the lid cover it normally in a blink or squint.
+      uniforms.uEyeWrap.value = roundedSclera ? .30 * Math.max(0, 1 - Math.max(blink, 1.8 * pose.upperLidAngle)) : 0;
     },
   };
 }

@@ -144,25 +144,28 @@ export function buildExperimentalPigtailBody() {
 
   // The pack sits behind the shoulder rings. The two nozzles stay above the hips.
   const packZ = -2.18;
-  ellipsoid(upperBodyContent, charcoal, [0, 6.46, -1.30], [.86, 1.27, .45]);
-  const backpack = profile(upperBodyContent, pack, [
+  const gear = new Group();
+  gear.name = 'pigtail-gear';
+  upperBodyContent.add(gear);
+  ellipsoid(gear, charcoal, [0, 6.46, -1.30], [.86, 1.27, .45]);
+  const backpack = profile(gear, pack, [
     [0, 4.84], [.69, 4.89], [1.04, 5.16], [1.18, 5.50],
     [1.18, 7.85], [1.12, 8.31], [.85, 8.52], [.45, 8.62], [0, 8.63],
   ], [0, 0, packZ], .87);
   backpack.name = 'pigtail-backpack';
 
-  profile(upperBodyContent, charcoal, [
+  profile(gear, charcoal, [
     [0, -.08], [1.16, -.08], [1.22, -.03], [1.22, .11], [1.17, .15], [0, .15],
   ], [0, 5.32, packZ], .88);
 
   const limbs = ([-1, 1] as const).map(side => {
     const sideLabel = side === -1 ? 'left' : 'right';
     const nozzle: Vec3 = [side * .59, 4.57, packZ - .12];
-    profile(upperBodyContent, fixture, [[0, -.19], [.35, -.19], [.38, -.14], [.28, .09], [.24, .48], [0, .50]], nozzle);
-    profile(upperBodyContent, soles, [[0, -.03], [.32, -.03], [.33, 0], [.32, .05], [0, .05]], [nozzle[0], 4.71, nozzle[2]]);
-    ellipsoid(upperBodyContent, fixture, [side * 1.14, 6.49, packZ - .12], [.14, .62, .49]);
+    profile(gear, fixture, [[0, -.19], [.35, -.19], [.38, -.14], [.28, .09], [.24, .48], [0, .50]], nozzle);
+    profile(gear, soles, [[0, -.03], [.32, -.03], [.33, 0], [.32, .05], [0, .05]], [nozzle[0], 4.71, nozzle[2]]);
+    ellipsoid(gear, fixture, [side * 1.14, 6.49, packZ - .12], [.14, .62, .49]);
     for (const y of [6.87, 6.47]) {
-      ellipsoid(upperBodyContent, charcoal, [side * 1.26, y - .13, packZ - .12], [.05, .125, .135]);
+      ellipsoid(gear, charcoal, [side * 1.26, y - .13, packZ - .12], [.05, .125, .135]);
     }
 
     const shoulder: Vec3 = [side * 1.44, 6.95, .07];

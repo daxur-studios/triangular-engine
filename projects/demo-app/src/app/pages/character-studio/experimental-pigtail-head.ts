@@ -99,6 +99,27 @@ function buildSkin(): BufferGeometry {
   return geometry;
 }
 
+function buildShaggyEar(): BufferGeometry {
+  const geometry = new SphereGeometry(1, 32, 24).rotateX(Math.PI / 2);
+  const positions = geometry.getAttribute('position');
+  for (let vertex = 0; vertex < positions.count; vertex++) {
+    const x = positions.getX(vertex);
+    const y = positions.getY(vertex);
+    const z = positions.getZ(vertex);
+    // Recess the outward pole into the ear. Keep the lower lobe narrower and
+    // shift the bowl upward so the rim blends into a rounded base.
+    const outward = Math.max(0, z);
+    positions.setXYZ(
+      vertex,
+      x * (.224 + .035 * y) + .052 * y,
+      .314 * (y + .13 * outward ** 2),
+      .015 + .145 * z - .13 * outward ** 5,
+    );
+  }
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 /** The workshop's hair swatch uses the same scalp and attachment coordinates as the face. */
 export function buildExperimentalHairPreview() {
   const root = new Group();
@@ -169,6 +190,23 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController, se
   const hair = withHair ? buildExperimentalCapsuleHair({ radii: hairFit, palette, curlScale: appearance.curls }) : undefined;
   if (hair) head.add(hair.root);
   ellipsoid(head, mat(palette.nose), [.018, 1.78, z * 1.011], [.098, .097, .096]);
+  let shaggy = false;
+  const ears = new Group();
+  if (withHair) {
+    ears.name = 'shaggy-ears';
+    const earGeometry = buildShaggyEar();
+    const earMaterial = new MeshStandardMaterial({ color: skinTone, roughness: .76 });
+    for (const side of [-1, 1]) {
+      const ear = new Mesh(earGeometry, earMaterial);
+      // Set the rim tangent to the temple and sink the back into the skin.
+      ear.position.set(side * (x - .01), 1.72, .11);
+      ear.rotation.y = side * Math.PI / 2;
+      ear.scale.x = side;
+      ears.add(ear);
+    }
+    ears.visible = false;
+    head.add(ears);
+  }
 
   if (appearance.freckles.length) {
     const freckle = mat(palette.freckle);
@@ -225,9 +263,9 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController, se
     ], .065);
 
     return (pose: CapsuleEyeRigPose, browPose: CapsuleBrowRigPose, blink: number, awe: number) => {
-      eyeSurface.update(pose, blink, awe);
+      eyeSurface.update(pose, blink, awe, shaggy);
       lashes.rotation.set(pose.upperLidAngle * .52, 0, pose.lidTiltZ, 'ZXY');
-      browPivot.position.y = browY + browPose.heightOffset;
+      browPivot.position.y = browY + (shaggy ? .17 : 0) + browPose.heightOffset;
       browPivot.rotation.z = browPose.zRotation;
     };
   });
@@ -268,8 +306,10 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController, se
     setAwe: (active: boolean) => { aweTarget = active ? 1 : 0; },
     setHair: (style: CapsuleHairStyle, length: number) => {
       hair?.setStyle(style, length);
-      for (const lashes of lashGroups) lashes.visible = withHair && style === 'pigtails';
-      brow.color.setHex(style === 'pigtails' ? palette.brow : 0x3b2e27);
+      shaggy = withHair && style === 'shaggy';
+      ears.visible = shaggy;
+      for (const lashes of lashGroups) lashes.visible = withHair && !shaggy;
+      brow.color.setHex(shaggy ? 0x3b2e27 : palette.brow);
     },
     setPigtailLag: (pitch: number, roll: number) => hair?.setPigtailLag(pitch, roll),
     update,

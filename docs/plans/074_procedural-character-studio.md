@@ -63,7 +63,7 @@ This plan covers separating the capsule character experience from the mixed-purp
 | experimental-pigtail-eyes | done        |
 | experimental-pigtail-variants | done        |
 | experimental-pigtail-body | done        |
-| capsule-parts-workshop | in_progress |
+| capsule-parts-workshop | done        |
 | character-performance-matrix | in_progress |
 
 <!-- tri:review version="1" scope-hash="bd4b1b7e677867df61e09c25e110c86e457075b7fd0b0e9d9bf3038221b48cdf" reviewed="2026-11-19" reviewer="agent" -->
@@ -74,6 +74,8 @@ This plan covers separating the capsule character experience from the mixed-purp
 The shell and app-local human/cat contributions are in place. The studio hosts capsule visual suites with recordings, thumbnails and review sheets; `capsule-hair-coverage@v1` (30 front, side and back close-ups across 10 hairstyles) and `capsule-human-lineup@v1` (20 full-body baseline and alt presets) are active with centered focus framing and saved baseline contact sheets, while human visual verdicts and hair/clothing geometry improvements remain pending. Capsule actors, test suites, adapters and focus framing belong to Character Studio. `/characters-lab` keeps only the face-rig and general humanoid demonstrations. The human performance matrix is active; its visible hardware run and target-device review are pending. Broader themed character packs and promotion of the contribution contract into a public engine entry point require later evidence and scope review.
 
 Latest diagnostic: [run the human performance matrix](http://triangular-demo.localhost:4200/character-studio?testSuite=character-studio-human-performance&testVersion=1&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1).
+
+The developer accepted Shaggy's overall look in the turnaround. The next proposed step is to carry those proportions into a selectable preset and try the existing walk in the [playable sandbox](079_playable-capsule-human-sandbox.md). Hand refinement remains open for the gesture and grip pass.
 
 For the next Orange Pigtails body review, compare one rotatable full-body blockout to the original art using the same angle slider and overlay as the head preview. The reproduction steps and local source are recorded in [ER 074](/docs/engineering-records/074_procedural-character-studio.md#2026-11-18--synchronized-concept-and-3d-review).
 
