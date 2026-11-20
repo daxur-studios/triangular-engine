@@ -75,7 +75,7 @@ The shell and app-local human/cat contributions are in place. The studio hosts c
 
 Latest diagnostic: [run the human performance matrix](http://triangular-demo.localhost:4200/character-studio?testSuite=character-studio-human-performance&testVersion=1&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1).
 
-The developer accepted Shaggy's overall look in the turnaround. The next proposed step is to carry those proportions into a selectable preset and try the existing walk in the [playable sandbox](079_playable-capsule-human-sandbox.md). Hand refinement remains open for the gesture and grip pass.
+The developer accepted Shaggy's overall look in the turnaround. The reviewed proportions are available in a selectable walking preset in the [playable sandbox](079_playable-capsule-human-sandbox.md). Hand refinement remains open for the gesture and grip pass.
 
 For the next Orange Pigtails body review, compare one rotatable full-body blockout to the original art using the same angle slider and overlay as the head preview. The reproduction steps and local source are recorded in [ER 074](/docs/engineering-records/074_procedural-character-studio.md#2026-11-18--synchronized-concept-and-3d-review).
 

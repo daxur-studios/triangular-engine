@@ -25,6 +25,7 @@ import {
 import { EngineModule, EngineService } from 'triangular-engine';
 import { ALL_CAPSULE_CHARACTER_PRESETS } from 'triangular-engine/characters';
 import { CapsuleCharacterActor } from 'triangular-engine/procedural';
+import { CAPSULE_SPACESUIT_PRESETS } from '../character-studio/capsule-spacesuit-presets';
 import { createFlatGroundSampler } from './motion/capsule-motion-types';
 import {
   createDefaultLocomotionPlugins,
@@ -40,7 +41,7 @@ type SandboxHuman = {
   sitting: boolean;
 } & (
   | { readonly kind: 'classic'; readonly actor: CapsuleCharacterActor }
-  | { readonly kind: 'pigtails'; readonly actor: ReturnType<typeof buildPigtailSandboxWalker> }
+  | { readonly kind: 'spacesuit'; readonly label: string; readonly actor: ReturnType<typeof buildPigtailSandboxWalker> }
 );
 
 type InteractionKind = 'pickup' | 'sit';
@@ -85,7 +86,8 @@ export class CapsuleHumanSandboxPageComponent {
 
   readonly populationOptions = POPULATION_OPTIONS;
   readonly population = signal(1);
-  readonly pigtailWalk = signal(false);
+  readonly spacesuitPresets = CAPSULE_SPACESUIT_PRESETS;
+  readonly spacesuitPreset = signal<(typeof CAPSULE_SPACESUIT_PRESETS)[number] | undefined>(undefined);
   readonly locomotionPlugins = createDefaultLocomotionPlugins();
   readonly activePluginId = signal<string>(DEFAULT_LOCOMOTION_PLUGIN_ID);
   readonly cameraPreset = signal<'three-quarter' | 'side'>('three-quarter');
@@ -142,8 +144,9 @@ export class CapsuleHumanSandboxPageComponent {
       const resolved = resolveLocomotionPlugin(this.locomotionPlugins, requestedWalk);
       this.activePluginId.set(resolved.id);
     }
-    if (queryParams.get('character') === 'orange-pigtails') {
-      this.togglePigtailWalk();
+    const requestedCharacter = queryParams.get('character');
+    if (this.spacesuitPresets.some(({ id }) => id === requestedCharacter)) {
+      this.selectCharacter(requestedCharacter);
     } else {
       this.createPopulation(1);
     }
@@ -189,10 +192,10 @@ export class CapsuleHumanSandboxPageComponent {
       !POPULATION_OPTIONS.includes(count as (typeof POPULATION_OPTIONS)[number])
     )
       return;
-    if (count === this.population() && !this.pigtailWalk()) return;
+    if (count === this.population() && !this.spacesuitPreset()) return;
     this.dropRock();
     this.cancelPendingInteraction();
-    this.pigtailWalk.set(false);
+    this.spacesuitPreset.set(undefined);
     this.rock.visible = true;
     this.chair.visible = true;
     this.createPopulation(count);
@@ -207,14 +210,16 @@ export class CapsuleHumanSandboxPageComponent {
     );
   }
 
-  togglePigtailWalk(): void {
-    if (this.pigtailWalk()) {
+  selectCharacter(characterId: string | null): void {
+    const preset = this.spacesuitPresets.find(({ id }) => id === characterId);
+    if (!preset) {
       this.setPopulation(1);
       return;
     }
+    if (preset === this.spacesuitPreset()) return;
     this.dropRock();
     this.cancelPendingInteraction();
-    this.pigtailWalk.set(true);
+    this.spacesuitPreset.set(preset);
     this.rock.visible = false;
     this.chair.visible = false;
     this.walkMetrics.set(null);
@@ -233,7 +238,7 @@ export class CapsuleHumanSandboxPageComponent {
   selectLocomotionPlugin(pluginId: string): void {
     const plugin = resolveLocomotionPlugin(this.locomotionPlugins, pluginId);
     this.activePluginId.set(plugin.id);
-    const walker = this.getPigtailWalker();
+    const walker = this.getSpacesuitWalker();
     if (walker) {
       walker.setPlugin(plugin);
       this.syncSelectedHumanState(this.humans[0]);
@@ -242,7 +247,7 @@ export class CapsuleHumanSandboxPageComponent {
   }
 
   runComparisonCourse(): void {
-    const walker = this.getPigtailWalker();
+    const walker = this.getSpacesuitWalker();
     if (!walker) return;
     walker.startComparisonCourse();
     this.walkMetrics.set(null);
@@ -346,6 +351,7 @@ export class CapsuleHumanSandboxPageComponent {
     }
 
     const placements = this.gridPlacements();
+    const spacesuit = this.spacesuitPreset();
     for (let index = 0; index < count; index++) {
       const id = `human-${index + 1}`;
       const preset =
@@ -357,11 +363,13 @@ export class CapsuleHumanSandboxPageComponent {
         index === 0 ? this.activeRingMaterial : this.inactiveRingMaterial,
       );
       const common = { id, selectionRing: ring, sitting: false };
-      const human: SandboxHuman = this.pigtailWalk()
+      const human: SandboxHuman = spacesuit
         ? {
             ...common,
-            kind: 'pigtails',
+            kind: 'spacesuit',
+            label: spacesuit.label,
             actor: buildPigtailSandboxWalker({
+              preset: spacesuit.id,
               plugin: resolveLocomotionPlugin(this.locomotionPlugins, this.activePluginId()),
               sampleGround: createFlatGroundSampler(this.ground.position.y),
             }),
@@ -370,7 +378,7 @@ export class CapsuleHumanSandboxPageComponent {
       const { actor } = human;
       actor.root.name = id;
       actor.root.userData['sandboxHumanId'] = id;
-      if (human.kind === 'pigtails') {
+      if (human.kind === 'spacesuit') {
         human.actor.resetTo(
           { x: placements[index][0], y: this.ground.position.y, z: placements[index][1] },
           0,
@@ -452,7 +460,7 @@ export class CapsuleHumanSandboxPageComponent {
     );
     this.raycaster.setFromCamera(this.pointerNdc, this.engine.camera);
 
-    if (!this.pigtailWalk()) {
+    if (!this.spacesuitPreset()) {
       if (this.raycaster.intersectObject(this.rock, true).length) {
         this.pickUpRock();
         return;
@@ -473,11 +481,11 @@ export class CapsuleHumanSandboxPageComponent {
     if (!groundHit) return;
     const human = this.getSelectedHuman();
     if (!human) return;
-    if (human.kind === 'pigtails') {
+    if (human.kind === 'spacesuit') {
       const wasWalking = human.actor.walking;
       if (human.actor.walkTo(groundHit.point)) {
         this.syncSelectedHumanState(human);
-        this.status.set(wasWalking ? 'Next destination queued.' : 'Orange Pigtails is walking.');
+        this.status.set(wasWalking ? 'Destination updated.' : `${human.label} is walking.`);
       }
       return;
     }
@@ -508,7 +516,7 @@ export class CapsuleHumanSandboxPageComponent {
     // delta so navigation does not become half speed after a slow frame.
     const delta = Math.max(deltaSeconds, 0);
     for (const human of this.humans) {
-      if (human.kind === 'pigtails') {
+      if (human.kind === 'spacesuit') {
         const wasWalking = human.actor.walking;
         human.actor.update(delta);
         const stage = human.actor.courseStage;
@@ -532,7 +540,7 @@ export class CapsuleHumanSandboxPageComponent {
             speedMps: m.peakSpeedMps,
           });
           this.syncSelectedHumanState(human);
-          this.status.set('Orange Pigtails arrived. Click the ground to walk again.');
+          this.status.set(`${human.label} arrived. Click the ground to walk again.`);
         }
         continue;
       }
@@ -681,7 +689,7 @@ export class CapsuleHumanSandboxPageComponent {
 
   private syncSelectedHumanState(human: SandboxHuman): void {
     if (human.id !== this.selectedHumanId()) return;
-    if (human.kind === 'pigtails') {
+    if (human.kind === 'spacesuit') {
       this.selectedHumanState.set(human.actor.walking ? 'Walking' : 'Ready');
       return;
     }
@@ -714,13 +722,13 @@ export class CapsuleHumanSandboxPageComponent {
     return this.humans.find((human) => human.id === this.selectedHumanId());
   }
 
-  private getPigtailWalker(): Extract<SandboxHuman, { kind: 'pigtails' }>['actor'] | undefined {
+  private getSpacesuitWalker(): Extract<SandboxHuman, { kind: 'spacesuit' }>['actor'] | undefined {
     const human = this.humans[0];
-    return human?.kind === 'pigtails' ? human.actor : undefined;
+    return human?.kind === 'spacesuit' ? human.actor : undefined;
   }
 
   private humanLabel(human: SandboxHuman): string {
-    if (human.kind === 'pigtails') return 'Orange Pigtails';
+    if (human.kind === 'spacesuit') return human.label;
     return `Human ${human.id.slice('human-'.length).padStart(2, '0')}`;
   }
 

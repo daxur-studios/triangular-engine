@@ -4,6 +4,7 @@ import {
   type BufferGeometry, type Material,
 } from 'three';
 import { RubberHoseLimbMesh } from 'triangular-engine/procedural';
+import type { CapsuleSpacesuitPreset } from './capsule-spacesuit-presets';
 import {
   ZERO_EULER,
   ZERO_VEC3,
@@ -35,10 +36,13 @@ interface PigtailWalkPose {
 }
 
 /** Shared standing spacesuit body from the approved full-body blockout with a collar socket for the seeded pigtail heads. */
-export function buildExperimentalPigtailBody() {
+export function buildExperimentalPigtailBody(preset: CapsuleSpacesuitPreset = 'orange-pigtails') {
+  const shaggy = preset === 'shaggy';
+  const rootScaleY = STUDIO_SCALE * (shaggy ? .91 : 1);
+  const bodyScaleY = rootScaleY * HEAD_LOCAL_SCALE;
   const root = new Group();
   root.name = 'pigtail-standing-body';
-  root.scale.setScalar(STUDIO_SCALE);
+  root.scale.set(STUDIO_SCALE, rootScaleY, STUDIO_SCALE);
 
   const body = new Group();
   body.scale.setScalar(HEAD_LOCAL_SCALE);
@@ -63,9 +67,9 @@ export function buildExperimentalPigtailBody() {
   const sphere = new SphereGeometry(1, 36, 24);
   const geometries: BufferGeometry[] = [sphere];
   const mat = (color: number) => new MeshStandardMaterial({ color, roughness: .74 });
-  const suit = mat(0xe6d5bd);
+  const suit = mat(shaggy ? 0xe8dcd0 : 0xe6d5bd);
   const charcoal = mat(0x3c393a);
-  const soles = mat(0x403936);
+  const soles = mat(shaggy ? 0x6c5b50 : 0x403936);
   const pack = mat(0xc45e25);
   const badge = mat(0xf48125);
   const fixture = mat(0x8f8374);
@@ -146,6 +150,10 @@ export function buildExperimentalPigtailBody() {
   const packZ = -2.18;
   const gear = new Group();
   gear.name = 'pigtail-gear';
+  if (shaggy) {
+    gear.scale.set(1.32, 1.11, 1.04);
+    gear.position.y = -.95;
+  }
   upperBodyContent.add(gear);
   ellipsoid(gear, charcoal, [0, 6.46, -1.30], [.86, 1.27, .45]);
   const backpack = profile(gear, pack, [
@@ -258,15 +266,15 @@ export function buildExperimentalPigtailBody() {
   // Seat the lowest point of the boot soles cleanly on the pedestal (y = 0).
   root.updateMatrixWorld(true);
   const soleMinY = new Box3().setFromObject(body, true).min.y;
-  const localOffsetY = -soleMinY / STUDIO_SCALE;
+  const localOffsetY = -soleMinY / rootScaleY;
   body.position.y += localOffsetY;
   root.updateMatrixWorld(true);
 
   const measurements: RigMeasurements = {
-    legLength: PELVIS_Y * BODY_SCALE,
-    hipHeight: PELVIS_Y * BODY_SCALE,
+    legLength: PELVIS_Y * bodyScaleY,
+    hipHeight: PELVIS_Y * bodyScaleY,
     stanceHalfWidth: ((1.25 + 1.00) * 0.5) * BODY_SCALE,
-    armLength: Math.hypot(2.31 - 1.44, 6.95 - 4.98, .18 - .07) * BODY_SCALE,
+    armLength: Math.hypot((2.31 - 1.44) * BODY_SCALE, (6.95 - 4.98) * bodyScaleY, (.18 - .07) * BODY_SCALE),
     leftFootRestLocal: { x: -1.25 * BODY_SCALE, y: 0, z: -.12 * BODY_SCALE },
     rightFootRestLocal: { x: 1.00 * BODY_SCALE, y: 0, z: -.03 * BODY_SCALE },
   };
@@ -299,7 +307,7 @@ export function buildExperimentalPigtailBody() {
 
     const activeWeight = 1 - Math.max(0, Math.min(1, pose.restBlend ?? 0));
     const torsoX = pose.torsoOffset.x * activeWeight / BODY_SCALE;
-    const torsoY = pose.torsoOffset.y * activeWeight / BODY_SCALE;
+    const torsoY = pose.torsoOffset.y * activeWeight / bodyScaleY;
     const torsoZ = pose.torsoOffset.z * activeWeight / BODY_SCALE;
     upperBody.position.set(torsoX, PELVIS_Y + torsoY, torsoZ);
     upperBody.rotation.set(
@@ -311,7 +319,7 @@ export function buildExperimentalPigtailBody() {
 
     headSocket.position.set(
       pose.headOffset.x * activeWeight / STUDIO_SCALE,
-      pose.headOffset.y * activeWeight / STUDIO_SCALE,
+      pose.headOffset.y * activeWeight / rootScaleY,
       pose.headOffset.z * activeWeight / STUDIO_SCALE,
     );
     headSocket.rotation.set(
@@ -341,7 +349,7 @@ export function buildExperimentalPigtailBody() {
 
       footOffset.set(
         footPose.offset.x * activeWeight / BODY_SCALE,
-        footPose.offset.y * activeWeight / BODY_SCALE,
+        footPose.offset.y * activeWeight / bodyScaleY,
         footPose.offset.z * activeWeight / BODY_SCALE,
       );
       foot.position.set(
@@ -358,7 +366,7 @@ export function buildExperimentalPigtailBody() {
       if (footPose.kneeBend) {
         legBendOffset.set(
           footPose.kneeBend.x * activeWeight / BODY_SCALE,
-          footPose.kneeBend.y * activeWeight / BODY_SCALE,
+          footPose.kneeBend.y * activeWeight / bodyScaleY,
           footPose.kneeBend.z * activeWeight / BODY_SCALE,
         );
       } else {
@@ -368,7 +376,7 @@ export function buildExperimentalPigtailBody() {
 
       wristOffset.set(
         handPose.offset.x * activeWeight / BODY_SCALE,
-        handPose.offset.y * activeWeight / BODY_SCALE,
+        handPose.offset.y * activeWeight / bodyScaleY,
         handPose.offset.z * activeWeight / BODY_SCALE,
       );
       wristSocket.position.set(...wrist).add(wristOffset);
@@ -381,7 +389,7 @@ export function buildExperimentalPigtailBody() {
       if (handPose.elbowBend) {
         armBendOffset.set(
           handPose.elbowBend.x * activeWeight / BODY_SCALE,
-          handPose.elbowBend.y * activeWeight / BODY_SCALE,
+          handPose.elbowBend.y * activeWeight / bodyScaleY,
           handPose.elbowBend.z * activeWeight / BODY_SCALE,
         );
       } else {

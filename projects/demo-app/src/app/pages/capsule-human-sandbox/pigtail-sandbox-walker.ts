@@ -1,5 +1,6 @@
 import { Box3, MathUtils, Mesh, Vector3 } from 'three';
 import { FacialAnimationController } from 'triangular-engine/characters';
+import type { CapsuleSpacesuitPreset } from '../character-studio/capsule-spacesuit-presets';
 import { buildExperimentalPigtailBody } from '../character-studio/experimental-pigtail-body';
 import { buildExperimentalPigtailHead } from '../character-studio/experimental-pigtail-head';
 import {
@@ -22,6 +23,7 @@ const MIN_WALK_DISTANCE = 0.04;
 const PLUGIN_CROSSFADE_SECONDS = 0.15;
 
 export interface PigtailWalkerOptions {
+  readonly preset?: CapsuleSpacesuitPreset;
   readonly plugin?: LocomotionPlugin;
   readonly sampleGround?: GroundSampler;
   readonly maxSpeed?: number;
@@ -48,9 +50,14 @@ const COURSE_LEG_2 = new Vector3(-1.6, 0, -1.7);
 const COURSE_LEG_3 = new Vector3(0.0, 0, 0.35);
 
 export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
-  const body = buildExperimentalPigtailBody();
+  const body = buildExperimentalPigtailBody(options.preset);
   const facialController = new FacialAnimationController({ autoBlink: true });
-  const head = buildExperimentalPigtailHead(facialController);
+  const head = buildExperimentalPigtailHead(facialController, undefined, true, options.preset);
+  if (options.preset === 'shaggy') {
+    facialController.setFaceChannel('mouth.smile', .65, 0);
+    facialController.setFaceChannel('mouth.widen', .35, 0);
+    facialController.setFaceChannel('mouth.jawOpen', .095, 0);
+  }
   body.headSocket.add(head.head);
 
   const root = body.root;

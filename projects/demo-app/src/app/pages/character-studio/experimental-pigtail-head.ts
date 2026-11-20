@@ -11,6 +11,7 @@ import {
   type FacialAnimationController,
 } from 'triangular-engine/characters';
 import { createCapsuleBodyMaterial } from 'triangular-engine/procedural';
+import type { CapsuleSpacesuitPreset } from './capsule-spacesuit-presets';
 import { buildExperimentalCapsuleHair, type CapsuleHairStyle } from './experimental-capsule-hair';
 import { createPigtailEyeMaterial } from './pigtail-eye-material';
 
@@ -139,13 +140,22 @@ export function buildExperimentalHairPreview() {
 }
 
 /** The approved head geometry, optionally varied by seed, with the shared expression controller. */
-export function buildExperimentalPigtailHead(face: FacialAnimationController, seed?: number, withHair = true) {
+export function buildExperimentalPigtailHead(
+  face: FacialAnimationController,
+  seed?: number,
+  withHair = true,
+  preset: CapsuleSpacesuitPreset = 'orange-pigtails',
+) {
   const appearance = pigtailAppearance(seed);
   const { palette } = appearance;
   const head = new Group();
   head.name = EXPERIMENTAL_PIGTAIL_HEAD_ID;
   // Scale the assembled face so its features and the mouth shader stay registered to the skin.
   head.scale.set(...appearance.scale).multiplyScalar(headScale);
+  if (preset === 'shaggy') {
+    head.scale.x *= 1.075;
+    head.scale.y *= 1.20;
+  }
 
   const sphere = new SphereGeometry(1, 32, 24);
   const mat = (color: number, roughness = .76) => new MeshStandardMaterial({ color, roughness });
@@ -220,7 +230,7 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController, se
     }
   }
 
-  const eyeRadius = .625;
+  const eyeRadius = .625 * (preset === 'shaggy' ? 1.095 : 1);
   const eyeGeometry = new SphereGeometry(1, 48, 32);
   const lashGroups: Group[] = [];
 
@@ -300,17 +310,21 @@ export function buildExperimentalPigtailHead(face: FacialAnimationController, se
     updateEye[1](pose.rightEye, pose.rightBrow, Math.max(blink, channels['eye.blink.right'] ?? 0), awe);
   }
 
+  function setHair(style: CapsuleHairStyle, length: number): void {
+    hair?.setStyle(style, length);
+    shaggy = withHair && style === 'shaggy';
+    ears.visible = shaggy;
+    for (const lashes of lashGroups) lashes.visible = withHair && !shaggy;
+    brow.color.setHex(shaggy ? 0x3b2e27 : palette.brow);
+  }
+
+  if (preset === 'shaggy') setHair('shaggy', 1);
+
   return {
     head,
     skinTone,
     setAwe: (active: boolean) => { aweTarget = active ? 1 : 0; },
-    setHair: (style: CapsuleHairStyle, length: number) => {
-      hair?.setStyle(style, length);
-      shaggy = withHair && style === 'shaggy';
-      ears.visible = shaggy;
-      for (const lashes of lashGroups) lashes.visible = withHair && !shaggy;
-      brow.color.setHex(shaggy ? 0x3b2e27 : palette.brow);
-    },
+    setHair,
     setPigtailLag: (pitch: number, roll: number) => hair?.setPigtailLag(pitch, roll),
     update,
     dispose: () => {

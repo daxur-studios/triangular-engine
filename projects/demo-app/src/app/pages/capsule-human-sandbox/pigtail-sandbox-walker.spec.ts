@@ -1,4 +1,5 @@
 import { Box3, Vector3 } from 'three';
+import { CAPSULE_SPACESUIT_PRESETS, type CapsuleSpacesuitPreset } from '../character-studio/capsule-spacesuit-presets';
 import { buildExperimentalPigtailBody } from '../character-studio/experimental-pigtail-body';
 import {
   blendCapsuleHumanPoses,
@@ -13,7 +14,7 @@ import { createBaselineLocomotionPlugin } from './motion/baseline-locomotion.plu
 import { createDefaultLocomotionPlugins } from './motion/locomotion-registry';
 import { buildPigtailSandboxWalker } from './pigtail-sandbox-walker';
 
-describe('Orange Pigtails pose rig & locomotion plugins', () => {
+describe('Capsule spacesuit pose rig & locomotion plugins', () => {
   it('preserves exact rest silhouette, collar head height, and prop sockets on the upgraded body', () => {
     const body = buildExperimentalPigtailBody();
     try {
@@ -56,6 +57,28 @@ describe('Orange Pigtails pose rig & locomotion plugins', () => {
     }
   });
 
+  it('uses the reviewed Shaggy proportions on the shared spacesuit rig', () => {
+    const orange = buildPigtailSandboxWalker();
+    const shaggy = buildPigtailSandboxWalker({ preset: 'shaggy' });
+    try {
+      orange.root.updateMatrixWorld(true);
+      shaggy.root.updateMatrixWorld(true);
+      const skin = (root: typeof shaggy.root) => root.getObjectByName('pigtail-skin')!;
+      const head = (root: typeof shaggy.root) => new Box3().setFromObject(skin(root), true);
+      const pack = (root: typeof shaggy.root) => new Box3().setFromObject(root.getObjectByName('pigtail-backpack')!, true);
+      const size = (bounds: Box3) => bounds.getSize(new Vector3());
+      expect(shaggy.root.getObjectByName('shaggy-ears')?.visible).toBeTrue();
+      expect(orange.root.getObjectByName('shaggy-ears')?.visible).toBeFalse();
+      expect(size(head(shaggy.root)).y / size(head(orange.root)).y).toBeCloseTo(.91 * 1.20, 5);
+      expect(size(head(shaggy.root)).x / size(head(orange.root)).x).toBeCloseTo(1.075, 5);
+      expect(size(pack(shaggy.root)).x / size(pack(orange.root)).x).toBeCloseTo(1.32, 5);
+      expect(shaggy.measurements.hipHeight).toBeCloseTo(orange.measurements.hipHeight * .91, 5);
+    } finally {
+      orange.dispose();
+      shaggy.dispose();
+    }
+  });
+
   it('blends full-body and masked partial-body poses cleanly', () => {
     const rest = createRestCapsuleHumanPose();
     const wavePose: CapsuleHumanPose = {
@@ -86,23 +109,26 @@ describe('Orange Pigtails pose rig & locomotion plugins', () => {
     const pluginId = pluginFactory.id;
 
     describe(`plugin: ${pluginId}`, () => {
-      let walker: ReturnType<typeof buildPigtailSandboxWalker>;
+      let walker: ReturnType<typeof buildPigtailSandboxWalker> | undefined;
 
-      beforeEach(() => {
+      function createWalker(preset?: CapsuleSpacesuitPreset) {
         const plugin =
           createDefaultLocomotionPlugins().find((p) => p.id === pluginId)!;
         walker = buildPigtailSandboxWalker({
+          preset,
           plugin,
           sampleGround: createFlatGroundSampler(0),
           maxSpeed: 1.4,
         });
-      });
+        return walker;
+      }
 
       afterEach(() => {
-        walker.dispose();
+        walker?.dispose();
+        walker = undefined;
       });
 
-      it('passes planted-foot slip, boot lift, zero floor clipping, speed cap, and rest settlement', () => {
+      function verifyWalk(walker: ReturnType<typeof buildPigtailSandboxWalker>): void {
         const boots = ['left', 'right'].map(
           (side) => walker.root.getObjectByName(`pigtail-boot-${side}`)!,
         );
@@ -141,10 +167,17 @@ describe('Orange Pigtails pose rig & locomotion plugins', () => {
           expect(boot.position.distanceTo(restLocal[index])).toBeLessThan(0.005);
           expect(new Box3().setFromObject(boot, true).min.y).toBeCloseTo(0, 4);
         });
-      });
+      }
+
+      for (const preset of CAPSULE_SPACESUIT_PRESETS) {
+        it(`${preset.label} plants its feet, lifts both boots, and settles at the destination`, () => {
+          verifyWalk(createWalker(preset.id));
+        });
+      }
 
       if (pluginId !== 'baseline-distance') {
         it('supports live mid-walk redirection with smooth turns, boot pitch, and torso weight', () => {
+          const walker = createWalker();
           const leg1 = new Vector3(0, 0, 2.5);
           const leg2 = new Vector3(2.2, 0, -1.2);
           walker.walkTo(leg1);

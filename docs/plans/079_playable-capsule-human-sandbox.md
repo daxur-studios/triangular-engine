@@ -74,7 +74,7 @@ The first implementation slice now includes a playable scene, point-and-click mo
 | At completion | Milestone | Checkpoint |
 | --- | --- | --- |
 | **20% ✓** | Approved character | Cream spacesuit and four repeatable pigtail heads in Studio, with expressions, Awe and a speech preview. |
-| 45% | Walk and run | **First walk verified.** Orange Pigtails walks to a clicked point with planted boots and settles back to the approved pose. Running and smooth turns remain. |
+| 45% | Walk and run | **Walking verified on Orange Pigtails and Shaggy.** Both use the same walk strategies and comparison course. Running and visual review of turns remain. |
 | 55% | Sit and stand | Approach a chair, sit without visible overlap, then stand and walk away. Reuse the sandbox's chair interaction. |
 | 70% | Emote and talk | Play dialogue with mouth shapes following the audio timing. Show blinking, gaze and emotion during speech and while moving. |
 | 80% | Custom actions | Add a reusable action sequence with approach, contact and release. Show pickup and one new action, such as pressing a panel, with a clean return to idle or movement. |
@@ -83,4 +83,4 @@ The first implementation slice now includes a playable scene, point-and-click mo
 
 Use the approved standing comparison as the silhouette check for the rig. Keep body motion, gestures and the face independently controllable so they can play together. A sandbox walkthrough from walking to sitting, speaking, interacting and dancing gives each checkpoint a repeatable visual check.
 
-[Open the Orange Pigtails walk](http://triangular-demo.localhost:4200/capsule-human-sandbox?character=orange-pigtails). Click open ground to walk. A click during a walk queues the latest destination for after the current stop.
+[Open the Shaggy walk](http://triangular-demo.localhost:4200/capsule-human-sandbox?character=shaggy) or [open Orange Pigtails](http://triangular-demo.localhost:4200/capsule-human-sandbox?character=orange-pigtails). Click open ground to walk or choose **Run course** for the same three legs on either character. Baseline queues clicks until the current leg ends. Step Planner and Key-Pose Bounce redirect while walking.

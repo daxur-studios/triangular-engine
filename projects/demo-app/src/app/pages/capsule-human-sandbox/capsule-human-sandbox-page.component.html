@@ -30,8 +30,8 @@
         <span>PLAYABLE SCENE</span>
         <i></i>
         <strong>
-          @if (pigtailWalk()) {
-            Orange Pigtails
+          @if (spacesuitPreset(); as preset) {
+            {{ preset.label }}
           } @else {
             {{ population() }} full character{{ population() === 1 ? "" : "s" }}
           }
@@ -41,10 +41,17 @@
 
     <ng-template portalTarget="overlay" lane="topEnd" [order]="10">
       <div class="population-control" aria-label="Sandbox controls">
-        <button class="character-switch" type="button" (click)="togglePigtailWalk()">
-          {{ pigtailWalk() ? "Classic sandbox" : "Walk Orange Pigtails" }}
-        </button>
-        @if (!pigtailWalk()) {
+        <select
+          #characterPicker
+          aria-label="Character"
+          (change)="selectCharacter(characterPicker.value)"
+        >
+          <option value="classic" [selected]="!spacesuitPreset()">Classic sandbox</option>
+          @for (preset of spacesuitPresets; track preset.id) {
+            <option [value]="preset.id" [selected]="spacesuitPreset() === preset">{{ preset.label }}</option>
+          }
+        </select>
+        @if (!spacesuitPreset()) {
           <span>Show</span>
           @for (count of populationOptions; track count) {
             <button
@@ -61,12 +68,11 @@
     </ng-template>
 
     <ng-template portalTarget="overlay" lane="bottomStart">
-      @if (pigtailWalk()) {
-        <div class="motion-race-dock" aria-label="Orange Pigtails locomotion strategies">
+      @if (spacesuitPreset(); as preset) {
+        <div class="motion-race-dock" [attr.aria-label]="preset.label + ' locomotion strategies'">
           <div class="dock-heading">
-            <span class="dock-kicker">OP</span>
             <div>
-              <strong>Orange Pigtails · Motion Race</strong>
+              <strong>{{ preset.label }} · Motion Race</strong>
               <small>
                 @if (courseLabel(); as stage) {
                   {{ stage }}
@@ -142,7 +148,7 @@
     </ng-template>
 
     <ng-template portalTarget="overlay" lane="bottomEnd" [order]="10">
-      <div class="scene-status" aria-live="polite">
+      <div class="scene-status" [class.spacesuit-status]="!!spacesuitPreset()" aria-live="polite">
         <strong>{{ status() }}</strong>
         <span
           >{{ renderStats().drawCalls }} draw calls ·
@@ -154,7 +160,7 @@
 
   <footer class="statusbar">
     <span>
-      @if (pigtailWalk()) {
+      @if (spacesuitPreset()) {
         Click the ground to walk · drag to orbit
       } @else {
         Click a human to select · click the ground to move · click the chair or rock to interact

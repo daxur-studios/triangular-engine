@@ -160,6 +160,7 @@ scene {
 }
 
 .population-control button,
+.population-control select,
 .interaction-dock button,
 .motion-race-dock button {
   border: 1px solid #343a45;
@@ -169,12 +170,14 @@ scene {
   cursor: pointer;
 }
 
-.population-control button {
+.population-control button,
+.population-control select {
   min-width: 33px;
   min-height: 27px;
   font-size: 0.61rem;
 }
 .population-control button:hover,
+.population-control select:hover,
 .interaction-dock button:hover:not(:disabled),
 .motion-race-dock button:hover:not(:disabled) {
   border-color: #a37b53;
@@ -187,8 +190,8 @@ scene {
   color: #f0bf8a;
 }
 
-.population-control .character-switch {
-  padding: 0 .45rem;
+.population-control select {
+  padding-inline: .35rem;
 }
 
 .interaction-dock {
@@ -349,7 +352,8 @@ scene {
     padding: 0.2rem;
     font-size: 0.52rem;
   }
-  .population-control button {
+  .population-control button,
+  .population-control select {
     min-width: 28px;
     min-height: 24px;
     font-size: 0.52rem;
@@ -364,10 +368,22 @@ scene {
     padding: 0.3rem;
     font-size: 0.53rem;
   }
+  .motion-race-dock {
+    box-sizing: border-box;
+    // Leave room for the status and thumbnail controls in the opposite lane.
+    max-width: calc(100vw - 11rem);
+  }
+  .motion-race-dock button {
+    padding-inline: 0.15rem;
+  }
   .scene-status {
     max-width: 48vw;
     gap: 0.25rem;
     padding: 0.42rem 0.5rem;
+  }
+  .spacesuit-status {
+    box-sizing: border-box;
+    max-width: 9rem;
   }
   .scene-status strong {
     font-size: 0.52rem;
@@ -381,6 +397,12 @@ scene {
     font-size: 0.48rem;
   }
   .statusbar span:last-child {
+    display: none;
+  }
+}
+
+@media (max-width: 440px) {
+  .scene-chip {
     display: none;
   }
 }
