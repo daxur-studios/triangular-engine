@@ -3,6 +3,7 @@ import { FacialAnimationController } from 'triangular-engine/characters';
 import type { ExtendedEmotionName } from 'triangular-engine/characters';
 import type { CapsuleBodyUniformMap } from 'triangular-engine/procedural';
 import { createCharacterStudioContributions } from './character-studio-contributions';
+import { boundStacheOffset, DEFAULT_STACHE_SHAPE, stacheTip, type StacheShape } from './classic-stache-shapes';
 import {
   buildExperimentalHairPreview, buildExperimentalPigtailHead, EXPERIMENTAL_PIGTAIL_HEAD_ID, EXPERIMENTAL_PIGTAIL_PRESETS,
 } from './experimental-pigtail-head';
@@ -57,6 +58,58 @@ describe('Character Studio experimental pigtail preset', () => {
       expect(ears.visible).toBeFalse();
       expect(human.root.getObjectByName('capsule-hair-shaggy')).toBeUndefined();
       expect(human.root.getObjectByName('pigtail-tuft-left')).toBeDefined();
+    } finally {
+      swatch.dispose();
+    }
+  });
+
+  it('shares the edited Classic Stache fringe and mirrors only the mustache tips', () => {
+    const human = studio.human;
+    human.selectPreset(EXPERIMENTAL_PIGTAIL_HEAD_ID);
+    const swatch = buildExperimentalHairPreview();
+    const edit: StacheShape = {
+      fringe: boundStacheOffset('fringe', -.25, .3),
+      mustache: boundStacheOffset('mustache', 1, .25),
+    };
+    const tip = (mesh: Mesh) => {
+      const vertices = mesh.geometry.getAttribute('position');
+      return new Vector3().fromBufferAttribute(vertices, vertices.count - 1).multiply(mesh.scale).add(mesh.position);
+    };
+    const fringe = (root: Object3D) => root.getObjectByName('classic-stache-fringe') as Mesh;
+    try {
+      human.setExperimentalHair('classic-stache', 1);
+      const haircut = human.root.getObjectByName('capsule-hair-classic-stache')!;
+      const staticGeometry = (haircut.children[2] as Mesh).geometry;
+      const face = human.root.getObjectByName('pigtail-skin');
+      const oldFringe = tip(fringe(human.root));
+      const mouth = captureMouthUniforms();
+      human.update(.3);
+      const restingOpen = mouth.uMouthOpen.value;
+      human.speechPreview!.play([{ time: 0, viseme: 'A', duration: .4 }]);
+      human.setExperimentalHair('classic-stache', 1, edit);
+      swatch.setHair('classic-stache', 1, edit.fringe);
+      human.update(.1);
+
+      const editedFringe = tip(fringe(human.root));
+      expect(editedFringe).toEqual(tip(fringe(swatch.root)));
+      expect(editedFringe.distanceTo(oldFringe)).toBeGreaterThan(.25);
+      expect((haircut.children[2] as Mesh).geometry).toBe(staticGeometry);
+      expect(human.root.getObjectByName('pigtail-skin')).toBe(face);
+      expect(mouth.uMouthOpen.value).toBeGreaterThan(restingOpen);
+
+      const accessory = human.root.getObjectByName('classic-mustache')!;
+      const [left, right] = accessory.children as Mesh[];
+      const rightTip = tip(right);
+      expect(edit.mustache[0]).toBe(.30);
+      expect(rightTip.distanceTo(new Vector3(...stacheTip('mustache', edit.mustache)))).toBeLessThan(1e-6);
+      expect(tip(left)).toEqual(rightTip.clone().multiply(new Vector3(-1, 1, 1)));
+
+      human.setExperimentalHair('classic-stache', 1, edit, false);
+      expect(accessory.visible).toBeFalse();
+      expect(tip(fringe(human.root))).toEqual(editedFringe);
+      human.setExperimentalHair('classic-stache', 1, DEFAULT_STACHE_SHAPE);
+      expect(accessory.visible).toBeTrue();
+      expect(tip(fringe(human.root))).toEqual(oldFringe);
     } finally {
       swatch.dispose();
     }

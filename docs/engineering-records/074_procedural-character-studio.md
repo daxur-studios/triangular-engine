@@ -214,6 +214,12 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **[follow-up]** Turned the ear rims to 90° from the forward face direction and reduced the depth, embedding the back of each ear into the temple. The updated spec checks the side-facing orientation, embedded depth, and exposed bowl. All 42 focused specs and the live workshop check passed. The front and three-quarter turnaround renders were inspected. Local captures regenerate with `node artifacts/concept-turnaround/build-shaggy-turnaround.mjs` and `node artifacts/concept-turnaround/check-shaggy-turnaround.mjs flush-ears`.
 - **[decision]** The developer accepted Shaggy's overall appearance in the turnaround and flagged the hands for follow-up. This completes the Parts Workshop review. The proposed next slice is to carry the reviewed proportions into a selectable Shaggy preset and run the existing walk on it. Revisit the glove shape and wrist alignment with open-hand gestures and prop grips.
 
+## 2026-11-21 — Classic Stache shape editing
+
+- **[decision]** Prototype direct shape editing in the Parts Workshop using Classic Stache. Fit a short swept hairstyle and an independently removable mustache, then expose a fringe tip and mirrored mustache tips as handles. Use the supplied three-quarter reference locally and share the turn angle with the assembled preview.
+- **[action]** Added the Classic Stache workshop entry and a close-up with drag handles and arrow-key controls. The fringe keeps its root fixed and the mustache mirrors the edited tip. Only the affected strand meshes are rebuilt. The authoring view shares its turn angle with the full character and uses an approximate 30° match for the supplied still. Edits and the uploaded reference live in the open page.
+- **[verification]** Passed 55 focused Studio and sandbox specs, the engine build, and the demo rebuild. A live Chromium check exercised both drags, keyboard edits, actual camera synchronization, mustache toggle, reset, speech playback and the 390 px layout. The wider demo suite disconnected in Karma. Visual acceptance against the supplied art is pending. Local-only evidence under `artifacts/classic-stache/`. Regenerate with `python artifacts/classic-stache/crop-reference.py <concept-sheet>` and `node artifacts/classic-stache/check-workshop.mjs` while the demo is running.
+
 ## Scope history
 
 <!-- tri:scope-history -->
@@ -256,6 +262,11 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - Summary: Add a capsule character parts graph with small 3D previews and interchangeable hair.
 - Reason: Compare distinct concept-art hairstyles on the same animated character and see how the parts assemble.
 - Impact: The app-local workshop adds a hairstyle recipe and previews of the shared head and suit.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-STACHE-FIT" date="2026-11-21" kind="addition" origin="requested" disposition="accepted" scope-ids="classic-stache-shape-editing" -->
+- Summary: Try direct editing of two swept procedural parts in the workshop.
+- Reason: Evaluate whether editing against concept art makes small shape changes faster.
+- Impact: App-local prototype on the existing expressive capsule rig.
 <!-- /tri:scope-change -->
 <!-- tri:scope-baseline state="unconfirmed" -->
 <!-- /tri:scope-baseline -->

@@ -34,7 +34,6 @@ import {
 } from './character-studio-focus';
 import { buildExperimentalPigtailHead, EXPERIMENTAL_PIGTAIL_PRESETS } from './experimental-pigtail-head';
 import { buildExperimentalPigtailBody } from './experimental-pigtail-body';
-import type { CapsuleHairStyle } from './experimental-capsule-hair';
 import { buildExperimentalSpaceCat, EXPERIMENTAL_SPACE_CAT } from './experimental-space-cat';
 
 export type CharacterStudioFamilyId = 'human' | 'cat';
@@ -92,7 +91,7 @@ export interface CharacterStudioContribution {
 }
 
 interface CapsuleHumanContribution extends CharacterStudioContribution {
-  setExperimentalHair(style: CapsuleHairStyle, length: number): void;
+  setExperimentalHair: ReturnType<typeof buildExperimentalPigtailHead>['setHair'];
 }
 
 function toLabel(value: string): string {
@@ -239,8 +238,8 @@ export function createCharacterStudioContributions() {
       }
     },
     setMotion: (motionId) => humanActor.setLocomotion(motionId as CapsuleLocomotionMode),
-    setExperimentalHair: (style, length) => {
-      if (experimentalBody?.root.visible) experimentalHead?.setHair(style, length);
+    setExperimentalHair: (...args) => {
+      if (experimentalBody?.root.visible) experimentalHead?.setHair(...args);
     },
     setExpression: (expression) => {
       experimentalHead?.setAwe(expression === 'awe' && experimentalBody?.root.visible === true);

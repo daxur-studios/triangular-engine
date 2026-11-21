@@ -62,6 +62,7 @@ import {
 import { EXPERIMENTAL_PIGTAIL_HEAD_ID, EXPERIMENTAL_PIGTAIL_PRESETS } from './experimental-pigtail-head';
 import { EXPERIMENTAL_SPACE_CAT } from './experimental-space-cat';
 import { CapsulePartPreviewComponent } from './capsule-part-preview.component';
+import { CLASSIC_STACHE_YAW, DEFAULT_STACHE_SHAPE, type StacheShape } from './classic-stache-shapes';
 import type { CapsuleHairStyle } from './experimental-capsule-hair';
 
 type CharacterStudioView = 'front' | 'three-quarter' | 'profile' | 'back' | 'face' | 'hair';
@@ -131,10 +132,20 @@ export class CharacterStudioPageComponent {
   readonly workshopHair = signal<CapsuleHairStyle>('pigtails');
   readonly workshopLockLength = signal(1);
   readonly workshopYaw = signal(35);
+  readonly stacheYaw = signal(CLASSIC_STACHE_YAW);
+  readonly stacheShape = signal(DEFAULT_STACHE_SHAPE);
+  readonly defaultStacheShape = DEFAULT_STACHE_SHAPE;
+  readonly withMustache = signal(true);
+  readonly stacheReference = signal('');
+  readonly stacheReferenceYaw = CLASSIC_STACHE_YAW;
+  readonly classicStacheSelected = computed(() => this.workshopOpen() && this.workshopHair() === 'classic-stache');
   readonly workshopHairChoices = [
     { id: 'pigtails', label: 'Pigtails' },
     { id: 'shaggy', label: 'Shaggy' },
+    { id: 'classic-stache', label: 'Classic Stache' },
   ] as const;
+  readonly workshopHairLabel = computed(() => this.workshopHair() === 'pigtails'
+    ? 'Orange Pigtails' : this.workshopHairChoices.find(choice => choice.id === this.workshopHair())?.label);
   readonly speechPreviewNotice = signal('');
   readonly selectedMotionId = signal('idle');
   readonly selectedExpression = signal<CharacterStudioExpression>('happy');
@@ -384,8 +395,10 @@ export class CharacterStudioPageComponent {
     this.syncFamilyVisibility();
     this.applyView('three-quarter');
     const query = inject(ActivatedRoute).snapshot.queryParamMap;
-    if (query.get('workshop') === '1') {
+    const workshop = query.get('workshop');
+    if (workshop === '1' || workshop === 'classic-stache') {
       this.toggleWorkshop();
+      if (workshop === 'classic-stache') this.setWorkshopHair('classic-stache');
     } else if (query.get('preset') === EXPERIMENTAL_SPACE_CAT.id) {
       this.selectFamily('cat');
       this.selectPreset(EXPERIMENTAL_SPACE_CAT.id);
@@ -417,6 +430,7 @@ export class CharacterStudioPageComponent {
       });
 
     this.destroyRef.onDestroy(() => {
+      URL.revokeObjectURL(this.stacheReference());
       this.stopSpeechPreview();
       this.clearPerformanceScenario();
       for (const family of this.familyOptions) {
@@ -481,13 +495,47 @@ export class CharacterStudioPageComponent {
       this.workshopOpen.set(true);
       this.workshopYaw.set(35);
     }
-    afterNextRender(() => this.applyView('three-quarter'), { injector: this.injector });
+    afterNextRender(() => {
+      if (this.classicStacheSelected()) this.setStacheYaw(this.stacheYaw());
+      else this.applyView('three-quarter');
+    }, { injector: this.injector });
   }
 
   setWorkshopHair(style: CapsuleHairStyle, length = this.workshopLockLength()): void {
-    this.contributions.human.setExperimentalHair(style, length);
+    const changed = style !== this.workshopHair();
+    this.contributions.human.setExperimentalHair(style, length, this.stacheShape(), this.withMustache());
     this.workshopHair.set(style);
     this.workshopLockLength.set(length);
+    if (changed && style === 'classic-stache') this.setStacheYaw(this.stacheYaw());
+  }
+
+  setStacheShape(shape: StacheShape): void {
+    this.stacheShape.set(shape);
+    this.setWorkshopHair('classic-stache');
+  }
+
+  setMustache(visible: boolean): void {
+    this.withMustache.set(visible);
+    this.setWorkshopHair('classic-stache');
+  }
+
+  setStacheReference(input: HTMLInputElement): void {
+    const file = input.files?.[0];
+    if (!file) return;
+    const previous = this.stacheReference();
+    this.stacheReference.set(URL.createObjectURL(file));
+    URL.revokeObjectURL(previous);
+    input.value = '';
+    this.setStacheYaw(CLASSIC_STACHE_YAW);
+  }
+
+  setStacheYaw(yaw: number): void {
+    this.stacheYaw.set(yaw);
+    this.autoRotate.set(false);
+    const face = this.activeView() === 'face';
+    this.activeView.set(face ? 'face' : 'three-quarter');
+    this.cameraFraming = face ? 'face-close-up' : 'three-quarter';
+    this.applyFocusTargetFraming(face ? 'human-head-hair' : 'human-full-body', -yaw * Math.PI / 180);
   }
 
   selectExpression(expression: CharacterStudioExpression): void {
@@ -556,6 +604,9 @@ export class CharacterStudioPageComponent {
   resetCharacter(): void {
     this.stopSpeechPreview();
     if (this.workshopOpen()) {
+      this.stacheShape.set(DEFAULT_STACHE_SHAPE);
+      this.withMustache.set(true);
+      this.stacheYaw.set(CLASSIC_STACHE_YAW);
       this.setWorkshopHair('pigtails', 1);
       this.workshopYaw.set(35);
       this.selectExpression('happy');
@@ -654,7 +705,7 @@ export class CharacterStudioPageComponent {
     }
   }
 
-  private applyFocusTargetFraming(targetId: VisualFocusTargetId): void {
+  private applyFocusTargetFraming(targetId: VisualFocusTargetId, azimuthRadians = this.framingAzimuthRadians(this.cameraFraming)): void {
     this.activeFocusTarget = targetId;
     const canvas = this.engine.canvas;
     const bounds = canvas.getBoundingClientRect();
@@ -662,7 +713,7 @@ export class CharacterStudioPageComponent {
     const framing = this.activeFamily().resolveFocusFraming(targetId, {
       fovDegrees: camera instanceof PerspectiveCamera ? camera.fov : 42,
       aspect: bounds.height > 0 ? bounds.width / bounds.height : 16 / 9,
-      azimuthRadians: this.framingAzimuthRadians(this.cameraFraming),
+      azimuthRadians,
       ...(this.experimentalHeadSelected() ? { elevationRadians: 0 } : {}),
     });
     this.cameraPosition.set([...framing.cameraPosition]);

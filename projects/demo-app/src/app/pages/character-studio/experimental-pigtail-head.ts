@@ -12,6 +12,7 @@ import {
 } from 'triangular-engine/characters';
 import { createCapsuleBodyMaterial } from 'triangular-engine/procedural';
 import type { CapsuleSpacesuitPreset } from './capsule-spacesuit-presets';
+import { buildClassicMustache, DEFAULT_STACHE_SHAPE } from './classic-stache-shapes';
 import { buildExperimentalCapsuleHair, type CapsuleHairStyle } from './experimental-capsule-hair';
 import { createPigtailEyeMaterial } from './pigtail-eye-material';
 
@@ -201,6 +202,7 @@ export function buildExperimentalPigtailHead(
   if (hair) head.add(hair.root);
   ellipsoid(head, mat(palette.nose), [.018, 1.78, z * 1.011], [.098, .097, .096]);
   let shaggy = false;
+  let mustache: ReturnType<typeof buildClassicMustache> | undefined;
   const ears = new Group();
   if (withHair) {
     ears.name = 'shaggy-ears';
@@ -310,12 +312,24 @@ export function buildExperimentalPigtailHead(
     updateEye[1](pose.rightEye, pose.rightBrow, Math.max(blink, channels['eye.blink.right'] ?? 0), awe);
   }
 
-  function setHair(style: CapsuleHairStyle, length: number): void {
-    hair?.setStyle(style, length);
-    shaggy = withHair && style === 'shaggy';
+  function setHair(style: CapsuleHairStyle, length: number, shape = DEFAULT_STACHE_SHAPE, withMustache = true): void {
+    if (!hair) return;
+    const classic = style === 'classic-stache';
+    hair.setStyle(style, length, shape.fringe);
+    shaggy = style !== 'pigtails';
     ears.visible = shaggy;
-    for (const lashes of lashGroups) lashes.visible = withHair && !shaggy;
-    brow.color.setHex(shaggy ? 0x3b2e27 : palette.brow);
+    for (const lashes of lashGroups) lashes.visible = !shaggy;
+    brow.color.setHex(classic ? 0x493126 : shaggy ? 0x3b2e27 : palette.brow);
+    if (classic && withMustache) {
+      if (!mustache) {
+        mustache = buildClassicMustache(brow);
+        head.add(mustache.root);
+      }
+      mustache.setTip(shape.mustache);
+    }
+    const showMustache = classic && withMustache;
+    if (mustache) mustache.root.visible = showMustache;
+    mouthUniforms.uMouthCenterY.value = showMustache ? 1.21 : 1.29;
   }
 
   if (preset === 'shaggy') setHair('shaggy', 1);

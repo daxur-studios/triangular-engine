@@ -1,9 +1,11 @@
 import {
-  BufferGeometry, CatmullRomCurve3, Float32BufferAttribute, Group, MathUtils, Mesh,
-  MeshStandardMaterial, SphereGeometry, TubeGeometry, Vector3,
+  BufferGeometry, Float32BufferAttribute, Group, MathUtils, Mesh,
+  MeshStandardMaterial, SphereGeometry, Vector3, type TubeGeometry,
 } from 'three';
+import { buildClayLock, type ClayLock } from './capsule-clay-lock';
+import { classicStacheFringe, classicStacheSweep, DEFAULT_STACHE_SHAPE } from './classic-stache-shapes';
 
-export type CapsuleHairStyle = 'pigtails' | 'shaggy';
+export type CapsuleHairStyle = 'pigtails' | 'shaggy' | 'classic-stache';
 type Point = readonly [number, number, number];
 
 interface HairFit {
@@ -20,10 +22,8 @@ const curlOffsets = [
   [.52, .24, -.22, .40], [.43, -.32, -.24, .38],
 ];
 
-type ShaggyLock = readonly [base: Point, bend: Point, tip: Point, radius: number];
-
 // Sculpt the part and the long front sweep independently of the rear layers.
-const shaggyFringe: readonly ShaggyLock[] = [
+const shaggyFringe: readonly ClayLock[] = [
   [[.30, 3.98, .34], [.53, 4.58, .59], [.31, 5.18, .48], .35],
   [[-.13, 4.06, .20], [-.42, 4.58, .15], [-.87, 4.89, .02], .34],
   [[.29, 4.02, -.12], [.40, 4.49, -.48], [.78, 4.86, -.64], .34],
@@ -39,14 +39,14 @@ const shaggyFringe: readonly ShaggyLock[] = [
   [[-1.02, 3.23, .31], [-1.39, 2.66, .50], [-1.34, 1.68, .53], .28],
 ];
 
-const shaggyCrown: readonly ShaggyLock[] = [
+const shaggyCrown: readonly ClayLock[] = [
   [[-.21, 4.13, -.12], [-.32, 4.54, -.58], [-.66, 4.98, -.78], .32],
   [[.12, 4.12, -.42], [.57, 4.46, -.87], [1.29, 4.52, -1.17], .36],
   [[.08, 4.11, -.42], [-.02, 4.30, -1.17], [-.54, 3.70, -1.96], .41],
 ];
 
 // Three staggered rows fan from the crown, overlap at the temples, and close at the nape.
-function shaggyRearLocks(): ShaggyLock[] {
+function shaggyRearLocks(): ClayLock[] {
   const point = (angle: number, radius: number, y: number): Point => {
     const radians = MathUtils.degToRad(angle);
     const z = Math.cos(radians) * radius;
@@ -56,7 +56,7 @@ function shaggyRearLocks(): ShaggyLock[] {
     base: readonly [radius: number, height: number],
     bend: readonly [radius: number, height: number, sweepDegrees: number],
     tip: readonly [radius: number, height: number, sweepDegrees: number],
-    thickness: number): ShaggyLock[] =>
+    thickness: number): ClayLock[] =>
     Array.from({ length: count }, (_, index) => {
       const fraction = index / (count - 1);
       const angle = MathUtils.lerp(first, last, fraction);
@@ -78,7 +78,7 @@ function shaggyRearLocks(): ShaggyLock[] {
 }
 
 /** Low hairline under the rear locks. Its edges meet the scalp under the fringe and nape. */
-function shaggyRearCap(width: number, depth: number): BufferGeometry {
+function rearScalpCap(width: number, depth: number, drop: number): BufferGeometry {
   const rows = 14;
   const columns = 42;
   const positions: number[] = [];
@@ -88,7 +88,7 @@ function shaggyRearCap(width: number, depth: number): BufferGeometry {
     for (let column = 0; column <= columns; column++) {
       const around = column / columns;
       const angle = MathUtils.degToRad(MathUtils.lerp(70, 290, around));
-      const edge = 2.86 - 2.13 * Math.pow(Math.sin(Math.PI * around), .62) + .075 * Math.cos(11 * angle);
+      const edge = 2.86 - drop * Math.pow(Math.sin(Math.PI * around), .62) + .075 * Math.cos(11 * angle);
       const y = MathUtils.lerp(edge, 3.89, rise);
       const taper = Math.max(0, (y - 2.81) / 1.08);
       const ease = Math.sin(Math.PI * rise) * Math.sin(Math.PI * around);
@@ -178,55 +178,65 @@ export function buildExperimentalCapsuleHair({ radii: [x, y, z], palette, curlSc
       new MeshStandardMaterial({ color, roughness: .67 })));
     // Carry the crown under the fringe so the roots stay covered at every lock length.
     ellipsoid(group, shaggyMaterials[0], [0, 3.65, -.10], [1.31, .81, 1.40]);
-    rearCap = shaggyRearCap(x, z);
+    rearCap = rearScalpCap(x, z, 2.13);
     group.add(new Mesh(rearCap, shaggyMaterials[0]));
     [...shaggyFringe, ...shaggyCrown, ...shaggyRearLocks()].forEach(([base, bend, tip, radius], index) => {
-      const origin = new Vector3(...base);
-      const curve = new CatmullRomCurve3([new Vector3(), new Vector3(...bend).sub(origin), new Vector3(...tip).sub(origin)]);
-      const segments = 20;
-      const sides = 16;
-      const geometry = new TubeGeometry(curve, segments, radius, sides);
-      const positions = geometry.getAttribute('position');
-      const point = new Vector3();
-      for (let ring = 0; ring <= segments; ring++) {
-        const t = ring / segments;
-        const center = curve.getPointAt(t);
-        const taper = Math.pow(Math.sin(Math.PI * t), .62) * (1.20 - .46 * t);
-        for (let side = 0; side <= sides; side++) {
-          const vertex = ring * (sides + 1) + side;
-          point.fromBufferAttribute(positions, vertex).lerp(center, 1 - taper);
-          positions.setXYZ(vertex, point.x, point.y, point.z);
-        }
-      }
-      geometry.computeVertexNormals();
-      // TubeGeometry duplicates the seam vertex for UVs. Average the seam normals
-      // so the lock stays rounded under side lighting.
-      const normals = geometry.getAttribute('normal');
-      const seam = new Vector3();
-      for (let ring = 1; ring < segments; ring++) {
-        const first = ring * (sides + 1);
-        const last = first + sides;
-        seam.fromBufferAttribute(normals, first).add(point.fromBufferAttribute(normals, last)).normalize();
-        normals.setXYZ(first, seam.x, seam.y, seam.z);
-        normals.setXYZ(last, seam.x, seam.y, seam.z);
-      }
-      const lock = new Mesh(geometry, shaggyMaterials[index % shaggyMaterials.length]);
-      lock.position.copy(origin);
+      const lock = new Mesh(buildClayLock([base, bend, tip, radius]), shaggyMaterials[index % shaggyMaterials.length]);
+      lock.position.set(...base);
       group.add(lock);
       lockMeshes.push(lock);
     });
     return group;
   }
 
+  let classic: Group | undefined;
+  let classicCap: BufferGeometry | undefined;
+  let classicFringe: Mesh<TubeGeometry, MeshStandardMaterial> | undefined;
+  let fringeOffset = DEFAULT_STACHE_SHAPE.fringe;
+  const classicLocks: Mesh<TubeGeometry, MeshStandardMaterial>[] = [];
+  const classicMaterials: MeshStandardMaterial[] = [];
+
+  function buildClassic() {
+    const group = new Group();
+    group.name = 'capsule-hair-classic-stache';
+    classicMaterials.push(...[0x473026, 0x54372a, 0x4e3428].map(color =>
+      new MeshStandardMaterial({ color, roughness: .69 })));
+    ellipsoid(group, classicMaterials[0], [0, 3.59, -.12], [1.33, .74, 1.41]);
+    classicCap = rearScalpCap(x, z, 1.34);
+    group.add(new Mesh(classicCap, classicMaterials[0]));
+    classicStacheSweep.forEach((shape, index) => {
+      const lock = new Mesh(buildClayLock(shape, .78), classicMaterials[index % classicMaterials.length]);
+      lock.position.set(...shape[0]);
+      classicLocks.push(lock);
+      group.add(lock);
+    });
+    const shape = classicStacheFringe(fringeOffset);
+    classicFringe = new Mesh(buildClayLock(shape, .78), classicMaterials[1]);
+    classicFringe.name = 'classic-stache-fringe';
+    classicFringe.position.set(...shape[0]);
+    classicLocks.push(classicFringe);
+    group.add(classicFringe);
+    return group;
+  }
+
   return {
     root,
-    setStyle(style: CapsuleHairStyle, length: number) {
+    setStyle(style: CapsuleHairStyle, length: number, offset = DEFAULT_STACHE_SHAPE.fringe) {
       if (style === 'shaggy') {
         shaggy ??= buildShaggy();
         for (const lock of lockMeshes) lock.scale.setScalar(MathUtils.clamp(length, .86, 1.14));
       }
+      if (style === 'classic-stache') {
+        classic ??= buildClassic();
+        if (offset[0] !== fringeOffset[0] || offset[1] !== fringeOffset[1]) {
+          const geometry = buildClayLock(classicStacheFringe(offset), .78);
+          classicFringe!.geometry.dispose();
+          classicFringe!.geometry = geometry;
+          fringeOffset = offset;
+        }
+      }
       // Keep only the chosen part attached so framing excludes hidden hairstyles.
-      const active = style === 'shaggy' ? shaggy! : pigtails;
+      const active = style === 'shaggy' ? shaggy! : style === 'classic-stache' ? classic! : pigtails;
       if (root.children[0] !== active) {
         root.clear();
         root.add(active);
@@ -238,8 +248,9 @@ export function buildExperimentalCapsuleHair({ radii: [x, y, z], palette, curlSc
     dispose() {
       sphere.dispose();
       rearCap?.dispose();
-      for (const lock of lockMeshes) lock.geometry.dispose();
-      for (const material of [...pigtailMaterials, ...shaggyMaterials]) material.dispose();
+      classicCap?.dispose();
+      for (const lock of [...lockMeshes, ...classicLocks]) lock.geometry.dispose();
+      for (const material of [...pigtailMaterials, ...shaggyMaterials, ...classicMaterials]) material.dispose();
     },
   };
 }
