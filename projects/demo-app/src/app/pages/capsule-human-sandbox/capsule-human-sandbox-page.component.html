@@ -94,6 +94,18 @@
               </button>
             }
           </div>
+          <div class="race-gravity" role="group" aria-label="Gravity preset">
+            @for (preset of gravityPresets; track preset.id) {
+              <button
+                type="button"
+                [class.active]="activeGravityId() === preset.id"
+                [attr.aria-pressed]="activeGravityId() === preset.id"
+                (click)="selectGravityPreset(preset.id)"
+              >
+                {{ preset.label }} {{ preset.ratioLabel }}
+              </button>
+            }
+          </div>
           <div class="race-actions">
             <button type="button" (click)="runComparisonCourse()">Run course</button>
             <button
@@ -116,7 +128,7 @@
           @if (walkMetrics(); as m) {
             <div class="race-metrics">
               Slip {{ m.slipMm | number: "1.1-2" }} mm · Lift
-              {{ m.liftCm | number: "1.1-1" }} cm · Peak
+              {{ m.liftCm | number: "1.1-1" }} cm@if (m.airCm >= 0.5) { · Air {{ m.airCm | number: "1.1-1" }} cm } · Peak
               {{ m.speedMps | number: "1.2-2" }} m/s
             </div>
           }

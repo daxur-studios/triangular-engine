@@ -1,4 +1,4 @@
-import type { BufferGeometry } from 'three';
+import { Vector3, type BufferGeometry } from 'three';
 import type { CapsuleCatTailPose } from 'triangular-engine/characters';
 import { CapsuleCatTailMesh } from './capsule-cat-tail';
 
@@ -114,5 +114,26 @@ describe('capsule-cat-tail', () => {
     expect(tail.geometry).toBe(geometry);
     expect(tail.material.color.getHexString()).toBe('d89a63');
     tail.dispose();
+  });
+
+  it('supports a thicker rounded tip without changing the tail base', () => {
+    const standard = new CapsuleCatTailMesh({ color: '#e8b07a' });
+    const rounded = new CapsuleCatTailMesh({ color: '#e8b07a', tipRadiusRatio: 0.9 });
+    const sample = pose(0.4);
+    standard.updateFromPose(sample);
+    rounded.updateFromPose(sample);
+
+    const standardPositions = standard.geometry.getAttribute('position');
+    const roundedPositions = rounded.geometry.getAttribute('position');
+    const base = new Vector3().fromBufferAttribute(standardPositions, 0);
+    expect(new Vector3().fromBufferAttribute(roundedPositions, 0).distanceTo(base)).toBeCloseTo(0, 6);
+    const tip = new Vector3(sample.tip.x, sample.tip.y, sample.tip.z);
+    const outerTip = new Vector3().fromBufferAttribute(roundedPositions, roundedPositions.count - 1);
+    expect(outerTip.distanceTo(tip)).toBeCloseTo(sample.radius * 0.9, 6);
+    expect(rounded.root.getObjectByName('capsule-cat-tail-tip')!.scale.x)
+      .toBeGreaterThan(standard.root.getObjectByName('capsule-cat-tail-tip')!.scale.x);
+
+    standard.dispose();
+    rounded.dispose();
   });
 });

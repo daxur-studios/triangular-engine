@@ -1,10 +1,10 @@
 import { MathUtils } from 'three';
 import {
   clampNumber,
+  EARTH_GRAVITY_MPS2,
   footRestWorldPosition,
   footWorldToLocalOffset,
   lerpNumber,
-  localToWorldDelta,
   REST_CAPSULE_HUMAN_POSE,
   smoothstep01,
   worldDeltaToLocal,
@@ -72,6 +72,20 @@ export function createProceduralStepperPlugin(): LocomotionPlugin {
   let smoothedHeadYaw = 0;
   let restBlend = 1;
 
+  // Low-gravity ballistic hop state (Mars / Moon).
+  let justReset = true;
+  let airHeight = 0;
+  let airVelY = 0;
+  let airborne = false;
+  let crouchTimer = 0;
+  let crouchDuration = 0.16;
+  let hopLeadSide: 'left' | 'right' = 'left';
+  let hopLaunchVel = 0.8;
+  let hopVelX = 0;
+  let hopVelZ = 0;
+  let airStartLeftOffset: Vec3Like = { ...ZERO_VEC3 };
+  let airStartRightOffset: Vec3Like = { ...ZERO_VEC3 };
+
   function reset(state: LocomotionStateSnapshot, rig: RigMeasurements): void {
     yaw = state.yaw;
     velX = 0;
@@ -96,6 +110,18 @@ export function createProceduralStepperPlugin(): LocomotionPlugin {
     smoothedArmSwing = 0;
     smoothedHeadYaw = 0;
     restBlend = 1;
+    justReset = true;
+    airHeight = 0;
+    airVelY = 0;
+    airborne = false;
+    crouchTimer = 0;
+    crouchDuration = 0.16;
+    hopLeadSide = 'left';
+    hopLaunchVel = 0.8;
+    hopVelX = 0;
+    hopVelZ = 0;
+    airStartLeftOffset = { ...ZERO_VEC3 };
+    airStartRightOffset = { ...ZERO_VEC3 };
   }
 
   function startSwing(
@@ -163,6 +189,7 @@ export function createProceduralStepperPlugin(): LocomotionPlugin {
     rootYaw: number,
     sampleGround: GroundSampler,
     isFinalSettle: boolean,
+    crouchSquash = 0,
   ): FootPose {
     const sign = side === 'left' ? -1 : 1;
 
@@ -189,6 +216,14 @@ export function createProceduralStepperPlugin(): LocomotionPlugin {
         }
       }
 
+      const trailBendZ =
+        localOffset.z < -0.04 ? clampNumber(-localOffset.z * 0.25, 0, 0.055) : 0;
+      const squatBendZ = clampNumber(crouchSquash * 0.11, 0, 0.11);
+      const kneeX =
+        crouchSquash > 0.02 || localOffset.z < -0.04
+          ? sign * Math.max(localOffset.z < -0.04 ? 0.012 : 0, crouchSquash * 0.032)
+          : 0;
+
       return {
         offset: { x: localOffset.x, y: localOffset.y, z: localOffset.z },
         rotation: {
@@ -197,8 +232,8 @@ export function createProceduralStepperPlugin(): LocomotionPlugin {
           roll: slopeRoll,
         },
         kneeBend:
-          localOffset.z < -0.04
-            ? { x: sign * 0.012, y: 0, z: clampNumber(-localOffset.z * 0.25, 0, 0.055) }
+          trailBendZ > 0 || squatBendZ > 0
+            ? { x: kneeX, y: 0, z: Math.max(trailBendZ, squatBendZ) }
             : ZERO_VEC3,
       };
     }
@@ -255,6 +290,486 @@ export function createProceduralStepperPlugin(): LocomotionPlugin {
     };
   }
 
+  function buildAirFootPose(
+    isLead: boolean,
+    side: 'left' | 'right',
+    flightU: number,
+    hopBlend: number,
+    startOffset: Vec3Like,
+  ): FootPose {
+    const sign = side === 'left' ? -1 : 1;
+    const u = clampNumber(flightU, 0, 1);
+    const s = smoothstep01(u);
+    const tuckArc = Math.sin(u * Math.PI);
+    const landFade = 1 - smoothstep01(clampNumber((u - 0.72) / 0.28, 0, 1));
+    const startCarry = 1 - s;
+
+    const lift = (isLead ? 0.095 : 0.045) * tuckArc * hopBlend * landFade;
+    const forward = (isLead ? 0.13 : -0.10) * tuckArc * hopBlend * landFade;
+
+    let pitch = 0;
+    if (isLead) {
+      if (u < 0.25) {
+        pitch = lerpNumber(0.22, 0.04, smoothstep01(u / 0.25)) * hopBlend;
+      } else if (u < 0.78) {
+        pitch = lerpNumber(0.04, -0.22, smoothstep01((u - 0.25) / 0.53)) * hopBlend;
+      } else {
+        pitch = lerpNumber(-0.22, 0, smoothstep01((u - 0.78) / 0.22)) * hopBlend;
+      }
+    } else if (u < 0.65) {
+      pitch = lerpNumber(0.20, 0.26, tuckArc) * hopBlend;
+    } else {
+      pitch = lerpNumber(0.22, 0, smoothstep01((u - 0.65) / 0.35)) * hopBlend;
+    }
+
+    return {
+      offset: {
+        x: startOffset.x * startCarry,
+        y: Math.max(0, startOffset.y * startCarry) + lift,
+        z: startOffset.z * startCarry + forward,
+      },
+      rotation: { pitch, yaw: 0, roll: 0 },
+      kneeBend: {
+        x: sign * (0.015 + 0.032 * tuckArc * hopBlend),
+        y: 0,
+        z: (isLead ? 0.095 : 0.048) * tuckArc * hopBlend * landFade,
+      },
+    };
+  }
+
+  function stepBounceSpring(safeDt: number): void {
+    const stiffness = 175;
+    const damping = 18;
+    const springAccel = -stiffness * bounceSpringY - damping * bounceSpringVel;
+    bounceSpringVel += springAccel * safeDt;
+    bounceSpringY = clampNumber(bounceSpringY + bounceSpringVel * safeDt, -0.05, 0.045);
+  }
+
+  function updateLowGravityHop(
+    safeDt: number,
+    g: number,
+    hopBlend: number,
+    command: LocomotionCommand,
+    state: LocomotionStateSnapshot,
+    rig: RigMeasurements,
+  ): LocomotionStepResult {
+    let yawError = 0;
+    let hasTarget = false;
+    let distToTarget = 0;
+
+    if (command.target) {
+      const dx = command.target.x - state.position.x;
+      const dz = command.target.z - state.position.z;
+      distToTarget = Math.hypot(dx, dz);
+      if (distToTarget > 0.022) {
+        hasTarget = true;
+        yawError = wrapAngle(Math.atan2(dx, dz) - yaw);
+      }
+    }
+
+    // Check if an off-rest Earth step was still in flight when gravity dropped.
+    for (const [side, foot] of [
+      ['left', leftFoot] as const,
+      ['right', rightFoot] as const,
+    ]) {
+      if (!foot.swinging) continue;
+      foot.swingElapsed += safeDt;
+      if (foot.swingElapsed >= foot.swingDuration) {
+        foot.swinging = false;
+        foot.plantedPos = { ...foot.swingEndPos };
+        foot.plantedYaw = foot.swingEndYaw;
+        doubleSupportTimer = 0;
+        lastSwungSide = side;
+        bounceSpringVel -= 0.22;
+      }
+    }
+
+    // Trigger takeoff once crouch windup finishes with both boots grounded.
+    if (!airborne && !leftFoot.swinging && !rightFoot.swinging && hasTarget && distToTarget > 0.045) {
+      crouchDuration = lerpNumber(0.11, 0.20, hopBlend);
+      crouchTimer += safeDt;
+      if (crouchTimer >= crouchDuration) {
+        crouchTimer = 0;
+        hopLeadSide = hopLeadSide === 'left' ? 'right' : 'left';
+        const shortScale = clampNumber(Math.sqrt(distToTarget / 1.05), 0.42, 1.0);
+        const baseLaunch = lerpNumber(0.68, 0.88, hopBlend) * shortScale;
+        hopLaunchVel = baseLaunch;
+        airVelY = baseLaunch;
+        airborne = true;
+
+        const flightTime = (2 * hopLaunchVel) / g;
+        const cruiseHopSpeed = Math.min(
+          command.maxSpeed * 0.92,
+          command.gait === 'run' ? command.maxSpeed : 1.26,
+        );
+        const alignFactor = Math.max(0.32, Math.cos(yawError * 0.65));
+        const desiredHorizDist = Math.min(distToTarget, cruiseHopSpeed * alignFactor * flightTime);
+        const launchHorizSpeed = clampNumber(
+          desiredHorizDist / Math.max(0.12, flightTime),
+          0.06,
+          command.maxSpeed * 0.92,
+        );
+        hopVelX = Math.sin(yaw) * launchHorizSpeed;
+        hopVelZ = Math.cos(yaw) * launchHorizSpeed;
+        airStartLeftOffset = footWorldToLocalOffset(
+          leftFoot.plantedPos,
+          state.position,
+          yaw,
+          rig.leftFootRestLocal,
+        );
+        airStartRightOffset = footWorldToLocalOffset(
+          rightFoot.plantedPos,
+          state.position,
+          yaw,
+          rig.rightFootRestLocal,
+        );
+      }
+    } else if (!airborne) {
+      crouchTimer = Math.max(0, crouchTimer - safeDt * 4);
+    }
+
+    if (airborne) {
+      airVelY -= g * safeDt;
+      airHeight += airVelY * safeDt;
+
+      if (hasTarget) {
+        const desiredTurn = clampNumber(yawError * 6.5, -4.6, 4.6);
+        turnRate = MathUtils.damp(turnRate, desiredTurn, 12, safeDt);
+        const stepYaw = clampNumber(turnRate * safeDt, -Math.abs(yawError), Math.abs(yawError));
+        yaw = wrapAngle(
+          yaw + (Math.abs(yawError) < 1e-4 ? 0 : Math.sign(yawError) * Math.abs(stepYaw)),
+        );
+
+        const tRem = Math.max(
+          0.08,
+          (airVelY + Math.sqrt(Math.max(0, airVelY * airVelY + 2 * g * Math.max(0, airHeight)))) /
+            g,
+        );
+        const speedCap = Math.min(
+          command.maxSpeed * 0.92,
+          command.gait === 'run' ? command.maxSpeed : 1.26,
+        );
+        const desiredHorizSpeed = clampNumber(distToTarget / tRem, 0.08, speedCap);
+        const steerFactor = Math.max(0.25, Math.cos(yawError * 0.6));
+        const desVelX = Math.sin(yaw) * desiredHorizSpeed * steerFactor;
+        const desVelZ = Math.cos(yaw) * desiredHorizSpeed * steerFactor;
+        hopVelX = MathUtils.damp(hopVelX, desVelX, 2.8, safeDt);
+        hopVelZ = MathUtils.damp(hopVelZ, desVelZ, 2.8, safeDt);
+      } else {
+        turnRate = MathUtils.damp(turnRate, 0, 10, safeDt);
+        hopVelX = MathUtils.damp(hopVelX, 0, 4, safeDt);
+        hopVelZ = MathUtils.damp(hopVelZ, 0, 4, safeDt);
+      }
+
+      const horizSpeed = Math.hypot(hopVelX, hopVelZ);
+      const speedCap = command.maxSpeed * 0.96;
+      if (horizSpeed > speedCap && horizSpeed > 1e-6) {
+        hopVelX *= speedCap / horizSpeed;
+        hopVelZ *= speedCap / horizSpeed;
+      }
+
+      const nextX = state.position.x + hopVelX * safeDt;
+      const nextZ = state.position.z + hopVelZ * safeDt;
+      const nextGround = command.sampleGround(nextX, nextZ);
+
+      if (airHeight > 0) {
+        restBlend = 0;
+        const nextPos: Vec3Like = { x: nextX, y: nextGround.y + airHeight, z: nextZ };
+        const flightU = clampNumber(1 - (airVelY / Math.max(0.25, hopLaunchVel) + 1) * 0.5, 0, 1);
+        const tuckArc = Math.sin(flightU * Math.PI);
+        const leftIsLead = hopLeadSide === 'left';
+
+        stepBounceSpring(safeDt);
+        const floatWeight = hopBlend * tuckArc;
+        const targetArmSwing = (leftIsLead ? -0.15 : 0.15) * floatWeight;
+        smoothedSwayX = MathUtils.damp(
+          smoothedSwayX,
+          (leftIsLead ? 0.022 : -0.022) * floatWeight,
+          10,
+          safeDt,
+        );
+        smoothedRollZ = MathUtils.damp(smoothedRollZ, -turnRate * 0.036, 10, safeDt);
+        smoothedPitchX = MathUtils.damp(
+          smoothedPitchX,
+          lerpNumber(0.14, 0.035, tuckArc) * hopBlend,
+          8,
+          safeDt,
+        );
+        smoothedTwistY = MathUtils.damp(
+          smoothedTwistY,
+          (leftIsLead ? -0.095 : 0.095) * floatWeight,
+          10,
+          safeDt,
+        );
+        smoothedArmSwing = MathUtils.damp(smoothedArmSwing, targetArmSwing, 10, safeDt);
+        smoothedHeadYaw = MathUtils.damp(
+          smoothedHeadYaw,
+          hasTarget ? clampNumber(yawError * 0.35, -0.28, 0.28) : 0,
+          10,
+          safeDt,
+        );
+
+        const floatSpread = (0.04 + 0.13 * tuckArc) * hopBlend;
+        const floatLift = (0.045 + 0.16 * tuckArc) * hopBlend;
+        const leftArmZ = smoothedArmSwing;
+        const rightArmZ = -smoothedArmSwing;
+
+        const pose: CapsuleHumanPose = {
+          torsoOffset: { x: smoothedSwayX, y: bounceSpringY, z: 0 },
+          torsoRotation: { pitch: smoothedPitchX, yaw: smoothedTwistY, roll: smoothedRollZ },
+          headOffset: ZERO_VEC3,
+          headRotation: {
+            pitch: -smoothedPitchX * 0.45 - 0.045 * tuckArc * hopBlend,
+            yaw: smoothedHeadYaw - smoothedTwistY * 0.4,
+            roll: -smoothedRollZ * 0.48,
+          },
+          leftFoot: buildAirFootPose(leftIsLead, 'left', flightU, hopBlend, airStartLeftOffset),
+          rightFoot: buildAirFootPose(
+            !leftIsLead,
+            'right',
+            flightU,
+            hopBlend,
+            airStartRightOffset,
+          ),
+          leftHand: {
+            offset: {
+              x: -floatSpread - Math.abs(leftArmZ) * 0.06,
+              y: floatLift + Math.max(0, leftArmZ) * 0.18,
+              z: leftArmZ,
+            },
+            rotation: { pitch: -leftArmZ * 1.1 - 0.15 * floatWeight, yaw: 0, roll: -0.24 * floatWeight },
+            elbowBend: { x: -0.045 * floatWeight, y: 0, z: -0.05 + leftArmZ * 0.12 },
+          },
+          rightHand: {
+            offset: {
+              x: floatSpread + Math.abs(rightArmZ) * 0.06,
+              y: floatLift + Math.max(0, rightArmZ) * 0.18,
+              z: rightArmZ,
+            },
+            rotation: { pitch: -rightArmZ * 1.1 - 0.15 * floatWeight, yaw: 0, roll: 0.24 * floatWeight },
+            elbowBend: { x: 0.045 * floatWeight, y: 0, z: -0.05 + rightArmZ * 0.12 },
+          },
+          restBlend: 0,
+        };
+
+        return { position: nextPos, yaw, pose, moving: true };
+      }
+
+      // Touchdown! Lock both boots seamlessly at current stance and trigger landing recoil.
+      airHeight = 0;
+      airVelY = 0;
+      airborne = false;
+      crouchTimer = 0;
+      velX = 0;
+      velZ = 0;
+      hopVelX = 0;
+      hopVelZ = 0;
+      const landedPos: Vec3Like = { x: nextX, y: nextGround.y, z: nextZ };
+      const leftRest = footRestWorldPosition(landedPos, yaw, rig.leftFootRestLocal);
+      const rightRest = footRestWorldPosition(landedPos, yaw, rig.rightFootRestLocal);
+      leftFoot = makeFootState(
+        { x: leftRest.x, y: command.sampleGround(leftRest.x, leftRest.z).y, z: leftRest.z },
+        yaw,
+      );
+      rightFoot = makeFootState(
+        { x: rightRest.x, y: command.sampleGround(rightRest.x, rightRest.z).y, z: rightRest.z },
+        yaw,
+      );
+      bounceSpringVel -= 0.28 + 0.18 * hopBlend;
+    }
+
+    // Grounded low-gravity crouch, landing absorption, or final settle.
+    let nextX = state.position.x;
+    let nextZ = state.position.z;
+    velX = 0;
+    velZ = 0;
+
+    if (hasTarget && distToTarget > 0.045) {
+      const desiredTurn = clampNumber(yawError * 7.0, -5.2, 5.2);
+      turnRate = MathUtils.damp(turnRate, desiredTurn, 16, safeDt);
+      const stepYaw = clampNumber(turnRate * safeDt, -Math.abs(yawError), Math.abs(yawError));
+      const proposedYaw = wrapAngle(
+        yaw + (Math.abs(yawError) < 1e-4 ? 0 : Math.sign(yawError) * Math.abs(stepYaw)),
+      );
+      if (
+        Math.abs(wrapAngle(proposedYaw - leftFoot.plantedYaw)) < 0.45 &&
+        Math.abs(wrapAngle(proposedYaw - rightFoot.plantedYaw)) < 0.45
+      ) {
+        yaw = proposedYaw;
+      }
+    } else {
+      turnRate = MathUtils.damp(turnRate, 0, 14, safeDt);
+      if (command.target && distToTarget <= 0.045) {
+        nextX = MathUtils.damp(state.position.x, command.target.x, 18, safeDt);
+        nextZ = MathUtils.damp(state.position.z, command.target.z, 18, safeDt);
+        if (Math.hypot(command.target.x - nextX, command.target.z - nextZ) < 0.005) {
+          nextX = command.target.x;
+          nextZ = command.target.z;
+        }
+      }
+    }
+
+    const nextGround = command.sampleGround(nextX, nextZ);
+    const nextPos: Vec3Like = { x: nextX, y: nextGround.y, z: nextZ };
+    const isSettling = !hasTarget || distToTarget <= 0.045;
+    const readyToSettleFeet =
+      !command.target ||
+      Math.hypot(command.target.x - nextX, command.target.z - nextZ) <= 0.002;
+
+    if (isSettling && readyToSettleFeet && !leftFoot.swinging && !rightFoot.swinging) {
+      const leftIdeal = footRestWorldPosition(nextPos, yaw, rig.leftFootRestLocal);
+      const rightIdeal = footRestWorldPosition(nextPos, yaw, rig.rightFootRestLocal);
+      const leftErr = Math.hypot(
+        leftFoot.plantedPos.x - leftIdeal.x,
+        leftFoot.plantedPos.z - leftIdeal.z,
+      );
+      const rightErr = Math.hypot(
+        rightFoot.plantedPos.x - rightIdeal.x,
+        rightFoot.plantedPos.z - rightIdeal.z,
+      );
+      if (leftErr > 0.0012 && leftErr >= rightErr) {
+        startSwing(
+          leftFoot,
+          rightFoot,
+          'left',
+          rig.leftFootRestLocal,
+          nextPos,
+          yaw,
+          0,
+          0,
+          command.sampleGround,
+          true,
+        );
+      } else if (rightErr > 0.0012) {
+        startSwing(
+          rightFoot,
+          leftFoot,
+          'right',
+          rig.rightFootRestLocal,
+          nextPos,
+          yaw,
+          0,
+          0,
+          command.sampleGround,
+          true,
+        );
+      }
+    }
+
+    const leftRestWorld = footRestWorldPosition(nextPos, yaw, rig.leftFootRestLocal);
+    const rightRestWorld = footRestWorldPosition(nextPos, yaw, rig.rightFootRestLocal);
+    const feetSettled =
+      !leftFoot.swinging &&
+      !rightFoot.swinging &&
+      Math.hypot(leftFoot.plantedPos.x - leftRestWorld.x, leftFoot.plantedPos.z - leftRestWorld.z) <
+        0.0015 &&
+      Math.hypot(
+        rightFoot.plantedPos.x - rightRestWorld.x,
+        rightFoot.plantedPos.z - rightRestWorld.z,
+      ) < 0.0015;
+
+    const stillActive =
+      hasTarget || !readyToSettleFeet || leftFoot.swinging || rightFoot.swinging || !feetSettled;
+    restBlend = MathUtils.damp(restBlend, stillActive ? 0 : 1, stillActive ? 22 : 16, safeDt);
+
+    stepBounceSpring(safeDt);
+    const crouchNorm =
+      !isSettling && crouchDuration > 0 ? clampNumber(crouchTimer / crouchDuration, 0, 1) : 0;
+    const crouchSquash = Math.sin(crouchNorm * Math.PI);
+    const crouchDip = -crouchSquash * (0.048 + 0.042 * hopBlend);
+    const kneeSquash = clampNumber(crouchSquash + Math.max(0, -bounceSpringY) * 14, 0, 1);
+
+    smoothedSwayX = MathUtils.damp(smoothedSwayX, 0, 12, safeDt);
+    smoothedRollZ = MathUtils.damp(smoothedRollZ, -turnRate * 0.03, 12, safeDt);
+    smoothedPitchX = MathUtils.damp(
+      smoothedPitchX,
+      hasTarget ? (0.14 + 0.04 * hopBlend) * crouchSquash + 0.05 : 0,
+      12,
+      safeDt,
+    );
+    smoothedTwistY = MathUtils.damp(smoothedTwistY, 0, 12, safeDt);
+    smoothedArmSwing = MathUtils.damp(smoothedArmSwing, -0.15 * crouchSquash * hopBlend, 12, safeDt);
+    smoothedHeadYaw = MathUtils.damp(
+      smoothedHeadYaw,
+      hasTarget ? clampNumber(yawError * 0.38, -0.28, 0.28) : 0,
+      10,
+      safeDt,
+    );
+
+    const moving = stillActive || restBlend < 0.995;
+    if (!moving) {
+      return {
+        position: nextPos,
+        yaw,
+        pose: REST_CAPSULE_HUMAN_POSE,
+        moving: false,
+      };
+    }
+
+    const crouchArmSpread = 0.045 * crouchSquash * hopBlend;
+    const pose: CapsuleHumanPose = {
+      torsoOffset: {
+        x: smoothedSwayX,
+        y: bounceSpringY + crouchDip,
+        z: 0,
+      },
+      torsoRotation: {
+        pitch: smoothedPitchX,
+        yaw: smoothedTwistY,
+        roll: smoothedRollZ,
+      },
+      headOffset: ZERO_VEC3,
+      headRotation: {
+        pitch: -smoothedPitchX * 0.3 + bounceSpringY * 0.5,
+        yaw: smoothedHeadYaw,
+        roll: -smoothedRollZ * 0.45,
+      },
+      leftFoot: buildFootPose(
+        leftFoot,
+        rightFoot,
+        'left',
+        rig.leftFootRestLocal,
+        nextPos,
+        yaw,
+        command.sampleGround,
+        isSettling && !hasTarget,
+        kneeSquash,
+      ),
+      rightFoot: buildFootPose(
+        rightFoot,
+        leftFoot,
+        'right',
+        rig.rightFootRestLocal,
+        nextPos,
+        yaw,
+        command.sampleGround,
+        isSettling && !hasTarget,
+        kneeSquash,
+      ),
+      leftHand: {
+        offset: {
+          x: -crouchArmSpread,
+          y: Math.abs(smoothedArmSwing) * 0.25,
+          z: smoothedArmSwing,
+        },
+        rotation: { pitch: -smoothedArmSwing * 1.15, yaw: 0, roll: -0.08 * crouchSquash },
+        elbowBend: { x: -0.025, y: 0, z: -0.045 + smoothedArmSwing * 0.12 },
+      },
+      rightHand: {
+        offset: {
+          x: crouchArmSpread,
+          y: Math.abs(smoothedArmSwing) * 0.25,
+          z: smoothedArmSwing,
+        },
+        rotation: { pitch: -smoothedArmSwing * 1.15, yaw: 0, roll: 0.08 * crouchSquash },
+        elbowBend: { x: 0.025, y: 0, z: -0.045 + smoothedArmSwing * 0.12 },
+      },
+      restBlend: stillActive ? 0 : restBlend,
+    };
+
+    return { position: nextPos, yaw, pose, moving: true };
+  }
+
   function update(
     dt: number,
     command: LocomotionCommand,
@@ -269,6 +784,27 @@ export function createProceduralStepperPlugin(): LocomotionPlugin {
         pose: REST_CAPSULE_HUMAN_POSE,
         moving: false,
       };
+    }
+
+    if (justReset) {
+      justReset = false;
+      const startGroundY = command.sampleGround(state.position.x, state.position.z).y;
+      const startAir = Math.max(0, state.position.y - startGroundY);
+      if (startAir > 0.02) {
+        airborne = true;
+        airHeight = startAir;
+        airVelY = state.velocity.y;
+        hopLaunchVel = Math.max(0.55, Math.abs(state.velocity.y));
+        hopVelX = state.velocity.x;
+        hopVelZ = state.velocity.z;
+      }
+    }
+
+    const g = clampNumber(command.gravity, 0.4, 25);
+    const gRatio = g / EARTH_GRAVITY_MPS2;
+    const hopBlend = smoothstep01((0.65 - gRatio) / 0.42);
+    if (hopBlend > 0.05 || airborne) {
+      return updateLowGravityHop(safeDt, g, hopBlend, command, state, rig);
     }
 
     let desiredVelX = 0;
@@ -571,7 +1107,7 @@ export function createProceduralStepperPlugin(): LocomotionPlugin {
     label: 'Step Planner',
     approach: 'Procedural · World foot lock',
     summary:
-      'World-space step planner with smooth steering, live redirects, landing recoil, and terrain slope adaptation.',
+      'World-space step planner with smooth steering, live redirects, landing recoil, terrain slopes, and Earth/Mars/Moon gravity hops.',
     reset,
     update,
   };

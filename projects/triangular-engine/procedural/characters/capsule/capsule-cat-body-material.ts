@@ -24,6 +24,9 @@ import type {
 } from 'triangular-engine/characters';
 import { createCatBodyGeometry } from './capsule-cat-shape';
 
+/** Silhouette of the closed positive smile. Open mouths and frowns use the shared animation. */
+export type CapsuleCatClosedSmileStyle = 'omega' | 'paired-curves';
+
 export interface CapsuleCatBodyUniformMap {
   uFurColor: { value: Color };
   uFurAccentColor: { value: Color };
@@ -61,6 +64,7 @@ export interface CapsuleCatBodyMeshResult {
 export function computeCapsuleCatMouthLocalBounds(
   uniforms: CapsuleCatBodyUniformMap,
   target = new Box3(),
+  closedSmileStyle: CapsuleCatClosedSmileStyle = 'omega',
 ): Box3 {
   const r = Math.max(0.1, uniforms.uBodyRadius.value);
   const neckZ = uniforms.uNeckZ.value;
@@ -72,9 +76,10 @@ export function computeCapsuleCatMouthLocalBounds(
   const curve = uniforms.uMouthCurve.value;
   const asym = Math.abs(uniforms.uMouthAsymmetry.value) * halfW * 0.16;
   const rimPad = 0.028;
+  const smileDrop = closedSmileStyle === 'paired-curves' ? halfW * 0.32 + 0.025 : 0;
 
   const xHalf = (halfW + rimPad) * r;
-  const yMin = centerY + (-halfH * 1.28 + Math.min(0, curve * 0.11) - asym - rimPad) * r;
+  const yMin = centerY + (-Math.max(halfH * 1.28, smileDrop) + Math.min(0, curve * 0.11) - asym - rimPad) * r;
   const yMax = centerY + (Math.max(0.14, halfH) + Math.max(0, curve * 0.09) + asym + rimPad) * r;
   const zMin = neckZ + r * 0.72;
   const zMax = neckZ + r * 1.02;
@@ -117,8 +122,10 @@ export function createCapsuleCatBodyUniforms(dna: CapsuleCatCharacterDNA): Capsu
  */
 export function createCapsuleCatBodyMaterial(
   dna: CapsuleCatCharacterDNA,
+  closedSmileStyle: CapsuleCatClosedSmileStyle = 'omega',
 ): { material: MeshStandardMaterial; uniforms: CapsuleCatBodyUniformMap } {
   const uniforms = createCapsuleCatBodyUniforms(dna);
+  const pairedCurves = closedSmileStyle === 'paired-curves';
 
   const material = new MeshStandardMaterial({
     color: 0xffffff,
@@ -126,7 +133,7 @@ export function createCapsuleCatBodyMaterial(
     metalness: 0.02,
   });
 
-  material.customProgramCacheKey = () => 'capsule-cat-body-sdf-v5';
+  material.customProgramCacheKey = () => `capsule-cat-body-sdf-v6-${closedSmileStyle}`;
 
   material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms) => {
     Object.assign(shader.uniforms, uniforms);
@@ -167,7 +174,13 @@ uniform float uMouthCurve;
 uniform float uMouthMeow;
 uniform float uTongueVisible;
 uniform float uFangsVisible;
-uniform float uMouthAsymmetry;`,
+uniform float uMouthAsymmetry;
+${pairedCurves ? `
+float catLipSegment(vec2 point, vec2 start, vec2 end) {
+  vec2 segment = end - start;
+  vec2 offset = point - start;
+  return length(offset - segment * clamp(dot(offset, segment) / dot(segment, segment), 0.0, 1.0));
+}` : ''}`,
       )
       .replace(
         '#include <color_fragment>',
@@ -239,14 +252,34 @@ uniform float uMouthAsymmetry;`,
     // Curve the corners, not the centre: negative expressions pull them down.
     float curveY = xNorm * xNorm * uMouthCurve * 0.09;
 
-    // Twin-arch omega upper lip with drooping corners when frowning
+    ${pairedCurves ? `
+    // Trace one shallow curl and mirror it. The steep inner tangent joins
+    // the philtrum and the outer tip turns back up into a rounded end.
+    vec2 lip = vec2(abs(mp.x), mp.y - curveY * 0.32) / halfW;
+    vec2 start = vec2(0.0, 0.12);
+    vec2 innerControl = vec2(0.19, -0.40);
+    vec2 outerControl = vec2(0.62, -0.42);
+    vec2 end = vec2(0.96, -0.15);
+    vec2 previous = start;
+    float lipDistance = 1e3;
+    for (int i = 1; i <= 12; i++) {
+      float t = float(i) / 12.0;
+      float u = 1.0 - t;
+      vec2 current = u*u*u*start + 3.0*u*u*t*innerControl + 3.0*u*t*t*outerControl + t*t*t*end;
+      lipDistance = min(lipDistance, catLipSegment(lip, previous, current));
+      previous = current;
+    }
+    float dArch = lipDistance * halfW - 0.023;
+    ` : `
+    // Twin-arch omega upper lip with drooping corners when frowning.
     vec2 archP = vec2(abs(mp.x) - archR, mp.y - curveY);
     float clipY = archP.y - max(0.0, -uMouthCurve) * (abs(mp.x) - archR) * 0.45;
     float dArch = max(abs(length(archP) - archR) - mix(0.014, 0.020, meowAmt), clipY);
+    `}
 
     // Philtrum seam connecting from nose down to the twin arches
-    float dPhiltrum = max(abs(mp.x) - 0.009, -(mp.y - curveY));
-    dPhiltrum = max(dPhiltrum, (mp.y - curveY) - 0.14);
+    float dPhiltrum = max(abs(mp.x) - ${pairedCurves ? '0.014' : '0.009'}, -(mp.y - curveY));
+    dPhiltrum = max(dPhiltrum, (mp.y - curveY) - ${pairedCurves ? '0.16' : '0.14'});
     // Replace the smiling omega with a single downturned line for negative
     // expressions. Its centre stays at the philtrum; its corners fall.
     float frown = smoothstep(0.05, 0.55, -uMouthCurve);
@@ -321,9 +354,12 @@ uniform float uMouthAsymmetry;`,
  * Builds the horizontal capsule body (head + torso) with the suit/fur pattern and
  * cat SDF mouth. The geometry is rotated so its long axis follows local +Z.
  */
-export function buildCapsuleCatBodyMesh(dna: CapsuleCatCharacterDNA): CapsuleCatBodyMeshResult {
+export function buildCapsuleCatBodyMesh(
+  dna: CapsuleCatCharacterDNA,
+  closedSmileStyle: CapsuleCatClosedSmileStyle = 'omega',
+): CapsuleCatBodyMeshResult {
   const geometry = createCatBodyGeometry(dna.bodyRadius, dna.bodyLength);
-  const { material, uniforms } = createCapsuleCatBodyMaterial(dna);
+  const { material, uniforms } = createCapsuleCatBodyMaterial(dna, closedSmileStyle);
   const mesh = new Mesh(geometry, material);
   mesh.name = 'capsule-cat-body';
   mesh.castShadow = true;
@@ -352,11 +388,11 @@ export function buildCapsuleCatBodyMesh(dna: CapsuleCatCharacterDNA): CapsuleCat
   };
 
   const getMouthLocalBounds = (target = new Box3()): Box3 =>
-    computeCapsuleCatMouthLocalBounds(uniforms, target);
+    computeCapsuleCatMouthLocalBounds(uniforms, target, closedSmileStyle);
 
   const getMouthWorldBounds = (target = new Box3()): Box3 => {
     mesh.updateWorldMatrix(true, false);
-    computeCapsuleCatMouthLocalBounds(uniforms, target);
+    getMouthLocalBounds(target);
     target.applyMatrix4(mesh.matrixWorld);
     return target;
   };

@@ -25,6 +25,8 @@ export interface CapsuleCatTailOptions {
   readonly tubularSegments?: number;
   readonly radialSegments?: number;
   readonly color: string;
+  /** Tip-to-base radius ratio. Increase it for a thicker, rounded tail. Defaults to 0.25. */
+  readonly tipRadiusRatio?: number;
 }
 
 export interface CapsuleCatTailAssembly {
@@ -45,6 +47,7 @@ export class CapsuleCatTailMesh implements CapsuleCatTailAssembly {
   private readonly normAttr: BufferAttribute;
   private readonly tubularSegments: number;
   private readonly radialSegments: number;
+  private readonly tipRadiusRatio: number;
   private readonly cosTable: Float32Array;
   private readonly sinTable: Float32Array;
   private readonly tipMesh: Mesh;
@@ -58,6 +61,8 @@ export class CapsuleCatTailMesh implements CapsuleCatTailAssembly {
   constructor(options: CapsuleCatTailOptions) {
     this.tubularSegments = options.tubularSegments ?? 22;
     this.radialSegments = options.radialSegments ?? 12;
+    const tipRatio = options.tipRadiusRatio ?? 0.25;
+    this.tipRadiusRatio = Number.isFinite(tipRatio) ? Math.max(0.05, Math.min(1, tipRatio)) : 0.25;
     this.root.name = options.name ?? 'capsule-cat-tail';
     this.material = new MeshStandardMaterial({
       color: new Color(options.color),
@@ -177,9 +182,9 @@ export class CapsuleCatTailMesh implements CapsuleCatTailAssembly {
       }
       this.tmpPrevTangent.copy(this.tmpTangent);
 
-      // Plump base, gentle taper, pinched tip.
+      // Taper the tube into its rounded tip.
       const taper = Math.pow(Math.max(0, 1 - t), 0.72);
-      const radius = Math.max(0.004, pose.radius * (0.25 + 0.75 * taper));
+      const radius = Math.max(0.004, pose.radius * (this.tipRadiusRatio + (1 - this.tipRadiusRatio) * taper));
 
       const baseVert = i * ringVerts;
       for (let j = 0; j <= this.radialSegments; j++) {
@@ -201,7 +206,7 @@ export class CapsuleCatTailMesh implements CapsuleCatTailAssembly {
     this.posAttr.needsUpdate = true;
     this.normAttr.needsUpdate = true;
 
-    const tipRadius = Math.max(0.006, pose.radius * 0.28);
+    const tipRadius = Math.max(0.006, pose.radius * Math.min(1, this.tipRadiusRatio + 0.03));
     this.tipMesh.position.set(p3x, p3y, p3z);
     this.tipMesh.scale.setScalar(tipRadius);
   }

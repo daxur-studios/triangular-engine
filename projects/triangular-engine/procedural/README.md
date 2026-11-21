@@ -34,4 +34,6 @@ Deterministic procedural generation sublibrary for synthetic 3D assets, macro-sc
   - Render without antialiasing into a linear render target with a black clear colour, then decode each pixel with `decodeCapsuleIdPixel`.
   - Also exported: `CAPSULE_ID_COLOURS`, `CapsulePartId`, `CapsuleIdPixel`, `tagCapsulePart`, `resolveCapsulePart`, `createCapsuleIdMaterial`, `createCapsuleBodyIdMaterial` and `CapsuleIdColourSwap`.
 - **Four-legged space cats**: `CapsuleCatActor`, `buildCapsuleCatBodyMesh` (horizontal capsule with three suit/fur patterns and the projected `:3` / `MEOW` mouth), `buildCapsuleCatFaceRig` (ears, tuft, googly eyes, eyelids, nose, whiskers), `CapsuleCatTailMesh` (zero-allocation tapered S-curve), `buildCapsuleCatPaw` (fur or space-bootie paws), and `buildCapsuleCatSpaceGear` (angled bubble helmet, dorsal pet jetpack with harness, brown/blue mini saddle packs).
+  - Set `CapsuleCatTailOptions.tipRadiusRatio` to adjust the thickness of the rounded tip relative to the base. The default is `0.25`.
+  - Set `CapsuleCatActorOptions.closedSmileStyle` to `'paired-curves'` for a shallower closed smile. The default is `'omega'`. Both styles share the open-mouth and frown animations.
 <!-- /doc-section -->

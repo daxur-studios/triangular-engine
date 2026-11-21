@@ -60,6 +60,7 @@ import {
   type CharacterStudioFamilyId,
 } from './character-studio-contributions';
 import { EXPERIMENTAL_PIGTAIL_HEAD_ID, EXPERIMENTAL_PIGTAIL_PRESETS } from './experimental-pigtail-head';
+import { EXPERIMENTAL_SPACE_CAT } from './experimental-space-cat';
 import { CapsulePartPreviewComponent } from './capsule-part-preview.component';
 import type { CapsuleHairStyle } from './experimental-capsule-hair';
 
@@ -382,8 +383,12 @@ export class CharacterStudioPageComponent {
     this.engine.scene.add(this.floor, this.pedestal, ...this.familyOptions.map((family) => family.root));
     this.syncFamilyVisibility();
     this.applyView('three-quarter');
-    if (inject(ActivatedRoute).snapshot.queryParamMap.get('workshop') === '1') {
+    const query = inject(ActivatedRoute).snapshot.queryParamMap;
+    if (query.get('workshop') === '1') {
       this.toggleWorkshop();
+    } else if (query.get('preset') === EXPERIMENTAL_SPACE_CAT.id) {
+      this.selectFamily('cat');
+      this.selectPreset(EXPERIMENTAL_SPACE_CAT.id);
     }
 
     this.engine.tick$
@@ -453,6 +458,8 @@ export class CharacterStudioPageComponent {
     this.selectedPresetId.set(presetId);
     if (changed && (wasExperimental || this.experimentalHeadSelected())) {
       this.selectExpression(this.selectedExpression());
+      this.applyView(this.activeView());
+    } else if (changed && this.activeFamily().id === 'cat') {
       this.applyView(this.activeView());
     }
     this.refreshControls();
@@ -542,6 +549,7 @@ export class CharacterStudioPageComponent {
     if (this.experimentalHeadSelected()) return;
     this.activeFamily().randomize(this.variantSeed++);
     this.selectedPresetId.set('custom');
+    if (this.activeFamily().id === 'cat') this.applyView(this.activeView());
     this.refreshControls();
   }
 

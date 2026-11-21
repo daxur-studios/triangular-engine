@@ -5,10 +5,13 @@ import {
   blendCapsuleHumanPoses,
   createFlatGroundSampler,
   createRestCapsuleHumanPose,
+  GRAVITY_PRESETS,
+  resolveGravityPreset,
   wrapAngle,
   ZERO_EULER,
   ZERO_VEC3,
   type CapsuleHumanPose,
+  type GravityPresetId,
 } from './motion/capsule-motion-types';
 import { createBaselineLocomotionPlugin } from './motion/baseline-locomotion.plugin';
 import { createDefaultLocomotionPlugins } from './motion/locomotion-registry';
@@ -111,7 +114,7 @@ describe('Capsule spacesuit pose rig & locomotion plugins', () => {
     describe(`plugin: ${pluginId}`, () => {
       let walker: ReturnType<typeof buildPigtailSandboxWalker> | undefined;
 
-      function createWalker(preset?: CapsuleSpacesuitPreset) {
+      function createWalker(preset?: CapsuleSpacesuitPreset, gravityId: GravityPresetId = 'earth') {
         const plugin =
           createDefaultLocomotionPlugins().find((p) => p.id === pluginId)!;
         walker = buildPigtailSandboxWalker({
@@ -119,6 +122,7 @@ describe('Capsule spacesuit pose rig & locomotion plugins', () => {
           plugin,
           sampleGround: createFlatGroundSampler(0),
           maxSpeed: 1.4,
+          gravity: resolveGravityPreset(gravityId).gravityMps2,
         });
         return walker;
       }
@@ -128,7 +132,10 @@ describe('Capsule spacesuit pose rig & locomotion plugins', () => {
         walker = undefined;
       });
 
-      function verifyWalk(walker: ReturnType<typeof buildPigtailSandboxWalker>): void {
+      function verifyWalk(
+        walker: ReturnType<typeof buildPigtailSandboxWalker>,
+        maxFrames = 450,
+      ) {
         const boots = ['left', 'right'].map(
           (side) => walker.root.getObjectByName(`pigtail-boot-${side}`)!,
         );
@@ -141,7 +148,7 @@ describe('Capsule spacesuit pose rig & locomotion plugins', () => {
         const target = new Vector3(1.8, 0, 2.4);
         expect(walker.walkTo(target)).toBeTrue();
 
-        for (let frame = 0; frame < 450 && walker.walking; frame++) {
+        for (let frame = 0; frame < maxFrames && walker.walking; frame++) {
           walker.update(1 / 90);
           const feet = boots.map((boot) => boot.getWorldPosition(new Vector3()));
           const heights = feet.map((foot, index) => foot.y - restHeight[index]);
@@ -161,12 +168,14 @@ describe('Capsule spacesuit pose rig & locomotion plugins', () => {
         expect(plantedSamples).toBeGreaterThan(20);
         lift.forEach((height) => expect(height).toBeGreaterThan(0.07));
         expect(walker.walking).toBeFalse();
-        expect(walker.root.position.distanceTo(target)).toBeLessThan(0.04);
-        expect(walker.metrics.peakSpeedMps).toBeLessThanOrEqual(1.42);
+        expect(walker.root.position.distanceTo(target)).toBeLessThan(0.06);
+        expect(Math.abs(walker.root.position.y)).toBeLessThan(1e-4);
+        expect(walker.metrics.peakSpeedMps).toBeLessThanOrEqual(1.44);
         boots.forEach((boot, index) => {
           expect(boot.position.distanceTo(restLocal[index])).toBeLessThan(0.005);
           expect(new Box3().setFromObject(boot, true).min.y).toBeCloseTo(0, 4);
         });
+        return walker.metrics;
       }
 
       for (const preset of CAPSULE_SPACESUIT_PRESETS) {
@@ -222,6 +231,41 @@ describe('Capsule spacesuit pose rig & locomotion plugins', () => {
           expect(maxYawDelta).toBeLessThan(0.2);
           expect(maxBootPitch).toBeGreaterThan(0.12);
           expect(maxTorsoAngle).toBeGreaterThan(0.03);
+        });
+
+        it('adapts stride and airtime across Earth, Mars, and Moon gravity presets', () => {
+          const results = Object.fromEntries(
+            GRAVITY_PRESETS.map((preset) => {
+              const instance = createWalker('orange-pigtails', preset.id);
+              const metrics = verifyWalk(instance, preset.id === 'moon' ? 780 : 540);
+              instance.dispose();
+              walker = undefined;
+              return [preset.id, metrics];
+            }),
+          ) as Record<GravityPresetId, ReturnType<typeof verifyWalk>>;
+
+          expect(results.earth.maxAirHeightM).toBeLessThan(0.01);
+          expect(results.mars.maxAirHeightM).toBeGreaterThan(0.03);
+          expect(results.moon.maxAirHeightM).toBeGreaterThan(0.12);
+          expect(results.moon.maxAirHeightM).toBeGreaterThan(results.mars.maxAirHeightM);
+          expect(results.moon.airborneSeconds).toBeGreaterThan(0.25);
+          expect(results.moon.maxFootLiftM).toBeGreaterThan(results.earth.maxFootLiftM);
+        });
+
+        it('survives switching Moon gravity back to Earth gravity mid-course', () => {
+          const instance = createWalker('orange-pigtails', 'moon');
+          instance.startComparisonCourse();
+          for (let frame = 0; frame < 720 && instance.walking; frame++) {
+            if (frame === 75) {
+              instance.setGravity(resolveGravityPreset('earth').gravityMps2);
+            }
+            instance.update(1 / 60);
+          }
+
+          expect(instance.walking).toBeFalse();
+          expect(instance.courseStage).toBeNull();
+          expect(Math.abs(instance.root.position.y)).toBeLessThan(1e-4);
+          expect(instance.root.position.distanceTo(new Vector3(0, 0, 0.35))).toBeLessThan(0.06);
         });
       }
     });

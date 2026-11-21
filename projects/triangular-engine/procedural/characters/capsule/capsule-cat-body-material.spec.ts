@@ -64,6 +64,28 @@ describe('capsule-cat-body-material', () => {
     result.mesh.material.dispose();
   });
 
+  it('opts into paired curves without changing open-mouth projection', () => {
+    const standard = buildCapsuleCatBodyMesh(DEFAULT_CAPSULE_CAT_DNA);
+    const paired = buildCapsuleCatBodyMesh(DEFAULT_CAPSULE_CAT_DNA, 'paired-curves');
+    try {
+      expect(paired.mesh.material.customProgramCacheKey()).not.toBe(standard.mesh.material.customProgramCacheKey());
+      expect(paired.getMouthLocalBounds().min.y).toBeLessThan(standard.getMouthLocalBounds().min.y);
+
+      const open: CapsuleCatSdfMouthUniforms = {
+        mouthOpen: 0.8, mouthWidth: 0.55, mouthCurve: 0.4, meow: 0.8, tongueVisible: 0.6,
+      };
+      standard.updateMouth(open);
+      paired.updateMouth(open);
+      expect(paired.uniforms).toEqual(standard.uniforms);
+      expect(paired.getMouthLocalBounds().equals(standard.getMouthLocalBounds())).toBeTrue();
+    } finally {
+      for (const { mesh } of [standard, paired]) {
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+      }
+    }
+  });
+
   it('rebuilds cleanly for every concept-sheet cat preset', () => {
     for (const preset of CAPSULE_CAT_PRESETS) {
       const result = buildCapsuleCatBodyMesh(preset);

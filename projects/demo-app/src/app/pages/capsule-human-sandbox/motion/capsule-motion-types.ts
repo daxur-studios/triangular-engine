@@ -82,6 +82,27 @@ export interface RigMeasurements {
   readonly rightFootRestLocal: Vec3Like;
 }
 
+export type GravityPresetId = 'earth' | 'mars' | 'moon';
+
+export interface GravityPreset {
+  readonly id: GravityPresetId;
+  readonly label: string;
+  readonly gravityMps2: number;
+  readonly ratioLabel: string;
+}
+
+export const EARTH_GRAVITY_MPS2 = 9.81;
+
+export const GRAVITY_PRESETS: readonly GravityPreset[] = [
+  { id: 'earth', label: 'Earth', gravityMps2: 9.81, ratioLabel: '1g' },
+  { id: 'mars', label: 'Mars', gravityMps2: 3.72, ratioLabel: '0.38g' },
+  { id: 'moon', label: 'Moon', gravityMps2: 1.62, ratioLabel: '0.16g' },
+];
+
+export function resolveGravityPreset(id?: string | null): GravityPreset {
+  return GRAVITY_PRESETS.find((preset) => preset.id === id) ?? GRAVITY_PRESETS[0];
+}
+
 export interface LocomotionCommand {
   /** Desired world destination, or `null` when idle/settling. */
   readonly target: Vec3Like | null;
@@ -89,6 +110,8 @@ export interface LocomotionCommand {
   readonly maxSpeed: number;
   readonly gait: 'walk' | 'run';
   readonly sampleGround: GroundSampler;
+  /** Downward gravitational acceleration in m/s² (Earth = 9.81). */
+  readonly gravity: number;
 }
 
 export interface LocomotionStateSnapshot {
@@ -123,6 +146,8 @@ export interface ActionUpdateContext {
   readonly elapsedSeconds: number;
   readonly rig: RigMeasurements;
   readonly sampleGround: GroundSampler;
+  /** Downward gravitational acceleration in m/s² (Earth = 9.81). */
+  readonly gravity: number;
 }
 
 export interface ActionStepResult {

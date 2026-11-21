@@ -26,7 +26,12 @@ import { EngineModule, EngineService } from 'triangular-engine';
 import { ALL_CAPSULE_CHARACTER_PRESETS } from 'triangular-engine/characters';
 import { CapsuleCharacterActor } from 'triangular-engine/procedural';
 import { CAPSULE_SPACESUIT_PRESETS } from '../character-studio/capsule-spacesuit-presets';
-import { createFlatGroundSampler } from './motion/capsule-motion-types';
+import {
+  createFlatGroundSampler,
+  GRAVITY_PRESETS,
+  resolveGravityPreset,
+  type GravityPresetId,
+} from './motion/capsule-motion-types';
 import {
   createDefaultLocomotionPlugins,
   DEFAULT_LOCOMOTION_PLUGIN_ID,
@@ -90,8 +95,15 @@ export class CapsuleHumanSandboxPageComponent {
   readonly spacesuitPreset = signal<(typeof CAPSULE_SPACESUIT_PRESETS)[number] | undefined>(undefined);
   readonly locomotionPlugins = createDefaultLocomotionPlugins();
   readonly activePluginId = signal<string>(DEFAULT_LOCOMOTION_PLUGIN_ID);
+  readonly gravityPresets = GRAVITY_PRESETS;
+  readonly activeGravityId = signal<GravityPresetId>('earth');
   readonly cameraPreset = signal<'three-quarter' | 'side'>('three-quarter');
-  readonly walkMetrics = signal<{ slipMm: number; liftCm: number; speedMps: number } | null>(null);
+  readonly walkMetrics = signal<{
+    slipMm: number;
+    liftCm: number;
+    airCm: number;
+    speedMps: number;
+  } | null>(null);
   readonly courseLabel = signal<string | null>(null);
   readonly selectedHumanId = signal('human-1');
   readonly selectedHumanState = signal<SandboxHumanState>('Ready');
@@ -143,6 +155,10 @@ export class CapsuleHumanSandboxPageComponent {
     if (requestedWalk) {
       const resolved = resolveLocomotionPlugin(this.locomotionPlugins, requestedWalk);
       this.activePluginId.set(resolved.id);
+    }
+    const requestedGravity = queryParams.get('gravity');
+    if (requestedGravity) {
+      this.activeGravityId.set(resolveGravityPreset(requestedGravity).id);
     }
     const requestedCharacter = queryParams.get('character');
     if (this.spacesuitPresets.some(({ id }) => id === requestedCharacter)) {
@@ -246,6 +262,18 @@ export class CapsuleHumanSandboxPageComponent {
     this.status.set(`${plugin.label} (${plugin.approach}): ${plugin.summary}`);
   }
 
+  selectGravityPreset(gravityId: GravityPresetId): void {
+    const preset = resolveGravityPreset(gravityId);
+    this.activeGravityId.set(preset.id);
+    const walker = this.getSpacesuitWalker();
+    if (walker) {
+      walker.setGravity(preset.gravityMps2);
+    }
+    this.status.set(
+      `${preset.label} gravity (${preset.gravityMps2.toFixed(2)} m/s² · ${preset.ratioLabel}). Click the ground to move or run the course.`,
+    );
+  }
+
   runComparisonCourse(): void {
     const walker = this.getSpacesuitWalker();
     if (!walker) return;
@@ -253,7 +281,10 @@ export class CapsuleHumanSandboxPageComponent {
     this.walkMetrics.set(null);
     this.courseLabel.set('Course 1/3 · Straight 2.5m');
     this.syncSelectedHumanState(this.humans[0]);
-    this.status.set(`Running 3-leg comparison course with ${walker.plugin.label}.`);
+    const gravityPreset = resolveGravityPreset(this.activeGravityId());
+    this.status.set(
+      `Running 3-leg comparison course with ${walker.plugin.label} (${gravityPreset.label} ${gravityPreset.ratioLabel}).`,
+    );
   }
 
   setCameraPreset(preset: 'three-quarter' | 'side'): void {
@@ -372,6 +403,7 @@ export class CapsuleHumanSandboxPageComponent {
               preset: spacesuit.id,
               plugin: resolveLocomotionPlugin(this.locomotionPlugins, this.activePluginId()),
               sampleGround: createFlatGroundSampler(this.ground.position.y),
+              gravity: resolveGravityPreset(this.activeGravityId()).gravityMps2,
             }),
           }
         : { ...common, kind: 'classic', actor: new CapsuleCharacterActor({ dna: preset, autoBlink: true }) };
@@ -529,6 +561,7 @@ export class CapsuleHumanSandboxPageComponent {
           this.walkMetrics.set({
             slipMm: m.maxFootSlipMm,
             liftCm: m.maxFootLiftM * 100,
+            airCm: m.maxAirHeightM * 100,
             speedMps: m.peakSpeedMps,
           });
         }
@@ -537,6 +570,7 @@ export class CapsuleHumanSandboxPageComponent {
           this.walkMetrics.set({
             slipMm: m.maxFootSlipMm,
             liftCm: m.maxFootLiftM * 100,
+            airCm: m.maxAirHeightM * 100,
             speedMps: m.peakSpeedMps,
           });
           this.syncSelectedHumanState(human);

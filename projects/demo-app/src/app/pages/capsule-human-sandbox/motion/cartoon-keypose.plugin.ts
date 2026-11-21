@@ -1,6 +1,7 @@
 import { MathUtils } from 'three';
 import {
   clampNumber,
+  EARTH_GRAVITY_MPS2,
   footRestWorldPosition,
   footWorldToLocalOffset,
   lerpNumber,
@@ -137,6 +138,192 @@ function sampleKeyframeTable(u: number): HalfStrideKeyframe {
   };
 }
 
+interface HopKeyframe {
+  readonly t: number;
+  readonly torsoY: number;
+  readonly torsoPitch: number;
+  readonly torsoRollTowardLead: number;
+  readonly torsoTwistTowardLead: number;
+  readonly leadFootLift: number;
+  readonly leadFootForward: number;
+  readonly leadFootPitch: number;
+  readonly trailFootLift: number;
+  readonly trailFootForward: number;
+  readonly trailFootPitch: number;
+  readonly armLift: number;
+  readonly armSpread: number;
+  readonly armForward: number;
+  readonly kneeBendZ: number;
+  readonly headPitch: number;
+}
+
+const HOP_FLIGHT_START = 0.24;
+const HOP_FLIGHT_END = 0.82;
+const HOP_FLIGHT_SPAN = HOP_FLIGHT_END - HOP_FLIGHT_START;
+
+/**
+ * Authored low-gravity hop curve (`Squash/Load -> Takeoff -> Float Apex -> Reach -> Cushion Land`).
+ * Foot linear offsets stay strictly zero outside `(0.24, 0.82)` so grounded boots never slip.
+ */
+const MOON_HOP_KEYFRAMES: readonly HopKeyframe[] = [
+  {
+    t: 0.0, // Start load
+    torsoY: 0.0,
+    torsoPitch: 0.05,
+    torsoRollTowardLead: 0.0,
+    torsoTwistTowardLead: 0.0,
+    leadFootLift: 0.0,
+    leadFootForward: 0.0,
+    leadFootPitch: 0.0,
+    trailFootLift: 0.0,
+    trailFootForward: 0.0,
+    trailFootPitch: 0.0,
+    armLift: 0.0,
+    armSpread: 0.01,
+    armForward: 0.0,
+    kneeBendZ: 0.01,
+    headPitch: 0.02,
+  },
+  {
+    t: 0.16, // Deep squash windup
+    torsoY: -0.088,
+    torsoPitch: 0.18,
+    torsoRollTowardLead: -0.02,
+    torsoTwistTowardLead: -0.04,
+    leadFootLift: 0.0,
+    leadFootForward: 0.0,
+    leadFootPitch: 0.0,
+    trailFootLift: 0.0,
+    trailFootForward: 0.0,
+    trailFootPitch: 0.0,
+    armLift: 0.03,
+    armSpread: 0.045,
+    armForward: -0.18,
+    kneeBendZ: 0.095,
+    headPitch: 0.065,
+  },
+  {
+    t: HOP_FLIGHT_START, // Takeoff push-off
+    torsoY: 0.024,
+    torsoPitch: 0.09,
+    torsoRollTowardLead: 0.03,
+    torsoTwistTowardLead: 0.06,
+    leadFootLift: 0.0,
+    leadFootForward: 0.0,
+    leadFootPitch: 0.2,
+    trailFootLift: 0.0,
+    trailFootForward: 0.0,
+    trailFootPitch: 0.22,
+    armLift: 0.16,
+    armSpread: 0.095,
+    armForward: 0.13,
+    kneeBendZ: 0.01,
+    headPitch: -0.02,
+  },
+  {
+    t: 0.53, // Float apex
+    torsoY: 0.014,
+    torsoPitch: 0.025,
+    torsoRollTowardLead: 0.055,
+    torsoTwistTowardLead: 0.11,
+    leadFootLift: 0.105,
+    leadFootForward: 0.135,
+    leadFootPitch: -0.17,
+    trailFootLift: 0.048,
+    trailFootForward: -0.105,
+    trailFootPitch: 0.24,
+    armLift: 0.22,
+    armSpread: 0.175,
+    armForward: -0.17,
+    kneeBendZ: 0.0,
+    headPitch: -0.06,
+  },
+  {
+    t: HOP_FLIGHT_END, // Touchdown contact
+    torsoY: -0.012,
+    torsoPitch: 0.12,
+    torsoRollTowardLead: 0.02,
+    torsoTwistTowardLead: 0.04,
+    leadFootLift: 0.0,
+    leadFootForward: 0.0,
+    leadFootPitch: -0.09,
+    trailFootLift: 0.0,
+    trailFootForward: 0.0,
+    trailFootPitch: 0.08,
+    armLift: 0.11,
+    armSpread: 0.11,
+    armForward: -0.08,
+    kneeBendZ: 0.035,
+    headPitch: 0.02,
+  },
+  {
+    t: 0.91, // Cushion absorb
+    torsoY: -0.072,
+    torsoPitch: 0.15,
+    torsoRollTowardLead: -0.015,
+    torsoTwistTowardLead: 0.0,
+    leadFootLift: 0.0,
+    leadFootForward: 0.0,
+    leadFootPitch: 0.0,
+    trailFootLift: 0.0,
+    trailFootForward: 0.0,
+    trailFootPitch: 0.0,
+    armLift: 0.04,
+    armSpread: 0.05,
+    armForward: -0.04,
+    kneeBendZ: 0.088,
+    headPitch: 0.055,
+  },
+  {
+    t: 1.0, // Rebound recover
+    torsoY: 0.0,
+    torsoPitch: 0.05,
+    torsoRollTowardLead: 0.0,
+    torsoTwistTowardLead: 0.0,
+    leadFootLift: 0.0,
+    leadFootForward: 0.0,
+    leadFootPitch: 0.0,
+    trailFootLift: 0.0,
+    trailFootForward: 0.0,
+    trailFootPitch: 0.0,
+    armLift: 0.0,
+    armSpread: 0.01,
+    armForward: 0.0,
+    kneeBendZ: 0.01,
+    headPitch: 0.02,
+  },
+];
+
+function sampleHopKeyframeTable(u: number): HopKeyframe {
+  const clamped = clampNumber(u, 0, 1);
+  let i = 0;
+  while (i < MOON_HOP_KEYFRAMES.length - 2 && clamped > MOON_HOP_KEYFRAMES[i + 1].t) {
+    i++;
+  }
+  const a = MOON_HOP_KEYFRAMES[i];
+  const b = MOON_HOP_KEYFRAMES[i + 1];
+  const span = Math.max(1e-5, b.t - a.t);
+  const s = smoothstep01((clamped - a.t) / span);
+  return {
+    t: clamped,
+    torsoY: lerpNumber(a.torsoY, b.torsoY, s),
+    torsoPitch: lerpNumber(a.torsoPitch, b.torsoPitch, s),
+    torsoRollTowardLead: lerpNumber(a.torsoRollTowardLead, b.torsoRollTowardLead, s),
+    torsoTwistTowardLead: lerpNumber(a.torsoTwistTowardLead, b.torsoTwistTowardLead, s),
+    leadFootLift: lerpNumber(a.leadFootLift, b.leadFootLift, s),
+    leadFootForward: lerpNumber(a.leadFootForward, b.leadFootForward, s),
+    leadFootPitch: lerpNumber(a.leadFootPitch, b.leadFootPitch, s),
+    trailFootLift: lerpNumber(a.trailFootLift, b.trailFootLift, s),
+    trailFootForward: lerpNumber(a.trailFootForward, b.trailFootForward, s),
+    trailFootPitch: lerpNumber(a.trailFootPitch, b.trailFootPitch, s),
+    armLift: lerpNumber(a.armLift, b.armLift, s),
+    armSpread: lerpNumber(a.armSpread, b.armSpread, s),
+    armForward: lerpNumber(a.armForward, b.armForward, s),
+    kneeBendZ: lerpNumber(a.kneeBendZ, b.kneeBendZ, s),
+    headPitch: lerpNumber(a.headPitch, b.headPitch, s),
+  };
+}
+
 /**
  * Hybrid locomotion: authored 4-keyframe cartoon walk curves for snappy bounce,
  * waddle, and weight, layered with world-space planted-foot locking and `sampleGround`.
@@ -161,6 +348,29 @@ export function createCartoonKeyposePlugin(): LocomotionPlugin {
   let restBlend = 1;
   let isIdle = true;
   let smoothedHeadYaw = 0;
+  let justReset = true;
+
+  // Low-gravity hop mode state (Mars / Moon).
+  let inHopMode = false;
+  let hopPhase = 0;
+  let hopIndex = 0;
+  let hopDuration = 1.0;
+  let hopApexHeight = 0.25;
+  let hopFlightGravity = EARTH_GRAVITY_MPS2;
+  let hopStyleScale = 1.0;
+  let hopStartPos: Vec3Like = { ...ZERO_VEC3 };
+  let hopTargetPos: Vec3Like = { ...ZERO_VEC3 };
+  let hopStartYaw = 0;
+  let hopEndYaw = 0;
+  let hopFlightVelX = 0;
+  let hopFlightVelZ = 0;
+  let leftFootWorld: Vec3Like = { ...ZERO_VEC3 };
+  let rightFootWorld: Vec3Like = { ...ZERO_VEC3 };
+  let airStartLeftOffset: Vec3Like = { ...ZERO_VEC3 };
+  let airStartRightOffset: Vec3Like = { ...ZERO_VEC3 };
+  let hopFlightStarted = false;
+  let hopLanded = false;
+  let hopRedirected = false;
 
   function syncFeetAtRest(pos: Vec3Like, currentYaw: number, rig: RigMeasurements): void {
     plantedWorld = footRestWorldPosition(pos, currentYaw, rig.rightFootRestLocal);
@@ -168,6 +378,21 @@ export function createCartoonKeyposePlugin(): LocomotionPlugin {
     swingTargetWorld = { ...swingStartWorld };
     plantedYaw = currentYaw;
     swingStartYaw = currentYaw;
+  }
+
+  function lockBothFeetAtRest(pos: Vec3Like, currentYaw: number, rig: RigMeasurements, sampleGround?: GroundSampler): void {
+    const leftRest = footRestWorldPosition(pos, currentYaw, rig.leftFootRestLocal);
+    const rightRest = footRestWorldPosition(pos, currentYaw, rig.rightFootRestLocal);
+    leftFootWorld = {
+      x: leftRest.x,
+      y: sampleGround ? sampleGround(leftRest.x, leftRest.z).y : pos.y,
+      z: leftRest.z,
+    };
+    rightFootWorld = {
+      x: rightRest.x,
+      y: sampleGround ? sampleGround(rightRest.x, rightRest.z).y : pos.y,
+      z: rightRest.z,
+    };
   }
 
   function reset(state: LocomotionStateSnapshot, rig: RigMeasurements): void {
@@ -181,7 +406,27 @@ export function createCartoonKeyposePlugin(): LocomotionPlugin {
     restBlend = 1;
     isIdle = true;
     smoothedHeadYaw = 0;
+    justReset = true;
+    inHopMode = false;
+    hopPhase = 0;
+    hopIndex = 0;
+    hopDuration = 1.0;
+    hopApexHeight = 0.25;
+    hopFlightGravity = EARTH_GRAVITY_MPS2;
+    hopStyleScale = 1.0;
+    hopStartPos = { ...state.position };
+    hopTargetPos = { ...state.position };
+    hopStartYaw = yaw;
+    hopEndYaw = yaw;
+    hopFlightVelX = 0;
+    hopFlightVelZ = 0;
+    airStartLeftOffset = { ...ZERO_VEC3 };
+    airStartRightOffset = { ...ZERO_VEC3 };
+    hopFlightStarted = false;
+    hopLanded = false;
+    hopRedirected = false;
     syncFeetAtRest(state.position, yaw, rig);
+    lockBothFeetAtRest(state.position, yaw, rig);
   }
 
   function advanceHalfStride(
@@ -221,6 +466,443 @@ export function createCartoonKeyposePlugin(): LocomotionPlugin {
     };
   }
 
+  function beginNextHop(
+    startPos: Vec3Like,
+    currentYaw: number,
+    g: number,
+    moonFactor: number,
+    command: LocomotionCommand,
+    distToTarget: number,
+    rig: RigMeasurements,
+  ): void {
+    const groundY = command.sampleGround(startPos.x, startPos.z).y;
+    hopStartPos = { x: startPos.x, y: groundY, z: startPos.z };
+    hopStartYaw = currentYaw;
+    hopFlightGravity = g;
+    hopStyleScale = lerpNumber(0.62, 1.08, moonFactor);
+    hopFlightStarted = false;
+    hopLanded = false;
+    hopRedirected = false;
+    lockBothFeetAtRest(hopStartPos, currentYaw, rig, command.sampleGround);
+
+    const desiredYaw = command.target
+      ? Math.atan2(command.target.x - startPos.x, command.target.z - startPos.z)
+      : currentYaw;
+    const yawDiff = wrapAngle(desiredYaw - currentYaw);
+    hopEndYaw = wrapAngle(currentYaw + clampNumber(yawDiff, -1.65, 1.65));
+
+    const baseApex = lerpNumber(0.058, 0.265, moonFactor);
+    const shortScale = clampNumber(Math.sqrt(distToTarget / 1.0), 0.42, 1.0);
+    hopApexHeight = baseApex * shortScale;
+
+    const flightDur = Math.sqrt((8 * hopApexHeight) / g);
+    hopDuration = clampNumber(flightDur / HOP_FLIGHT_SPAN, 0.42, 1.65);
+    const actualFlightDur = hopDuration * HOP_FLIGHT_SPAN;
+
+    const maxHopSpeed = Math.min(
+      command.maxSpeed * 0.88,
+      command.gait === 'run' ? command.maxSpeed : 1.24,
+    );
+    const alignScale = Math.max(0.28, Math.cos(yawDiff * 0.6));
+    const maxStepDist = maxHopSpeed * alignScale * actualFlightDur;
+    const stepDist = Math.min(distToTarget, maxStepDist);
+
+    if (command.target && stepDist >= distToTarget - 0.015 && Math.abs(yawDiff) <= 1.65) {
+      hopTargetPos = {
+        x: command.target.x,
+        y: command.sampleGround(command.target.x, command.target.z).y,
+        z: command.target.z,
+      };
+    } else {
+      const tx = startPos.x + Math.sin(hopEndYaw) * stepDist;
+      const tz = startPos.z + Math.cos(hopEndYaw) * stepDist;
+      hopTargetPos = {
+        x: tx,
+        y: command.sampleGround(tx, tz).y,
+        z: tz,
+      };
+    }
+
+    hopFlightVelX = (hopTargetPos.x - hopStartPos.x) / actualFlightDur;
+    hopFlightVelZ = (hopTargetPos.z - hopStartPos.z) / actualFlightDur;
+  }
+
+  function updateLowGravityHop(
+    safeDt: number,
+    g: number,
+    wantsHopMode: boolean,
+    moonFactor: number,
+    command: LocomotionCommand,
+    state: LocomotionStateSnapshot,
+    rig: RigMeasurements,
+  ): LocomotionStepResult {
+    const distToTarget = command.target
+      ? Math.hypot(command.target.x - state.position.x, command.target.z - state.position.z)
+      : 0;
+    const hasTarget = distToTarget > 0.022;
+
+    if (hopPhase === 0 && !hopFlightStarted) {
+      if (!wantsHopMode || !hasTarget) {
+        inHopMode = false;
+        syncFeetAtRest(state.position, yaw, rig);
+        return {
+          position: {
+            x: state.position.x,
+            y: command.sampleGround(state.position.x, state.position.z).y,
+            z: state.position.z,
+          },
+          yaw,
+          pose: REST_CAPSULE_HUMAN_POSE,
+          moving: false,
+        };
+      }
+      beginNextHop(state.position, yaw, g, moonFactor, command, distToTarget, rig);
+    }
+
+    // Speed up completion slightly if Earth gravity is turned back on mid-hop.
+    const hopDtScale = wantsHopMode
+      ? 1
+      : clampNumber(Math.sqrt(g / Math.max(0.4, hopFlightGravity)), 1.0, 2.3);
+    const prevPhase = hopPhase;
+    hopPhase += (safeDt * hopDtScale) / hopDuration;
+
+    const airDt = Math.max(
+      0,
+      (Math.min(hopPhase, HOP_FLIGHT_END) - Math.max(prevPhase, HOP_FLIGHT_START)) *
+        hopDuration,
+    );
+
+    let nextX = state.position.x;
+    let nextZ = state.position.z;
+    let airHeight = 0;
+
+    if (hopPhase <= HOP_FLIGHT_START) {
+      // Grounded crouch windup: keep hips and boots planted so slip stays strictly zero.
+      nextX = hopStartPos.x;
+      nextZ = hopStartPos.z;
+      const desiredCrouchYaw = clampNumber(wrapAngle(hopEndYaw - hopStartYaw), -0.42, 0.42);
+      const crouchTargetYaw = wrapAngle(hopStartYaw + desiredCrouchYaw);
+      const yawDiff = wrapAngle(crouchTargetYaw - yaw);
+      const maxTurnStep = clampNumber(yawDiff, -3.4 * safeDt, 3.4 * safeDt);
+      yaw = wrapAngle(yaw + maxTurnStep);
+      velX = 0;
+      velZ = 0;
+    } else if (hopPhase < HOP_FLIGHT_END || !hopLanded) {
+      if (!hopFlightStarted) {
+        hopFlightStarted = true;
+        airStartLeftOffset = footWorldToLocalOffset(
+          leftFootWorld,
+          hopStartPos,
+          yaw,
+          rig.leftFootRestLocal,
+        );
+        airStartRightOffset = footWorldToLocalOffset(
+          rightFootWorld,
+          hopStartPos,
+          yaw,
+          rig.rightFootRestLocal,
+        );
+      }
+
+      const airU = clampNumber((hopPhase - HOP_FLIGHT_START) / HOP_FLIGHT_SPAN, 0, 1);
+
+      // Handle live mid-walk redirection cleanly in flight without exceeding speed cap.
+      if (command.target && airU < 0.72) {
+        const targetShift = Math.hypot(
+          command.target.x - hopTargetPos.x,
+          command.target.z - hopTargetPos.z,
+        );
+        if (targetShift > 0.28 || hopRedirected) {
+          hopRedirected = true;
+          const desiredYaw = Math.atan2(
+            command.target.x - state.position.x,
+            command.target.z - state.position.z,
+          );
+          const yawDiff = wrapAngle(desiredYaw - yaw);
+          yaw = wrapAngle(yaw + clampNumber(yawDiff, -4.6 * airDt, 4.6 * airDt));
+          hopEndYaw = yaw;
+
+          const remAirSec = Math.max(0.05, (HOP_FLIGHT_END - hopPhase) * hopDuration);
+          const maxHopSpeed = Math.min(
+            command.maxSpeed * 0.9,
+            command.gait === 'run' ? command.maxSpeed : 1.24,
+          );
+          const curDist = Math.hypot(
+            command.target.x - state.position.x,
+            command.target.z - state.position.z,
+          );
+          const targetSpeed =
+            clampNumber(curDist / remAirSec, 0.08, maxHopSpeed) *
+            Math.max(0.28, Math.cos(yawDiff * 0.6));
+          hopFlightVelX = MathUtils.damp(
+            hopFlightVelX,
+            Math.sin(yaw) * targetSpeed,
+            3.2,
+            Math.max(airDt, safeDt),
+          );
+          hopFlightVelZ = MathUtils.damp(
+            hopFlightVelZ,
+            Math.cos(yaw) * targetSpeed,
+            3.2,
+            Math.max(airDt, safeDt),
+          );
+          const velMag = Math.hypot(hopFlightVelX, hopFlightVelZ);
+          if (velMag > maxHopSpeed && velMag > 1e-6) {
+            hopFlightVelX *= maxHopSpeed / velMag;
+            hopFlightVelZ *= maxHopSpeed / velMag;
+          }
+        }
+      }
+
+      if (!hopRedirected) {
+        const yawDiff = wrapAngle(hopEndYaw - yaw);
+        const remAirSec = Math.max(1e-4, (HOP_FLIGHT_END - Math.max(prevPhase, HOP_FLIGHT_START)) * hopDuration);
+        const turnRateNeeded = clampNumber(yawDiff / remAirSec, -4.8, 4.8);
+        const stepYaw = clampNumber(turnRateNeeded * Math.max(airDt, safeDt), -Math.abs(yawDiff), Math.abs(yawDiff));
+        yaw = wrapAngle(
+          yaw + (Math.abs(yawDiff) < 1e-4 ? 0 : Math.sign(yawDiff) * Math.abs(stepYaw)),
+        );
+      }
+
+      nextX = state.position.x + hopFlightVelX * airDt;
+      nextZ = state.position.z + hopFlightVelZ * airDt;
+      velX = hopFlightVelX;
+      velZ = hopFlightVelZ;
+
+      if (hopPhase >= HOP_FLIGHT_END) {
+        hopLanded = true;
+        airHeight = 0;
+        velX = 0;
+        velZ = 0;
+        hopStartPos = {
+          x: nextX,
+          y: command.sampleGround(nextX, nextZ).y,
+          z: nextZ,
+        };
+        hopTargetPos = { ...hopStartPos };
+        yaw = hopEndYaw;
+        lockBothFeetAtRest(hopTargetPos, yaw, rig, command.sampleGround);
+      } else {
+        const airArc = 4 * airU * (1 - airU);
+        airHeight = airArc * hopApexHeight;
+      }
+    } else {
+      // Grounded cushion absorption before starting the next hop or settling to rest.
+      nextX = hopTargetPos.x;
+      nextZ = hopTargetPos.z;
+      velX = 0;
+      velZ = 0;
+      airHeight = 0;
+    }
+
+    const groundCenter = command.sampleGround(nextX, nextZ);
+    const nextPos: Vec3Like = { x: nextX, y: groundCenter.y + airHeight, z: nextZ };
+
+    const arrivedAtEnd =
+      hopPhase >= 1.0 &&
+      (!hasTarget ||
+        (command.target !== null &&
+          Math.hypot(command.target.x - nextX, command.target.z - nextZ) <= 0.025));
+
+    if (hopPhase >= 1.0) {
+      if (!wantsHopMode) {
+        inHopMode = false;
+        hopPhase = 0;
+        hopFlightStarted = false;
+        hopLanded = false;
+        cyclePhase = 0;
+        currentStepIndex = 0;
+        syncFeetAtRest(nextPos, yaw, rig);
+        if (!hasTarget) {
+          isIdle = true;
+          return {
+            position: { x: nextX, y: groundCenter.y, z: nextZ },
+            yaw,
+            pose: REST_CAPSULE_HUMAN_POSE,
+            moving: false,
+          };
+        }
+        // Start an immediate Earth step smoothly from landed stance.
+        return update(safeDt, command, { position: nextPos, yaw, velocity: { x: 0, y: 0, z: 0 } }, rig);
+      }
+
+      if (!arrivedAtEnd && hasTarget) {
+        hopIndex++;
+        hopPhase = 0;
+        beginNextHop(
+          { x: nextX, y: groundCenter.y, z: nextZ },
+          yaw,
+          g,
+          moonFactor,
+          command,
+          Math.hypot(command.target!.x - nextX, command.target!.z - nextZ),
+          rig,
+        );
+      }
+    }
+
+    if (arrivedAtEnd) {
+      restBlend = MathUtils.damp(restBlend, 1, 16, safeDt);
+      if (restBlend >= 0.995) {
+        isIdle = true;
+        inHopMode = false;
+        hopPhase = 0;
+        hopFlightStarted = false;
+        hopLanded = false;
+        syncFeetAtRest(nextPos, yaw, rig);
+        return {
+          position: { x: nextX, y: groundCenter.y, z: nextZ },
+          yaw,
+          pose: REST_CAPSULE_HUMAN_POSE,
+          moving: false,
+        };
+      }
+    } else {
+      restBlend = MathUtils.damp(restBlend, 0, 24, safeDt);
+    }
+
+    const k = sampleHopKeyframeTable(clampNumber(hopPhase, 0, 1));
+    const leadIsLeft = hopIndex % 2 === 0;
+    const leadSign = leadIsLeft ? -1 : 1;
+    const isGroundedPhase = hopPhase <= HOP_FLIGHT_START || hopPhase >= HOP_FLIGHT_END;
+    const airU = clampNumber((hopPhase - HOP_FLIGHT_START) / HOP_FLIGHT_SPAN, 0, 1);
+    const startFade = isGroundedPhase ? 1 : 1 - smoothstep01(airU);
+
+    let leftPose: FootPose;
+    let rightPose: FootPose;
+
+    if (isGroundedPhase) {
+      const leftLocal = footWorldToLocalOffset(
+        leftFootWorld,
+        nextPos,
+        yaw,
+        rig.leftFootRestLocal,
+      );
+      const rightLocal = footWorldToLocalOffset(
+        rightFootWorld,
+        nextPos,
+        yaw,
+        rig.rightFootRestLocal,
+      );
+      leftPose = {
+        offset: leftLocal,
+        rotation: {
+          pitch: (leadIsLeft ? k.leadFootPitch : k.trailFootPitch) * hopStyleScale,
+          yaw: clampNumber(wrapAngle(hopStartYaw - yaw), -0.45, 0.45),
+          roll: 0,
+        },
+        kneeBend: { x: -0.025 * (k.kneeBendZ / 0.095), y: 0, z: k.kneeBendZ },
+      };
+      rightPose = {
+        offset: rightLocal,
+        rotation: {
+          pitch: (leadIsLeft ? k.trailFootPitch : k.leadFootPitch) * hopStyleScale,
+          yaw: clampNumber(wrapAngle(hopStartYaw - yaw), -0.45, 0.45),
+          roll: 0,
+        },
+        kneeBend: { x: 0.025 * (k.kneeBendZ / 0.095), y: 0, z: k.kneeBendZ },
+      };
+    } else {
+      const leftLift = (leadIsLeft ? k.leadFootLift : k.trailFootLift) * hopStyleScale;
+      const rightLift = (leadIsLeft ? k.trailFootLift : k.leadFootLift) * hopStyleScale;
+      const leftForward = (leadIsLeft ? k.leadFootForward : k.trailFootForward) * hopStyleScale;
+      const rightForward = (leadIsLeft ? k.trailFootForward : k.leadFootForward) * hopStyleScale;
+      leftPose = {
+        offset: {
+          x: airStartLeftOffset.x * startFade,
+          y: Math.max(0, airStartLeftOffset.y * startFade) + leftLift,
+          z: airStartLeftOffset.z * startFade + leftForward,
+        },
+        rotation: {
+          pitch: (leadIsLeft ? k.leadFootPitch : k.trailFootPitch) * hopStyleScale,
+          yaw: 0,
+          roll: 0,
+        },
+        kneeBend: {
+          x: -(0.014 + 0.03 * (leftLift / 0.105)),
+          y: 0,
+          z: Math.max(0.02, leftLift * 0.95),
+        },
+      };
+      rightPose = {
+        offset: {
+          x: airStartRightOffset.x * startFade,
+          y: Math.max(0, airStartRightOffset.y * startFade) + rightLift,
+          z: airStartRightOffset.z * startFade + rightForward,
+        },
+        rotation: {
+          pitch: (leadIsLeft ? k.trailFootPitch : k.leadFootPitch) * hopStyleScale,
+          yaw: 0,
+          roll: 0,
+        },
+        kneeBend: {
+          x: 0.014 + 0.03 * (rightLift / 0.105),
+          y: 0,
+          z: Math.max(0.02, rightLift * 0.95),
+        },
+      };
+    }
+
+    const leftArmZ = (leadIsLeft ? -k.armForward : k.armForward) * hopStyleScale;
+    const rightArmZ = -leftArmZ;
+    const spread = k.armSpread * hopStyleScale;
+    const armLift = k.armLift * hopStyleScale;
+    const torsoRoll = -leadSign * k.torsoRollTowardLead * hopStyleScale;
+    const torsoTwist = leadSign * k.torsoTwistTowardLead * hopStyleScale;
+    const targetHeadYaw = command.target
+      ? clampNumber(
+          wrapAngle(
+            Math.atan2(command.target.x - nextX, command.target.z - nextZ) - yaw,
+          ) * 0.38,
+          -0.28,
+          0.28,
+        )
+      : 0;
+    smoothedHeadYaw = MathUtils.damp(smoothedHeadYaw, targetHeadYaw, 10, safeDt);
+
+    const pose: CapsuleHumanPose = {
+      torsoOffset: {
+        x: 0,
+        y: k.torsoY * (0.75 + 0.25 * hopStyleScale),
+        z: 0,
+      },
+      torsoRotation: {
+        pitch: k.torsoPitch,
+        yaw: torsoTwist,
+        roll: torsoRoll,
+      },
+      headOffset: ZERO_VEC3,
+      headRotation: {
+        pitch: k.headPitch * hopStyleScale,
+        yaw: smoothedHeadYaw - torsoTwist * 0.45,
+        roll: -torsoRoll * 0.5,
+      },
+      leftFoot: leftPose,
+      rightFoot: rightPose,
+      leftHand: {
+        offset: { x: -spread, y: armLift, z: leftArmZ },
+        rotation: {
+          pitch: -leftArmZ * 1.1 - armLift * 0.65,
+          yaw: 0,
+          roll: -0.06 - spread * 1.25,
+        },
+        elbowBend: { x: -0.035, y: 0, z: -0.05 + leftArmZ * 0.12 },
+      },
+      rightHand: {
+        offset: { x: spread, y: armLift, z: rightArmZ },
+        rotation: {
+          pitch: -rightArmZ * 1.1 - armLift * 0.65,
+          yaw: 0,
+          roll: 0.06 + spread * 1.25,
+        },
+        elbowBend: { x: 0.035, y: 0, z: -0.05 + rightArmZ * 0.12 },
+      },
+      restBlend: arrivedAtEnd ? restBlend : 0,
+    };
+
+    return { position: nextPos, yaw, pose, moving: true };
+  }
+
   function update(
     dt: number,
     command: LocomotionCommand,
@@ -235,6 +917,49 @@ export function createCartoonKeyposePlugin(): LocomotionPlugin {
         pose: REST_CAPSULE_HUMAN_POSE,
         moving: false,
       };
+    }
+
+    if (justReset) {
+      justReset = false;
+      const startGroundY = command.sampleGround(state.position.x, state.position.z).y;
+      const startAir = Math.max(0, state.position.y - startGroundY);
+      if (startAir > 0.02) {
+        inHopMode = true;
+        isIdle = false;
+        hopPhase = 0.53;
+        hopDuration = 1.05;
+        hopApexHeight = Math.max(0.18, startAir);
+        hopFlightGravity = clampNumber(command.gravity, 0.4, 25);
+        hopStyleScale = 1.0;
+        hopFlightStarted = true;
+        hopLanded = false;
+        hopFlightVelX = state.velocity.x;
+        hopFlightVelZ = state.velocity.z;
+        hopEndYaw = yaw;
+      }
+    }
+
+    const g = clampNumber(command.gravity, 0.4, 25);
+    const gRatio = g / EARTH_GRAVITY_MPS2;
+    const wantsHopMode = gRatio < 0.65;
+    const moonFactor = smoothstep01((0.46 - gRatio) / 0.29);
+
+    if (wantsHopMode && !inHopMode) {
+      const dist = command.target
+        ? Math.hypot(command.target.x - state.position.x, command.target.z - state.position.z)
+        : 0;
+      if (dist > 0.022) {
+        inHopMode = true;
+        isIdle = false;
+        hopPhase = 0;
+        hopFlightStarted = false;
+        hopLanded = false;
+        lockBothFeetAtRest(state.position, yaw, rig, command.sampleGround);
+      }
+    }
+
+    if (inHopMode) {
+      return updateLowGravityHop(safeDt, g, wantsHopMode, moonFactor, command, state, rig);
     }
 
     let desiredVelX = 0;
@@ -560,7 +1285,7 @@ export function createCartoonKeyposePlugin(): LocomotionPlugin {
     label: 'Key-Pose Bounce',
     approach: 'Hybrid · 4-key cartoon + foot lock',
     summary:
-      'Authored 4-beat Contact/Down/Passing/Up walk curves layered with world-locked boots and smooth turns.',
+      'Authored Contact/Down/Passing/Up Earth walk and Squash/Float/Cushion Moon/Mars hop keyframes with world-locked boots.',
     reset,
     update,
   };

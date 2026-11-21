@@ -1,5 +1,8 @@
 # Changelog
 
+- `triangular-engine/procedural`: `CapsuleCatTailMesh` accepts an optional `tipRadiusRatio` for a thicker rounded tail.
+- `triangular-engine/procedural`: `CapsuleCatActor` accepts the optional `closedSmileStyle` for a shallow paired-curve smile with the existing expression rig.
+
 - `triangular-engine/cache`: expose the persistent cache through a worker-safe entry; planet graph caching no longer pulls Angular into terrain bake workers.
 
 - `triangular-engine/atmosphere`, `planet-material`: finite foreground-atmosphere haze for opaque planet surfaces, including a moon seen through another planet's limb. `foregroundPerspective()` composes after the body's own haze through the new ordered atmosphere overlays. It marches per fragment and currently assumes a spherical atmosphere and an unscaled planet root.

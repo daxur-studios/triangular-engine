@@ -37,6 +37,7 @@ import {
 import {
   buildCapsuleCatBodyMesh,
   type CapsuleCatBodyMeshResult,
+  type CapsuleCatClosedSmileStyle,
 } from './capsule-cat-body-material';
 import {
   buildCapsuleCatFaceRig,
@@ -60,6 +61,8 @@ export interface CapsuleCatActorOptions {
   readonly seed?: string | number;
   readonly facialController?: FacialAnimationController;
   readonly autoBlink?: boolean;
+  /** Closed positive smile shape. Defaults to the capsule cat's omega smile. */
+  readonly closedSmileStyle?: CapsuleCatClosedSmileStyle;
 }
 
 export class CapsuleCatActor {
@@ -122,7 +125,7 @@ export class CapsuleCatActor {
     this.limbsGroup.name = 'capsule-cat-limbs-group';
     this.root.add(this.torsoGroup, this.limbsGroup);
 
-    this.body = buildCapsuleCatBodyMesh(this.currentDna);
+    this.body = buildCapsuleCatBodyMesh(this.currentDna, options.closedSmileStyle);
     this.torsoGroup.add(this.body.mesh);
 
     this.faceRig = buildCapsuleCatFaceRig(this.currentDna);

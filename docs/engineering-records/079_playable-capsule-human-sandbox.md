@@ -70,6 +70,11 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **[verification]** All 46 focused Studio and sandbox specs and the library build passed. The live Chromium check walked Shaggy to a clicked point, completed all three course legs on both spacesuit presets with Key-Pose Bounce, switched back to the Classic crowd controls, and checked the walk controls at 390 and 320 pixels without browser errors. The course recorded no planted boot slip or below-floor soles on either preset. Captures are local only. Regenerate with `node artifacts/concept-turnaround/check-shaggy-walk.mjs`.
 - **[next]** Use a wave and a rock pickup to review the gloves in open-hand and gripping poses. The walk-and-run tracker still requires a run on the approved spacesuit.
 
+## 2026-11-20 — Earth, Mars, and Moon gravity walks & hops
+
+- **[action]** Extended `LocomotionCommand` and `ActionUpdateContext` in `capsule-motion-types.ts` with `gravity: number` (`GRAVITY_PRESETS`: Earth `9.81`, Mars `3.72`, Moon `1.62` m/s²). Enabled bounded airborne `position.y` lift, gravity-scaled pigtail secondary spring, and `maxAirHeightM` / `airborneSeconds` metrics in `pigtail-sandbox-walker.ts`. Upgraded both starter plugins (`procedural-stepper` with true ballistic crouch-launch-land physics and `cartoon-keypose` with 7-key Squash/Float/Cushion low-G curves), wired Earth/Mars/Moon buttons, `?gravity=` query param, and `Air` metric into `/capsule-human-sandbox`, and updated `MOTION_RACE_BRIEF.md`.
+- **[verification]** All 31 focused specs in `pigtail-sandbox-walker.spec.ts` and `experimental-pigtail-head.spec.ts` passed (`ChromeHeadless`), covering Earth (`< 0.01 m` sole clearance), Mars (`> 0.03 m`), Moon (`> 0.12 m` and higher than Mars, `> 0.25 s` two-foot airtime), `< 1 mm` planted slip, zero below-floor soles, and mid-course Moon -> Earth switching. `npx ng build demo-app` exited `0`, and `npm run triangular -- docs records check` had zero errors on Plan/ER 079. Live DevTools browser verification is pending (Chrome remote debugging `DevToolsActivePort` was not active).
+
 ## Scope history
 
 <!-- tri:scope-history -->

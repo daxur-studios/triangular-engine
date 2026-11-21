@@ -35,6 +35,7 @@ import {
 import { buildExperimentalPigtailHead, EXPERIMENTAL_PIGTAIL_PRESETS } from './experimental-pigtail-head';
 import { buildExperimentalPigtailBody } from './experimental-pigtail-body';
 import type { CapsuleHairStyle } from './experimental-capsule-hair';
+import { buildExperimentalSpaceCat, EXPERIMENTAL_SPACE_CAT } from './experimental-space-cat';
 
 export type CharacterStudioFamilyId = 'human' | 'cat';
 export type CharacterStudioExpression = ExtendedEmotionName | 'awe';
@@ -283,19 +284,34 @@ export function createCharacterStudioContributions() {
     },
   };
 
-  const catActor = new CapsuleCatActor({ dna: CAPSULE_CAT_PRESETS[0], autoBlink: true });
-  const catPresets = presets(CAPSULE_CAT_PRESETS);
+  const standardCat = new CapsuleCatActor({ dna: CAPSULE_CAT_PRESETS[0], autoBlink: true });
+  const catRoot = new Group();
+  catRoot.add(standardCat.root);
+  let catActor = standardCat;
+  let conceptCat: ReturnType<typeof buildExperimentalSpaceCat> | undefined;
+  const catPresets = presets([EXPERIMENTAL_SPACE_CAT, ...CAPSULE_CAT_PRESETS]);
   const catDefault = CAPSULE_CAT_PRESETS[0].id!;
   const catMotions = choices(['idle', 'goofy_walk', 'bound_run', 'float']);
+  const activateCat = (next: CapsuleCatActor) => {
+    if (next === catActor) return;
+    next.setLocomotion(catActor.locomotion);
+    catActor.root.removeFromParent();
+    catActor = next;
+    catRoot.add(catActor.root);
+  };
+  const setCatAppearance = (changes: Parameters<ReturnType<typeof buildExperimentalSpaceCat>['setDna']>[0]) => {
+    if (conceptCat?.actor === catActor) conceptCat.setDna(changes);
+    else catActor.setDna(changes);
+  };
 
   const cat: CharacterStudioContribution = {
     id: 'cat',
     name: 'Capsule Space Cat',
     category: 'Companion',
     summary: 'A four-legged capsule explorer with expressive ears, whiskers and space gear.',
-    root: catActor.root,
-    cameraTargetY: 0.34,
-    faceTargetY: 0.49,
+    root: catRoot,
+    get cameraTargetY() { return catActor === standardCat ? 0.34 : 0.55; },
+    get faceTargetY() { return catActor === standardCat ? 0.49 : 0.69; },
     defaultPresetId: catDefault,
     presets: catPresets,
     motions: catMotions,
@@ -334,28 +350,46 @@ export function createCharacterStudioContributions() {
       },
     ],
     selectPreset: (presetId) => {
+      if (presetId === EXPERIMENTAL_SPACE_CAT.id) {
+        if (conceptCat) conceptCat.setDna(EXPERIMENTAL_SPACE_CAT);
+        else conceptCat = buildExperimentalSpaceCat(true, standardCat.facialController);
+        activateCat(conceptCat.actor);
+        return;
+      }
       const preset = CAPSULE_CAT_PRESETS.find((candidate) => candidate.id === presetId);
-      if (preset) catActor.setDna(preset);
+      if (preset) {
+        standardCat.setDna(preset);
+        activateCat(standardCat);
+      }
     },
     setMotion: (motionId) => catActor.setLocomotion(motionId as CapsuleCatGaitMode),
     setExpression: (expression) => catActor.facialController.setExpression(expression === 'awe' ? 'neutral' : expression, 1, 0.2),
     setControl: (controlId, value) => {
       switch (controlId) {
-        case 'bodyPatternId': catActor.setDna({ bodyPattern: value as CapsuleCatBodyPatternId }); break;
-        case 'furColor': catActor.setDna({ furColor: value }); break;
-        case 'furAccentColor': catActor.setDna({ furAccentColor: value }); break;
-        case 'packId': catActor.setDna({ pack: value as CapsuleCatPackId }); break;
-        case 'helmet': catActor.setDna({ helmet: value === 'true' }); break;
-        case 'harness': catActor.setDna({ harness: value === 'true' }); break;
-        case 'booties': catActor.setDna({ suitBooties: value === 'true' }); break;
-        case 'restMouthPose': catActor.setDna({ restMouthPose: value as CapsuleCatMouthPose }); break;
-        case 'tuft': catActor.setDna({ tuft: value === 'true' }); break;
-        case 'panicked': catActor.setDna({ panicked: value === 'true' }); break;
+        case 'bodyPatternId': setCatAppearance({ bodyPattern: value as CapsuleCatBodyPatternId }); break;
+        case 'furColor': setCatAppearance({ furColor: value }); break;
+        case 'furAccentColor': setCatAppearance({ furAccentColor: value }); break;
+        case 'packId': setCatAppearance({ pack: value as CapsuleCatPackId }); break;
+        case 'helmet': setCatAppearance({ helmet: value === 'true' }); break;
+        case 'harness': setCatAppearance({ harness: value === 'true' }); break;
+        case 'booties': setCatAppearance({ suitBooties: value === 'true' }); break;
+        case 'restMouthPose': setCatAppearance({ restMouthPose: value as CapsuleCatMouthPose }); break;
+        case 'tuft': setCatAppearance({ tuft: value === 'true' }); break;
+        case 'panicked': setCatAppearance({ panicked: value === 'true' }); break;
       }
     },
-    randomize: (seed) => catActor.setSeed(`character-studio-cat-${seed}`),
-    update: (deltaSeconds) => catActor.update(deltaSeconds),
-    dispose: () => catActor.dispose(),
+    randomize: (seed) => {
+      standardCat.setSeed(`character-studio-cat-${seed}`);
+      activateCat(standardCat);
+    },
+    update: (deltaSeconds) => {
+      if (conceptCat?.actor === catActor) conceptCat.update(deltaSeconds);
+      else catActor.update(deltaSeconds);
+    },
+    dispose: () => {
+      standardCat.dispose();
+      conceptCat?.dispose();
+    },
   };
 
   return { human, cat };

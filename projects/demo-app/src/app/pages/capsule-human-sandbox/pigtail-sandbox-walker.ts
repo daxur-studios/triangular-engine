@@ -6,6 +6,7 @@ import { buildExperimentalPigtailHead } from '../character-studio/experimental-p
 import {
   blendCapsuleHumanPoses,
   createFlatGroundSampler,
+  EARTH_GRAVITY_MPS2,
   REST_CAPSULE_HUMAN_POSE,
   smoothstep01,
   type CapsuleHumanPose,
@@ -28,12 +29,15 @@ export interface PigtailWalkerOptions {
   readonly sampleGround?: GroundSampler;
   readonly maxSpeed?: number;
   readonly gait?: 'walk' | 'run';
+  readonly gravity?: number;
 }
 
 export interface WalkMetrics {
   readonly maxFootSlipMm: number;
   readonly minSoleY: number;
   readonly maxFootLiftM: number;
+  readonly maxAirHeightM: number;
+  readonly airborneSeconds: number;
   readonly peakSpeedMps: number;
   readonly elapsedSeconds: number;
   readonly stepCount: number;
@@ -69,6 +73,7 @@ export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
     options.sampleGround ?? createFlatGroundSampler(0);
   const maxSpeed = options.maxSpeed ?? DEFAULT_MAX_SPEED;
   let gait: 'walk' | 'run' = options.gait ?? 'walk';
+  let gravity = MathUtils.clamp(options.gravity ?? EARTH_GRAVITY_MPS2, 0.4, 25);
 
   let activePlugin: LocomotionPlugin =
     options.plugin ??
@@ -105,6 +110,8 @@ export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
     maxFootSlipMm: 0,
     minSoleY: 0,
     maxFootLiftM: 0,
+    maxAirHeightM: 0,
+    airborneSeconds: 0,
     peakSpeedMps: 0,
     elapsedSeconds: 0,
     stepCount: 0,
@@ -118,6 +125,8 @@ export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
       maxFootSlipMm: 0,
       minSoleY: 0,
       maxFootLiftM: 0,
+      maxAirHeightM: 0,
+      airborneSeconds: 0,
       peakSpeedMps: 0,
       elapsedSeconds: 0,
       stepCount: 0,
@@ -222,16 +231,18 @@ export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
     dt: number,
     pose: CapsuleHumanPose,
     speed: number,
+    rootVelY: number,
+    currentGravity: number,
   ): void {
     if (dt <= 0) return;
     const torsoVelX = (pose.torsoOffset.x - prevTorsoX) / dt;
-    const torsoVelY = (pose.torsoOffset.y - prevTorsoY) / dt;
+    const totalTorsoVelY = rootVelY + (pose.torsoOffset.y - prevTorsoY) / dt;
     prevTorsoX = pose.torsoOffset.x;
     prevTorsoY = pose.torsoOffset.y;
 
     const activeWeight = 1 - Math.max(0, Math.min(1, pose.restBlend ?? 0));
     const targetPitch = MathUtils.clamp(
-      (-torsoVelY * 0.38 + speed * 0.045) * activeWeight,
+      (-totalTorsoVelY * 0.38 + speed * 0.045) * activeWeight,
       -0.24,
       0.24,
     );
@@ -241,8 +252,9 @@ export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
       0.24,
     );
 
-    const k = 120;
-    const c = 15;
+    const gScale = Math.sqrt(MathUtils.clamp(currentGravity / EARTH_GRAVITY_MPS2, 0.12, 2.0));
+    const k = 120 * gScale;
+    const c = 15 * gScale;
     pigtailPitchVel += (k * (targetPitch - pigtailPitch) - c * pigtailPitchVel) * dt;
     pigtailPitch = MathUtils.clamp(pigtailPitch + pigtailPitchVel * dt, -0.26, 0.26);
 
@@ -258,6 +270,7 @@ export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
     let minSoleY = metricsState.minSoleY;
     let maxLiftM = metricsState.maxFootLiftM;
     let stepCount = metricsState.stepCount;
+    const bootSoleHeights: [number, number] = [0, 0];
 
     boots.forEach((boot, index) => {
       boot.getWorldPosition(tmpBootPos);
@@ -266,6 +279,7 @@ export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
       maxLiftM = Math.max(maxLiftM, height);
 
       const soleMin = tmpBox.setFromObject(boot, true).min.y - localGroundY;
+      bootSoleHeights[index] = soleMin;
       minSoleY = Math.min(minSoleY, soleMin);
 
       if (height > 0.022) {
@@ -289,10 +303,20 @@ export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
       prevBootGrounded[index] = grounded;
     });
 
+    const minBootSoleClearance = Math.min(bootSoleHeights[0], bootSoleHeights[1]);
+    const maxAirHeightM = Math.max(
+      metricsState.maxAirHeightM,
+      Math.max(0, minBootSoleClearance),
+    );
+    const airborneSeconds =
+      metricsState.airborneSeconds + (minBootSoleClearance > 0.015 ? dt : 0);
+
     metricsState = {
       maxFootSlipMm: maxSlipMm,
       minSoleY,
       maxFootLiftM: maxLiftM,
+      maxAirHeightM,
+      airborneSeconds,
       peakSpeedMps: Math.max(metricsState.peakSpeedMps, speed),
       elapsedSeconds: metricsState.elapsedSeconds + dt,
       stepCount,
@@ -308,7 +332,7 @@ export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
 
     const stepResult = activePlugin.update(
       delta,
-      { target, maxSpeed, gait, sampleGround },
+      { target, maxSpeed, gait, sampleGround, gravity },
       snapshotState(),
       body.measurements,
     );
@@ -326,13 +350,20 @@ export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
       nextZ = prevZ + dz * ratio;
     }
     const clampedGroundY = sampleGround(nextX, nextZ).y;
-    const clampedPos: Vec3Like = { x: nextX, y: clampedGroundY, z: nextZ };
+    const rawNextY = Number.isFinite(stepResult.position.y)
+      ? stepResult.position.y
+      : clampedGroundY;
+    const nextY = stepResult.moving
+      ? MathUtils.clamp(rawNextY, clampedGroundY, clampedGroundY + 3.0)
+      : clampedGroundY;
+    const clampedPos: Vec3Like = { x: nextX, y: nextY, z: nextZ };
 
     const actualDist = Math.hypot(nextX - prevX, nextZ - prevZ);
     const speed = actualDist / delta;
+    const rootVelY = (nextY - root.position.y) / delta;
     velocity = {
       x: (nextX - prevX) / delta,
-      y: (clampedGroundY - root.position.y) / delta,
+      y: rootVelY,
       z: (nextZ - prevZ) / delta,
     };
 
@@ -356,7 +387,7 @@ export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
 
     lastPose = finalPose;
     body.setPose(finalPose);
-    updatePigtailSpring(delta, finalPose, speed);
+    updatePigtailSpring(delta, finalPose, speed, rootVelY, gravity);
 
     moving = stepResult.moving;
     if (!moving) {
@@ -382,6 +413,12 @@ export function buildPigtailSandboxWalker(options: PigtailWalkerOptions = {}) {
     setPlugin,
     setGait(nextGait: 'walk' | 'run') {
       gait = nextGait;
+    },
+    setGravity(nextGravity: number) {
+      gravity = MathUtils.clamp(nextGravity, 0.4, 25);
+    },
+    get gravity(): number {
+      return gravity;
     },
     startComparisonCourse,
     get plugin(): LocomotionPlugin {
