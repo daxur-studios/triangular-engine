@@ -20,7 +20,11 @@ export function buildConceptCatSuit() {
       .replace('#include <common>', `#include <common>
 varying vec3 catPosition;
 uniform vec3 catFur, catAccent, catSuit, catTrim;
-uniform float catPattern;`)
+uniform float catPattern;
+
+float catRumpStroke(vec2 point, vec2 end) {
+  return length(point - end * clamp(dot(point, end) / dot(end, end), -1.0, 1.0));
+}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
 float seam = catPosition.z + 0.018;
 float feather = max(fwidth(seam), 0.002);
@@ -32,6 +36,17 @@ if (catPattern > 1.5) {
   stripe *= smoothstep(0.08, 0.10, catPosition.z);
   float suited = catPattern > 0.5 ? 1.0 : front;
   diffuseColor.rgb = mix(catFur, mix(catSuit, catTrim, stripe), suited);
+}
+
+// Paint a small asterisk onto the exposed rump below the tail.
+if (catPosition.z < -0.4 && (catPattern < 0.5 || catPattern > 1.5)) {
+  vec2 point = catPosition.xy;
+  float diagonals = min(catRumpStroke(point, vec2(0.022, 0.013)),
+                        catRumpStroke(point, vec2(0.022, -0.013)));
+  float distanceToInk = min(diagonals, catRumpStroke(point, vec2(0.0, 0.024))) - 0.0045;
+  float aa = max(fwidth(distanceToInk), 0.001);
+  float ink = 1.0 - smoothstep(-aa, aa, distanceToInk);
+  diffuseColor.rgb *= mix(vec3(1.0), vec3(0.48, 0.38, 0.34), ink);
 }`);
   };
   const geometry = new CapsuleGeometry(0.266, 0.355, 20, 48);

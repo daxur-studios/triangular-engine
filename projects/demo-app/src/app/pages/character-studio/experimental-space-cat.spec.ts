@@ -1,4 +1,4 @@
-import { type Mesh } from 'three';
+import type { BufferGeometry, Mesh, MeshStandardMaterial, WebGLProgramParametersWithUniforms, WebGLRenderer } from 'three';
 import { createCharacterStudioContributions } from './character-studio-contributions';
 import { buildExperimentalSpaceCat, EXPERIMENTAL_SPACE_CAT } from './experimental-space-cat';
 
@@ -73,6 +73,27 @@ describe('Character Studio concept-fit cat', () => {
         const floorDepth = Math.min(...[...pinkVertices].map(index => positions.getZ(index)));
         expect(rimDepth - floorDepth).toBeGreaterThan(0.03);
       }
+    } finally {
+      fit.dispose();
+    }
+  });
+
+  it('updates the rump material in place as the suit covers or exposes the rear', () => {
+    const fit = buildExperimentalSpaceCat(false);
+    try {
+      const torso = fit.actor.root.getObjectByName('concept-cat-torso') as Mesh<BufferGeometry, MeshStandardMaterial>;
+      const shader = {
+        uniforms: {}, vertexShader: '', fragmentShader: '#include <common>\n#include <color_fragment>',
+      } as WebGLProgramParametersWithUniforms;
+      torso.material.onBeforeCompile(shader, {} as WebGLRenderer);
+      const pattern = shader.uniforms['catPattern'];
+      expect(pattern.value).toBe(0);
+
+      fit.setDna({ bodyPattern: 'full_suit' });
+      expect(pattern.value).toBe(1);
+      fit.setDna({ bodyPattern: 'natural_two_tone' });
+      expect(pattern.value).toBe(2);
+      expect(fit.actor.root.getObjectByName('concept-cat-torso')).toBe(torso);
     } finally {
       fit.dispose();
     }
