@@ -38,7 +38,8 @@
               <app-capsule-part-preview class="part-preview hair-preview" part="hair" role="img"
                 aria-label="3D hairstyle on a scalp"
                 [hairStyle]="workshopHair()" [lockLength]="workshopLockLength()" [stacheShape]="stacheShape()"
-                [yawDegrees]="classicStacheSelected() ? stacheYaw() : workshopYaw()" />
+                [naturalHairColor]="naturalHairColor()"
+                [yawDegrees]="fitPreviewOpen() ? stacheYaw() : workshopYaw()" />
               <div class="hair-controls">
                 <div class="hair-styles" role="group" aria-label="Hairstyle">
                   @for (style of workshopHairChoices; track style.id) {
@@ -54,7 +55,7 @@
                       (input)="setWorkshopHair('shaggy', $any($event.target).valueAsNumber)">
                   </label>
                 }
-                @if (!classicStacheSelected()) {
+                @if (!fitPreviewOpen()) {
                 <label class="workshop-range">
                   <span>Rotate hair <output aria-hidden="true">{{ workshopYaw() }}°</output></span>
                   <input type="range" min="-180" max="180" step="1" [value]="workshopYaw()"
@@ -64,48 +65,61 @@
                 }
               </div>
             </div>
+            <div class="stache-options">
+              <label><input type="color" [value]="naturalHairHex()" (input)="setNaturalHairColor($any($event.target).value)"> Natural hair color</label>
+              <label><input type="checkbox" [checked]="withShortBeard()" (change)="setShortBeard($any($event.target).checked)"> Short beard</label>
+            </div>
           </section>
 
-          @if (classicStacheSelected()) {
+          @if (fitPreviewOpen()) {
             <section class="part-node stache-editor" aria-labelledby="stache-editor">
-              <h2 id="stache-editor">Fit Classic Stache</h2>
-              <div class="stache-pair" [class.stache-pair--with-reference]="stacheReference()">
-                @if (stacheReference(); as reference) {
+              <h2 id="stache-editor">{{ withShortBeard() ? 'Fit short beard' : 'Fit Classic Stache' }}</h2>
+              <div class="stache-pair" [class.stache-pair--with-reference]="fitReference()">
+                @if (fitReference(); as reference) {
                   <figure class="stache-reference">
-                    <img [src]="reference" alt="Uploaded Classic Stache head concept">
-                    <figcaption>Reference · approx. {{ stacheReferenceYaw }}°</figcaption>
+                    <img [src]="reference" [alt]="withShortBeard() ? 'Uploaded short beard concept' : 'Uploaded Classic Stache head concept'">
+                    <figcaption>Reference · approx. {{ fitReferenceYaw() }}°</figcaption>
                   </figure>
                 }
                 <div>
-                  <app-capsule-part-preview #shapeEditor class="part-preview stache-preview" part="stache" role="img"
-                    aria-label="3D head with draggable fringe and mustache tips"
+                  <app-capsule-part-preview #shapeEditor class="part-preview stache-preview" [part]="withShortBeard() ? 'beard' : 'stache'" role="img"
+                    [attr.aria-label]="withShortBeard() ? '3D short beard fitted to the head' : '3D head with draggable fringe and mustache tips'"
+                    [hairStyle]="workshopHair()" [lockLength]="workshopLockLength()" [naturalHairColor]="naturalHairColor()"
                     [yawDegrees]="stacheYaw()" [stacheShape]="stacheShape()" [withMustache]="withMustache()"
                     (stacheShapeChange)="setStacheShape($event)" />
-                  <div class="stache-handle-keys" aria-label="Shape controls">
-                    <button class="hair-style stache-fringe-key" type="button" aria-label="Fringe tip, adjust with arrow keys"
-                      (keydown)="shapeEditor.nudgeHandle('fringe', $event)">Fringe tip</button>
-                    @if (withMustache()) {
-                      <button class="hair-style stache-mustache-key" type="button" aria-label="Mustache tip, adjust with arrow keys"
-                        (keydown)="shapeEditor.nudgeHandle('mustache', $event)">Mustache tip</button>
-                    }
-                  </div>
+                  @if (!withShortBeard()) {
+                    <div class="stache-handle-keys" aria-label="Shape controls">
+                      <button class="hair-style stache-fringe-key" type="button" aria-label="Fringe tip, adjust with arrow keys"
+                        (keydown)="shapeEditor.nudgeHandle('fringe', $event)">Fringe tip</button>
+                      @if (withMustache()) {
+                        <button class="hair-style stache-mustache-key" type="button" aria-label="Mustache tip, adjust with arrow keys"
+                          (keydown)="shapeEditor.nudgeHandle('mustache', $event)">Mustache tip</button>
+                      }
+                    </div>
+                  }
                 </div>
               </div>
-              <p class="stache-instructions">Drag a dot or focus its label and use the arrow keys.</p>
+              @if (!withShortBeard()) {
+                <p class="stache-instructions">Drag a dot or focus its label and use the arrow keys.</p>
+              }
               <label class="workshop-range">
                 <span>Rotate both previews <output aria-hidden="true">{{ stacheYaw() }}°</output></span>
-                <input type="range" min="-60" max="60" step="1" [value]="stacheYaw()"
+                <input type="range" [min]="withShortBeard() ? -180 : -60" [max]="withShortBeard() ? 180 : 60" step="1" [value]="stacheYaw()"
                   aria-label="Rotate both previews" [attr.aria-valuetext]="stacheYaw() + ' degrees'"
                   (input)="setStacheYaw($any($event.target).valueAsNumber)">
               </label>
               <div class="stache-options">
-                <label><input type="checkbox" [checked]="withMustache()" (change)="setMustache($any($event.target).checked)"> Mustache</label>
-                <button class="hair-style" type="button" (click)="referenceFile.click()">{{ stacheReference() ? 'Replace reference' : 'Load reference' }}</button>
-                <input #referenceFile type="file" accept="image/*" hidden (change)="setStacheReference(referenceFile)">
-                @if (stacheReference()) {
-                  <button class="hair-style" type="button" (click)="setStacheYaw(stacheReferenceYaw)">Match angle</button>
+                @if (!withShortBeard()) {
+                  <label><input type="checkbox" [checked]="withMustache()" (change)="setMustache($any($event.target).checked)"> Mustache</label>
                 }
-                <button class="hair-style" type="button" (click)="setStacheShape(defaultStacheShape)">Reset shape</button>
+                <button class="hair-style" type="button" (click)="referenceFile.click()">{{ fitReference() ? 'Replace reference' : 'Load reference' }}</button>
+                <input #referenceFile type="file" accept="image/*" hidden (change)="setFitReference(referenceFile)">
+                @if (fitReference()) {
+                  <button class="hair-style" type="button" (click)="setStacheYaw(fitReferenceYaw())">Match angle</button>
+                }
+                @if (!withShortBeard()) {
+                  <button class="hair-style" type="button" (click)="setStacheShape(defaultStacheShape)">Reset shape</button>
+                }
               </div>
             </section>
           }

@@ -1,15 +1,23 @@
 import {
-  BufferGeometry, Float32BufferAttribute, Group, MathUtils, Mesh,
-  MeshStandardMaterial, SphereGeometry, Vector3, type TubeGeometry,
+  BufferGeometry, Float32BufferAttribute, Group, LatheGeometry, MathUtils, Mesh,
+  MeshStandardMaterial, SphereGeometry, Vector2, Vector3, type TubeGeometry,
 } from 'three';
 import { buildClayLock, type ClayLock } from './capsule-clay-lock';
-import { classicStacheFringe, classicStacheSweep, DEFAULT_STACHE_SHAPE } from './classic-stache-shapes';
+import {
+  boundStacheOffset, classicStacheFringe, classicStacheSweep, classicStacheTemple, DEFAULT_STACHE_SHAPE,
+} from './classic-stache-shapes';
 
 export type CapsuleHairStyle = 'pigtails' | 'shaggy' | 'classic-stache';
+export const DEFAULT_WORKSHOP_HAIR_COLORS: Readonly<Record<CapsuleHairStyle, number>> = {
+  pigtails: 0xc06730,
+  shaggy: 0x39322e,
+  'classic-stache': 0x473026,
+};
 type Point = readonly [number, number, number];
 
 interface HairFit {
   readonly radii: Point;
+  readonly scalpProfile: readonly Vector3[];
   readonly palette: { readonly hair: number; readonly curl: number; readonly band: number };
   readonly curlScale: Point;
 }
@@ -108,7 +116,7 @@ function rearScalpCap(width: number, depth: number, drop: number): BufferGeometr
 }
 
 /** Builds the hairstyle in scalp coordinates so a head and a preview can share the same recipe. */
-export function buildExperimentalCapsuleHair({ radii: [x, y, z], palette, curlScale }: HairFit) {
+export function buildExperimentalCapsuleHair({ radii: [x, y, z], scalpProfile, palette, curlScale }: HairFit) {
   const root = new Group();
   root.name = 'capsule-hair';
   const sphere = new SphereGeometry(1, 32, 24);
@@ -174,8 +182,7 @@ export function buildExperimentalCapsuleHair({ radii: [x, y, z], palette, curlSc
   function buildShaggy() {
     const group = new Group();
     group.name = 'capsule-hair-shaggy';
-    shaggyMaterials.push(...[0x39322e, 0x413934, 0x49403a].map(color =>
-      new MeshStandardMaterial({ color, roughness: .67 })));
+    shaggyMaterials.push(...Array.from({ length: 3 }, () => new MeshStandardMaterial({ roughness: .67 })));
     // Carry the crown under the fringe so the roots stay covered at every lock length.
     ellipsoid(group, shaggyMaterials[0], [0, 3.65, -.10], [1.31, .81, 1.40]);
     rearCap = rearScalpCap(x, z, 2.13);
@@ -191,6 +198,7 @@ export function buildExperimentalCapsuleHair({ radii: [x, y, z], palette, curlSc
 
   let classic: Group | undefined;
   let classicCap: BufferGeometry | undefined;
+  let classicCrown: BufferGeometry | undefined;
   let classicFringe: Mesh<TubeGeometry, MeshStandardMaterial> | undefined;
   let fringeOffset = DEFAULT_STACHE_SHAPE.fringe;
   const classicLocks: Mesh<TubeGeometry, MeshStandardMaterial>[] = [];
@@ -199,13 +207,22 @@ export function buildExperimentalCapsuleHair({ radii: [x, y, z], palette, curlSc
   function buildClassic() {
     const group = new Group();
     group.name = 'capsule-hair-classic-stache';
-    classicMaterials.push(...[0x473026, 0x54372a, 0x4e3428].map(color =>
-      new MeshStandardMaterial({ color, roughness: .69 })));
-    ellipsoid(group, classicMaterials[0], [0, 3.59, -.12], [1.33, .74, 1.41]);
+    classicMaterials.push(...Array.from({ length: 3 }, () => new MeshStandardMaterial({ roughness: .69 })));
+    // Follow the actual scalp curve so skin cannot poke through as the fringe moves.
+    const crownProfile = scalpProfile.filter(point => point.y >= .76).map(point => {
+      const lift = MathUtils.smoothstep(point.y, .76, .85);
+      return new Vector2(point.x * (.994 + .073 * lift), y * point.y + .09 * lift);
+    });
+    crownProfile.push(new Vector2(0, y + .09));
+    classicCrown = new LatheGeometry(crownProfile, 64).scale(x, 1, z);
+    const crown = new Mesh(classicCrown, classicMaterials[0]);
+    crown.name = 'classic-stache-crown';
+    group.add(crown);
     classicCap = rearScalpCap(x, z, 1.34);
     group.add(new Mesh(classicCap, classicMaterials[0]));
     classicStacheSweep.forEach((shape, index) => {
       const lock = new Mesh(buildClayLock(shape, .78), classicMaterials[index % classicMaterials.length]);
+      if (shape === classicStacheTemple) lock.name = 'classic-stache-temple';
       lock.position.set(...shape[0]);
       classicLocks.push(lock);
       group.add(lock);
@@ -221,19 +238,29 @@ export function buildExperimentalCapsuleHair({ radii: [x, y, z], palette, curlSc
 
   return {
     root,
-    setStyle(style: CapsuleHairStyle, length: number, offset = DEFAULT_STACHE_SHAPE.fringe) {
+    setStyle(style: CapsuleHairStyle, length: number, requested = DEFAULT_STACHE_SHAPE.fringe,
+      color = style === 'pigtails' ? palette.hair : DEFAULT_WORKSHOP_HAIR_COLORS[style],
+    ) {
       if (style === 'shaggy') {
         shaggy ??= buildShaggy();
+        shaggyMaterials.forEach((material, index) => material.color.setHex(color).multiplyScalar(1 + .23 * index));
         for (const lock of lockMeshes) lock.scale.setScalar(MathUtils.clamp(length, .86, 1.14));
       }
       if (style === 'classic-stache') {
         classic ??= buildClassic();
+        classicMaterials.forEach((material, index) => material.color.setHex(color).multiplyScalar([1, 1.36, 1.17][index]));
+        const offset = boundStacheOffset('fringe', ...requested);
         if (offset[0] !== fringeOffset[0] || offset[1] !== fringeOffset[1]) {
           const geometry = buildClayLock(classicStacheFringe(offset), .78);
           classicFringe!.geometry.dispose();
           classicFringe!.geometry = geometry;
           fringeOffset = offset;
         }
+      }
+      if (style === 'pigtails') {
+        hair.color.setHex(color);
+        if (color === palette.hair) curl.color.setHex(palette.curl);
+        else curl.color.copy(hair.color).multiplyScalar(1.32);
       }
       // Keep only the chosen part attached so framing excludes hidden hairstyles.
       const active = style === 'shaggy' ? shaggy! : style === 'classic-stache' ? classic! : pigtails;
@@ -249,6 +276,7 @@ export function buildExperimentalCapsuleHair({ radii: [x, y, z], palette, curlSc
       sphere.dispose();
       rearCap?.dispose();
       classicCap?.dispose();
+      classicCrown?.dispose();
       for (const lock of [...lockMeshes, ...classicLocks]) lock.geometry.dispose();
       for (const material of [...pigtailMaterials, ...shaggyMaterials, ...classicMaterials]) material.dispose();
     },

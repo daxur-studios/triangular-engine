@@ -219,6 +219,26 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **[decision]** Prototype direct shape editing in the Parts Workshop using Classic Stache. Fit a short swept hairstyle and an independently removable mustache, then expose a fringe tip and mirrored mustache tips as handles. Use the supplied three-quarter reference locally and share the turn angle with the assembled preview.
 - **[action]** Added the Classic Stache workshop entry and a close-up with drag handles and arrow-key controls. The fringe keeps its root fixed and the mustache mirrors the edited tip. Only the affected strand meshes are rebuilt. The authoring view shares its turn angle with the full character and uses an approximate 30° match for the supplied still. Edits and the uploaded reference live in the open page.
 - **[verification]** Passed 55 focused Studio and sandbox specs, the engine build, and the demo rebuild. A live Chromium check exercised both drags, keyboard edits, actual camera synchronization, mustache toggle, reset, speech playback and the 390 px layout. The wider demo suite disconnected in Karma. Visual acceptance against the supplied art is pending. Local-only evidence under `artifacts/classic-stache/`. Regenerate with `python artifacts/classic-stache/crop-reference.py <concept-sheet>` and `node artifacts/classic-stache/check-workshop.mjs` while the demo is running.
+- **[action]** Narrowed the mustache and lowered its tips. The mesh builder applies the workshop's limits to generated offsets as well as pointer edits. Replaced the crown base with a cap built from the head's own scalp profile and moved the loose temple lock up and back into that cap.
+- **[decision]** Use front-view clearance around the eye whites to fit Classic Stache, and check at the limit of each editable dimension. Use the scalp profile to carry the hair between locks and anchor the lock roots under its surface. Refit the clearance range if a future face places or sizes the eyes differently.
+- **[verification]** The 57 focused Studio and sandbox specs passed. After aligning the handle with clamped offsets, all 17 head specs passed again. The live workshop check passed, and the front renders showed clearance at the widest and highest edit while both elevated views showed the closed crown and rooted lock. Local-only captures regenerate with `node artifacts/classic-stache/check-fit.mjs` while the demo is running.
+- **[decision]** The developer accepted the revised Classic Stache fit. Close the shape-editing prototype with the existing drag, synchronized angle and speech checks. A proposed follow-up is one short beard on the same face to test whether the fitting workflow carries over to a part that follows the jaw and leaves the speaking mouth visible.
+
+## 2026-11-21 — Short beard fit
+
+- **[decision]** Fit the rounded, layered beard in the developer's supplied three-quarter reference as a separate part on the workshop head. Reuse the synchronized view, check the side joins, and keep the existing animated mouth clear.
+- **[action]** Fitted a jaw-following base with clay locks and an opening around the shared speaking mouth. The beard can be toggled alongside any workshop hairstyle. The short-beard link opens on Shaggy with a neutral face and an approximate 32° reference angle. The supplied art remains a local upload.
+- **[verification]** Passed 59 focused Studio and sandbox specs and the engine build. The new checks sample A, E and O mouth shapes from the front and both three-quarter views for beard coverage. Live browser checks passed for synchronized camera angles, reference loading, hairstyle swaps, speech preview, narrow layout and the Classic Stache handles. Reviewed front, three-quarter and profile renders. Evidence is local only. With the supplied reference at `artifacts/short-beard/short-beard-reference.png` and the demo serving, regenerate the renders with `node artifacts/short-beard/check-workshop.mjs`.
+- **[decision]** The developer accepted the beard fit and called out that Shaggy's light brown beard and charcoal scalp hair should share a natural colour. Keep the natural colour on the character so cosmetic scalp or facial hair overrides can be added independently later.
+- **[action]** Added a natural hair colour control to the workshop. Hair, brows, beard and mustache take their shades from the selected colour. The assembled character and part previews share the selection. Adding a beard or picking a colour keeps that value through hairstyle swaps.
+- **[verification]** Passed 60 focused Studio and sandbox specs. The live short-beard check confirmed the charcoal default, picker updates across the assembled character and both part previews, and colour retention across hairstyle changes. The Classic Stache workshop check also passed.
+
+## 2026-11-21 — WebGPU bob lock
+
+- **[decision]** Test one rounded side lock against the supplied bob concept. Use TSL vertex shaping on native WebGPU and adjust the hem with a uniform. Keep the root and mesh buffers fixed through the length range.
+- **[action]** Added the [WebGPU bob lock prototype](http://triangular-demo.localhost:4200/bob-hair-lock-spike) to the demo and spikes catalogs. TSL sweeps a rounded profile along a curve on the workshop scalp and lights it with normals computed from the surface. The angle slider turns the scalp and lock together.
+- **[verification]** Native WebGPU rendered the short, default and long settings from the front, three-quarter and profile views. Rendered comparisons confirmed the crown stayed fixed while the hem moved. The same mesh and material stayed live through the edits. Browser checks passed for both catalog entries and the narrow layout. All 61 focused specs and the engine build passed. Evidence is local only. With the demo serving, regenerate with `node artifacts/bob-hair-lock/check-demo.mjs` and compare the captured frames with `python artifacts/bob-hair-lock/check-pixels.py`.
+- **[finding]** The side lock's curved crown and rounded end are viable at a single-lock scale. Fitting the full bob will require overlapping side and back locks and an independently shaped fringe. The full character's WebGPU rendering is a separate integration step.
 
 ## Scope history
 
@@ -267,6 +287,16 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - Summary: Try direct editing of two swept procedural parts in the workshop.
 - Reason: Evaluate whether editing against concept art makes small shape changes faster.
 - Impact: App-local prototype on the existing expressive capsule rig.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-SHORT-BEARD" date="2026-11-21" kind="addition" origin="requested" disposition="accepted" scope-ids="short-beard-fit" -->
+- Summary: Fit one interchangeable short beard from the supplied concept in Parts Workshop.
+- Reason: Check whether the concept-fitting workflow extends to facial hair that wraps the jaw and borders the animated mouth.
+- Impact: Use the existing capsule head and rotation comparison, and keep the beard available separately from the hairstyle.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-WEBGPU-BOB-LOCK" date="2026-11-21" kind="addition" origin="requested" disposition="accepted" scope-ids="webgpu-bob-lock" -->
+- Summary: Prototype GPU shaping for one rounded bob lock on the workshop scalp.
+- Reason: Check whether a curve-driven lock can keep its attachment and a convincing silhouette as its length changes.
+- Impact: Isolated WebGPU demo with length and angle controls.
 <!-- /tri:scope-change -->
 <!-- tri:scope-baseline state="unconfirmed" -->
 <!-- /tri:scope-baseline -->

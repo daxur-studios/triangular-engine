@@ -1,5 +1,8 @@
-import { Box3, Matrix3, Mesh, MeshStandardMaterial, Raycaster, Vector2, Vector3, type Object3D, type WebGLProgramParametersWithUniforms, type WebGLRenderer } from 'three';
-import { FacialAnimationController } from 'triangular-engine/characters';
+import {
+  Box3, Matrix3, Mesh, MeshStandardMaterial, Raycaster, Vector2, Vector3, type Object3D, type TubeGeometry,
+  type WebGLProgramParametersWithUniforms, type WebGLRenderer,
+} from 'three';
+import { computeCapsuleMouthShape, FacialAnimationController } from 'triangular-engine/characters';
 import type { ExtendedEmotionName } from 'triangular-engine/characters';
 import type { CapsuleBodyUniformMap } from 'triangular-engine/procedural';
 import { createCharacterStudioContributions } from './character-studio-contributions';
@@ -100,7 +103,6 @@ describe('Character Studio experimental pigtail preset', () => {
       const accessory = human.root.getObjectByName('classic-mustache')!;
       const [left, right] = accessory.children as Mesh[];
       const rightTip = tip(right);
-      expect(edit.mustache[0]).toBe(.30);
       expect(rightTip.distanceTo(new Vector3(...stacheTip('mustache', edit.mustache)))).toBeLessThan(1e-6);
       expect(tip(left)).toEqual(rightTip.clone().multiply(new Vector3(-1, 1, 1)));
 
@@ -110,6 +112,165 @@ describe('Character Studio experimental pigtail preset', () => {
       human.setExperimentalHair('classic-stache', 1, DEFAULT_STACHE_SHAPE);
       expect(accessory.visible).toBeTrue();
       expect(tip(fringe(human.root))).toEqual(oldFringe);
+    } finally {
+      swatch.dispose();
+    }
+  });
+
+  it('swaps the short beard between hairstyles and restores the Classic Stache mustache', () => {
+    const human = studio.human;
+    human.selectPreset(EXPERIMENTAL_PIGTAIL_HEAD_ID);
+    human.setExperimentalHair('classic-stache', 1);
+    const mustache = human.root.getObjectByName('classic-mustache')!;
+
+    human.setExperimentalHair('shaggy', 1, DEFAULT_STACHE_SHAPE, true, true);
+    const beard = human.root.getObjectByName('short-beard')!;
+    const skin = human.root.getObjectByName('pigtail-skin')!;
+    expect(beard.parent).toBe(skin.parent);
+    for (const hair of ['pigtails', 'classic-stache'] as const) {
+      human.setExperimentalHair(hair, 1, DEFAULT_STACHE_SHAPE, true, true);
+      expect(human.root.getObjectByName('short-beard')).toBe(beard);
+      expect(beard.visible).toBeTrue();
+      expect(mustache.visible).toBeFalse();
+    }
+    human.setExperimentalHair('classic-stache', 1);
+    expect(beard.visible).toBeFalse();
+    expect(mustache.visible).toBeTrue();
+  });
+
+  it('shares the natural color with the beard and hair swatch while reusing the beard geometry', () => {
+    const human = studio.human;
+    human.selectPreset(EXPERIMENTAL_PIGTAIL_HEAD_ID);
+    const swatch = buildExperimentalHairPreview();
+    const surface = (root: Object3D, part: string) =>
+      root.getObjectByName(part)!.children[0] as Mesh<TubeGeometry, MeshStandardMaterial>;
+    try {
+      human.setExperimentalHair('shaggy', 1, DEFAULT_STACHE_SHAPE, true, true);
+      const beard = surface(human.root, 'short-beard');
+      const geometry = beard.geometry;
+      expect(beard.material.color.equals(surface(human.root, 'capsule-hair-shaggy').material.color)).toBeTrue();
+
+      const color = 0x87543a;
+      for (const style of ['shaggy', 'pigtails', 'classic-stache'] as const) {
+        human.setExperimentalHair(style, 1, DEFAULT_STACHE_SHAPE, true, true, color);
+        swatch.setHair(style, 1, DEFAULT_STACHE_SHAPE.fringe, color);
+        expect(surface(human.root, 'short-beard').geometry).toBe(geometry);
+        expect(beard.material.color.getHex()).toBe(color);
+        expect(surface(human.root, `capsule-hair-${style}`).material.color.getHex()).toBe(color);
+        expect(surface(swatch.root, `capsule-hair-${style}`).material.color.getHex()).toBe(color);
+      }
+    } finally {
+      swatch.dispose();
+    }
+  });
+
+  it('leaves the active speech shapes visible from the front and both three-quarter views', () => {
+    const human = studio.human;
+    human.selectPreset(EXPERIMENTAL_PIGTAIL_HEAD_ID);
+    human.setExperimentalHair('shaggy', 1, DEFAULT_STACHE_SHAPE, true, true);
+    const skin = human.root.getObjectByName('pigtail-skin')!;
+    const beard = human.root.getObjectByName('short-beard')!;
+    const mouth = captureMouthUniforms();
+    const ray = new Raycaster();
+    const front = new Vector3(0, 0, -1);
+    human.setExpression('neutral');
+    human.update(.3);
+    human.root.updateMatrixWorld(true);
+
+    for (const viseme of ['A', 'E', 'O'] as const) {
+      human.speechPreview!.play([{ time: 0, viseme, duration: .4 }]);
+      for (let frame = 0; frame < 12; frame++) human.update(1 / 60);
+      const mouthCurve = mouth.uMouthCurve.value;
+      const { halfWidth, halfHeight } = computeCapsuleMouthShape({
+        mouthCurve, mouthOpen: mouth.uMouthOpen.value, mouthWidth: mouth.uMouthWidth.value,
+      });
+      expect(mouth.uMouthOpen.value).toBeGreaterThan(.12);
+      const radius = mouth.uBodyRadius.value;
+
+      for (const yaw of [-32, 0, 32]) {
+        const theta = yaw * Math.PI / 180;
+        const direction = new Vector3(-Math.sin(theta), 0, -Math.cos(theta));
+        const across = yaw === 0 ? [-.72, 0, .72] : [-.55, 0, .55];
+        for (const xFraction of across) {
+          for (const yFraction of [-.68, 0, .68]) {
+            const x = xFraction * halfWidth;
+            const curve = (xFraction ** 2 - .35) * mouthCurve * .085;
+            const wave = Math.sin(x * 28) * mouth.uMouthWave.value * .024;
+            const y = mouth.uMouthCenterY.value + radius * (curve + wave + yFraction * halfHeight);
+            const point = skin.localToWorld(new Vector3(x * radius, y, 0));
+            ray.set(point.addScaledVector(front, -4), front);
+            const faceHit = ray.intersectObject(skin, false)[0];
+            expect(faceHit).toBeDefined();
+            if (!faceHit) continue;
+            // Start the oblique ray at the same actual skin point as the front ray.
+            // The face material is projected onto the capsule, so its depth curves across the mouth.
+            ray.set(faceHit.point.clone().addScaledVector(direction, -4), direction);
+            const hairHit = ray.intersectObject(beard, true)[0];
+            expect(hairHit?.distance ?? Infinity).withContext(`${viseme}, ${yaw}°, ${xFraction}, ${yFraction}`).toBeGreaterThan(3.998);
+          }
+        }
+      }
+    }
+  });
+
+  it('leaves room below the eyes throughout the Classic Stache edits, including unbounded inputs', () => {
+    const character = buildExperimentalPigtailHead(new FacialAnimationController());
+    try {
+      const eyes = ['left', 'right'].map(side => character.head.getObjectByName('pigtail-eye-' + side)!.parent!);
+      const point = new Vector3();
+      for (const x of [-1, 0, 1]) {
+        for (const y of [-1, 0, 1]) {
+          character.setHair('classic-stache', 1, { ...DEFAULT_STACHE_SHAPE, mustache: [x, y] });
+          const lobes = character.head.getObjectByName('classic-mustache')!.children as Mesh[];
+          const right = lobes[1];
+          const vertices = right.geometry.getAttribute('position');
+          point.fromBufferAttribute(vertices, vertices.count - 1).add(right.position);
+          expect(point.distanceTo(new Vector3(...stacheTip('mustache', [x, y])))).toBeLessThan(1e-6);
+          let clearance = Infinity;
+          for (const lobe of lobes) {
+            const vertices = lobe.geometry.getAttribute('position');
+            for (let i = 0; i < vertices.count; i++) {
+              point.fromBufferAttribute(vertices, i).multiply(lobe.scale).add(lobe.position);
+              for (const eye of eyes) {
+                // The front projection of the eye white is an ellipse. Reserve some space around it.
+                const dx = (point.x - eye.position.x) / eye.scale.x;
+                const dy = (point.y - eye.position.y) / eye.scale.y;
+                clearance = Math.min(clearance, Math.hypot(dx, dy));
+              }
+            }
+          }
+          expect(clearance).withContext(`mustache offset [${x}, ${y}]`).toBeGreaterThan(1.035);
+        }
+      }
+    } finally {
+      character.dispose();
+    }
+  });
+
+  it('covers the Classic Stache crown and keeps the temple lock rooted when the fringe moves', () => {
+    const swatch = buildExperimentalHairPreview();
+    const [scalp, hair] = swatch.root.children;
+    const ray = new Raycaster();
+    const down = new Vector3(0, -1, 0);
+    try {
+      for (const offset of [[-.44, -.17], [.43, .52]] as const) {
+        swatch.setHair('classic-stache', 1, offset);
+        swatch.root.updateMatrixWorld(true);
+        const crown = hair.getObjectByName('classic-stache-crown')!;
+        for (const x of [-.8, -.4, 0, .4, .8]) {
+          for (const z of [-.8, -.4, 0, .4, .8]) {
+            ray.set(swatch.root.localToWorld(new Vector3(x, 5, z)), down);
+            const [visible] = ray.intersectObjects([scalp, crown], false);
+            expect(visible?.object).withContext(`crown at [${x}, ${z}]`).toBe(crown);
+          }
+        }
+
+        const temple = hair.getObjectByName('classic-stache-temple') as Mesh<TubeGeometry>;
+        const nearRoot = temple.geometry.parameters.path.getPointAt(.2).add(temple.position);
+        ray.set(swatch.root.localToWorld(nearRoot.clone().add(new Vector3(0, 2, 0))), down);
+        const [surface] = ray.intersectObject(crown);
+        expect(surface?.point.y).toBeGreaterThan(swatch.root.localToWorld(nearRoot).y + .02);
+      }
     } finally {
       swatch.dispose();
     }

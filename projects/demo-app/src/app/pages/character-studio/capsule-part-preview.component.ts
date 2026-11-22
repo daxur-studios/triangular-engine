@@ -9,7 +9,7 @@ import { buildExperimentalHairPreview, buildExperimentalPigtailHead } from './ex
 import type { CapsuleHairStyle } from './experimental-capsule-hair';
 import { boundStacheOffset, DEFAULT_STACHE_SHAPE, stacheTip, type StacheHandle, type StacheShape } from './classic-stache-shapes';
 
-type PreviewPart = 'hair' | 'face' | 'suit' | 'stache';
+type PreviewPart = 'hair' | 'face' | 'suit' | 'stache' | 'beard';
 
 @Component({
   selector: 'app-capsule-part-preview',
@@ -24,7 +24,7 @@ type PreviewPart = 'hair' | 'face' | 'suit' | 'stache';
   },
   template: `
     <scene [showFps]="true" [renderOnlyWhenThisIsTriggered]="true">
-      <camera [isActive]="true" [position]="[0, part() === 'stache' ? 0 : 0.16, 2.65]" [lookAt]="[0, 0, 0]" />
+      <camera [isActive]="true" [position]="[0, part() === 'stache' || part() === 'beard' ? 0 : 0.16, 2.65]" [lookAt]="[0, 0, 0]" />
       <ambientLight [intensity]="1.3" />
       <directionalLight [position]="[3.2, 5.4, 4.2]" [intensity]="2.5" />
       <directionalLight [position]="[-3.8, 3.2, 1.5]" [intensity]="1.35" />
@@ -42,6 +42,7 @@ type PreviewPart = 'hair' | 'face' | 'suit' | 'stache';
 export class CapsulePartPreviewComponent {
   readonly part = input.required<PreviewPart>();
   readonly hairStyle = input<CapsuleHairStyle>('pigtails');
+  readonly naturalHairColor = input<number>();
   readonly lockLength = input(1);
   readonly yawDegrees = input(35);
   readonly stacheShape = input(DEFAULT_STACHE_SHAPE);
@@ -81,18 +82,20 @@ export class CapsulePartPreviewComponent {
       }
       const model = this.model!;
       if ('setHair' in model) {
-        model.setHair(this.hairStyle(), this.lockLength(), this.stacheShape().fringe);
+        model.setHair(this.hairStyle(), this.lockLength(), this.stacheShape().fringe, this.naturalHairColor());
       }
-      if ('setStache' in model && model.setStache) {
+      if ('setFittedHead' in model && model.setFittedHead) {
         const shape = this.stacheShape();
-        model.setStache(shape, this.withMustache());
-        for (const handle of ['fringe', 'mustache'] as const) {
-          const marker = this.markers[handle];
-          const tip = stacheTip(handle, shape[handle]);
-          marker.position.set(tip[0] * this.handleSide(handle), tip[1], tip[2]);
-          marker.visible = handle === 'fringe' || this.withMustache();
-          marker.renderOrder = 10;
-          if (marker.parent !== model.root) model.root.add(marker);
+        model.setFittedHead(this.hairStyle(), this.lockLength(), shape, this.withMustache(), this.naturalHairColor());
+        if (part === 'stache') {
+          for (const handle of ['fringe', 'mustache'] as const) {
+            const marker = this.markers[handle];
+            const tip = stacheTip(handle, shape[handle]);
+            marker.position.set(tip[0] * this.handleSide(handle), tip[1], tip[2]);
+            marker.visible = handle === 'fringe' || this.withMustache();
+            marker.renderOrder = 10;
+            if (marker.parent !== model.root) model.root.add(marker);
+          }
         }
       }
 
@@ -103,9 +106,10 @@ export class CapsulePartPreviewComponent {
       this.turntable.updateMatrixWorld(true);
       const bounds = new Box3().setFromObject(model.root.getObjectByName('capsule-hair') ?? model.root);
       // Keep the camera fixed while editing so a drag cannot move its own reference frame.
-      const center = part === 'stache' ? new Vector3(0, .86, .11) : bounds.getCenter(new Vector3());
+      const fit = part === 'stache' || part === 'beard';
+      const center = fit ? new Vector3(0, .86, .11) : bounds.getCenter(new Vector3());
       const size = bounds.getSize(new Vector3());
-      const scale = part === 'stache' ? 1.14 : 1.74 / Math.max(size.x, size.y, size.z);
+      const scale = fit ? 1.14 : 1.74 / Math.max(size.x, size.y, size.z);
       this.turntable.scale.setScalar(scale);
       this.turntable.rotation.y = MathUtils.degToRad(this.yawDegrees());
       this.turntable.position.copy(center).multiplyScalar(-scale).applyEuler(this.turntable.rotation);
@@ -204,13 +208,13 @@ function createPreviewModel(part: PreviewPart) {
   if (part === 'hair') return buildExperimentalHairPreview();
   if (part === 'suit') return buildExperimentalPigtailBody();
   const controller = new FacialAnimationController();
-  controller.setExpression('happy', 1, 0);
-  if (part === 'stache') {
+  controller.setExpression(part === 'beard' ? 'neutral' : 'happy', 1, 0);
+  if (part === 'stache' || part === 'beard') {
     const head = buildExperimentalPigtailHead(controller);
     return {
       root: head.head,
-      setStache: (shape: StacheShape, withMustache: boolean) => {
-        head.setHair('classic-stache', 1, shape, withMustache);
+      setFittedHead: (style: CapsuleHairStyle, length: number, shape: StacheShape, withMustache: boolean, naturalColor?: number) => {
+        head.setHair(style, length, shape, withMustache, part === 'beard', naturalColor);
         head.update(0);
       },
       dispose: head.dispose,

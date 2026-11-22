@@ -128,6 +128,17 @@ export const SPIKES: readonly ISpikeItem[] = [
     runbookPath: 'docs/plans/051_cloud_volumes.md',
     dateISO: '2026-11-15',
   },
+  {
+    id: 'bob-hair-lock-spike',
+    number: '9',
+    title: 'WebGPU Bob Hair Lock',
+    route: '/bob-hair-lock-spike',
+    status: 'passed',
+    hypothesis: 'A TSL sweep can reshape a rounded bob lock along its curve, keeping its root and mesh buffers fixed as the hem changes.',
+    description: 'Change the lock length and turn the capsule workshop scalp to check the attachment, silhouette and lighting.',
+    runbookPath: 'docs/plans/074_procedural-character-studio.md',
+    dateISO: '2026-11-21',
+  },
 ];
 
 const STATUS_LABEL: Record<SpikeStatus, string> = {

@@ -13,8 +13,9 @@ import {
 import { createCapsuleBodyMaterial } from 'triangular-engine/procedural';
 import type { CapsuleSpacesuitPreset } from './capsule-spacesuit-presets';
 import { buildClassicMustache, DEFAULT_STACHE_SHAPE } from './classic-stache-shapes';
-import { buildExperimentalCapsuleHair, type CapsuleHairStyle } from './experimental-capsule-hair';
+import { buildExperimentalCapsuleHair, DEFAULT_WORKSHOP_HAIR_COLORS, type CapsuleHairStyle } from './experimental-capsule-hair';
 import { createPigtailEyeMaterial } from './pigtail-eye-material';
+import { buildShortBeard, SHORT_BEARD_MOUTH_Y } from './short-beard';
 
 export const EXPERIMENTAL_PIGTAIL_HEAD_ID = 'experimental-pigtail-head';
 
@@ -34,7 +35,7 @@ const headScale = .35;
 const hairFit: Point = [width / 2, height, depth / 2];
 
 const orangePalette = {
-  skin: '#eab995', nose: 0xd9885b, brow: 0xb46430, hair: 0xc06730, curl: 0xd37a37, band: 0x505b63, freckle: 0xb67554,
+  skin: '#eab995', nose: 0xd9885b, brow: 0xb46430, hair: DEFAULT_WORKSHOP_HAIR_COLORS.pigtails, curl: 0xd37a37, band: 0x505b63, freckle: 0xb67554,
 };
 const variantPalettes = [
   { skin: '#bc855f', nose: 0xa56353, brow: 0x523244, hair: 0x442a40, curl: 0x6b425c, band: 0xb0ad8e, freckle: 0x754738 },
@@ -70,15 +71,17 @@ function pigtailAppearance(seed: number | undefined) {
   return { palette, scale, curls, freckles };
 }
 
-function buildSkin(): BufferGeometry {
-  const profile = new CatmullRomCurve3([
-    [0, .001], [0, .63], [.006, .83], [.019, .951], [.04, .99], [.09, 1],
-    [.48, 1], [.69, .99], [.78, .95], [.87, .85], [.94, .65], [.985, .34], [1, .001],
-  ].map(([y, r]) => new Vector3(r, y, 0))).getSpacedPoints(64);
+const scalpProfile = new CatmullRomCurve3([
+  [0, .001], [0, .63], [.006, .83], [.019, .951], [.04, .99], [.09, 1],
+  [.48, 1], [.69, .99], [.78, .95], [.87, .85], [.94, .65], [.985, .34], [1, .001],
+].map(([y, r]) => new Vector3(r, y, 0))).getSpacedPoints(64);
+
+/** The workshop's head surface in local scalp coordinates. */
+export function buildExperimentalScalpGeometry(): BufferGeometry {
   const sides = 64;
   const positions: number[] = [];
   const indices: number[] = [];
-  for (const [ring, point] of profile.entries()) {
+  for (const [ring, point] of scalpProfile.entries()) {
     const radius = Math.max(0, point.x);
     const y = Math.max(0, point.y);
     for (let segment = 0; segment < sides; segment++) {
@@ -88,7 +91,7 @@ function buildSkin(): BufferGeometry {
         y * height,
         radius * Math.sin(angle) * depth / 2,
       );
-      if (ring === profile.length - 1) continue;
+      if (ring === scalpProfile.length - 1) continue;
       const a = ring * sides + segment;
       const b = ring * sides + (segment + 1) % sides;
       indices.push(a, a + sides, b, b, a + sides, b + sides);
@@ -126,8 +129,8 @@ function buildShaggyEar(): BufferGeometry {
 export function buildExperimentalHairPreview() {
   const root = new Group();
   root.scale.setScalar(headScale);
-  const scalp = new Mesh(buildSkin(), new MeshStandardMaterial({ color: 0xb5aca3, roughness: .82 }));
-  const hair = buildExperimentalCapsuleHair({ radii: hairFit, palette: orangePalette, curlScale: [1, 1, 1] });
+  const scalp = new Mesh(buildExperimentalScalpGeometry(), new MeshStandardMaterial({ color: 0xb5aca3, roughness: .82 }));
+  const hair = buildExperimentalCapsuleHair({ radii: hairFit, scalpProfile, palette: orangePalette, curlScale: [1, 1, 1] });
   root.add(scalp, hair.root);
   return {
     root,
@@ -195,14 +198,17 @@ export function buildExperimentalPigtailHead(
     ellipsoid(parent, material, points[points.length - 1], tip);
   }
 
-  const skinMesh = new Mesh(buildSkin(), headSkin);
+  const skinMesh = new Mesh(buildExperimentalScalpGeometry(), headSkin);
   skinMesh.name = 'pigtail-skin';
   head.add(skinMesh);
-  const hair = withHair ? buildExperimentalCapsuleHair({ radii: hairFit, palette, curlScale: appearance.curls }) : undefined;
+  const hair = withHair
+    ? buildExperimentalCapsuleHair({ radii: hairFit, scalpProfile, palette, curlScale: appearance.curls })
+    : undefined;
   if (hair) head.add(hair.root);
   ellipsoid(head, mat(palette.nose), [.018, 1.78, z * 1.011], [.098, .097, .096]);
   let shaggy = false;
   let mustache: ReturnType<typeof buildClassicMustache> | undefined;
+  let shortBeard: ReturnType<typeof buildShortBeard> | undefined;
   const ears = new Group();
   if (withHair) {
     ears.name = 'shaggy-ears';
@@ -312,24 +318,37 @@ export function buildExperimentalPigtailHead(
     updateEye[1](pose.rightEye, pose.rightBrow, Math.max(blink, channels['eye.blink.right'] ?? 0), awe);
   }
 
-  function setHair(style: CapsuleHairStyle, length: number, shape = DEFAULT_STACHE_SHAPE, withMustache = true): void {
+  function setHair(
+    style: CapsuleHairStyle, length: number, shape = DEFAULT_STACHE_SHAPE,
+    withMustache = true, withShortBeard = false,
+    naturalColor = style === 'pigtails' ? palette.hair : DEFAULT_WORKSHOP_HAIR_COLORS[style],
+  ): void {
     if (!hair) return;
     const classic = style === 'classic-stache';
-    hair.setStyle(style, length, shape.fringe);
+    hair.setStyle(style, length, shape.fringe, naturalColor);
     shaggy = style !== 'pigtails';
     ears.visible = shaggy;
     for (const lashes of lashGroups) lashes.visible = !shaggy;
-    brow.color.setHex(classic ? 0x493126 : shaggy ? 0x3b2e27 : palette.brow);
-    if (classic && withMustache) {
+    if (!shaggy && naturalColor === palette.hair) brow.color.setHex(palette.brow);
+    else brow.color.setHex(naturalColor).multiplyScalar(.9);
+    const showMustache = classic && withMustache && !withShortBeard;
+    if (showMustache) {
       if (!mustache) {
         mustache = buildClassicMustache(brow);
         head.add(mustache.root);
       }
       mustache.setTip(shape.mustache);
     }
-    const showMustache = classic && withMustache;
     if (mustache) mustache.root.visible = showMustache;
-    mouthUniforms.uMouthCenterY.value = showMustache ? 1.21 : 1.29;
+    if (withShortBeard && !shortBeard) {
+      shortBeard = buildShortBeard(hairFit, scalpProfile);
+      head.add(shortBeard.root);
+    }
+    if (shortBeard) {
+      shortBeard.root.visible = withShortBeard;
+      if (withShortBeard) shortBeard.setColor(naturalColor);
+    }
+    mouthUniforms.uMouthCenterY.value = withShortBeard ? SHORT_BEARD_MOUTH_Y : showMustache ? 1.21 : 1.29;
   }
 
   if (preset === 'shaggy') setHair('shaggy', 1);

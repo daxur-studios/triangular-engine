@@ -1,0 +1,27 @@
+<main>
+  <aside class="controls">
+    <h1>Bob hair lock</h1>
+    <p>Change the hem length and rotate the scalp to inspect the attachment and silhouette.</p>
+
+    <label>
+      <span>Lock length <span class="value" aria-hidden="true">{{ length() }}%</span></span>
+      <input #lengthSlider type="range" min="70" max="130" [value]="length()" [attr.aria-valuetext]="length() + '%'"
+        (input)="setLength(lengthSlider)" />
+    </label>
+    <label>
+      <span>View angle <span class="value" aria-hidden="true">{{ angle() }}°</span></span>
+      <input #angleSlider type="range" min="-180" max="180" [value]="angle()" [attr.aria-valuetext]="angle() + '°'"
+        (input)="setAngle(angleSlider)" />
+    </label>
+
+    <p class="backend" role="status">{{ backend() }}</p>
+  </aside>
+
+  <scene [showFps]="true">
+    <camera [isActive]="true" [position]="[0, 2.57, 6.9]" [lookAt]="[0, 2.27, 0]" />
+    <ambientLight [intensity]="1.05" />
+    <directionalLight [position]="[4, 6, 4]" [intensity]="2.4" />
+    <directionalLight [position]="[-3, 4, 1]" [intensity]="1.1" />
+    <directionalLight [position]="[2, 5, -4]" [intensity]="2" />
+  </scene>
+</main>

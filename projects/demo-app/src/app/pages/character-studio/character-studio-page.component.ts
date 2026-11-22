@@ -16,6 +16,7 @@ import {
   Color,
   CylinderGeometry,
   Group,
+  MathUtils,
   Mesh,
   MeshStandardMaterial,
   PlaneGeometry,
@@ -63,7 +64,8 @@ import { EXPERIMENTAL_PIGTAIL_HEAD_ID, EXPERIMENTAL_PIGTAIL_PRESETS } from './ex
 import { EXPERIMENTAL_SPACE_CAT } from './experimental-space-cat';
 import { CapsulePartPreviewComponent } from './capsule-part-preview.component';
 import { CLASSIC_STACHE_YAW, DEFAULT_STACHE_SHAPE, type StacheShape } from './classic-stache-shapes';
-import type { CapsuleHairStyle } from './experimental-capsule-hair';
+import { SHORT_BEARD_REFERENCE_YAW } from './short-beard';
+import { DEFAULT_WORKSHOP_HAIR_COLORS, type CapsuleHairStyle } from './experimental-capsule-hair';
 
 type CharacterStudioView = 'front' | 'three-quarter' | 'profile' | 'back' | 'face' | 'hair';
 
@@ -130,21 +132,28 @@ export class CharacterStudioPageComponent {
     EXPERIMENTAL_PIGTAIL_PRESETS.some(preset => preset.value === this.selectedPresetId()));
   readonly workshopOpen = signal(false);
   readonly workshopHair = signal<CapsuleHairStyle>('pigtails');
+  private readonly selectedNaturalHairColor = signal<number | undefined>(undefined);
+  readonly naturalHairColor = computed(() => this.selectedNaturalHairColor() ?? DEFAULT_WORKSHOP_HAIR_COLORS[this.workshopHair()]);
+  readonly naturalHairHex = computed(() => '#' + this.naturalHairColor().toString(16).padStart(6, '0'));
   readonly workshopLockLength = signal(1);
   readonly workshopYaw = signal(35);
   readonly stacheYaw = signal(CLASSIC_STACHE_YAW);
   readonly stacheShape = signal(DEFAULT_STACHE_SHAPE);
   readonly defaultStacheShape = DEFAULT_STACHE_SHAPE;
   readonly withMustache = signal(true);
+  readonly withShortBeard = signal(false);
   readonly stacheReference = signal('');
-  readonly stacheReferenceYaw = CLASSIC_STACHE_YAW;
-  readonly classicStacheSelected = computed(() => this.workshopOpen() && this.workshopHair() === 'classic-stache');
+  readonly beardReference = signal('');
+  readonly fitPreviewOpen = computed(() => this.workshopOpen()
+    && (this.workshopHair() === 'classic-stache' || this.withShortBeard()));
+  readonly fitReference = computed(() => this.withShortBeard() ? this.beardReference() : this.stacheReference());
+  readonly fitReferenceYaw = computed(() => this.withShortBeard() ? SHORT_BEARD_REFERENCE_YAW : CLASSIC_STACHE_YAW);
   readonly workshopHairChoices = [
     { id: 'pigtails', label: 'Pigtails' },
     { id: 'shaggy', label: 'Shaggy' },
     { id: 'classic-stache', label: 'Classic Stache' },
   ] as const;
-  readonly workshopHairLabel = computed(() => this.workshopHair() === 'pigtails'
+  readonly workshopHairLabel = computed(() => this.workshopHair() === 'pigtails' && this.naturalHairColor() === DEFAULT_WORKSHOP_HAIR_COLORS.pigtails
     ? 'Orange Pigtails' : this.workshopHairChoices.find(choice => choice.id === this.workshopHair())?.label);
   readonly speechPreviewNotice = signal('');
   readonly selectedMotionId = signal('idle');
@@ -250,6 +259,8 @@ export class CharacterStudioPageComponent {
     },
     apply: (settings) => {
       if (this.workshopOpen()) {
+        this.withShortBeard.set(false);
+        this.selectedNaturalHairColor.set(undefined);
         this.setWorkshopHair('pigtails', 1);
         this.workshopOpen.set(false);
       }
@@ -396,9 +407,14 @@ export class CharacterStudioPageComponent {
     this.applyView('three-quarter');
     const query = inject(ActivatedRoute).snapshot.queryParamMap;
     const workshop = query.get('workshop');
-    if (workshop === '1' || workshop === 'classic-stache') {
+    if (workshop === '1' || workshop === 'classic-stache' || workshop === 'short-beard') {
       this.toggleWorkshop();
       if (workshop === 'classic-stache') this.setWorkshopHair('classic-stache');
+      if (workshop === 'short-beard') {
+        this.setWorkshopHair('shaggy');
+        this.setShortBeard(true);
+        this.selectExpression('neutral');
+      }
     } else if (query.get('preset') === EXPERIMENTAL_SPACE_CAT.id) {
       this.selectFamily('cat');
       this.selectPreset(EXPERIMENTAL_SPACE_CAT.id);
@@ -431,6 +447,7 @@ export class CharacterStudioPageComponent {
 
     this.destroyRef.onDestroy(() => {
       URL.revokeObjectURL(this.stacheReference());
+      URL.revokeObjectURL(this.beardReference());
       this.stopSpeechPreview();
       this.clearPerformanceScenario();
       for (const family of this.familyOptions) {
@@ -487,6 +504,8 @@ export class CharacterStudioPageComponent {
   toggleWorkshop(): void {
     if (this.runnerBusy()) return;
     if (this.workshopOpen()) {
+      this.withShortBeard.set(false);
+      this.selectedNaturalHairColor.set(undefined);
       this.setWorkshopHair('pigtails', 1);
       this.workshopOpen.set(false);
     } else {
@@ -496,17 +515,24 @@ export class CharacterStudioPageComponent {
       this.workshopYaw.set(35);
     }
     afterNextRender(() => {
-      if (this.classicStacheSelected()) this.setStacheYaw(this.stacheYaw());
+      if (this.fitPreviewOpen()) this.setStacheYaw(this.stacheYaw());
       else this.applyView('three-quarter');
     }, { injector: this.injector });
   }
 
   setWorkshopHair(style: CapsuleHairStyle, length = this.workshopLockLength()): void {
     const changed = style !== this.workshopHair();
-    this.contributions.human.setExperimentalHair(style, length, this.stacheShape(), this.withMustache());
     this.workshopHair.set(style);
     this.workshopLockLength.set(length);
-    if (changed && style === 'classic-stache') this.setStacheYaw(this.stacheYaw());
+    this.contributions.human.setExperimentalHair(
+      style, length, this.stacheShape(), this.withMustache(), this.withShortBeard(), this.naturalHairColor(),
+    );
+    if (changed && (style === 'classic-stache' || this.withShortBeard())) this.setStacheYaw(this.stacheYaw());
+  }
+
+  setNaturalHairColor(hex: string): void {
+    this.selectedNaturalHairColor.set(Number.parseInt(hex.slice(1), 16));
+    this.setWorkshopHair(this.workshopHair());
   }
 
   setStacheShape(shape: StacheShape): void {
@@ -519,14 +545,22 @@ export class CharacterStudioPageComponent {
     this.setWorkshopHair('classic-stache');
   }
 
-  setStacheReference(input: HTMLInputElement): void {
+  setShortBeard(visible: boolean): void {
+    if (visible) this.selectedNaturalHairColor.set(this.naturalHairColor());
+    this.withShortBeard.set(visible);
+    this.setWorkshopHair(this.workshopHair());
+    if (this.fitPreviewOpen()) this.setStacheYaw(this.fitReferenceYaw());
+  }
+
+  setFitReference(input: HTMLInputElement): void {
     const file = input.files?.[0];
     if (!file) return;
-    const previous = this.stacheReference();
-    this.stacheReference.set(URL.createObjectURL(file));
+    const reference = this.withShortBeard() ? this.beardReference : this.stacheReference;
+    const previous = reference();
+    reference.set(URL.createObjectURL(file));
     URL.revokeObjectURL(previous);
     input.value = '';
-    this.setStacheYaw(CLASSIC_STACHE_YAW);
+    this.setStacheYaw(this.fitReferenceYaw());
   }
 
   setStacheYaw(yaw: number): void {
@@ -606,6 +640,8 @@ export class CharacterStudioPageComponent {
     if (this.workshopOpen()) {
       this.stacheShape.set(DEFAULT_STACHE_SHAPE);
       this.withMustache.set(true);
+      this.withShortBeard.set(false);
+      this.selectedNaturalHairColor.set(undefined);
       this.stacheYaw.set(CLASSIC_STACHE_YAW);
       this.setWorkshopHair('pigtails', 1);
       this.workshopYaw.set(35);
@@ -644,7 +680,16 @@ export class CharacterStudioPageComponent {
       this.activeView.set(experimentalView);
       this.autoRotate.set(false);
       this.cameraFraming = experimentalView === 'face' ? 'face-close-up' : experimentalView;
-      this.applyFocusTargetFraming(experimentalView === 'face' ? 'human-head-hair' : 'human-full-body');
+      const target = experimentalView === 'face' ? 'human-head-hair' : 'human-full-body';
+      if (this.withShortBeard()) {
+        // Keep the fit preview in sync when changing the framing as well as when using the slider.
+        const azimuth = experimentalView === 'face'
+          ? -MathUtils.degToRad(this.stacheYaw()) : this.framingAzimuthRadians(this.cameraFraming);
+        this.stacheYaw.set(Math.round(-MathUtils.radToDeg(azimuth)));
+        this.applyFocusTargetFraming(target, azimuth);
+      } else {
+        this.applyFocusTargetFraming(target);
+      }
       return;
     }
 

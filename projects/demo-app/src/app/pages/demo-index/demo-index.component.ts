@@ -78,6 +78,11 @@ export const CATEGORIES: readonly DemoCategory[] = [
 
 export const DEMOS: readonly DemoItem[] = [
   {
+    id: 'bob-hair-lock-spike', number: '074a', title: 'WebGPU Bob Hair Lock', route: '/bob-hair-lock-spike',
+    categoryId: 'core', tier: 'lab', createdAt: '2026-11-21', entryPoints: ['core'], package: 'triangular-engine',
+    description: 'Adjust the hem of a curved hair lock generated with TSL on the capsule workshop scalp.',
+  },
+  {
     id: 'crowd-navigation-grid', number: '086', title: 'Crowd Navigation Grid Layers', route: '/crowd-navigation-grid',
     categoryId: 'core', tier: 'lab', createdAt: '2026-11-07', entryPoints: ['crowd-navigation'], package: 'triangular-engine/crowd-navigation',
     description: 'A generated island turned into a navigation grid: slope cost, structure, road and territory layers, flags, composed cost and clearance by unit class, drawn as switchable terrain overlays.',

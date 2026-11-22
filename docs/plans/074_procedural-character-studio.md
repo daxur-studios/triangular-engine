@@ -41,6 +41,8 @@ This plan covers separating the capsule character experience from the mixed-purp
 - **experimental-pigtail-body** — Fit one procedural body and standing pose to Orange, Plum, Honey and Chestnut Pigtails in Character Studio. Acceptance: front, 45° and profile show boots on the pedestal and connected limbs and neck for every preset. Head close-up, Awe, speech and switching to existing characters still work.
 - **capsule-parts-workshop** — Add a prewired graph for the approved spacesuit and shared animated face. Acceptance: Hair, Head and Suit each show a 3D preview. Swapping Pigtails and Shaggy hair updates the assembled character and preserves facial animation. Review Shaggy from multiple angles against the concept.
 - **classic-stache-shape-editing** — Fit a swept hairstyle and optional mustache using Classic Stache as the reference. Acceptance: dragging the fringe and mustache tips updates the edit view and the assembled character. The editor and assembled preview can turn together, and speech remains readable. Review whether the handles help with fitting.
+- **short-beard-fit** — Fit a rounded, layered beard from the approved reference. Acceptance: the beard follows the jaw and meets the sideburn area in the front and profile views, stays interchangeable across workshop hairstyles, and frames the speaking mouth in synchronized views. The beard and scalp hair use the character's natural hair colour in all previews.
+- **webgpu-bob-lock** — Shape one rounded bob lock with TSL on native WebGPU. Acceptance: the length slider moves the hem and preserves the scalp attachment and mesh buffers. Review the locked root, rounded profile and lighting from front, three-quarter and side views across the slider range.
 - **character-performance-matrix** — Measure one and many procedural humans while idle, walking in place and moving on repeatable scene paths. Acceptance: a visible-browser performance run records actor-update CPU time, render-submit CPU time, frame cadence, draw calls, triangles and scenario setup time at populations of 1, 16 and 48; scenario setup includes constructing additional actors, arranging the population and fitting the camera, but excludes construction of the studio's pre-existing primary human. The 16.7 ms p95 frame-cadence budget is labeled as an initial 60 Hz target hypothesis, and no hardware baseline is accepted before reviewing a clean run on the intended device.
 
 ## Relationships
@@ -65,10 +67,12 @@ This plan covers separating the capsule character experience from the mixed-purp
 | experimental-pigtail-variants | done        |
 | experimental-pigtail-body | done        |
 | capsule-parts-workshop | done        |
-| classic-stache-shape-editing | in_progress |
+| classic-stache-shape-editing | done        |
+| short-beard-fit         | done        |
+| webgpu-bob-lock        | done        |
 | character-performance-matrix | in_progress |
 
-<!-- tri:review version="1" scope-hash="5ec8c8dbb8f6070a3fe927c42e5a5e2753010857b1209a287a89cb9f339e96f9" reviewed="2026-11-21" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="ff95ce3397534ef6bbf03e11c151f40a4c063d2b4002e5865f121b71a5e01a28" reviewed="2026-11-21" reviewer="agent" -->
 <!-- /tri:review -->
 
 ## Delivery progress
@@ -78,6 +82,10 @@ The shell and app-local human/cat contributions are in place. The studio hosts c
 Latest diagnostic: [run the human performance matrix](http://triangular-demo.localhost:4200/character-studio?testSuite=character-studio-human-performance&testVersion=1&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1).
 
 The developer accepted Shaggy's overall look in the turnaround. The reviewed proportions are available in a selectable walking preset in the [playable sandbox](079_playable-capsule-human-sandbox.md). Hand refinement remains open for the gesture and grip pass.
+
+The developer accepted the revised [Classic Stache fit](http://triangular-demo.localhost:4200/character-studio?workshop=classic-stache). The shape-editing prototype is complete. The [short beard fit](http://triangular-demo.localhost:4200/character-studio?workshop=short-beard) reuses the synchronized rotation view, opens on Shaggy, and is available on the other workshop hairstyles. Owner visual review is pending.
+
+The [WebGPU bob lock prototype](http://triangular-demo.localhost:4200/bob-hair-lock-spike) passed its single-lock check. It changes the hem length while keeping the crown attachment and mesh buffers fixed. Use the sweep to fit the full bob, with separate fringe length and lock count controls, if the developer accepts the prototype.
 
 For the next Orange Pigtails body review, compare one rotatable full-body blockout to the original art using the same angle slider and overlay as the head preview. The reproduction steps and local source are recorded in [ER 074](/docs/engineering-records/074_procedural-character-studio.md#2026-11-18--synchronized-concept-and-3d-review).
 

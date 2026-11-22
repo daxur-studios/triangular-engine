@@ -79,6 +79,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'bob-hair-lock-spike',
+    loadComponent: () =>
+      import('./bob-hair-lock-spike/bob-hair-lock-spike.component').then(
+        ({ BobHairLockSpikeComponent }) => BobHairLockSpikeComponent,
+      ),
+  },
+  {
     path: 'gpu-morph-lod-spike',
     loadComponent: () =>
       import('./gpu-morph-lod-spike/gpu-morph-lod-spike.component').then(
