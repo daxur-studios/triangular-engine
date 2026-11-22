@@ -10,7 +10,7 @@ interface Preset {
   label: string;
   slug: string;
   encoded: string;
-  values: { headRise: number; cheekFullness: number; blendLength: number };
+  caption: string;
   anchor: { y: number; z: number };
   triangles: number;
 }
@@ -132,8 +132,7 @@ function buildCat(body: Group | null, anchor?: { y: number; z: number }) {
 }
 
 function caption(preset: Preset): string {
-  const { headRise, cheekFullness, blendLength } = preset.values;
-  return `Head rise ${headRise} mm · cheek ${cheekFullness}% · blend ${blendLength} mm · ${preset.triangles.toLocaleString()} tris`;
+  return `${preset.caption} · ${preset.triangles.toLocaleString()} tris`;
 }
 
 async function main() {
@@ -142,12 +141,9 @@ async function main() {
   embedded.remove();
 
   const bodies = await Promise.all(presets.map(loadBody));
-  const [reference, subtle] = presets;
 
-  const silhouetteStages = [
-    makeStage(silhouettes, reference.label, `${caption(reference)} · plain silhouette`),
-    makeStage(silhouettes, subtle.label, `${caption(subtle)} · plain silhouette`),
-  ];
+  const silhouetteStages = presets.map(preset =>
+    makeStage(silhouettes, preset.label, `${caption(preset)} · plain silhouette`));
   bodies.forEach((body, index) => {
     setMaterial(body, silhouetteMaterial);
     silhouetteStages[index].pivot.add(body);

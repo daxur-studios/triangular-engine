@@ -1,5 +1,9 @@
 # Review brief: capsule space cat, single-surface silhouette (BRep study)
 
+> **Historical.** This is the brief as sent for the first external review. The lofted part it
+> describes (`capsule-space-cat-silhouette.brep.ts`) was rejected and split into the tube-and-sphere
+> body and the kept fat-cat option; see `README.md` for the current parts and parameters.
+
 Paste everything below the line into the reviewing agent, and attach (or open) the images listed
 in the manifest. Replace `D:/code/triangular-workspace/` with the reviewer's path if it is not on
 this machine.

@@ -6,12 +6,32 @@ import {
 import { build } from 'esbuild';
 import { OcctKernel } from 'occt-wasm';
 import { Color } from 'three';
-import buildCatSilhouette, { params, rigAnchor } from '../../src/app/part/capsule-space-cat-silhouette.brep.ts';
+import buildFatCat, { params as fatParams, rigAnchor as fatAnchor } from '../../src/app/part/capsule-space-cat-fat.brep.ts';
+import buildTubeCat, { params as tubeParams, rigAnchor as tubeAnchor } from '../../src/app/part/capsule-space-cat-tube.brep.ts';
 
 const out = resolve('artifacts/brep-space-cat-silhouette');
+const tubeValues = (overrides = {}) => ({ ...tubeParams.values, ...overrides });
 const presets = [
-  { slug: 'revised-subtle', label: 'Revised · subtle rise', values: params.values },
-  { slug: 'revised-higher', label: 'Revised · higher head', values: { ...params.values, headRise: 70 } },
+  {
+    slug: 'fat', label: 'Fat cat (kept option)',
+    build: buildFatCat, values: fatParams.values, anchor: fatAnchor(fatParams.values),
+    caption: 'Fused head and body balls · join 85 mm',
+  },
+  {
+    slug: 'tube-short', label: 'Tube · short',
+    build: buildTubeCat, values: tubeValues({ bodyLength: 780 }), anchor: tubeAnchor(tubeValues({ bodyLength: 780 })),
+    caption: 'Tube and sphere · body 780 mm · bevel 90 mm',
+  },
+  {
+    slug: 'tube-default', label: 'Tube · default length',
+    build: buildTubeCat, values: tubeValues(), anchor: tubeAnchor(tubeValues()),
+    caption: 'Tube and sphere · body 900 mm · bevel 90 mm',
+  },
+  {
+    slug: 'tube-long', label: 'Tube · long',
+    build: buildTubeCat, values: tubeValues({ bodyLength: 1100 }), anchor: tubeAnchor(tubeValues({ bodyLength: 1100 })),
+    caption: 'Tube and sphere · body 1100 mm · bevel 90 mm',
+  },
 ];
 const millimetersPerMeter = 1000;
 const fur = { name: 'Cat fur', baseColor: [...new Color('#f2c7a0').toArray(), 1], roughness: .72 };
@@ -78,11 +98,11 @@ function weld(data) {
 
 // Bake millimetres to the engine's metres here, once. The GLB exporter adds
 // the Z-up to Y-up rotation, so the preview loads the exact delivered file.
-function bake(values) {
+function bake(buildCat, values) {
   return withScope(scope => {
-    const shape = scope.register(buildCatSilhouette(values));
+    const shape = scope.register(buildCat(values));
     const solids = getSolids(shape).map(solid => scope.register(solid));
-    if (solids.length !== 1 || !isValidSolid(solids[0])) throw new Error('Invalid cat silhouette body');
+    if (solids.length !== 1 || !isValidSolid(solids[0])) throw new Error('Invalid cat body');
     const data = weld(meshBody(shape));
     const vertices = new Float32Array(data.vertices.map(value => value / millimetersPerMeter));
     const materials = new Map();
@@ -101,13 +121,12 @@ function bake(values) {
 await mkdir(out, { recursive: true });
 const kernel = await OcctKernel.init();
 registerKernel('occt-wasm', OcctWasmAdapter.fromKernel(kernel));
-const baked = await Promise.all(presets.map(async ({ slug, label, values }) => {
-  const { glb, triangles } = bake(values);
+const baked = await Promise.all(presets.map(async ({ slug, label, build, values, anchor, caption }) => {
+  const { glb, triangles } = bake(build, values);
   const file = `space-cat-${slug}.glb`;
   await writeFile(resolve(out, file), glb);
-  const anchor = rigAnchor(values);
-  const stats = { file, label, values, anchor, triangles, bytes: glb.length };
-  console.log(stats);
+  const stats = { file, label, caption, values, anchor, triangles, bytes: glb.length };
+  console.log(label, '|', caption, '|', triangles, 'tris |', anchor);
   return { ...stats, encoded: glb.toString('base64') };
 }));
 

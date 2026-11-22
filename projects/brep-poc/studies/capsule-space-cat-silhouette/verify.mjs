@@ -1,37 +1,60 @@
 import { getBounds, getSolids, isValidSolid, OcctWasmAdapter, registerKernel, withScope } from 'brepjs';
 import { OcctKernel } from 'occt-wasm';
-import buildCatSilhouette, { expected, params } from '../../src/app/part/capsule-space-cat-silhouette.brep.ts';
+import buildFatCat, { expected as fatExpected, params as fatParams } from '../../src/app/part/capsule-space-cat-fat.brep.ts';
+import buildTubeCat, { expected as tubeExpected, params as tubeParams } from '../../src/app/part/capsule-space-cat-tube.brep.ts';
 
 const kernel = await OcctKernel.init();
 registerKernel('occt-wasm', OcctWasmAdapter.fromKernel(kernel));
 
-const { defs, values } = params;
-const limits = definition => [definition.min, definition.max];
-const cases = [values];
-for (const headRise of limits(defs.headRise)) {
-  for (const cheekFullness of limits(defs.cheekFullness)) {
-    for (const blendLength of limits(defs.blendLength)) {
-      cases.push({ headRise, cheekFullness, blendLength });
+function casesFor({ values, defs }) {
+  const cases = [{ label: 'defaults', values }];
+  for (const [key, definition] of Object.entries(defs)) {
+    for (const [edge, value] of [['min', definition.min], ['max', definition.max]]) {
+      cases.push({ label: `${key}=${edge}`, values: { ...values, [key]: value } });
+    }
+  }
+  const lowest = { ...values };
+  const highest = { ...values };
+  for (const [key, definition] of Object.entries(defs)) {
+    lowest[key] = definition.min;
+    highest[key] = definition.max;
+  }
+  cases.push({ label: 'all min', values: lowest }, { label: 'all max', values: highest });
+  return cases;
+}
+
+const parts = [
+  { name: 'fat cat', build: buildFatCat, expected: fatExpected, params: fatParams },
+  { name: 'tube and sphere', build: buildTubeCat, expected: tubeExpected, params: tubeParams },
+];
+
+let failures = 0;
+for (const part of parts) {
+  for (const { label, values } of casesFor(part.params)) {
+    try {
+      withScope(scope => {
+        const shape = scope.register(part.build(values));
+        const solids = getSolids(shape).map(solid => scope.register(solid));
+        if (solids.length !== 1 || !isValidSolid(solids[0])) {
+          throw new Error('should produce one valid solid');
+        }
+        const bounds = getBounds(shape);
+        const want = part.expected(values).bounds;
+        for (const axis of ['xMin', 'xMax', 'yMin', 'yMax', 'zMin', 'zMax']) {
+          const tolerance = Math.abs(want[axis]) * .01 + 1;
+          if (Math.abs(bounds[axis] - want[axis]) > tolerance) {
+            throw new Error(`${axis}: measured ${bounds[axis]}, expected ${want[axis]}`);
+          }
+        }
+      });
+      console.log(`${part.name} · ${label} ok`);
+    } catch (error) {
+      failures += 1;
+      console.error(`${part.name} · ${label} FAILED: ${String(error)}`);
     }
   }
 }
-
-for (const variant of cases) {
-  withScope(scope => {
-    const shape = scope.register(buildCatSilhouette(variant));
-    const solids = getSolids(shape).map(solid => scope.register(solid));
-    const label = JSON.stringify(variant);
-    if (solids.length !== 1 || !isValidSolid(solids[0])) {
-      throw new Error(`${label} should produce one valid solid`);
-    }
-    const bounds = getBounds(shape);
-    const want = expected(variant).bounds;
-    for (const axis of ['xMin', 'xMax', 'yMin', 'yMax', 'zMin', 'zMax']) {
-      const tolerance = Math.abs(want[axis]) * .01 + 1;
-      if (Math.abs(bounds[axis] - want[axis]) > tolerance) {
-        throw new Error(`${label} ${axis}: measured ${bounds[axis]}, expected ${want[axis]}`);
-      }
-    }
-    console.log(`${label} ok`);
-  });
+if (failures) {
+  console.error(`${failures} case(s) failed`);
+  process.exitCode = 1;
 }

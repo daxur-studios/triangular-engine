@@ -284,6 +284,29 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **[verification]** Both revised presets passed `brep verify --check` and the default and four combined extremes passed the geometry check. The revised hair GLBs contain 26,345 and 26,613 triangles. The offline preview still renders both expressions and toggles the mustache. The four previews passed the linked pitch, wheel zoom and reset checks. The swept-hair preview also passed simulated two-finger pinch. The preview type check and engine build passed.
 - **[reproduce]** Rebuild the four standalone previews with their `build.mjs` scripts, then run `node projects/brep-poc/studies/verify-preview-orbit.mjs`. The front and side comparison is local under `artifacts/brep-swept-hair/silhouette-comparison.png`. Regenerate it with the sweep study capture and `turnaround.py` above, using `turnaround-before.png` from the first bake.
 
+## 2026-11-22 — Swept hair fringe and profile
+
+- **[action]** Moved the fringe tips and narrowed their final sections so they taper over the forehead. Reworked the rear locks to round out high, tuck toward the nape and then sweep backward and up. Extended the scalp cap under the rear layers to cover gaps between them.
+- **[finding]** Several tightly spaced profiles let the smooth loft overshoot. Wider spacing and an explicit width direction kept sections aligned through the rear turn. Easing the length offset near the tips preserved their upward direction as the locks lengthened.
+- **[verification]** Both presets passed `brep verify --check` and rendered in the offline preview. Section checks at the default and four parameter extremes confirmed that the three fringe tips narrow and that the rear silhouette tucks in and rises again. The hair GLBs contain 29,309 and 29,355 triangles.
+- **[reproduce]** The local comparison at `artifacts/brep-swept-hair/fringe-profile-comparison.png` uses the original reference, the saved `profile-previous.png` and `three-quarter-previous.png`, and the current renders. Run the existing build and capture scripts, then `python artifacts/brep-swept-hair/turnaround.py`.
+
+## 2026-11-22 — Space cat body: single loft replaced with a fused two-lobe solid
+
+- **[action]** The space cat silhouette part now builds the head and body as two overlapping ellipsoids fused into one solid, with a fillet along the join, instead of lofting one oval profile from muzzle to rump. `headRise`, `cheekFullness`, `headSetback` and `joinFillet` control it; the rig anchor follows the head's setback so the face still lands on the head.
+- **[finding]** A single loft cannot reproduce the reference. One oval per section has to be the ball head and the barrel body at the same time, so the head either tapers into a long wedge (which reads as a muzzle) or the chest bulges under the jaw. Making the top and bottom the union of the two lobes fixes the side outline but leaves the section, and therefore the front view, too tall and narrow. The reference is two balls with a crease, which is what the fused version is.
+- **[finding]** The reference's head and body overlap more deeply than the actor's anchors allow. The head's centre sits 426 mm ahead of the torso origin and the tail base 280 mm behind it. Setting the head back 160 mm to deepen the overlap collapses the head into the body instead of producing the reference's proportions, so closing the remaining gap is an actor-proportion change, not a CAD one.
+- **[verification]** Default and nine parameter cases pass `brep verify --check`; one valid manifold solid, volume 288.6 M mm³, bounds x ±345, y −727…340, z −360…460 mm. The three baked GLBs contain 8,451, 8,595 and 6,286 triangles.
+- **[reproduce]** `node projects/brep-poc/studies/capsule-space-cat-silhouette/verify.mjs`, then `build.mjs` and `capture.mjs`; the orbitable preview is `artifacts/brep-space-cat-silhouette/preview.html`.
+
+## 2026-11-22 — Space cat body: tube and sphere, with the fat cat kept as an option
+
+- **[action]** Added `capsule-space-cat-tube.brep.ts`: a capsule body with the Concept Fit head ellipsoid fused on and a fillet bevel on the join ring. `bodyLength` is the single length control (560–1100 mm), with `tubeRadius`, `headRise` and `joinFillet` alongside. The earlier fused-two-balls part is kept as `capsule-space-cat-fat.brep.ts` and stays available in the preview.
+- **[finding]** A fused tube and sphere reproduces the Concept Fit's body without its mesh join: the tube's front cap is buried in the head, so the only intersection is the ring where the tube's side meets the ball, and the fillet blends that ring. A capsule cannot be shorter than twice its radius, so the builder holds a 40 mm straight run as the lower bound.
+- **[finding]** The tail keeps the actor's anchor while the body length changes. Bodies below about 780 mm leave the tail behind the rump; longer bodies swallow its base. The preview therefore shows 780, 900 and 1100 mm.
+- **[verification]** Both parts pass `brep verify --check` and 22 case checks (defaults, each parameter at both limits, all-min and all-max corners). Tube at the 900 mm default: one valid manifold solid, 276.1 M mm³, bounds x ±318, y −727…520, z −280…460 mm, 10,023 triangles. Fat cat: 288.6 M mm³, 8,451 triangles.
+- **[reproduce]** `node projects/brep-poc/studies/capsule-space-cat-silhouette/verify.mjs`, then `build.mjs` and `capture.mjs`; preview at `artifacts/brep-space-cat-silhouette/preview.html`.
+
 ## Scope history
 
 <!-- tri:scope-history -->
@@ -368,5 +391,10 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - Summary: Add synchronized orbit and zoom to the standalone CAD studies.
 - Reason: Inspect the fit between fixed comparison angles and make close-up checks easier.
 - Impact: Add shared preview controls for the hair and space-cat studies.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-BREP-FRINGE-PROFILE" date="2026-11-22" kind="change" origin="requested" disposition="accepted" scope-ids="brep-swept-hair-study" -->
+- Summary: Taper the fringe tips and carry the side silhouette through an inward bend and lift at the nape.
+- Reason: The fringe widened where it hooked over the forehead, and the side view was missing the rise at the ends.
+- Impact: Rebuild both presets and check the tip taper and the profile at the parameter limits.
 <!-- /tri:scope-change -->
 <!-- /tri:scope-history -->

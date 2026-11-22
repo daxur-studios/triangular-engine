@@ -1,7 +1,7 @@
 import {
   compound, cut, defineParams, mirror, Sketcher, unwrap, withScope, type Shape3D, type Vec3,
 } from 'brepjs';
-import { sculptLock, type LockSection } from './sculpt-lock.ts';
+import { sculptLock, type LockOrientation, type LockSection } from './sculpt-lock.ts';
 
 export const params = defineParams({
   crownSweep: { type: 'number', default: 18, min: 0, max: 34, step: 1, unit: 'mm', label: 'Crown sweep' },
@@ -13,7 +13,7 @@ type Part = { shape: Shape3D; surface: 'hair' | 'mustache' };
 
 const up: Vec3 = [0, 0, 1];
 const front: Vec3 = [0, -1, 0];
-const back: Vec3 = [0, 1, 0];
+const rearWidth: LockOrientation = { widthDirection: [-1, 0, 0] };
 
 export const expected = () => ({ bounds: { yMin: -166 }, tolerancePct: 1 });
 
@@ -23,12 +23,14 @@ export function withSweptHairParts<T>(p: SweptHairValues, consume: (parts: reado
     const cap = scope.register(new Sketcher('XZ')
       .movePointerTo([0, 453])
       .cubicBezierCurveTo([126, 361], [65, 453], [112, 411])
-      .cubicBezierCurveTo([141, 257], [140, 327], [140, 285])
-      .cubicBezierCurveTo([127, 237], [142, 245], [138, 237])
-      .lineTo([0, 237]).close().revolve(up));
+      .cubicBezierCurveTo([142, 259], [140, 327], [142, 285])
+      .cubicBezierCurveTo([138, 189], [142, 233], [138, 205])
+      .cubicBezierCurveTo([122, 169], [138, 176], [131, 169])
+      .lineTo([0, 169]).close().revolve(up));
     const opening = scope.register(new Sketcher('YZ', [-195, 0, 0])
-      .movePointerTo([-190, 200]).lineTo([79, 200]).lineTo([79, 235])
-      .cubicBezierCurveTo([-83, 356], [43, 275], [-18, 332])
+      .movePointerTo([-190, 118]).lineTo([190, 118]).lineTo([190, 162])
+      .cubicBezierCurveTo([79, 225], [147, 162], [115, 189])
+      .cubicBezierCurveTo([-83, 356], [40, 266], [-18, 332])
       .cubicBezierCurveTo([-190, 360], [-121, 358], [-153, 360])
       .close().extrude(390, { extrusionDirection: [1, 0, 0] }));
     const arch = scope.register(new Sketcher('XZ', [0, -67, 0])
@@ -39,15 +41,16 @@ export function withSweptHairParts<T>(p: SweptHairValues, consume: (parts: reado
     const trimmed = scope.register(unwrap(cut(cap, opening)));
     const parts: Part[] = [{ shape: scope.register(unwrap(cut(trimmed, arch))), surface: 'hair' }];
 
-    // Apply the controls progressively along each lock so the buried roots stay attached.
-    function lock(start: Vec3, sections: readonly LockSection[], end: Vec3, guide: Vec3, offset: Vec3 = [0, 0, 0]) {
+    // Ease into the offsets at both ends to preserve the buried roots and tip direction.
+    function lock(start: Vec3, sections: readonly LockSection[], end: Vec3, orientation: LockOrientation, offset: Vec3 = [0, 0, 0]) {
       const displace = ([x, y, z]: Vec3, weight: number): Vec3 => [
         x + offset[0] * weight, y + offset[1] * weight, z + offset[2] * weight,
       ];
-      const profiles: LockSection[] = sections.map(([center, width, depth], index) => [
-        displace(center, ((index + 1) / (sections.length + 1)) ** 2), width, depth,
-      ]);
-      parts.push({ shape: sculptLock(scope, start, profiles, displace(end, 1), guide), surface: 'hair' });
+      const profiles: LockSection[] = sections.map(([center, width, depth], index) => {
+        const t = (index + 1) / (sections.length + 1);
+        return [displace(center, t * t * (3 - 2 * t)), width, depth];
+      });
+      parts.push({ shape: sculptLock(scope, start, profiles, displace(end, 1), orientation), surface: 'hair' });
     }
 
     const sweep: Vec3 = [p.crownSweep, 0, 0];
@@ -60,22 +63,22 @@ export function withSweptHairParts<T>(p: SweptHairValues, consume: (parts: reado
       [[-37, 31, 456], 35, 23], [[5, 37, 486], 31, 20],
       [[49, 48, 491], 21, 15], [[79, 65, 481], 10, 8],
     ], [99, 78, 462], up, sweep);
-    lock([-26, -1, 426], [
-      [[-10, -6, 453], 23, 17], [[14, -4, 478], 21, 14],
-      [[35, 1, 491], 13, 10], [[50, 8, 498], 6, 5],
-    ], [61, 13, 499], front, [p.crownSweep * .45, 0, 0]);
+    lock([-26, 19, 426], [
+      [[-12, 12, 454], 23, 17], [[12, -7, 480], 21, 14],
+      [[34, -30, 498], 14, 10], [[49, -49, 509], 6, 5],
+    ], [61, -65, 516], { widthDirection: [1, .7, 0] }, [p.crownSweep * .45, 0, 0]);
     lock([-69, -46, 398], [
       [[-45, -80, 426], 31, 24], [[9, -103, 442], 39, 26],
-      [[66, -117, 425], 31, 22], [[113, -118, 394], 16, 12],
-    ], [148, -110, 364], [0, -.42, 1], sweep);
+      [[66, -116, 425], 31, 22], [[115, -125, 397], 13, 9],
+    ], [151, -130, 366], [0, -.42, 1], sweep);
     lock([-29, -47, 419], [
-      [[-23, -91, 420], 30, 21], [[-7, -125, 397], 28, 20],
-      [[1, -145, 374], 19, 13], [[-2, -149, 357], 8, 7],
-    ], [-11, -146, 346], front, [p.crownSweep * .38, 0, 0]);
+      [[-23, -88, 421], 27, 19], [[-10, -119, 405], 25, 17],
+      [[-1, -136, 384], 17, 11], [[0, -144, 367], 7, 4.5],
+    ], [-4, -149, 351], front, [p.crownSweep * .38, 0, 0]);
     lock([-66, -38, 410], [
-      [[-79, -79, 416], 24, 18], [[-91, -112, 396], 24, 19],
-      [[-108, -125, 370], 15, 11], [[-128, -119, 352], 7, 6],
-    ], [-140, -111, 341], front);
+      [[-79, -79, 416], 24, 18], [[-91, -108, 397], 23, 17],
+      [[-109, -119, 375], 14, 9], [[-126, -123, 355], 6, 4],
+    ], [-141, -125, 339], front);
     lock([-58, -5, 413], [
       [[-92, -10, 421], 27, 16], [[-122, -6, 416], 25, 17],
       [[-144, 6, 399], 15, 11], [[-150, 16, 380], 7, 6],
@@ -85,52 +88,57 @@ export function withSweptHairParts<T>(p: SweptHairValues, consume: (parts: reado
       [[-143, 55, 442], 10, 8], [[-152, 70, 434], 5, 4],
     ], [-159, 78, 426], up);
     lock([66, -38, 404], [
-      [[108, -64, 383], 23, 19], [[127, -64, 350], 22, 17],
-      [[139, -57, 330], 13, 10], [[149, -47, 324], 6, 5],
-    ], [153, -38, 321], [.9, -.4, 0]);
+      [[105, -61, 384], 22, 18], [[123, -66, 357], 18, 14],
+      [[135, -66, 339], 10, 7], [[144, -64, 328], 3.5, 2.5],
+    ], [150, -62, 321], [.9, -.4, 0]);
 
     // Bow out high at the temple, tuck in beside the cheek, then curl forward below the ear.
     const sideDrop: Vec3 = [0, 0, -.8 * p.backLength];
     lock([71, -6, 419], [
-      [[112, 5, 393], 30, 20], [[140, 13, 341], 29, 19],
-      [[146, 24, 283], 23, 16], [[142, 30, 223], 18, 11],
-      [[145, 24, 187], 13, 9], [[153, 8, 169], 7, 6],
-    ], [160, -4, 158], [1, 0, 0], sideDrop);
+      [[112, -5, 393], 33, 20], [[140, -5, 341], 33, 20],
+      [[145, 3, 284], 26, 16], [[142, 13, 229], 17, 11],
+      [[143, 17, 188], 10, 7], [[150, 13, 168], 4, 3],
+    ], [157, 7, 158], [1, 0, 0], sideDrop);
     lock([-79, -8, 419], [
-      [[-125, 5, 390], 34, 22], [[-147, 14, 341], 31, 20],
-      [[-148, 25, 275], 23, 16], [[-140, 31, 216], 17, 11],
-      [[-145, 25, 182], 12, 8], [[-153, 10, 163], 7, 6],
-    ], [-158, -5, 153], [-1, 0, 0], sideDrop);
+      [[-121, -7, 390], 34, 21], [[-144, -7, 341], 34, 21],
+      [[-147, 2, 282], 27, 16], [[-140, 13, 222], 18, 11],
+      [[-141, 16, 186], 11, 7], [[-148, 12, 165], 4.5, 3],
+    ], [-154, 6, 153], [-1, 0, 0], sideDrop);
 
+    // Keep neighboring sections spaced along the bend so the smooth loft does not overshoot.
+    // The profile rounds out high, tucks in at the nape, then flicks back up.
     const rearDrop: Vec3 = [0, 0, -p.backLength];
     lock([-86, 33, 402], [
-      [[-119, 48, 369], 31, 18], [[-135, 56, 315], 32, 18],
-      [[-137, 62, 260], 23, 14], [[-147, 68, 232], 11, 9],
-    ], [-168, 73, 224], [-.9, .45, 0], rearDrop);
+      [[-118, 40, 369], 34, 18], [[-139, 44, 316], 34, 19],
+      [[-138, 48, 262], 26, 15], [[-133, 72, 215], 14, 9],
+    ], [-154, 104, 224], { widthDirection: [-.45, -.9, 0] }, rearDrop);
     lock([99, 31, 395], [
-      [[124, 51, 362], 30, 17], [[133, 59, 310], 30, 16],
-      [[138, 63, 261], 21, 14], [[149, 66, 235], 12, 9],
-    ], [170, 70, 229], [.9, .45, 0], rearDrop);
+      [[124, 44, 362], 34, 17], [[138, 48, 309], 34, 18],
+      [[137, 53, 258], 25, 15], [[132, 75, 216], 14, 9],
+    ], [152, 106, 225], { widthDirection: [-.45, .9, 0] }, rearDrop);
     lock([-81, 66, 375], [
-      [[-104, 88, 330], 24, 13], [[-115, 94, 282], 26, 14],
-      [[-116, 96, 241], 19, 12], [[-126, 102, 218], 9, 7],
-    ], [-140, 108, 211], [-.78, .62, 0], [0, 0, -p.backLength * .6]);
+      [[-112, 84, 339], 30, 16], [[-122, 88, 285], 29, 15],
+      [[-119, 86, 229], 23, 13], [[-112, 103, 176], 14, 9],
+    ], [-133, 135, 182], { widthDirection: [-.62, -.78, 0] }, rearDrop);
     lock([84, 70, 370], [
-      [[104, 91, 326], 24, 13], [[113, 100, 283], 25, 14],
-      [[118, 102, 244], 18, 11], [[129, 108, 226], 8, 6],
-    ], [143, 108, 221], [.76, .65, 0], [0, 0, -p.backLength * .6]);
+      [[109, 87, 332], 29, 16], [[120, 92, 282], 27, 15],
+      [[115, 91, 237], 21, 12], [[110, 105, 186], 13, 8],
+    ], [131, 137, 194], { widthDirection: [-.65, .76, 0] }, rearDrop);
     lock([-57, 57, 410], [
-      [[-82, 96, 366], 32, 18], [[-91, 121, 314], 35, 16],
-      [[-100, 126, 246], 30, 16], [[-121, 130, 214], 13, 10],
-    ], [-144, 133, 211], back, rearDrop);
+      [[-81, 105, 365], 34, 18], [[-89, 129, 313], 34, 17],
+      [[-89, 123, 258], 28, 16], [[-85, 112, 207], 21, 13],
+      [[-92, 116, 169], 14, 9], [[-103, 132, 163], 6, 4],
+    ], [-119, 151, 172], rearWidth, rearDrop);
     lock([10, 59, 417], [
-      [[-9, 107, 391], 35, 17], [[-19, 136, 340], 44, 19],
-      [[-19, 146, 263], 39, 15], [[-31, 147, 222], 16, 11],
-    ], [-48, 141, 205], back, rearDrop);
+      [[-1, 120, 391], 36, 18], [[-9, 151, 335], 44, 19],
+      [[-9, 145, 272], 43, 17], [[-11, 134, 215], 33, 15],
+      [[-14, 133, 164], 24, 13], [[-20, 146, 154], 11, 6],
+    ], [-28, 166, 162], rearWidth, rearDrop);
     lock([61, 55, 411], [
-      [[66, 102, 381], 35, 17], [[70, 132, 322], 41, 18],
-      [[72, 137, 259], 34, 16], [[87, 132, 226], 15, 10],
-    ], [110, 128, 215], back, rearDrop);
+      [[65, 106, 380], 35, 17], [[74, 136, 324], 37, 17],
+      [[74, 130, 261], 32, 16], [[72, 115, 207], 24, 14],
+      [[76, 118, 169], 16, 10], [[89, 133, 161], 7, 5],
+    ], [102, 151, 170], rearWidth, rearDrop);
 
     const mustache = sculptLock(scope, [-9, -137, 165], [
       [[5, -147, 163], 12, 11], [[23, -152, 156], 17, 15],
