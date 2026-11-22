@@ -85,7 +85,7 @@ The developer accepted Shaggy's overall look in the turnaround. The reviewed pro
 
 The developer accepted the revised [Classic Stache fit](http://triangular-demo.localhost:4200/character-studio?workshop=classic-stache). The shape-editing prototype is complete. The [short beard fit](http://triangular-demo.localhost:4200/character-studio?workshop=short-beard) reuses the synchronized rotation view, opens on Shaggy, and is available on the other workshop hairstyles. Owner visual review is pending.
 
-The [WebGPU bob lock prototype](http://triangular-demo.localhost:4200/bob-hair-lock-spike) passed its single-lock check. It changes the hem length while keeping the crown attachment and mesh buffers fixed. Use the sweep to fit the full bob, with separate fringe length and lock count controls, if the developer accepts the prototype.
+The [WebGPU bob lock prototype](http://triangular-demo.localhost:4200/bob-hair-lock-spike) changes hem length and flare independently while keeping the crown attachment and mesh buffers fixed. The next visual review is the full bob's flared outline against the supplied concept. Its face opening and fringe can be fitted once the outline is approved.
 
 For the next Orange Pigtails body review, compare one rotatable full-body blockout to the original art using the same angle slider and overlay as the head preview. The reproduction steps and local source are recorded in [ER 074](/docs/engineering-records/074_procedural-character-studio.md#2026-11-18--synchronized-concept-and-3d-review).
 

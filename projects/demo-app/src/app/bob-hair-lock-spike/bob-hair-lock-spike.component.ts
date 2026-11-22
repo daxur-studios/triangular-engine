@@ -6,7 +6,7 @@ import { WebGPURenderer } from 'three/webgpu';
 import { EngineModule, EngineService } from 'triangular-engine';
 import { createBobHairLockSpikeScene } from './core';
 
-/** Tests whether a TSL sweep can change the length of one bob lock in place. */
+/** Tests whether a TSL sweep can shape the hem of one bob lock in place. */
 @Component({
   selector: 'app-bob-hair-lock-spike',
   imports: [EngineModule],
@@ -21,6 +21,7 @@ export class BobHairLockSpikeComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly length = signal(100);
+  readonly flare = signal(70);
   readonly angle = signal(35);
   readonly backend = signal('Starting renderer');
 
@@ -29,6 +30,7 @@ export class BobHairLockSpikeComponent {
   constructor() {
     this.engine.scene.background = new Color('#242327');
     this.scene.setAngle(this.angle());
+    this.scene.setFlare(this.flare());
     this.destroyRef.onDestroy(() => this.scene.dispose());
 
     this.engine.renderComplete$.pipe(take(1), takeUntilDestroyed(this.destroyRef)).subscribe(() => {
@@ -42,6 +44,11 @@ export class BobHairLockSpikeComponent {
   setLength(input: HTMLInputElement): void {
     this.length.set(input.valueAsNumber);
     this.scene.setLength(this.length());
+  }
+
+  setFlare(input: HTMLInputElement): void {
+    this.flare.set(input.valueAsNumber);
+    this.scene.setFlare(this.flare());
   }
 
   setAngle(input: HTMLInputElement): void {

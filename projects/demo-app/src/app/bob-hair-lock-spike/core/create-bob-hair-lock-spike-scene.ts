@@ -10,7 +10,7 @@ export function createBobHairLockSpikeScene(engine: Pick<EngineService, 'scene'>
     buildExperimentalScalpGeometry(),
     new MeshStandardMaterial({ color: '#b6a69b', roughness: .88 }),
   );
-  const { material, hemDrop } = createBobLockMaterial();
+  const { material, hemDrop, hemFlare } = createBobLockMaterial();
   // The grid's UVs are the angular and axial parameters of the generated sweep.
   const lock = new Mesh(new PlaneGeometry(1, 1, 24, 40), material);
   lock.name = 'bob-lock';
@@ -21,6 +21,9 @@ export function createBobHairLockSpikeScene(engine: Pick<EngineService, 'scene'>
   return {
     setLength(percent: number) {
       hemDrop.value = (percent - 100) * .018;
+    },
+    setFlare(percent: number) {
+      hemFlare.value = percent * .0065;
     },
     setAngle(degrees: number) {
       turntable.rotation.y = -MathUtils.degToRad(degrees);

@@ -15,8 +15,9 @@ describe('WebGPU bob lock prototype', () => {
       const material = lock.material as MeshStandardNodeMaterial;
       expect(material.positionNode).toBeTruthy();
 
-      for (const length of [70, 130]) {
+      for (const [length, flare] of [[70, 0], [130, 100]]) {
         handle.setLength(length);
+        handle.setFlare(flare);
         expect(lock.parent).toBe(turntable);
         expect(lock.geometry).toBe(geometry);
         expect(lock.geometry.getAttribute('position')).toBe(positions);

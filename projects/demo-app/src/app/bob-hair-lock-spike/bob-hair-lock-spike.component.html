@@ -1,12 +1,17 @@
 <main>
   <aside class="controls">
     <h1>Bob hair lock</h1>
-    <p>Change the hem length and rotate the scalp to inspect the attachment and silhouette.</p>
+    <p>Adjust the hem length and flare independently. Turn the scalp to check where the lock sits.</p>
 
     <label>
       <span>Lock length <span class="value" aria-hidden="true">{{ length() }}%</span></span>
       <input #lengthSlider type="range" min="70" max="130" [value]="length()" [attr.aria-valuetext]="length() + '%'"
         (input)="setLength(lengthSlider)" />
+    </label>
+    <label>
+      <span>Hem flare <span class="value" aria-hidden="true">{{ flare() }}%</span></span>
+      <input #flareSlider type="range" min="0" max="100" [value]="flare()" [attr.aria-valuetext]="flare() + '%'"
+        (input)="setFlare(flareSlider)" />
     </label>
     <label>
       <span>View angle <span class="value" aria-hidden="true">{{ angle() }}°</span></span>
