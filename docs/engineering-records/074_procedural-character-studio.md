@@ -254,6 +254,10 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **[action]** Ported the approved continuous bob study into the experimental character's interchangeable hair, retaining its five shape parameters and default values. The assembled head and miniatures share the same shape and natural hair colour. Geometry is CPU-generated and compatible with either renderer; the existing studio remains WebGL.
 - **[verification]** The focused character spec verifies matching character and miniature geometry, shared colour and shape updates; owner review of silhouette, expression and movement remains pending.
 
+## 2026-11-22 — Parametric Brep bob study
+
+- **[decision]** Try a standalone CAD hair part against the supplied front, side and back turnaround, using the workshop head and its Three.js bob as the comparison.
+
 ## Scope history
 
 <!-- tri:scope-history -->
@@ -314,4 +318,9 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 <!-- /tri:scope-change -->
 <!-- tri:scope-baseline state="unconfirmed" -->
 <!-- /tri:scope-baseline -->
+<!-- tri:scope-change id="SC-074-BREP-BOB-STUDY" date="2026-11-22" kind="addition" origin="requested" disposition="accepted" scope-ids="brep-bob-study" -->
+- Summary: Prototype a parametric Brep bob on the existing capsule head.
+- Reason: Check whether CAD makes shape variations easier to author while preserving the intended appearance and fit.
+- Impact: Add an isolated CAD part and visual comparison using the existing character as a baseline.
+<!-- /tri:scope-change -->
 <!-- /tri:scope-history -->

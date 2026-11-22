@@ -73,12 +73,46 @@ if (catPosition.z < -0.4 && (catPattern < 0.5 || catPattern > 1.5)) {
   };
 }
 
-export function buildConceptCatHelmet() {
+export function buildConceptCatHelmet(headRadius: number, headZ: number) {
+  // Find where the head and the rounded front of the torso meet in profile.
+  // The head is slightly elliptical, so this is an approximate circular collar.
+  const headCenterY = 0.195;
+  const headCenterZ = 0.176 + headZ * 1.04;
+  const headRadiusY = headRadius * 1.17 * 0.96;
+  const headRadiusZ = headRadius * 1.04;
+  const bodyCenterY = -0.062;
+  const bodyFrontZ = 0.012 + 0.355 / 2;
+  const bodyRadiusY = 0.266 * 1.04;
+  const bodyRadiusZ = 0.266;
+  const point = (angle: number) => new Vector2(
+    headCenterY + headRadiusY * Math.sin(angle),
+    headCenterZ + headRadiusZ * Math.cos(angle),
+  );
+  const distance = (angle: number) => {
+    const p = point(angle);
+    return ((p.x - bodyCenterY) / bodyRadiusY) ** 2 + ((p.y - bodyFrontZ) / bodyRadiusZ) ** 2 - 1;
+  };
+  const crossings: Vector2[] = [];
+  const steps = 256;
+  for (let i = 0; i < steps; i++) {
+    let a = i * 2 * Math.PI / steps;
+    let b = (i + 1) * 2 * Math.PI / steps;
+    if (distance(a) * distance(b) >= 0) continue;
+    for (let j = 0; j < 24; j++) {
+      const middle = (a + b) / 2;
+      if (distance(a) * distance(middle) <= 0) b = middle;
+      else a = middle;
+    }
+    crossings.push(point((a + b) / 2));
+  }
+  if (crossings.length !== 2) throw new Error('Concept cat head and torso must intersect twice in profile');
+  const [top, bottom] = crossings.sort((a, b) => b.x - a.x);
+  // Leave the raised collar visible above the intersecting surfaces.
+  const rimRadius = top.distanceTo(bottom) / 2 + 0.035;
   const root = new Group();
   root.name = 'concept-cat-helmet';
-  root.position.set(0, 0.105, 0.365);
-  root.rotation.x = 0.71;
-  const rimRadius = 0.318;
+  root.position.set(0, (top.x + bottom.x) / 2, (top.y + bottom.y) / 2);
+  root.rotation.x = Math.atan2(bottom.y - top.y, top.x - bottom.x);
   const domeRadius = 0.417;
   const aperture = Math.PI - Math.asin(rimRadius / domeRadius);
   const collarGeometry = new LatheGeometry([
@@ -86,6 +120,7 @@ export function buildConceptCatHelmet() {
     new Vector2(0.335, -0.032), new Vector2(0.332, 0.002), new Vector2(0.318, 0.015),
     new Vector2(0.259, -0.005), new Vector2(0.222, -0.059),
   ], 64);
+  collarGeometry.scale(rimRadius / 0.318, 1, rimRadius / 0.318);
   const collarMaterial = new MeshStandardMaterial({ color: '#716761', roughness: 0.57, metalness: 0.12 });
   const collar = new Mesh(collarGeometry, collarMaterial);
   collar.name = 'concept-cat-collar';

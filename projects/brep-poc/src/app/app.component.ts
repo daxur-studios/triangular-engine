@@ -7,31 +7,46 @@ import {
   signal,
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
+import type { ParamDefs } from 'brepjs';
 import { Color } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
-import { buildBracket, type BuiltPart } from './part/bracket';
+import { renderBracket, type RenderedPart } from './part/bracket-render';
 import { loadBrep, type BrepApi } from './part/brep-kernel';
-import {
-  DEFAULT_PART_PARAMETERS,
-  PART_PARAMETER_CONTROLS,
-  type PartParameterControl,
-  type PartParameters,
-} from './part/part-parameters';
 import { createPartScene, type PartSceneHandle } from './scene/part-scene';
+
+/** The lazily loaded part module; also the file `brep verify` checks. */
+type PartModule = typeof import('./part/bracket.brep');
+
+/** The declared parameter values a build takes. */
+type PartValues = PartModule['params']['values'];
 
 /** Wait after the last slider change before rebuilding, so dragging is not one build per pixel. */
 const REBUILD_DEBOUNCE_MS = 120;
-/** Tessellation tolerance while the user is still dragging, in millimetres. */
+/** Tessellation tolerance while the part is first drawn, in millimetres. */
 const PREVIEW_TOLERANCE_MM = 0.4;
 /** Tessellation tolerance once the parameters settle, in millimetres. */
 const FINAL_TOLERANCE_MM = 0.08;
+/** Fallback slider range when a numeric parameter declares no bounds. */
+const DEFAULT_SLIDER_MIN = 0;
+const DEFAULT_SLIDER_MAX = 100;
+const DEFAULT_SLIDER_STEP = 1;
 
 type KernelState = 'loading' | 'ready' | 'error';
 
+/** One numeric row in the parameter panel. */
+interface SliderControl {
+  readonly key: string;
+  readonly label: string;
+  readonly min: number;
+  readonly max: number;
+  readonly step: number;
+  readonly default: number;
+}
+
 /**
  * POC shell: owns the `<scene>`, the kernel load and the debounced rebuild
- * loop, and nothing about geometry itself (that lives in `part/` and
- * `scene/`).
+ * loop. The part itself (and its declared parameters) lives in
+ * `part/bracket.brep.ts`, which `brep verify` runs on its own.
  */
 @Component({
   selector: 'app-root',
@@ -48,15 +63,17 @@ export class AppComponent {
   private readonly scene: PartSceneHandle;
 
   private brep: BrepApi | null = null;
-  private lastPart: BuiltPart | null = null;
+  private partModule: PartModule | null = null;
+  private lastPart: RenderedPart | null = null;
   private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
 
-  readonly controls = PART_PARAMETER_CONTROLS;
-  readonly params = signal<PartParameters>({ ...DEFAULT_PART_PARAMETERS });
+  readonly controls = signal<readonly SliderControl[]>([]);
+  readonly values = signal<PartValues | null>(null);
   readonly kernelState = signal<KernelState>('loading');
   readonly busy = signal(true);
   readonly error = signal<string | null>(null);
   readonly edgesVisible = signal(true);
+  readonly liveShapes = signal(0);
   readonly partInfo = signal<{
     readonly buildMs: number;
     readonly triangleCount: number;
@@ -77,18 +94,27 @@ export class AppComponent {
       if (this.rebuildTimer !== null) {
         clearTimeout(this.rebuildTimer);
       }
+      this.lastPart?.solid.delete();
       this.scene.dispose();
     });
     void this.startKernel();
   }
 
-  onSliderInput(control: PartParameterControl, event: Event): void {
+  /** Current value of a slider, or the declared default before the part loads. */
+  valueOf(control: SliderControl): number {
+    const values = this.values();
+    return values ? asNumberMap(values)[control.key] ?? control.default : control.default;
+  }
+
+  onSliderInput(control: SliderControl, event: Event): void {
     const input = event.target as HTMLInputElement;
     const value = input.valueAsNumber;
     if (!Number.isFinite(value)) {
       return;
     }
-    this.params.update((current) => ({ ...current, [control.key]: value }));
+    this.values.update((current) =>
+      current ? ({ ...asNumberMap(current), [control.key]: value } as PartValues) : current,
+    );
     this.scheduleRebuild();
   }
 
@@ -113,7 +139,12 @@ export class AppComponent {
 
   private async startKernel(): Promise<void> {
     try {
-      this.brep = await loadBrep();
+      // One lazy chunk: the kernel and the part that runs on it.
+      const [brep, part] = await Promise.all([loadBrep(), import('./part/bracket.brep')]);
+      this.brep = brep;
+      this.partModule = part;
+      this.values.set({ ...part.params.values });
+      this.controls.set(toSliderControls(part.params.defs));
       this.kernelState.set('ready');
       this.rebuild(PREVIEW_TOLERANCE_MM);
       this.rebuildTimer = setTimeout(() => this.rebuild(FINAL_TOLERANCE_MM), 0);
@@ -134,20 +165,25 @@ export class AppComponent {
 
   private rebuild(toleranceMm: number): void {
     const brep = this.brep;
-    if (!brep) {
+    const partModule = this.partModule;
+    const values = this.values();
+    if (!brep || !partModule || !values) {
       return;
     }
+    const startedAt = performance.now();
     try {
-      const part = buildBracket(brep, this.params(), toleranceMm);
-      this.lastPart = part;
-      this.scene.setPart(part.geometry);
+      const rendered = renderBracket(brep, partModule.buildBracket(values), toleranceMm);
+      this.lastPart?.solid.delete();
+      this.lastPart = rendered;
+      this.scene.setPart(rendered.geometry);
       this.partInfo.set({
-        buildMs: part.buildMs,
-        triangleCount: part.triangleCount,
-        volumeMm3: part.volumeMm3,
-        filletApplied: part.filletApplied,
-        note: part.note,
+        buildMs: performance.now() - startedAt,
+        triangleCount: rendered.triangleCount,
+        volumeMm3: rendered.volumeMm3,
+        filletApplied: rendered.filletApplied,
+        note: rendered.note,
       });
+      this.liveShapes.set(brep.getDisposalStats().liveHandles);
       this.error.set(null);
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : String(error));
@@ -155,4 +191,28 @@ export class AppComponent {
       this.busy.set(false);
     }
   }
+}
+
+/** Turn declared numeric parameters into panel rows, in declaration order. */
+function toSliderControls(defs: ParamDefs): SliderControl[] {
+  const controls: SliderControl[] = [];
+  for (const [key, def] of Object.entries(defs)) {
+    if (def.type !== 'number') {
+      continue;
+    }
+    controls.push({
+      key,
+      label: def.label ?? key,
+      min: def.min ?? DEFAULT_SLIDER_MIN,
+      max: def.max ?? DEFAULT_SLIDER_MAX,
+      step: def.step ?? DEFAULT_SLIDER_STEP,
+      default: def.default,
+    });
+  }
+  return controls;
+}
+
+/** Read a declared parameter set by name, for the panel's generic slider loop. */
+function asNumberMap(values: PartValues): Record<string, number> {
+  return values as unknown as Record<string, number>;
 }

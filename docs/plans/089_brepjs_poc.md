@@ -29,15 +29,21 @@ camera or tick loop.
 1. Third Angular application in the workspace, `projects/brep-poc`, using the
    local engine source through the existing tsconfig paths.
 2. Load `brepjs` lazily and initialise `occt-wasm` explicitly from an asset URL.
-3. One parametric bracket (plate, flange, drilled holes, vertical fillets).
+3. One parametric bracket as a `brep` part (`part/bracket.brep.ts`): declared
+   `params`, an `expected` block, and a default export returning the shape.
 4. Feed the tessellation into an engine scene mesh plus a true B-Rep edge overlay.
-5. Property panel with sliders, measurements and STEP/STL export.
+5. Property panel with sliders generated from the declared parameters,
+   measurements and STEP/STL export.
+6. `npm run verify:brep-poc` as the gate: the report, not the viewport, decides
+   whether the part is correct.
 
 ## Done when
 
 - Slider change rebuilds and re-renders the part with no console errors.
 - Measurements (volume, triangles, build time) are visible per rebuild.
 - STEP and STL exports download and open in another tool.
+- `brep verify` reports `ok: true` for the part at its defaults and at the
+  parameter extremes, with no growth in live kernel shapes across rebuilds.
 
 ## Out of scope
 

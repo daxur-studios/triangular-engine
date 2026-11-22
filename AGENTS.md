@@ -5,6 +5,7 @@
 - `projects/triangular-engine/` — the published Angular library.
 - `projects/demo-app/` - the local demo application.
 - `projects/brep-poc/` - POC app: brepjs exact geometry rendered by the engine ([ER 089](docs/engineering-records/089_brepjs_poc.md)).
+- **brepjs parts:** a part is a `.brep.ts` file whose default export returns a shape, with `params` from `defineParams` and an `expected` block. `projects/brep-poc/src/app/part/bracket.brep.ts` is the example. After editing any `.brep.ts`, run `npm run verify:brep-poc` (or `npx brep verify <file> --check`) and treat a report that is not `ok` as a failure, even if the app still renders. API reference: `node_modules/brepjs-cad/reference/llms-full.txt`; where the upstream authoring skills live and how to enable them per provider: [`projects/brep-poc/README.md`](projects/brep-poc/README.md).
 - `projects/triangular-engine/docs/` — cross-cutting library guides; they ship in the npm package. Each secondary entry point's guide is `projects/triangular-engine/<entry>/README.md`, next to its code, and ships with it.
 - `docs/engineering-records/` — Engineering Records: design notes and implementation history for larger features.
 - `docs/plans/` — current and preserved historical work plans linked to their Engineering Records; [convention](docs/plans-and-runbooks.md).

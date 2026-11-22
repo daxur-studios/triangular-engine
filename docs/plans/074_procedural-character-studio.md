@@ -43,6 +43,7 @@ This plan covers separating the capsule character experience from the mixed-purp
 - **classic-stache-shape-editing** — Fit a swept hairstyle and optional mustache using Classic Stache as the reference. Acceptance: dragging the fringe and mustache tips updates the edit view and the assembled character. The editor and assembled preview can turn together, and speech remains readable. Review whether the handles help with fitting.
 - **short-beard-fit** — Fit a rounded, layered beard from the approved reference. Acceptance: the beard follows the jaw and meets the sideburn area in the front and profile views, stays interchangeable across workshop hairstyles, and frames the speaking mouth in synchronized views. The beard and scalp hair use the character's natural hair colour in all previews.
 - **webgpu-bob-lock** — Shape one rounded bob lock with TSL on native WebGPU. Acceptance: the length slider moves the hem and preserves the scalp attachment and mesh buffers. Review the locked root, rounded profile and lighting from front, three-quarter and side views across the slider range.
+- **brep-bob-study** — Trial one parametric Brep bob on the workshop head. Acceptance: compare front, side and back beside the current bob and the supplied turnaround, verify the solid at defaults and combined parameter extremes, and record the authoring trade-off.
 - **character-performance-matrix** — Measure one and many procedural humans while idle, walking in place and moving on repeatable scene paths. Acceptance: a visible-browser performance run records actor-update CPU time, render-submit CPU time, frame cadence, draw calls, triangles and scenario setup time at populations of 1, 16 and 48; scenario setup includes constructing additional actors, arranging the population and fitting the camera, but excludes construction of the studio's pre-existing primary human. The 16.7 ms p95 frame-cadence budget is labeled as an initial 60 Hz target hypothesis, and no hardware baseline is accepted before reviewing a clean run on the intended device.
 
 ## Relationships
@@ -70,6 +71,7 @@ This plan covers separating the capsule character experience from the mixed-purp
 | classic-stache-shape-editing | done        |
 | short-beard-fit         | done        |
 | webgpu-bob-lock        | done        |
+| brep-bob-study          | in_progress |
 | character-performance-matrix | in_progress |
 
 <!-- tri:review version="1" scope-hash="ff95ce3397534ef6bbf03e11c151f40a4c063d2b4002e5865f121b71a5e01a28" reviewed="2026-11-21" reviewer="agent" -->

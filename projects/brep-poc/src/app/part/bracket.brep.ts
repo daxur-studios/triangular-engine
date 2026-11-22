@@ -6,6 +6,7 @@ import {
   edgeFinder,
   fillet,
   fuse,
+  getBounds,
   isOk,
   translate,
   unwrap,
@@ -38,8 +39,11 @@ const HOLE_EDGE_CLEARANCE_RADII = 1.6;
 /** The drill is this many plate thicknesses long, so it cuts cleanly through. */
 const DRILL_OVERSHOOT_RATIO = 3;
 
-/** A fallback fillet is never larger than this share of the thinnest wall. */
-const FILLET_SAFETY_RATIO = 0.45;
+/** A fallback fillet is never larger than this share of the plate thickness. */
+const FILLET_MAX_THICKNESS_RATIO = 0.9;
+
+/** Tolerance when matching an edge to the plate's outline, in millimetres. */
+const EDGE_MATCH_EPSILON_MM = 0.01;
 
 /** Smallest fillet worth attempting, in millimetres. */
 const MIN_FILLET_MM = 0.5;
@@ -182,10 +186,28 @@ export function buildBracket(p: BracketValues = params.values): BracketBuild {
       }
     }
 
-    /** Fillet every vertical edge at `radius`, or null when the kernel refuses. */
+    /**
+     * The plate's four vertical corner edges. Selecting "every vertical edge"
+     * also picks up the flange's corners and the hole bores' seam edges, and
+     * blending those together produces a shape that fails BRepCheck. The plate
+     * outline is the part worth rounding.
+     */
+    const plateCorners = () =>
+      edgeFinder()
+        .inDirection('Z')
+        .when((edge) => {
+          const bounds = getBounds(edge);
+          return (
+            Math.abs(Math.abs(bounds.xMax) - p.width / 2) < EDGE_MATCH_EPSILON_MM &&
+            Math.abs(Math.abs(bounds.yMax) - p.depth / 2) < EDGE_MATCH_EPSILON_MM &&
+            bounds.zMax <= p.thickness / 2 + EDGE_MATCH_EPSILON_MM
+          );
+        })
+        .findAll(solid);
+
+    /** Fillet the plate corners at `radius`, or null when the kernel refuses. */
     const attemptFillet = (radius: number): BracketSolid | null => {
-      const verticalEdges = edgeFinder().inDirection('Z').findAll(solid);
-      const result = fillet(solid, verticalEdges, radius);
+      const result = fillet(solid, plateCorners(), radius);
       return isOk(result) ? result.value : null;
     };
 
@@ -193,15 +215,19 @@ export function buildBracket(p: BracketValues = params.values): BracketBuild {
     let note: string | null = holesFit ? null : 'Holes skipped: they do not fit these dimensions.';
     if (p.filletRadius >= MIN_FILLET_MM) {
       const exact = attemptFillet(p.filletRadius);
-      const fallbackCeiling =
-        Math.min(p.thickness / 2, p.flangeHeight > 0 ? p.flangeHeight / 2 : p.thickness / 2) *
-        FILLET_SAFETY_RATIO;
-      const fallback = exact ?? (fallbackCeiling >= MIN_FILLET_MM ? attemptFillet(fallbackCeiling) : null);
-      if (fallback !== null) {
-        advance(fallback);
+      const ceiling =
+        FILLET_MAX_THICKNESS_RATIO *
+        Math.min(p.thickness, p.width / 2, p.depth / 2);
+      const reduced =
+        exact === null && ceiling >= MIN_FILLET_MM && ceiling < p.filletRadius
+          ? attemptFillet(ceiling)
+          : null;
+      const applied = exact ?? reduced;
+      if (applied !== null) {
+        advance(applied);
         filletApplied = true;
         if (exact === null) {
-          note = `Fillet reduced to ${fallbackCeiling.toFixed(2)} mm: the kernel rejected ${p.filletRadius} mm here.`;
+          note = `Fillet reduced to ${ceiling.toFixed(2)} mm: the kernel rejected ${p.filletRadius} mm here.`;
         }
       } else {
         note = `Fillet rejected by the kernel at ${p.filletRadius} mm; showing square edges.`;

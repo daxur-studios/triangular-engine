@@ -32,22 +32,24 @@
     }
   </section>
 
-  <section class="sliders">
-    @for (control of controls; track control.key) {
-      <label>
-        <span class="label">{{ control.label }}</span>
-        <input
-          type="range"
-          [min]="control.min"
-          [max]="control.max"
-          [step]="control.step"
-          [value]="params()[control.key]"
-          (input)="onSliderInput(control, $event)"
-        />
-        <span class="value">{{ params()[control.key] }} mm</span>
-      </label>
-    }
-  </section>
+  @if (controls().length) {
+    <section class="sliders">
+      @for (control of controls(); track control.key) {
+        <label>
+          <span class="label">{{ control.label }}</span>
+          <input
+            type="range"
+            [min]="control.min"
+            [max]="control.max"
+            [step]="control.step"
+            [value]="valueOf(control)"
+            (input)="onSliderInput(control, $event)"
+          />
+          <span class="value">{{ valueOf(control) }} mm</span>
+        </label>
+      }
+    </section>
+  }
 
   @if (partInfo(); as info) {
     <section class="metrics">
@@ -55,6 +57,7 @@
       <div><span>triangles</span><strong>{{ info.triangleCount }}</strong></div>
       <div><span>build</span><strong>{{ info.buildMs | number: '1.0-0' }} ms</strong></div>
       <div><span>fillet</span><strong>{{ info.filletApplied ? 'applied' : 'square' }}</strong></div>
+      <div><span>shapes live</span><strong>{{ liveShapes() }}</strong></div>
     </section>
   }
 
@@ -79,7 +82,9 @@
   </section>
 
   <footer>
-    Same solid, three consumers: engine mesh for the viewport, STEP for CAD,
+    The sliders come from <code>defineParams</code> in
+    <code>part/bracket.brep.ts</code>, the same file
+    <code>brep verify</code> checks. Engine mesh for the viewport, STEP for CAD,
     STL for a slicer.
   </footer>
 </aside>

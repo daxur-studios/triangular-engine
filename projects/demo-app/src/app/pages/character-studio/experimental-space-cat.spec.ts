@@ -3,6 +3,29 @@ import { createCharacterStudioContributions } from './character-studio-contribut
 import { buildExperimentalSpaceCat, EXPERIMENTAL_SPACE_CAT } from './experimental-space-cat';
 
 describe('Character Studio concept-fit cat', () => {
+  it('places the helmet collar at the head and torso intersection in profile', () => {
+    const fit = buildExperimentalSpaceCat(false);
+    try {
+      const collar = fit.actor.root.getObjectByName('concept-cat-helmet')!;
+      const radius = fit.actor.dna.bodyRadius;
+      const headZ = 0.176 + fit.actor.dna.bodyLength / 2 * 1.04;
+      // Remove the raised collar allowance to recover the two intersection points.
+      const geometry = (fit.actor.root.getObjectByName('concept-cat-collar') as Mesh).geometry;
+      geometry.computeBoundingBox();
+      const halfJoin = geometry.boundingBox!.max.x * 0.318 / 0.335 - 0.035;
+      for (const sign of [-1, 1]) {
+        const y = collar.position.y + sign * halfJoin * Math.cos(collar.rotation.x);
+        const z = collar.position.z - sign * halfJoin * Math.sin(collar.rotation.x);
+        const head = ((y - 0.195) / (radius * 1.17 * 0.96)) ** 2 + ((z - headZ) / (radius * 1.04)) ** 2;
+        const body = ((y + 0.062) / (0.266 * 1.04)) ** 2 + ((z - (0.012 + 0.355 / 2)) / 0.266) ** 2;
+        expect(head).toBeCloseTo(1, 4);
+        expect(body).toBeCloseTo(1, 4);
+      }
+    } finally {
+      fit.dispose();
+    }
+  });
+
   it('selects the study independently and restores the standard cat when switching presets', () => {
     const { cat, human } = createCharacterStudioContributions();
     try {

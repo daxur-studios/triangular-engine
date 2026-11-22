@@ -9,6 +9,7 @@
     "check:paths": "node scripts/check-local-paths.mjs --all",
     "serve:demo-map": "node scripts/export-development-map.mjs && ng serve demo-app",
     "serve:brep-poc": "ng serve brep-poc",
+    "verify:brep-poc": "brep verify projects/brep-poc/src/app/part/bracket.brep.ts --check",
     "test:docs:records": "node --test scripts/engineering-records.spec.mjs",
     "setup:hooks": "git config core.hooksPath .githooks",
     "test:summary": "node projects/triangular-engine/bin/triangular-test-summary.mjs",

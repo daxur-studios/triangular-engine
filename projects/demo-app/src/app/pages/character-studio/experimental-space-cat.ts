@@ -115,7 +115,7 @@ export function buildExperimentalSpaceCat(autoBlink = true, facialController?: F
   actor.torsoGroup.add(head);
 
   const body = buildConceptCatSuit();
-  const helmet = buildConceptCatHelmet();
+  const helmet = buildConceptCatHelmet(radius, headZ);
   actor.torsoGroup.getObjectByName('capsule-cat-head-gear')?.removeFromParent();
   const stockTorsoGear = actor.torsoGroup.getObjectByName('capsule-cat-torso-gear')!;
   stockTorsoGear.position.y = -0.052;

@@ -12,7 +12,7 @@ import {
   MeshStandardMaterial,
 } from 'three';
 import { EngineService } from 'triangular-engine';
-import type { PartGeometry } from '../part/bracket';
+import type { PartGeometry } from '../part/bracket-render';
 
 /** Millimetres (brepjs) to metres (engine world units). */
 const MM_TO_METERS = 0.001;
