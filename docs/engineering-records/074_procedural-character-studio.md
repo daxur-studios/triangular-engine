@@ -257,6 +257,32 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 ## 2026-11-22 — Parametric Brep bob study
 
 - **[decision]** Try a standalone CAD hair part against the supplied front, side and back turnaround, using the workshop head and its Three.js bob as the comparison.
+- **[action]** Added a closed CAD cap with a continuous revolved profile and a cut face opening. Side length, flare and fringe length are independent inputs. The offline comparison uses the existing face and draws both bobs from synchronized angles. The fringe scallops are part of the solid. The groove toggle adds shading in the preview.
+- **[verification]** The default and all eight combinations of minimum and maximum inputs passed `brep verify --check`. In headless Chrome the default and both combined extremes each rendered as a single valid solid. Each slider changed the CAD rendering independently. Reset, groove shading, view switching and narrow layout worked. The bracket verification, preview type check and engine build passed. Evidence is local only. From the repo root run `node projects/brep-poc/studies/capsule-bob/verify.mjs` for geometry reports and `node projects/brep-poc/studies/capsule-bob/build.mjs artifacts/brep-bob/reference.png` for the offline preview. Use the retained local `check.mjs` and `comparison.py` in `artifacts/brep-bob/` to recreate the contact sheet.
+- **[finding]** The CAD cap follows the turnaround's narrower outline and blunt hem on the default head. The profile and face cut make the major dimensions straightforward to edit. The reference has fuller, more clearly separated locks, especially in profile. Rebuild plus validation and rendering took roughly a second in the local headless preview. This supports trying CAD for offline variants. Live editor performance and animated or helmet fit remain open.
+- **[action]** Added two rounded cuts per side where the shaded grooves meet the hem. The depth follows the hem as side length changes. The preview now opens in profile with a 15 mm default. Setting depth to zero restores the smooth hem.
+- **[verification]** The default passed `brep verify --check`. The study's verification script also checked for one valid solid and the expected vertical bounds at the default, the smooth default, and all eight length, flare and fringe extremes with 0, 1 and 27 mm cuts. The browser comparison confirmed visible cuts with groove shading disabled. Side comparison evidence is local only. Recreate it with `node artifacts/brep-bob/check.mjs` and `python artifacts/brep-bob/hem-comparison.py artifacts/brep-bob/side-reference.png`.
+
+## 2026-11-22 — Parametric Brep space buns
+
+- **[action]** Fitted a cap, swept fringe, side locks and rear layers to the workshop head. The two fluted buns and their ties share one mirrored recipe. The Classic and Full presets differ in bun size, individual bun placement and side-lock length.
+- **[finding]** Smooth lofts through oriented sections made the locks reusable. The initial fit still needed visual work, especially around the back seam. A valid CAD body could produce an incomplete mesh, so the bake checks each body's vertex bounds against its CAD bounds and retries with finer meshing when needed. The baked files use the workshop's unscaled Y-up head coordinates and two materials. The preview loads the GLBs directly without loading a CAD kernel.
+- **[verification]** Both presets passed `brep verify --check`. The part also produced 15 valid solids at the default and at all 16 combined parameter extremes. The browser rendered both baked presets from front, three-quarter, side and back. The close-up exports contain 23,525 and 25,385 triangles respectively. The preview type check, bracket verification and engine build passed. Character Studio integration and crowd performance remain open.
+- **[reproduce]** The preview and models are local under `artifacts/brep-space-buns/`. From the repository root, run `node projects/brep-poc/studies/capsule-space-buns/build.mjs` to bake both GLBs and the offline preview. Pass the concept PNG path as the optional first argument to include it in the preview. Run `node projects/brep-poc/studies/capsule-space-buns/verify.mjs` to repeat the parameter checks. The local `check.mjs` and `turnaround.py` in the artifact folder regenerate the stills and contact sheet.
+
+## 2026-11-22 — Parametric Brep swept hair and mustache
+
+- **[action]** Fitted an asymmetric swept crown and layered nape to the workshop head. The crown sweep and rear length move the lock tips while keeping their roots attached. The mirrored mustache is a separate GLB, shared by both baked hair presets. The preview uses the workshop's existing Classic Stache face and mouth placement.
+- **[finding]** The same oriented-section loft function worked for the space buns, swept locks and curled mustache. The front and side checks still drove the fit. An arched trim and two shorter nape locks softened the visible scalp-cap edge. Authoring and baking share the space-bun loft function and tessellation coverage check.
+- **[verification]** Both presets passed `brep verify --check`. The default and all four parameter corners produced 19 valid hair bodies and two valid mustache bodies. The offline browser loaded both styles and the shared mustache without network requests. Checked front, three-quarter, side and back, happy and surprised mouths, the mustache toggle, and mobile layout. The preview type check and engine build passed. Hair exports contain 23,961 and 24,013 triangles. The mustache adds 1,204. These are close-up assets. Character Studio integration and crowd use remain open.
+- **[reproduce]** Run `node projects/brep-poc/studies/capsule-swept-hair/build.mjs` from the repository root to regenerate the offline preview and three GLBs under `artifacts/brep-swept-hair/`. Pass the supplied concept PNG path as the first argument to include it. Run `node projects/brep-poc/studies/capsule-swept-hair/verify.mjs` for the geometry checks. Local stills can be regenerated with `node artifacts/brep-swept-hair/check.mjs` and `python artifacts/brep-swept-hair/turnaround.py`.
+
+## 2026-11-22 — Swept hair silhouette and preview orbit
+
+- **[action]** Reworked the loft profiles to make the crown fuller and arch the side locks from temple to cheek, with a forward curl under each ear. The sweep and length controls still make both presets from one recipe. The length now extends the side and rear locks together.
+- **[action]** Added a shared orbit and zoom controller to the swept hair, bob, space buns and space cat studies. Drag or zoom either comparison panel to move all cameras on its page. The angle buttons restore the selected angle and default zoom.
+- **[verification]** Both revised presets passed `brep verify --check` and the default and four combined extremes passed the geometry check. The revised hair GLBs contain 26,345 and 26,613 triangles. The offline preview still renders both expressions and toggles the mustache. The four previews passed the linked pitch, wheel zoom and reset checks. The swept-hair preview also passed simulated two-finger pinch. The preview type check and engine build passed.
+- **[reproduce]** Rebuild the four standalone previews with their `build.mjs` scripts, then run `node projects/brep-poc/studies/verify-preview-orbit.mjs`. The front and side comparison is local under `artifacts/brep-swept-hair/silhouette-comparison.png`. Regenerate it with the sweep study capture and `turnaround.py` above, using `turnaround-before.png` from the first bake.
 
 ## Scope history
 
@@ -322,5 +348,25 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - Summary: Prototype a parametric Brep bob on the existing capsule head.
 - Reason: Check whether CAD makes shape variations easier to author while preserving the intended appearance and fit.
 - Impact: Add an isolated CAD part and visual comparison using the existing character as a baseline.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-BREP-SPACE-BUNS-STUDY" date="2026-11-22" kind="addition" origin="requested" disposition="accepted" scope-ids="brep-space-buns-study" -->
+- Summary: Fit and bake two CAD space-bun presets on the workshop head from one recipe.
+- Reason: Test whether reusable curved locks are practical for more sculpted concept hairstyles.
+- Impact: Add an isolated CAD part and a standalone baked-asset comparison.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-BREP-SWEPT-HAIR-STUDY" date="2026-11-22" kind="addition" origin="requested" disposition="accepted" scope-ids="brep-swept-hair-study" -->
+- Summary: Fit a swept crown, layered rear locks and a separate curled mustache to the workshop head.
+- Reason: Try the curved loft workflow on an asymmetric concept and check whether facial hair fits the animated face.
+- Impact: Add a parametric CAD model and an offline preview of baked variations.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-BREP-HAIR-FEEDBACK" date="2026-11-22" kind="change" origin="requested" disposition="accepted" scope-ids="brep-swept-hair-study" -->
+- Summary: Round out the crown and shape the side locks so they curve under the ears.
+- Reason: The first bake looked flat at the crown and finished too high beside the face.
+- Impact: Reshape the lock profiles while preserving the two preset controls and separate mustache.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-074-BREP-STUDY-ORBIT" date="2026-11-22" kind="addition" origin="requested" disposition="accepted" scope-ids="brep-study-orbit" -->
+- Summary: Add synchronized orbit and zoom to the standalone CAD studies.
+- Reason: Inspect the fit between fixed comparison angles and make close-up checks easier.
+- Impact: Add shared preview controls for the hair and space-cat studies.
 <!-- /tri:scope-change -->
 <!-- /tri:scope-history -->

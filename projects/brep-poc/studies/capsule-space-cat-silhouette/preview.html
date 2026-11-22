@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capsule space cat silhouette</title>
+<style>
+  :root { color-scheme: light; color: #332622; background: #f6efe8; font: 16px/1.4 system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  main { max-width: 1280px; margin: auto; padding: 18px 18px 28px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 10px 20px; }
+  h1 { margin: 0; font: 400 clamp(1.6rem, 4vw, 2.3rem) Georgia, serif; }
+  h2 { font-size: .98rem; margin: 18px 0 6px; }
+  nav { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { background: #fff9f2; border: 1px solid #c9afa6; border-radius: 7px; color: inherit; padding: 6px 10px; font: inherit; cursor: pointer; }
+  button[aria-pressed="true"] { background: #603e3c; color: #fff9f2; border-color: #603e3c; }
+  figure { margin: 12px auto; }
+  img { display: block; margin: auto; width: min(100%, 760px); height: auto; border-radius: 8px; }
+  .note { color: #604740; font-size: .9rem; max-width: 70ch; margin: 12px 0 0; }
+  .stages { display: grid; gap: 10px; margin-top: 4px; }
+  .stages.silhouettes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stages.assembled { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  section { background: #ede1d6; border-radius: 10px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: clamp(240px, 30vw, 390px); touch-action: none; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  .caption { font-size: .86rem; margin: 4px 14px 10px; color: #604740; }
+  h2 .hint { font-size: .78rem; font-weight: 400; color: #8a6b61; margin-left: 8px; }
+  [role=status] { font-size: .86rem; margin: 12px 0 0; color: #604740; }
+  @media (max-width: 720px) {
+    .stages.silhouettes, .stages.assembled { grid-template-columns: 1fr; }
+  }
+</style>
+<main>
+  <header>
+    <h1>Capsule space cat silhouette</h1>
+    <nav aria-label="View">
+      <button data-angle="90" aria-pressed="false">Front</button>
+      <button data-angle="35" aria-pressed="false">Three-quarter</button>
+      <button data-angle="0" aria-pressed="true">Side</button>
+      <button data-angle="-90" aria-pressed="false">Back</button>
+    </nav>
+  </header>
+  <p class="note">One lofted surface from rump to muzzle replaces the separate head and torso.</p>
+  <p class="note" id="orbit-hint">Drag to orbit. Scroll or pinch to zoom.</p>
+  <h2>Silhouette <span class="hint">body only, no face or limbs</span></h2>
+  <div class="stages silhouettes"></div>
+  <h2>Assembled <span class="hint">existing face rig, legs and tail</span></h2>
+  <div class="stages assembled"></div>
+  <!-- REFERENCE -->
+  <p role="status">Loading the baked silhouettes…</p>
+</main>
+<!-- ASSETS -->
+<!-- PREVIEW -->
+</html>

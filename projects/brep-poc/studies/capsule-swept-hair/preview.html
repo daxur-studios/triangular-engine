@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swept capsule hair</title>
+<style>
+  :root { color-scheme: light; color: #3a2a23; background: #f8f0e7; font: 16px/1.4 system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  main { max-width: 1030px; margin: auto; padding: 18px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; }
+  h1 { margin: 0; font: 400 clamp(1.75rem, 5vw, 2.5rem) Georgia, serif; }
+  nav, .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .controls { margin-top: 12px; justify-content: end; gap: 12px; }
+  button, select { background: #fff9f2; border: 1px solid #bea58f; border-radius: 7px; color: inherit; padding: 6px 10px; font: inherit; cursor: pointer; }
+  button[aria-pressed="true"] { background: #694b38; color: #fff9f2; border-color: #694b38; }
+  figure { margin: 12px auto; }
+  img { display: block; margin: auto; width: min(100%, 520px); height: auto; border-radius: 8px; }
+  .stages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+  section { background: #eee1d4; border-radius: 10px; overflow: hidden; }
+  h2 { font-size: .98rem; margin: 10px 14px 0; }
+  canvas { display: block; width: 100%; height: clamp(285px, 37vw, 395px); cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  section p, [role=status] { font-size: .86rem; margin: 5px 14px 10px; color: #624939; }
+  [role=status] { margin: 10px 0 0; }
+  #orbit-hint { margin: 10px 0 0; color: #624939; font-size: .86rem; }
+  @media (max-width: 640px) { .stages { grid-template-columns: 1fr; } .controls { justify-content: start; } }
+</style>
+<main>
+  <header>
+    <h1>Swept capsule hair</h1>
+    <nav aria-label="View">
+      <button data-angle="0" aria-pressed="true" disabled>Front</button>
+      <button data-angle="-40" aria-pressed="false" disabled>Three-quarter</button>
+      <button data-angle="-90" aria-pressed="false" disabled>Side</button>
+      <button data-angle="180" aria-pressed="false" disabled>Back</button>
+    </nav>
+  </header>
+  <!-- REFERENCE -->
+  <div class="controls">
+    <label><input id="mustache" type="checkbox" checked disabled> Mustache</label>
+    <label>Expression <select id="expression" disabled><option value="happy">Happy</option><option value="surprised">Surprised</option></select></label>
+  </div>
+  <p id="orbit-hint">Drag to orbit. Scroll or pinch to zoom.</p>
+  <div class="stages"></div>
+  <p role="status">Loading the baked assets…</p>
+</main>
+<!-- ASSETS -->
+<!-- PREVIEW -->
+</html>

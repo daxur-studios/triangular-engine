@@ -44,6 +44,9 @@ This plan covers separating the capsule character experience from the mixed-purp
 - **short-beard-fit** — Fit a rounded, layered beard from the approved reference. Acceptance: the beard follows the jaw and meets the sideburn area in the front and profile views, stays interchangeable across workshop hairstyles, and frames the speaking mouth in synchronized views. The beard and scalp hair use the character's natural hair colour in all previews.
 - **webgpu-bob-lock** — Shape one rounded bob lock with TSL on native WebGPU. Acceptance: the length slider moves the hem and preserves the scalp attachment and mesh buffers. Review the locked root, rounded profile and lighting from front, three-quarter and side views across the slider range.
 - **brep-bob-study** — Trial one parametric Brep bob on the workshop head. Acceptance: compare front, side and back beside the current bob and the supplied turnaround, verify the solid at defaults and combined parameter extremes, and record the authoring trade-off.
+- **brep-space-buns-study** — Fit modular CAD space buns to the workshop head. Acceptance: compare the default and a second preset from the front, side and back, verify the CAD bodies and load the baked GLBs on the same head.
+- **brep-swept-hair-study** — Fit a rounded swept crown, locks that curl under the ears and a separate mustache to the workshop head. Acceptance: compare two baked hair presets at matching angles, verify the parameter ranges and check the mustache against happy and surprised expressions.
+- **brep-study-orbit** — Add synchronized orbit and zoom to the standalone CAD comparisons. Acceptance: dragging or zooming any model moves both comparison views together, and angle buttons restore a repeatable view.
 - **character-performance-matrix** — Measure one and many procedural humans while idle, walking in place and moving on repeatable scene paths. Acceptance: a visible-browser performance run records actor-update CPU time, render-submit CPU time, frame cadence, draw calls, triangles and scenario setup time at populations of 1, 16 and 48; scenario setup includes constructing additional actors, arranging the population and fitting the camera, but excludes construction of the studio's pre-existing primary human. The 16.7 ms p95 frame-cadence budget is labeled as an initial 60 Hz target hypothesis, and no hardware baseline is accepted before reviewing a clean run on the intended device.
 
 ## Relationships
@@ -71,10 +74,13 @@ This plan covers separating the capsule character experience from the mixed-purp
 | classic-stache-shape-editing | done        |
 | short-beard-fit         | done        |
 | webgpu-bob-lock        | done        |
-| brep-bob-study          | in_progress |
+| brep-bob-study         | done        |
+| brep-space-buns-study  | done        |
+| brep-swept-hair-study   | done        |
+| brep-study-orbit       | done        |
 | character-performance-matrix | in_progress |
 
-<!-- tri:review version="1" scope-hash="ff95ce3397534ef6bbf03e11c151f40a4c063d2b4002e5865f121b71a5e01a28" reviewed="2026-11-21" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="1776aa3ebf0e1448d8fc66d04678df19fb235c621a85f3c00a9c34d940fb4ae8" reviewed="2026-11-22" reviewer="agent" -->
 <!-- /tri:review -->
 
 ## Delivery progress
@@ -86,6 +92,12 @@ Latest diagnostic: [run the human performance matrix](http://triangular-demo.loc
 The developer accepted Shaggy's overall look in the turnaround. The reviewed proportions are available in a selectable walking preset in the [playable sandbox](079_playable-capsule-human-sandbox.md). Hand refinement remains open for the gesture and grip pass.
 
 The developer accepted the revised [Classic Stache fit](http://triangular-demo.localhost:4200/character-studio?workshop=classic-stache). The shape-editing prototype is complete. The [short beard fit](http://triangular-demo.localhost:4200/character-studio?workshop=short-beard) reuses the synchronized rotation view, opens on Shaggy, and is available on the other workshop hairstyles. Owner visual review is pending.
+
+The standalone Brep bob study is ready for visual review. [ER 074 records the comparison, geometry checks and reproduction commands](../engineering-records/074_procedural-character-studio.md#2026-11-22--parametric-brep-bob-study).
+
+The standalone space-buns study compares two baked presets on the workshop head. [ER 074 records the CAD and mesh checks and bake command](../engineering-records/074_procedural-character-studio.md#2026-11-22--parametric-brep-space-buns).
+
+The standalone swept-hair study compares two baked presets with a fuller crown and under-ear locks on the existing animated face. The swept hair, bob, space buns and space cat previews support linked orbit and zoom. [ER 074 records the original study and revision checks](../engineering-records/074_procedural-character-studio.md#2026-11-22--swept-hair-silhouette-and-preview-orbit).
 
 The approved continuous bob study is now selectable in [Character Studio](http://triangular-demo.localhost:4200/character-studio?workshop=bob), with length, flare, fringe and groove controls and shared natural hair colour. Owner review on the full animated character remains pending; the studio itself still uses WebGL.
 

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capsule space buns</title>
+<style>
+  :root { color-scheme: light; color: #332622; background: #f6efe8; font: 16px/1.4 system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  main { max-width: 1000px; margin: auto; padding: 18px 18px 24px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; }
+  h1 { margin: 0; font: 400 clamp(1.75rem, 5vw, 2.5rem) Georgia, serif; }
+  nav { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { background: #fff9f2; border: 1px solid #c9afa6; border-radius: 7px; color: inherit; padding: 6px 10px; font: inherit; cursor: pointer; }
+  button[aria-pressed="true"] { background: #603e3c; color: #fff9f2; border-color: #603e3c; }
+  figure { margin: 14px auto; }
+  img { display: block; margin: auto; width: min(100%, 640px); height: auto; border-radius: 8px; }
+  .stages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+  section { background: #ede1d6; border-radius: 10px; overflow: hidden; }
+  h2 { font-size: .96rem; margin: 10px 14px 0; }
+  canvas { display: block; width: 100%; height: clamp(260px, 36vw, 350px); cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  section p, [role=status] { font-size: .86rem; margin: 5px 14px 10px; color: #604740; }
+  [role=status] { margin: 10px 0 0; }
+  #orbit-hint { margin: 10px 0 0; color: #604740; font-size: .86rem; }
+  @media (max-width: 640px) { .stages { grid-template-columns: 1fr; } }
+</style>
+<main>
+  <header>
+    <h1>Capsule space buns</h1>
+    <nav aria-label="View">
+      <button data-angle="0" aria-pressed="true" disabled>Front</button>
+      <button data-angle="40" aria-pressed="false" disabled>Three-quarter</button>
+      <button data-angle="-90" aria-pressed="false" disabled>Side</button>
+      <button data-angle="180" aria-pressed="false" disabled>Back</button>
+    </nav>
+  </header>
+  <!-- REFERENCE -->
+  <p id="orbit-hint">Drag to orbit. Scroll or pinch to zoom.</p>
+  <div class="stages"></div>
+  <p role="status">Loading the baked hair…</p>
+</main>
+<!-- ASSETS -->
+<!-- PREVIEW -->
+</html>

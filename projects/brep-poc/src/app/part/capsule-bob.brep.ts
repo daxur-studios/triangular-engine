@@ -1,10 +1,11 @@
-import { cut, defineParams, Sketcher, unwrap, withScope } from 'brepjs';
+import { cut, cutAll, defineParams, rotate, Sketcher, unwrap, withScope } from 'brepjs';
 
 /** A rigid hair piece for the workshop's default capsule head, in millimetres and Z-up. */
 export const params = defineParams({
   length: { type: 'number', default: 48, min: 0, max: 80, step: 1, unit: 'mm', label: 'Side length' },
   flare: { type: 'number', default: 16, min: 0, max: 35, step: 1, unit: 'mm', label: 'Flare' },
   fringe: { type: 'number', default: 14, min: 0, max: 35, step: 1, unit: 'mm', label: 'Fringe length' },
+  notchDepth: { type: 'number', default: 15, min: 0, max: 27, step: 1, unit: 'mm', label: 'Hem notch depth' },
 });
 
 export type BobValues = typeof params.values;
@@ -46,12 +47,31 @@ export default function buildBob(p: BobValues = params.values) {
         .lineTo([143, 0])
         .lineTo([143, fringe - 19])
         .quadraticBezierCurveTo([121, fringe - 2], [143, fringe - 3])
-        .quadraticBezierCurveTo([-121, fringe - 2], [0, fringe + 9])
+        .cubicBezierCurveTo([62, fringe + 8], [105, fringe - 2], [74, fringe - 6])
+        .cubicBezierCurveTo([0, fringe + 11], [47, fringe - 8], [13, fringe - 8])
+        .cubicBezierCurveTo([-62, fringe + 8], [-13, fringe - 8], [-47, fringe - 8])
+        .cubicBezierCurveTo([-121, fringe - 2], [-74, fringe - 6], [-105, fringe - 2])
         .quadraticBezierCurveTo([-143, fringe - 19], [-143, fringe - 3])
         .close()
         .extrude(230, { extrusionDirection: [0, -1, 0] }),
     );
 
-    return unwrap(cut(cap, opening));
+    if (p.notchDepth === 0) return unwrap(cut(cap, opening));
+
+    // A rounded, tapered cut runs through the lip wherever two side locks meet.
+    // Keep its top relative to the hem so it follows changes in hair length.
+    const tip = hem + p.notchDepth;
+    const notch = scope.register(
+      new Sketcher('XZ', [0, -120, 0])
+        .movePointerTo([-10, hem - 12])
+        .cubicBezierCurveTo([0, tip], [-6, hem + 1], [-3, tip])
+        .cubicBezierCurveTo([10, hem - 12], [3, tip], [6, hem + 1])
+        .close()
+        .extrude(110, { extrusionDirection: [0, -1, 0] }),
+    );
+    const sideNotches = [-101.25, -78.75, 78.75, 101.25].map(angle =>
+      scope.register(rotate(notch, angle, { axis: [0, 0, 1] })),
+    );
+    return unwrap(cutAll(cap, [opening, ...sideNotches]));
   });
 }

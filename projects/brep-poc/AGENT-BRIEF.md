@@ -118,6 +118,24 @@ An installed skill costs one description line of prompt until invoked.
 - **`brepjs` 20.x is not the 4.x API.** `init()` + `box()`/`cut()` vs
   `initFromOC()` + `makeBaseBox()`/`cutShape()`. Pin the version.
 
+## Decorative assemblies
+
+- **Reuse a few sculpted pieces.** The space buns use lofts through oriented
+  sections for the fringe, locks and buns. Mirror paired pieces and adjust their
+  placement independently. Overlapping decorative solids can stay separate in
+  the CAD assembly. Fit them on the actual character and inspect the front,
+  side and back before tuning variants.
+- **Check the baked mesh as well as the CAD bodies.** One meshing setting
+  reduced valid buns to tiny patches. Compare each body's mesh bounds with its
+  CAD bounds, then load the saved GLB on the actual head. The bake retries with
+  a finer setting if a body loses coverage.
+- **Use the attachment's local coordinates.** The space-buns bake uses 100 CAD
+  mm per unscaled workshop head unit. Its GLB exporter already adds the Y-up
+  rotation.
+
+See the [space-buns bake](studies/capsule-space-buns/build.mjs) and the
+[study notes and commands](../../docs/engineering-records/074_procedural-character-studio.md#2026-11-22--parametric-brep-space-buns).
+
 ## What the game needs back
 
 The part must hand over to the engine, which works in **metres, Y-up**:
@@ -153,7 +171,7 @@ Out of scope:    <what not to model>
 
 - [ ] `brep verify <part>.brep.ts --check` reports `ok: true`.
 - [ ] Report shows the expected bounds (and volume, if declared) and a positive
-      volume; the shape is a solid or a single-body compound.
+      volume. Verify the intended body count and validity of each body.
 - [ ] Green at the parameter extremes, not only at defaults.
 - [ ] `--snapshot` viewed: it is the part the brief describes, not a generic blob.
 - [ ] Exported the formats the game needs, and reported their paths.
