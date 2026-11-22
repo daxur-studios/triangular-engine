@@ -56,3 +56,4 @@ Records `001`–`042` keep their historical formats; new work uses reciprocal pl
 | [Island crowd navigation](/docs/engineering-records/086_island-crowd-navigation.md) | [PLAN-086](/docs/plans/086_island-crowd-navigation.md) |
 | [Multi-turn consensus conversations](/docs/engineering-records/087_multi-turn-consensus-conversations.md) | [PLAN-087](/docs/plans/087_multi-turn-consensus-conversations.md) |
 | [Concept reference fitting](/docs/engineering-records/088_concept-reference-fitting.md) | [PLAN-088](/docs/plans/088_concept-reference-fitting.md) |
+| [brepjs parametric part POC](/docs/engineering-records/089_brepjs_poc.md) | [PLAN-089](/docs/plans/089_brepjs_poc.md) |

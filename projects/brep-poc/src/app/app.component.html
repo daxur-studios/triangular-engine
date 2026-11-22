@@ -1,0 +1,85 @@
+<scene>
+  <orbitControls
+    [cameraPosition]="[0.36, 0.26, 0.36]"
+    [target]="[0.07, 0.05, 0]"
+    [isActive]="true"
+  />
+</scene>
+
+<aside class="panel">
+  <header>
+    <h1>brepjs &times; triangular-engine</h1>
+    <p class="hypothesis">
+      Exact B-Rep geometry can drive a live parametric part inside an engine
+      scene, with manufacturable output, at interactive rates.
+    </p>
+  </header>
+
+  <section class="status">
+    @switch (kernelState()) {
+      @case ('loading') {
+        <span class="dot busy"></span> loading OpenCascade WASM kernel&hellip;
+      }
+      @case ('ready') {
+        <span class="dot ok"></span> kernel ready
+        @if (busy()) {
+          &middot; rebuilding&hellip;
+        }
+      }
+      @case ('error') {
+        <span class="dot error"></span> kernel failed
+      }
+    }
+  </section>
+
+  <section class="sliders">
+    @for (control of controls; track control.key) {
+      <label>
+        <span class="label">{{ control.label }}</span>
+        <input
+          type="range"
+          [min]="control.min"
+          [max]="control.max"
+          [step]="control.step"
+          [value]="params()[control.key]"
+          (input)="onSliderInput(control, $event)"
+        />
+        <span class="value">{{ params()[control.key] }} mm</span>
+      </label>
+    }
+  </section>
+
+  @if (partInfo(); as info) {
+    <section class="metrics">
+      <div><span>volume</span><strong>{{ volumeCm3() | number: '1.2-2' }} cm³</strong></div>
+      <div><span>triangles</span><strong>{{ info.triangleCount }}</strong></div>
+      <div><span>build</span><strong>{{ info.buildMs | number: '1.0-0' }} ms</strong></div>
+      <div><span>fillet</span><strong>{{ info.filletApplied ? 'applied' : 'square' }}</strong></div>
+    </section>
+  }
+
+  @if (partInfo()?.note; as note) {
+    <p class="note">{{ note }}</p>
+  }
+
+  @if (error(); as message) {
+    <p class="error">{{ message }}</p>
+  }
+
+  <section class="actions">
+    <button type="button" (click)="toggleEdges()">
+      {{ edgesVisible() ? 'Hide edges' : 'Show edges' }}
+    </button>
+    <button type="button" (click)="exportPart('step')" [disabled]="kernelState() !== 'ready'">
+      Export STEP
+    </button>
+    <button type="button" (click)="exportPart('stl')" [disabled]="kernelState() !== 'ready'">
+      Export STL
+    </button>
+  </section>
+
+  <footer>
+    Same solid, three consumers: engine mesh for the viewport, STEP for CAD,
+    STL for a slicer.
+  </footer>
+</aside>

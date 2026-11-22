@@ -3,7 +3,8 @@
 ## Repository map
 
 - `projects/triangular-engine/` — the published Angular library.
-- `projects/demo-app/` — the local demo application.
+- `projects/demo-app/` - the local demo application.
+- `projects/brep-poc/` - POC app: brepjs exact geometry rendered by the engine ([ER 089](docs/engineering-records/089_brepjs_poc.md)).
 - `projects/triangular-engine/docs/` — cross-cutting library guides; they ship in the npm package. Each secondary entry point's guide is `projects/triangular-engine/<entry>/README.md`, next to its code, and ships with it.
 - `docs/engineering-records/` — Engineering Records: design notes and implementation history for larger features.
 - `docs/plans/` — current and preserved historical work plans linked to their Engineering Records; [convention](docs/plans-and-runbooks.md).

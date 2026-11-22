@@ -303,6 +303,73 @@
           }
         }
       }
+    },
+    "brep-poc": {
+      "projectType": "application",
+      "root": "projects/brep-poc",
+      "sourceRoot": "projects/brep-poc/src",
+      "prefix": "app",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "outputPath": "dist/brep-poc",
+            "index": "projects/brep-poc/src/index.html",
+            "browser": "projects/brep-poc/src/main.ts",
+            "polyfills": [],
+            "tsConfig": "projects/brep-poc/tsconfig.app.json",
+            "externalDependencies": ["module", "node:module"],
+            "inlineStyleLanguage": "scss",
+            "assets": [
+              {
+                "glob": "occt-wasm.wasm",
+                "input": "node_modules/occt-wasm/dist",
+                "output": "assets/"
+              }
+            ],
+            "styles": ["projects/brep-poc/src/styles.scss"],
+            "scripts": []
+          },
+          "configurations": {
+            "production": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "2MB",
+                  "maximumError": "3MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "14kB",
+                  "maximumError": "16kB"
+                }
+              ],
+              "outputHashing": "all"
+            },
+            "development": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true
+            }
+          },
+          "defaultConfiguration": "development"
+        },
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "options": {
+            "port": 4223
+          },
+          "configurations": {
+            "production": {
+              "buildTarget": "brep-poc:build:production"
+            },
+            "development": {
+              "buildTarget": "brep-poc:build:development"
+            }
+          },
+          "defaultConfiguration": "development"
+        }
+      }
     }
   },
   "cli": {
