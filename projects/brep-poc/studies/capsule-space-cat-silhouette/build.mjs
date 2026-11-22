@@ -10,6 +10,13 @@ import buildFatCat, { params as fatParams, rigAnchor as fatAnchor } from '../../
 import buildTubeCat, { params as tubeParams, rigAnchor as tubeAnchor } from '../../src/app/part/capsule-space-cat-tube.brep.ts';
 
 const out = resolve('artifacts/brep-space-cat-silhouette');
+// The tube's front tip is fixed inside the head, so a length change only moves
+// the rump. The Concept Fit's hind legs and tail were fitted to this body, and
+// the preview slides them by the same amount.
+const referenceBodyLength = 900;
+const rearExtension = values => values.bodyLength === undefined
+  ? 0
+  : (values.bodyLength - referenceBodyLength) / 1000;
 const tubeValues = (overrides = {}) => ({ ...tubeParams.values, ...overrides });
 const presets = [
   {
@@ -125,8 +132,9 @@ const baked = await Promise.all(presets.map(async ({ slug, label, build, values,
   const { glb, triangles } = bake(build, values);
   const file = `space-cat-${slug}.glb`;
   await writeFile(resolve(out, file), glb);
-  const stats = { file, label, caption, values, anchor, triangles, bytes: glb.length };
-  console.log(label, '|', caption, '|', triangles, 'tris |', anchor);
+  const rear = rearExtension(values);
+  const stats = { file, label, caption, values, anchor, rearExtension: rear, triangles, bytes: glb.length };
+  console.log(label, '|', caption, '| rear', rear.toFixed(3), 'm |', triangles, 'tris');
   return { ...stats, encoded: glb.toString('base64') };
 }));
 

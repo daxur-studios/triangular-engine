@@ -12,6 +12,7 @@ interface Preset {
   encoded: string;
   caption: string;
   anchor: { y: number; z: number };
+  rearExtension: number;
   triangles: number;
 }
 
@@ -104,8 +105,8 @@ function hideGear(root: Group): void {
 }
 
 /** An assembled cat posed on the idle gait, with the Concept Fit's face and limbs. */
-function buildCat(body: Group | null, anchor?: { y: number; z: number }) {
-  const fit = buildExperimentalSpaceCat(false);
+function buildCat(body: Group | null, anchor?: { y: number; z: number }, rearExtension = 0) {
+  const fit = buildExperimentalSpaceCat(false, undefined, { rearExtension });
   fit.actor.setLocomotion('idle');
   fit.setDna({ bodyPattern: 'natural_two_tone' });
   fit.update(.3);
@@ -159,7 +160,7 @@ async function main() {
 
   const loaded = await Promise.all(presets.map(loadBody));
   const fits = loaded.map((body, index) => {
-    const fit = buildCat(body, presets[index].anchor);
+    const fit = buildCat(body, presets[index].anchor, presets[index].rearExtension);
     assembledStages[index].pivot.add(fit.actor.root);
     assembledStages[index].draw();
     return fit;

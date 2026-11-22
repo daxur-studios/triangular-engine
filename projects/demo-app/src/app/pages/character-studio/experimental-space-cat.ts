@@ -88,8 +88,22 @@ function fitPaw(paw: CapsuleCatPawAssembly): void {
   cuff.position.y = -0.003;
 }
 
+export interface ExperimentalSpaceCatOptions {
+  /**
+   * How far the visible rump sits behind the stock Concept Fit body, in metres.
+   * The hind legs and the tail base slide with it, so a longer or shorter body
+   * keeps its rear anchors attached. Negative values bring them forward.
+   */
+  readonly rearExtension?: number;
+}
+
 /** The studio study uses the standard cat's face and gait on a separate head and torso. */
-export function buildExperimentalSpaceCat(autoBlink = true, facialController?: FacialAnimationController) {
+export function buildExperimentalSpaceCat(
+  autoBlink = true,
+  facialController?: FacialAnimationController,
+  options: ExperimentalSpaceCatOptions = {},
+) {
+  const rearExtension = options.rearExtension ?? 0;
   const actor = new CapsuleCatActor({
     dna: EXPERIMENTAL_SPACE_CAT,
     autoBlink,
@@ -161,9 +175,11 @@ export function buildExperimentalSpaceCat(autoBlink = true, facialController?: F
     if (!gait) return;
     for (const { limb, paw, key, front } of legs) {
       const { p0, p2 } = gait[key];
-      socketOffset.set(0, 0.006, front ? 0.112 : -0.104).applyQuaternion(actor.torsoGroup.quaternion);
+      const socketZ = front ? 0.112 : -0.104 - rearExtension;
+      const ankleZ = front ? 0.183 : -0.168 - rearExtension;
+      socketOffset.set(0, 0.006, socketZ).applyQuaternion(actor.torsoGroup.quaternion);
       shoulder.set(p0.x, p0.y, p0.z).add(socketOffset);
-      ankle.set(p2.x * 1.06, p2.y + 0.023, p2.z + (front ? 0.183 : -0.168));
+      ankle.set(p2.x * 1.06, p2.y + 0.023, p2.z + ankleZ);
       elbow.lerpVectors(shoulder, ankle, 0.52);
       elbow.z += front ? -0.033 : 0.05;
       limb.updateCurve(shoulder, elbow, ankle);
@@ -177,10 +193,10 @@ export function buildExperimentalSpaceCat(autoBlink = true, facialController?: F
     const swing = gait.tail;
     const tipLift = swing.tip.y - radius * (1.78 + actor.dna.tailCurl * 0.6);
     const streaming = actor.locomotion === 'bound_run' ? -0.035 : 0;
-    tailPose.base.set(swing.base.x, 0.095, -0.337);
-    tailPose.control1.set(swing.control1.x * 1.15, 0.198 + tipLift * 0.3, -0.666);
-    tailPose.control2.set(swing.control2.x * 1.3, 0.582 + tipLift * 0.7, -0.334 + streaming);
-    tailPose.tip.set(swing.tip.x * 1.3, 0.531 + tipLift, -0.567 + streaming);
+    tailPose.base.set(swing.base.x, 0.095, -0.337 - rearExtension);
+    tailPose.control1.set(swing.control1.x * 1.15, 0.198 + tipLift * 0.3, -0.666 - rearExtension);
+    tailPose.control2.set(swing.control2.x * 1.3, 0.582 + tipLift * 0.7, -0.334 + streaming - rearExtension);
+    tailPose.tip.set(swing.tip.x * 1.3, 0.531 + tipLift, -0.567 + streaming - rearExtension);
     tailPose.radius = swing.radius * 1.45;
     tail.updateFromPose(tailPose);
     uniforms.uMouthWidth.value *= 1.22;

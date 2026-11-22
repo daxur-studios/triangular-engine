@@ -101,6 +101,29 @@ describe('Character Studio concept-fit cat', () => {
     }
   });
 
+  it('slides the hind legs and tail with the visible rear extension', () => {
+    const stock = buildExperimentalSpaceCat(false);
+    const extended = buildExperimentalSpaceCat(false, undefined, { rearExtension: 0.2 });
+    const tailBox = (fit: typeof stock) => {
+      const mesh = fit.actor.root.getObjectByName('concept-cat-tail')!
+        .getObjectByName('capsule-cat-tail-tube') as Mesh;
+      mesh.geometry.computeBoundingBox();
+      return mesh.geometry.boundingBox!;
+    };
+    try {
+      stock.update(0.3);
+      extended.update(0.3);
+      const frontShift = extended.actor.frontLeftPaw.root.position.z - stock.actor.frontLeftPaw.root.position.z;
+      const backShift = extended.actor.backLeftPaw.root.position.z - stock.actor.backLeftPaw.root.position.z;
+      expect(Math.abs(frontShift)).toBeLessThan(1e-9);
+      expect(backShift).toBeCloseTo(-0.2, 9);
+      expect(tailBox(extended).min.z - tailBox(stock).min.z).toBeCloseTo(-0.2, 3);
+    } finally {
+      stock.dispose();
+      extended.dispose();
+    }
+  });
+
   it('updates the rump material in place as the suit covers or exposes the rear', () => {
     const fit = buildExperimentalSpaceCat(false);
     try {

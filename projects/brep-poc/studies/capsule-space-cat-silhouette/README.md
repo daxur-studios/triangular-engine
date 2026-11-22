@@ -41,9 +41,11 @@ to orbit the result; it embeds the GLB bytes that `brep verify` measured.
 - `joinFillet` (mm, default 90): radius of the bevel where the tube's side meets
   the head's ball. 0 leaves the sharp intersection.
 
-Rear tip = `BODY_FRONT (-380) + bodyLength`. The tail base sits near CAD y +340,
-so bodies shorter than about 780 mm leave the tail behind the rump; the preview
-shows 780, 900 and 1100.
+Rear tip = `BODY_FRONT (-380) + bodyLength`. Because the front tip is fixed in the
+head, a length change only moves the rump backwards. The preview passes that
+distance (against the 900 mm default) to the Concept Fit builder as its rear
+extension, so the hind legs and tail base slide with the rump instead of staying
+where the stock body ended. The preview shows 780, 900 and 1100 mm.
 
 ## Fat cat parameters
 
@@ -61,9 +63,10 @@ Defaults: 30, 115, 0, 85.
 
 ## Open
 
-- The tail and hind legs keep the actor's anchors while the body length changes,
-  so a short body leaves the tail behind the rump and a long body swallows its
-  base. Moving the rump anchors with the length is an actor change.
+- The hind legs and tail follow the body length in the study through the Concept
+  Fit builder's `rearExtension` option: they keep their stock distance from the
+  rump instead of stretching with it. A production bake still has to pass the
+  baked body's rump offset to the actor the same way.
 - The body shader's natural two-tone seam still lands mid-body and reads as a
   faint belt on the assembled cat.
 - The rig advice from the first review still stands: keep one visible mesh and
