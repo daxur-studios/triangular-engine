@@ -1,3 +1,4 @@
+import { DEFAULT_BOB_SHAPE, type BobShape } from './experimental-bob-hair';
 import {
   afterNextRender,
   ChangeDetectionStrategy,
@@ -136,6 +137,7 @@ export class CharacterStudioPageComponent {
   readonly naturalHairColor = computed(() => this.selectedNaturalHairColor() ?? DEFAULT_WORKSHOP_HAIR_COLORS[this.workshopHair()]);
   readonly naturalHairHex = computed(() => '#' + this.naturalHairColor().toString(16).padStart(6, '0'));
   readonly workshopLockLength = signal(1);
+  readonly bobShape = signal<BobShape>({ ...DEFAULT_BOB_SHAPE });
   readonly workshopYaw = signal(35);
   readonly stacheYaw = signal(CLASSIC_STACHE_YAW);
   readonly stacheShape = signal(DEFAULT_STACHE_SHAPE);
@@ -151,6 +153,7 @@ export class CharacterStudioPageComponent {
   readonly workshopHairChoices = [
     { id: 'pigtails', label: 'Pigtails' },
     { id: 'shaggy', label: 'Shaggy' },
+    { id: 'bob', label: 'Bob' },
     { id: 'classic-stache', label: 'Classic Stache' },
   ] as const;
   readonly workshopHairLabel = computed(() => this.workshopHair() === 'pigtails' && this.naturalHairColor() === DEFAULT_WORKSHOP_HAIR_COLORS.pigtails
@@ -407,8 +410,9 @@ export class CharacterStudioPageComponent {
     this.applyView('three-quarter');
     const query = inject(ActivatedRoute).snapshot.queryParamMap;
     const workshop = query.get('workshop');
-    if (workshop === '1' || workshop === 'classic-stache' || workshop === 'short-beard') {
+    if (workshop === '1' || workshop === 'classic-stache' || workshop === 'short-beard' || workshop === 'bob') {
       this.toggleWorkshop();
+      if (workshop === 'bob') this.setWorkshopHair('bob');
       if (workshop === 'classic-stache') this.setWorkshopHair('classic-stache');
       if (workshop === 'short-beard') {
         this.setWorkshopHair('shaggy');
@@ -525,9 +529,14 @@ export class CharacterStudioPageComponent {
     this.workshopHair.set(style);
     this.workshopLockLength.set(length);
     this.contributions.human.setExperimentalHair(
-      style, length, this.stacheShape(), this.withMustache(), this.withShortBeard(), this.naturalHairColor(),
+      style, length, this.stacheShape(), this.withMustache(), this.withShortBeard(), this.naturalHairColor(), this.bobShape(),
     );
     if (changed && (style === 'classic-stache' || this.withShortBeard())) this.setStacheYaw(this.stacheYaw());
+  }
+
+  setBobShape(key: keyof BobShape, value: number): void {
+    this.bobShape.update(shape => ({ ...shape, [key]: value }));
+    this.setWorkshopHair('bob');
   }
 
   setNaturalHairColor(hex: string): void {

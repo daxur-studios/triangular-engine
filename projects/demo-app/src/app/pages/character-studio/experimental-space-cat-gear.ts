@@ -76,7 +76,7 @@ if (catPosition.z < -0.4 && (catPattern < 0.5 || catPattern > 1.5)) {
 export function buildConceptCatHelmet() {
   const root = new Group();
   root.name = 'concept-cat-helmet';
-  root.position.set(0, 0.117, 0.300);
+  root.position.set(0, 0.105, 0.365);
   root.rotation.x = 0.71;
   const rimRadius = 0.318;
   const domeRadius = 0.417;

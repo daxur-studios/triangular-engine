@@ -1,3 +1,4 @@
+import { DEFAULT_BOB_SHAPE, type BobShape } from './experimental-bob-hair';
 import {
   BufferGeometry, CatmullRomCurve3, Float32BufferAttribute, Group, MathUtils, Mesh,
   MeshStandardMaterial, SphereGeometry, TubeGeometry, Vector3,
@@ -322,10 +323,11 @@ export function buildExperimentalPigtailHead(
     style: CapsuleHairStyle, length: number, shape = DEFAULT_STACHE_SHAPE,
     withMustache = true, withShortBeard = false,
     naturalColor = style === 'pigtails' ? palette.hair : DEFAULT_WORKSHOP_HAIR_COLORS[style],
+    bobShape: BobShape = DEFAULT_BOB_SHAPE,
   ): void {
     if (!hair) return;
     const classic = style === 'classic-stache';
-    hair.setStyle(style, length, shape.fringe, naturalColor);
+    hair.setStyle(style, length, shape.fringe, naturalColor, bobShape);
     shaggy = style !== 'pigtails';
     ears.visible = shaggy;
     for (const lashes of lashGroups) lashes.visible = !shaggy;

@@ -187,3 +187,10 @@ gear. The reference sheet's dogs stay out of scope.
 - **[verification]** The 7 focused Studio specs, 24 procedural cat specs and library build passed. Checked the ear recess across the turnaround and the transition from Neutral to Surprised in the running Studio. Local captures regenerate with `node artifacts/space-cat-turnaround/check.mjs turnaround fit` and `node artifacts/space-cat-turnaround/check-studio.mjs`.
 - **[follow-up]** Added a small cartoon asterisk under the Concept Fit cat's tail. The existing torso material paints it onto exposed fur so it follows the gait and disappears under the full suit.
 - **[verification]** The 8 focused Studio specs passed. Checked the asterisk from the live Studio rear view during Goofy Walk and Idle, with the full suit and the natural two-tone coat. Verified all five turnaround views and the aligned overlay.
+
+### 2026-11-22 — Whisker depth
+
+- **[action]** Extended the Concept Fit whiskers forward from their cheek anchors so they read as three-dimensional from oblique views, while retaining the existing expression controls.
+- **[verification]** Inspected the five-view turnaround and checked Goofy Walk, expressions, gear and preset switching in the live Studio. Local captures regenerate with `node artifacts/space-cat-turnaround/check.mjs turnaround fit` and `node artifacts/space-cat-turnaround/check-studio.mjs`.
+- **[action]** Moved the Concept Fit helmet and collar forward and slightly down to frame the head and bring the collar under the chin.
+- **[verification]** The five-view turnaround, 8 focused Studio specs and live Studio controls passed. Local captures regenerate with `node artifacts/space-cat-turnaround/build.mjs`, `node artifacts/space-cat-turnaround/check.mjs turnaround fit` and `node artifacts/space-cat-turnaround/check-studio.mjs`.

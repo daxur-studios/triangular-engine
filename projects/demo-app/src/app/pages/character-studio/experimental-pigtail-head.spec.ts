@@ -5,6 +5,7 @@ import {
 import { computeCapsuleMouthShape, FacialAnimationController } from 'triangular-engine/characters';
 import type { ExtendedEmotionName } from 'triangular-engine/characters';
 import type { CapsuleBodyUniformMap } from 'triangular-engine/procedural';
+import { DEFAULT_BOB_SHAPE } from './experimental-bob-hair';
 import { createCharacterStudioContributions } from './character-studio-contributions';
 import { boundStacheOffset, DEFAULT_STACHE_SHAPE, stacheTip, type StacheShape } from './classic-stache-shapes';
 import {
@@ -64,6 +65,27 @@ describe('Character Studio experimental pigtail preset', () => {
     } finally {
       swatch.dispose();
     }
+  });
+
+  it('shares bob shape and natural colour between the head and hair preview', () => {
+    const human = studio.human;
+    human.selectPreset(EXPERIMENTAL_PIGTAIL_HEAD_ID);
+    const swatch = buildExperimentalHairPreview();
+    const shape = { ...DEFAULT_BOB_SHAPE, length: 70, fringe: 45, grooves: 12 };
+    const color = 0x583b29;
+    try {
+      human.setExperimentalHair('bob', 1, DEFAULT_STACHE_SHAPE, true, true, color, shape);
+      swatch.setHair('bob', 1, DEFAULT_STACHE_SHAPE.fringe, color, shape);
+      const bob = human.root.getObjectByName('capsule-hair-bob') as Mesh;
+      const preview = swatch.root.getObjectByName('capsule-hair-bob') as Mesh;
+      expect(bob.geometry.getAttribute('position').array).toEqual(preview.geometry.getAttribute('position').array);
+      expect((bob.material as MeshStandardMaterial).color.getHex()).toBe(color);
+      expect((preview.material as MeshStandardMaterial).color.getHex()).toBe(color);
+      const original = bob.geometry;
+      human.setExperimentalHair('bob', 1, DEFAULT_STACHE_SHAPE, true, true, color, { ...shape, length: 0 });
+      expect(bob.geometry).not.toBe(original);
+      expect(human.root.getObjectByName('pigtail-skin')).toBeDefined();
+    } finally { swatch.dispose(); }
   });
 
   it('shares the edited Classic Stache fringe and mirrors only the mustache tips', () => {

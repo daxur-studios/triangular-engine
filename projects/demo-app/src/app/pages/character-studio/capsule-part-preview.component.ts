@@ -1,3 +1,4 @@
+import { DEFAULT_BOB_SHAPE, type BobShape } from './experimental-bob-hair';
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, effect, inject, input, output } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PortalRegistryService } from '@daxur-studios/portal-layout';
@@ -44,6 +45,7 @@ export class CapsulePartPreviewComponent {
   readonly hairStyle = input<CapsuleHairStyle>('pigtails');
   readonly naturalHairColor = input<number>();
   readonly lockLength = input(1);
+  readonly bobShape = input<BobShape>(DEFAULT_BOB_SHAPE);
   readonly yawDegrees = input(35);
   readonly stacheShape = input(DEFAULT_STACHE_SHAPE);
   readonly withMustache = input(true);
@@ -82,11 +84,11 @@ export class CapsulePartPreviewComponent {
       }
       const model = this.model!;
       if ('setHair' in model) {
-        model.setHair(this.hairStyle(), this.lockLength(), this.stacheShape().fringe, this.naturalHairColor());
+        model.setHair(this.hairStyle(), this.lockLength(), this.stacheShape().fringe, this.naturalHairColor(), this.bobShape());
       }
       if ('setFittedHead' in model && model.setFittedHead) {
         const shape = this.stacheShape();
-        model.setFittedHead(this.hairStyle(), this.lockLength(), shape, this.withMustache(), this.naturalHairColor());
+        model.setFittedHead(this.hairStyle(), this.lockLength(), shape, this.withMustache(), this.naturalHairColor(), this.bobShape());
         if (part === 'stache') {
           for (const handle of ['fringe', 'mustache'] as const) {
             const marker = this.markers[handle];
@@ -213,8 +215,8 @@ function createPreviewModel(part: PreviewPart) {
     const head = buildExperimentalPigtailHead(controller);
     return {
       root: head.head,
-      setFittedHead: (style: CapsuleHairStyle, length: number, shape: StacheShape, withMustache: boolean, naturalColor?: number) => {
-        head.setHair(style, length, shape, withMustache, part === 'beard', naturalColor);
+      setFittedHead: (style: CapsuleHairStyle, length: number, shape: StacheShape, withMustache: boolean, naturalColor?: number, bobShape = DEFAULT_BOB_SHAPE) => {
+        head.setHair(style, length, shape, withMustache, part === 'beard', naturalColor, bobShape);
         head.update(0);
       },
       dispose: head.dispose,

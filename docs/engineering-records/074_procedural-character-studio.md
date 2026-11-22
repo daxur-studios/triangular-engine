@@ -249,6 +249,11 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **[action]** Added a local full-volume bob study with a crown, open face and flared side/back shell, alongside the supplied three-quarter concept. Length, flare and viewing angle are adjustable. The concept remains a fixed view, so only nearby angles are directly comparable. This is an early blockout for silhouette review; the fringe, facial features, rounded hem and strand detail remain to be fitted. Local-only preview can be regenerated with `node artifacts/bob-hair-lock/build-silhouette.mjs` and checked with `node artifacts/bob-hair-lock/check-silhouette.mjs`.
 - **[finding]** The initial separate crown and skirt had mismatched radii and allowed the head to protrude through the back. Replaced them with one connected parametric surface for the study. Its geometry is generated on the CPU and rendered with WebGPU. The head no longer shows through in the checked rear view at minimum flare. Further visual review across the range is needed.
 
+## 2026-11-22 — Bob in the parts workshop
+
+- **[action]** Ported the approved continuous bob study into the experimental character's interchangeable hair, retaining its five shape parameters and default values. The assembled head and miniatures share the same shape and natural hair colour. Geometry is CPU-generated and compatible with either renderer; the existing studio remains WebGL.
+- **[verification]** The focused character spec verifies matching character and miniature geometry, shared colour and shape updates; owner review of silhouette, expression and movement remains pending.
+
 ## Scope history
 
 <!-- tri:scope-history -->

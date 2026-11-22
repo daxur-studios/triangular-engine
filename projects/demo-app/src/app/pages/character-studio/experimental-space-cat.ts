@@ -55,7 +55,7 @@ function fitFace(actor: CapsuleCatActor, headZ: number): void {
   nose.position.set(0, -0.032, headZ + 0.274);
   nose.scale.set(1, 1, 1);
 
-  // Lay the linework against the curved cheeks so the tips remain visible in profile.
+  // Anchor the whiskers on the cheeks and let them project away from the face.
   const cheekPoint = (x: number, y: number) => new Vector3(
     x, y, Math.sqrt(Math.max(0, 1 - (x / 0.3276) ** 2 - (y / 0.3276) ** 2)) * 0.28 + headZ + 0.012,
   );
@@ -64,10 +64,12 @@ function fitFace(actor: CapsuleCatActor, headZ: number): void {
     for (const [index, mesh] of (group.children as Mesh[]).entries()) {
       const y = -0.073 - index * 0.036;
       const endY = y - index * 0.044;
+      const start = cheekPoint(side * 0.137, y);
+      const tip = new Vector3(side * 0.265, endY, start.z + 0.025);
       const curve = new QuadraticBezierCurve3(
-        cheekPoint(side * 0.137, y).sub(group.position),
-        cheekPoint(side * 0.208, (y + endY) * 0.5).sub(group.position),
-        cheekPoint(side * 0.265, endY).sub(group.position),
+        start.clone().sub(group.position),
+        start.clone().lerp(tip, 0.5).sub(group.position),
+        tip.sub(group.position),
       );
       mesh.geometry.dispose();
       mesh.geometry = new TubeGeometry(curve, 16, 0.0088, 10, false);

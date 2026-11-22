@@ -38,7 +38,7 @@
               <app-capsule-part-preview class="part-preview hair-preview" part="hair" role="img"
                 aria-label="3D hairstyle on a scalp"
                 [hairStyle]="workshopHair()" [lockLength]="workshopLockLength()" [stacheShape]="stacheShape()"
-                [naturalHairColor]="naturalHairColor()"
+                [naturalHairColor]="naturalHairColor()" [bobShape]="bobShape()"
                 [yawDegrees]="fitPreviewOpen() ? stacheYaw() : workshopYaw()" />
               <div class="hair-controls">
                 <div class="hair-styles" role="group" aria-label="Hairstyle">
@@ -54,6 +54,15 @@
                       aria-label="Lock length" [attr.aria-valuetext]="(workshopLockLength() * 100 | number:'1.0-0') + '%'"
                       (input)="setWorkshopHair('shaggy', $any($event.target).valueAsNumber)">
                   </label>
+                }
+                @if (workshopHair() === 'bob') {
+                  @for (control of [{ key: 'length', label: 'Length', min: 0, max: 100 }, { key: 'flare', label: 'Flare', min: 0, max: 100 }, { key: 'fringe', label: 'Fringe length', min: 0, max: 100 }, { key: 'grooves', label: 'Groove count', min: 4, max: 18 }, { key: 'depth', label: 'Groove depth', min: 0, max: 100 }]; track control.key) {
+                    <label class="workshop-range">
+                      <span>{{ control.label }} <output>{{ $any(bobShape())[control.key] }}</output></span>
+                      <input type="range" [min]="control.min" [max]="control.max" step="1" [value]="$any(bobShape())[control.key]"
+                        [attr.aria-label]="control.label" (input)="setBobShape($any(control.key), $any($event.target).valueAsNumber)">
+                    </label>
+                  }
                 }
                 @if (!fitPreviewOpen()) {
                 <label class="workshop-range">
@@ -84,7 +93,7 @@
                 <div>
                   <app-capsule-part-preview #shapeEditor class="part-preview stache-preview" [part]="withShortBeard() ? 'beard' : 'stache'" role="img"
                     [attr.aria-label]="withShortBeard() ? '3D short beard fitted to the head' : '3D head with draggable fringe and mustache tips'"
-                    [hairStyle]="workshopHair()" [lockLength]="workshopLockLength()" [naturalHairColor]="naturalHairColor()"
+                    [hairStyle]="workshopHair()" [lockLength]="workshopLockLength()" [naturalHairColor]="naturalHairColor()" [bobShape]="bobShape()"
                     [yawDegrees]="stacheYaw()" [stacheShape]="stacheShape()" [withMustache]="withMustache()"
                     (stacheShapeChange)="setStacheShape($event)" />
                   @if (!withShortBeard()) {

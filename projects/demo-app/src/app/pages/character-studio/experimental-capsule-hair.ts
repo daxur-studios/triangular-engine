@@ -1,16 +1,18 @@
 import {
-  BufferGeometry, Float32BufferAttribute, Group, LatheGeometry, MathUtils, Mesh,
+  BufferGeometry, DoubleSide, Float32BufferAttribute, Group, LatheGeometry, MathUtils, Mesh,
   MeshStandardMaterial, SphereGeometry, Vector2, Vector3, type TubeGeometry,
 } from 'three';
+import { buildBobGeometry, DEFAULT_BOB_SHAPE, type BobShape } from './experimental-bob-hair';
 import { buildClayLock, type ClayLock } from './capsule-clay-lock';
 import {
   boundStacheOffset, classicStacheFringe, classicStacheSweep, classicStacheTemple, DEFAULT_STACHE_SHAPE,
 } from './classic-stache-shapes';
 
-export type CapsuleHairStyle = 'pigtails' | 'shaggy' | 'classic-stache';
+export type CapsuleHairStyle = 'pigtails' | 'shaggy' | 'classic-stache' | 'bob';
 export const DEFAULT_WORKSHOP_HAIR_COLORS: Readonly<Record<CapsuleHairStyle, number>> = {
   pigtails: 0xc06730,
   shaggy: 0x39322e,
+  bob: 0x302825,
   'classic-stache': 0x473026,
 };
 type Point = readonly [number, number, number];
@@ -236,10 +238,14 @@ export function buildExperimentalCapsuleHair({ radii: [x, y, z], scalpProfile, p
     return group;
   }
 
+  let bob: Mesh<BufferGeometry, MeshStandardMaterial> | undefined;
+  let bobKey = '';
+
   return {
     root,
     setStyle(style: CapsuleHairStyle, length: number, requested = DEFAULT_STACHE_SHAPE.fringe,
       color = style === 'pigtails' ? palette.hair : DEFAULT_WORKSHOP_HAIR_COLORS[style],
+      bobShape: BobShape = DEFAULT_BOB_SHAPE,
     ) {
       if (style === 'shaggy') {
         shaggy ??= buildShaggy();
@@ -257,13 +263,26 @@ export function buildExperimentalCapsuleHair({ radii: [x, y, z], scalpProfile, p
           fringeOffset = offset;
         }
       }
+      if (style === 'bob') {
+        const key = JSON.stringify(bobShape);
+        if (!bob) {
+          bob = new Mesh(buildBobGeometry(bobShape), new MeshStandardMaterial({ color, roughness: .82, side: DoubleSide }));
+          bob.name = 'capsule-hair-bob';
+          bobKey = key;
+        } else if (bobKey !== key) {
+          bob.geometry.dispose();
+          bob.geometry = buildBobGeometry(bobShape);
+          bobKey = key;
+        }
+        bob.material.color.setHex(color);
+      }
       if (style === 'pigtails') {
         hair.color.setHex(color);
         if (color === palette.hair) curl.color.setHex(palette.curl);
         else curl.color.copy(hair.color).multiplyScalar(1.32);
       }
       // Keep only the chosen part attached so framing excludes hidden hairstyles.
-      const active = style === 'shaggy' ? shaggy! : style === 'classic-stache' ? classic! : pigtails;
+      const active = style === 'shaggy' ? shaggy! : style === 'classic-stache' ? classic! : style === 'bob' ? bob! : pigtails;
       if (root.children[0] !== active) {
         root.clear();
         root.add(active);
@@ -273,6 +292,8 @@ export function buildExperimentalCapsuleHair({ radii: [x, y, z], scalpProfile, p
       for (const tuft of tufts) tuft.rotation.set(MathUtils.clamp(pitch, -.28, .28), 0, MathUtils.clamp(roll, -.28, .28));
     },
     dispose() {
+      bob?.geometry.dispose();
+      bob?.material.dispose();
       sphere.dispose();
       rearCap?.dispose();
       classicCap?.dispose();
