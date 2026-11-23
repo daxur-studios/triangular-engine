@@ -13,6 +13,7 @@ export * from './capsule/capsule-character-actor';
 export * from './capsule/capsule-cat-body-material';
 export * from './capsule/capsule-cat-face-rig';
 export * from './capsule/capsule-cat-paws';
+export * from './capsule/capsule-cat-leg-mesh';
 export * from './capsule/capsule-cat-tail';
 export * from './capsule/capsule-cat-space-gear';
 export * from './capsule/capsule-cat-actor';

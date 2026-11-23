@@ -1,6 +1,7 @@
 import { getBounds, getSolids, isValidSolid, OcctWasmAdapter, registerKernel, withScope } from 'brepjs';
 import { OcctKernel } from 'occt-wasm';
 import buildFatCat, { expected as fatExpected, params as fatParams } from '../../src/app/part/capsule-space-cat-fat.brep.ts';
+import buildCatLeg, { expected as legExpected, params as legParams } from '../../src/app/part/capsule-space-cat-leg.brep.ts';
 import buildTubeCat, { expected as tubeExpected, params as tubeParams } from '../../src/app/part/capsule-space-cat-tube.brep.ts';
 
 const kernel = await OcctKernel.init();
@@ -26,6 +27,7 @@ function casesFor({ values, defs }) {
 const parts = [
   { name: 'fat cat', build: buildFatCat, expected: fatExpected, params: fatParams },
   { name: 'tube and sphere', build: buildTubeCat, expected: tubeExpected, params: tubeParams },
+  { name: 'leg and paw', build: buildCatLeg, expected: legExpected, params: legParams },
 ];
 
 let failures = 0;

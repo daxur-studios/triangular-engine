@@ -99,6 +99,8 @@ The standalone space-buns study compares two baked presets on the workshop head.
 
 The standalone swept-hair study compares two baked presets with a fuller crown, tapered fringe and swept nape on the existing animated face. The swept hair, bob, space buns and space cat previews support linked orbit and zoom. [ER 074 records the fringe and profile checks](../engineering-records/074_procedural-character-studio.md#2026-11-22--swept-hair-fringe-and-profile).
 
+The space cat now has a baked leg: a leg tube fused to a paw ball with a 60 mm bevel at the join, skinned to a hip/knee/ankle chain so it still bends. The study shows it against the stock hose legs on the same body. [ER 074 records the rig, the two pose bugs and the checks](../engineering-records/074_procedural-character-studio.md#2026-11-23--space-cat-legs-baked-leg-plus-paw-driven-by-bones). Next stage is fusing the legs into the body solid and bevelling the hips.
+
 The approved continuous bob study is now selectable in [Character Studio](http://triangular-demo.localhost:4200/character-studio?workshop=bob), with length, flare, fringe and groove controls and shared natural hair colour. Owner review on the full animated character remains pending; the studio itself still uses WebGL.
 
 The [WebGPU bob lock prototype](http://triangular-demo.localhost:4200/bob-hair-lock-spike) changes hem length and flare independently while keeping the crown attachment and mesh buffers fixed. The next visual review is the full bob's flared outline against the supplied concept. Its face opening and fringe can be fitted once the outline is approved.

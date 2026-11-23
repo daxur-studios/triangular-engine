@@ -1,5 +1,5 @@
 import {
-  CapsuleGeometry, ExtrudeGeometry, Group, Mesh, MeshStandardMaterial,
+  CapsuleGeometry, ExtrudeGeometry, Group, Mesh, MeshStandardMaterial, Object3D,
   QuadraticBezierCurve3, Shape, TorusGeometry, TubeGeometry, Vector3,
 } from 'three';
 import {
@@ -95,7 +95,37 @@ export interface ExperimentalSpaceCatOptions {
    * keeps its rear anchors attached. Negative values bring them forward.
    */
   readonly rearExtension?: number;
+  /**
+   * Replaces the rubber-hose leg with a rigged one, for example a baked BRep leg
+   * driven by bones. Returning `null` keeps the default tube.
+   */
+  readonly legFactory?: (request: SpaceCatLegRequest) => SpaceCatLeg | null;
 }
+
+/**
+ * A leg the studio can drive. A baked leg carries its own paw, so the studio
+ * leaves the paw assembly out and lets the leg handle the paw pitch.
+ */
+export interface SpaceCatLeg {
+  readonly mesh: Object3D;
+  readonly ownsPaw: boolean;
+  /** Poses the leg so its hip sits at `shoulder` and its ankle at `ankle`. */
+  pose(shoulder: Vector3, knee: Vector3, ankle: Vector3, pawPitch: number): void;
+  dispose(): void;
+}
+
+export interface SpaceCatLegRequest {
+  readonly front: boolean;
+  readonly name: string;
+  readonly material: MeshStandardMaterial;
+}
+
+type LegKey = 'frontLeft' | 'frontRight' | 'backLeft' | 'backRight';
+
+type LegEntry = { key: LegKey; front: boolean } & (
+  | { kind: 'hose'; limb: RubberHoseLimbMesh; paw: CapsuleCatPawAssembly }
+  | { kind: 'baked'; leg: SpaceCatLeg }
+);
 
 /** The studio study uses the standard cat's face and gait on a separate head and torso. */
 export function buildExperimentalSpaceCat(
@@ -145,35 +175,54 @@ export function buildExperimentalSpaceCat(
 
   const forelegMaterial = new MeshStandardMaterial({ roughness: 0.72 });
   const hindlegMaterial = new MeshStandardMaterial({ roughness: 0.72 });
-  const replaceLimb = (key: 'frontLeftLimb' | 'frontRightLimb' | 'backLeftLimb' | 'backRightLimb', front: boolean) => {
-    const original = actor[key];
+  const paws = {
+    frontLeft: actor.frontLeftPaw,
+    frontRight: actor.frontRightPaw,
+    backLeft: actor.backLeftPaw,
+    backRight: actor.backRightPaw,
+  } as const;
+  const replaceLimb = (key: LegKey, front: boolean): LegEntry => {
+    const limbKey = `${key}Limb` as const;
+    const original = actor[limbKey];
     original.mesh.removeFromParent();
     original.dispose();
+    const material = front ? forelegMaterial : hindlegMaterial;
+    const baked = options.legFactory?.({ front, name: original.mesh.name, material }) ?? null;
+    if (baked) {
+      // The baked leg includes its paw, so the separate assembly stays out.
+      paws[key].root.removeFromParent();
+      actor.limbsGroup.add(baked.mesh);
+      return { kind: 'baked', leg: baked, key, front };
+    }
     const limb = new RubberHoseLimbMesh({
       name: original.mesh.name,
       radius: front ? 0.063 : 0.06,
-      material: front ? forelegMaterial : hindlegMaterial,
+      material,
     });
-    actor[key] = limb;
+    actor[limbKey] = limb;
     actor.limbsGroup.add(limb.mesh);
-    return limb;
+    return { kind: 'hose', limb, paw: paws[key], key, front };
   };
-  const legs = [
-    { limb: replaceLimb('frontLeftLimb', true), paw: actor.frontLeftPaw, key: 'frontLeft', front: true },
-    { limb: replaceLimb('frontRightLimb', true), paw: actor.frontRightPaw, key: 'frontRight', front: true },
-    { limb: replaceLimb('backLeftLimb', false), paw: actor.backLeftPaw, key: 'backLeft', front: false },
-    { limb: replaceLimb('backRightLimb', false), paw: actor.backRightPaw, key: 'backRight', front: false },
-  ] as const;
-  for (const { paw } of legs) fitPaw(paw);
+  const legs: LegEntry[] = [
+    replaceLimb('frontLeft', true),
+    replaceLimb('frontRight', true),
+    replaceLimb('backLeft', false),
+    replaceLimb('backRight', false),
+  ];
+  for (const entry of legs) {
+    if (entry.kind === 'hose') fitPaw(entry.paw);
+  }
   const socketOffset = new Vector3();
   const shoulder = new Vector3();
   const elbow = new Vector3();
+  const knee = new Vector3();
   const ankle = new Vector3();
   const ankleTangent = new Vector3();
   const updatePose = (): void => {
     const gait = actor.latestLocomotionSample;
     if (!gait) return;
-    for (const { limb, paw, key, front } of legs) {
+    for (const entry of legs) {
+      const { key, front } = entry;
       const { p0, p2 } = gait[key];
       const socketZ = front ? 0.112 : -0.104 - rearExtension;
       const ankleZ = front ? 0.183 : -0.168 - rearExtension;
@@ -182,12 +231,21 @@ export function buildExperimentalSpaceCat(
       ankle.set(p2.x * 1.06, p2.y + 0.023, p2.z + ankleZ);
       elbow.lerpVectors(shoulder, ankle, 0.52);
       elbow.z += front ? -0.033 : 0.05;
-      limb.updateCurve(shoulder, elbow, ankle);
-      paw.root.position.copy(ankle);
-      paw.root.scale.setScalar(1.18);
+      if (entry.kind === 'baked') {
+        // `elbow` is the hose's control point, which sits off the leg. The knee
+        // has to land on the curve itself, at its midpoint.
+        knee.copy(shoulder).multiplyScalar(0.25)
+          .addScaledVector(elbow, 0.5)
+          .addScaledVector(ankle, 0.25);
+        entry.leg.pose(shoulder, knee, ankle, gait[`${key}PawPitch`]);
+        continue;
+      }
+      entry.limb.updateCurve(shoulder, elbow, ankle);
+      entry.paw.root.position.copy(ankle);
+      entry.paw.root.scale.setScalar(1.18);
       ankleTangent.subVectors(ankle, elbow);
-      limb.computeEndOrientation(ankleTangent, paw.root.quaternion);
-      paw.root.rotateX(gait[`${key}PawPitch`]);
+      entry.limb.computeEndOrientation(ankleTangent, entry.paw.root.quaternion);
+      entry.paw.root.rotateX(gait[`${key}PawPitch`]);
     }
 
     const swing = gait.tail;
@@ -216,12 +274,13 @@ export function buildExperimentalSpaceCat(
     const rearFur = dna.bodyPattern === 'natural_two_tone' ? dna.furAccentColor : dna.furColor;
     forelegMaterial.color.set(frontSuited ? dna.suitColor : dna.furColor);
     hindlegMaterial.color.set(backSuited ? dna.suitColor : rearFur);
-    for (const { paw, front } of legs) {
-      paw.setAppearance({
-        furColor: front ? dna.furColor : rearFur,
+    for (const entry of legs) {
+      if (entry.kind !== 'hose') continue;
+      entry.paw.setAppearance({
+        furColor: entry.front ? dna.furColor : rearFur,
         bootieColor: dna.suitColor,
         cuffColor: dna.cuffColor,
-        suited: dna.suitBooties && (front || dna.bodyPattern !== 'front_suit'),
+        suited: dna.suitBooties && (entry.front || dna.bodyPattern !== 'front_suit'),
       });
     }
     // The concept collar also serves as the open collar when adding a pack.
@@ -248,6 +307,10 @@ export function buildExperimentalSpaceCat(
     },
     dispose(): void {
       actor.dispose();
+      // The actor disposes the stock limbs; a baked leg was never one of them.
+      for (const entry of legs) {
+        if (entry.kind === 'baked') entry.leg.dispose();
+      }
       body.dispose();
       helmet.dispose();
       tail.dispose();

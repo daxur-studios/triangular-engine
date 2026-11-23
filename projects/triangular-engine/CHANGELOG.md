@@ -1,5 +1,6 @@
 # Changelog
 
+- `triangular-engine/procedural`: new `CapsuleCatLegMesh` turns a baked leg — a leg tube fused to a paw ball and filleted at the join — into a three-bone `SkinnedMesh` (hip, knee, ankle). Skin weights come from the rest geometry, not painted: a smooth ramp down the leg that splits at the knee and hands the paw to the ankle bone, so a rigid bake still bends and the modelled bevel survives. `pose(hip, knee, ankle, pawPitch)` puts the chain on the gait's joints and pitches the paw about X. `capsuleCatLegSkinWeights` is exported for tests. The Concept Fit builder accepts an optional `legFactory` to drive such a leg instead of the rubber-hose tube.
 - `triangular-engine/procedural`: `CapsuleCatTailMesh` accepts an optional `tipRadiusRatio` for a thicker rounded tail.
 - `triangular-engine/procedural`: `CapsuleCatActor` accepts the optional `closedSmileStyle` for a shallow paired-curve smile with the existing expression rig.
 

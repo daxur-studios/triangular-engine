@@ -12,6 +12,11 @@ Both keep the Concept Fit head ellipsoid in the same size and place, so the
 existing eyes, ears, whiskers and nose keep their anchors. The study scripts and
 the preview bake from both parts side by side.
 
+The legs are baked too: **`capsule-space-cat-leg.brep.ts`** fuses a straight leg
+tube to a paw ball and bevels the join, the same operation as the head and body.
+The baked leg is skin-weighted to a hip → knee → ankle chain, so it still bends.
+See [Rigged legs](#rigged-legs).
+
 An earlier version lofted one oval profile from rump to muzzle. It is kept only
 in the history as a rejected approach: one profile cannot be a ball head and a
 barrel body at once, so the head turned into a wedge and the chest bulged under
@@ -21,14 +26,17 @@ the jaw.
 
 ```powershell
 npx brep verify projects/brep-poc/src/app/part/capsule-space-cat-tube.brep.ts --check
-node projects/brep-poc/studies/capsule-space-cat-silhouette/verify.mjs        # both parts, 22 cases
+npx brep verify projects/brep-poc/src/app/part/capsule-space-cat-leg.brep.ts --check
+node projects/brep-poc/studies/capsule-space-cat-silhouette/verify.mjs        # all three parts, 35 cases
 node projects/brep-poc/studies/capsule-space-cat-silhouette/profile.mjs 900   # tube numbers
 node projects/brep-poc/studies/capsule-space-cat-silhouette/build.mjs         # bake GLBs, preview
 node projects/brep-poc/studies/capsule-space-cat-silhouette/capture.mjs       # comparison images
 ```
 
 Output goes to `artifacts/brep-space-cat-silhouette/`. Open `preview.html` there
-to orbit the result; it embeds the GLB bytes that `brep verify` measured.
+to orbit the result; it embeds the GLB bytes that `brep verify` measured. The
+preview has a `Tube · default (hose legs)` stage next to the baked-leg stage, so
+the leg change can be judged on the same body.
 
 ## Tube parameters
 
@@ -53,6 +61,42 @@ where the stock body ended. The preview shows 780, 900 and 1100 mm.
 `headRise`, `cheekFullness`, `headSetback`, `joinFillet`; see the part's TSDoc.
 Defaults: 30, 115, 0, 85.
 
+## Rigged legs
+
+`capsule-space-cat-leg.brep.ts` bakes one leg: a capsule tube fused to a paw
+ellipsoid, filleted where the tube leaves the paw. The origin is the ankle joint
+and the leg rises along +Z to the hip, straight on purpose — the bend comes from
+the rig, not the shape.
+
+Parameters: `legLength` (mm, default 265, the measured hip-to-ankle distance on
+the Concept Fit cat), `legRadius` (62), `pawScale` (1.25, always above 1 so the
+paw is wider than the leg and the fuse has a join to bevel), `pawForward` (16) and
+`joinFillet` (60 mm; 90 and above cannot be solved, 85 is the widest that passes
+every corner).
+
+`CapsuleCatLegMesh` (`triangular-engine/procedural`) turns the bake into a
+`SkinnedMesh` with three bones — hip, knee, ankle. Skin weights are generated from
+the rest geometry, not painted: one smooth ramp down the leg that splits at the
+knee and hands the last 10% to the ankle bone, so the paw stays rigid and the
+modelled bevel survives the bend. `pose(hip, knee, ankle, pawPitch)` places the
+chain exactly on the gait's joints and pitches the paw about X, which is what
+`paw.root.rotateX(...)` did for the hose leg. The studio passes the hose's Bézier
+*control* point as `elbow`; the knee has to be the curve's midpoint instead
+(`0.25·hip + 0.5·elbow + 0.25·ankle`), or the leg bends around a point that is not
+on the leg.
+
+The preview mounts the baked legs through the Concept Fit builder's `legFactory`
+option. The fat cat keeps the stock hose legs so its silhouette stays the subject.
+
+### Feasibility probes
+
+`probe-leg.brep.ts` and `probe-hip.brep.ts` are throwaway parts that answered the
+first two questions — can a leg-to-paw join be filleted, and can a leg-to-body
+join be filleted? Both can. `probe-leg.mjs` bakes them and writes `leg-probe.html`
+and `leg-probe.png` with the with/without-bevel pairs. The hip probe fuses one leg
+into the tube body and bevels the hip ring; that only works if the legs are part of
+the body solid, which is the next stage.
+
 ## Current state
 
 - Tube (body 900): volume 276.8 M mm³, bounds x ±318, y −727…520, z −280…460 mm.
@@ -60,10 +104,21 @@ Defaults: 30, 115, 0, 85.
   all-min / all-max corners.
 - Fat cat: volume 288.6 M mm³, bounds x ±345, y −727…340, z −360…460 mm.
   8,451 triangles. Verified the same way.
-- Baked presets: fat cat, tube 780, tube 900, tube 1100.
+- Leg (defaults): volume 5.21 M mm³, bounds x ±89.1, y −112.9…80.9, z −108.5…265 mm,
+  2,018 triangles at the 60 mm bevel. Verified at defaults, both limits of every
+  parameter, and both all-min / all-max corners; `verify.mjs` checks all three
+  parts (35 cases).
+- Baked presets: fat cat, tube 780, tube 900, tube 1100, plus one leg.
 
 ## Open
 
+- The rigged legs live in this study only. The production actor still swaps in
+  `RubberHoseLimbMesh`, because the baked leg arrives as a GLB and the app has no
+  baked-geometry path yet. Next stage: fuse the legs into the body solid, bevel
+  the hips and bake one skinned cat.
+- The knee reads as a soft crease at close range: two segments concentrate the
+  bend at one joint. More bones, or a knee blend that follows the curve, would
+  smooth it.
 - The hind legs and tail follow the body length in the study through the Concept
   Fit builder's `rearExtension` option: they keep their stock distance from the
   rump instead of stretching with it. A production bake still has to pass the

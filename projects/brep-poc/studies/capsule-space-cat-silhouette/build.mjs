@@ -7,6 +7,7 @@ import { build } from 'esbuild';
 import { OcctKernel } from 'occt-wasm';
 import { Color } from 'three';
 import buildFatCat, { params as fatParams, rigAnchor as fatAnchor } from '../../src/app/part/capsule-space-cat-fat.brep.ts';
+import buildCatLeg, { params as legParams, restPose as legRestPose } from '../../src/app/part/capsule-space-cat-leg.brep.ts';
 import buildTubeCat, { params as tubeParams, rigAnchor as tubeAnchor } from '../../src/app/part/capsule-space-cat-tube.brep.ts';
 
 const out = resolve('artifacts/brep-space-cat-silhouette');
@@ -138,6 +139,15 @@ const baked = await Promise.all(presets.map(async ({ slug, label, build, values,
   return { ...stats, encoded: glb.toString('base64') };
 }));
 
+const legBake = bake(buildCatLeg, legParams.values);
+await writeFile(resolve(out, 'space-cat-leg.glb'), legBake.glb);
+const leg = {
+  encoded: legBake.glb.toString('base64'),
+  triangles: legBake.triangles,
+  ...legRestPose(legParams.values),
+};
+console.log('Leg |', `bevel ${legParams.values.joinFillet} mm`, '|', leg.triangles, 'tris');
+
 const [template, result, concept] = await Promise.all([
   readFile(new URL('preview.html', import.meta.url), 'utf8'),
   build({
@@ -154,6 +164,7 @@ const [template, result, concept] = await Promise.all([
 const html = template
   .replace('<!-- REFERENCE -->', `<figure><img alt="Concept sheet, five views of the capsule space cat" src="data:image/png;base64,${concept.toString('base64')}"></figure>`)
   .replace('<!-- ASSETS -->', () => `<script id="presets" type="application/json">${JSON.stringify(baked)}</script>`)
+  .replace('<!-- LEG -->', () => `<script id="leg" type="application/json">${JSON.stringify(leg)}</script>`)
   .replace('<!-- PREVIEW -->', () => `<script type="module">${result.outputFiles[0].text.replace(/<\/script/gi, '<\\/script')}</script>`);
 await writeFile(resolve(out, 'preview.html'), html);
 console.log(resolve(out, 'preview.html'));

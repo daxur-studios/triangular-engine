@@ -35,6 +35,32 @@ try {
   await page.waitForTimeout(200);
   await page.screenshot({ path: join(output, 'preview-page.png'), fullPage: true });
 
+  // The same body with baked, bone-driven legs and with the stock hose legs.
+  const stages = page.locator('.stages.assembled section');
+  const baked = stages.filter({ hasText: 'Tube · default length' }).first();
+  const hose = stages.filter({ hasText: 'hose legs' }).first();
+  await baked.screenshot({ path: join(output, 'legs-baked.png') });
+  await hose.screenshot({ path: join(output, 'legs-hose.png') });
+  const [bakedImage, hoseImage] = await Promise.all([
+    sharp(join(output, 'legs-baked.png')).toBuffer(),
+    sharp(join(output, 'legs-hose.png')).toBuffer(),
+  ]);
+  const [bakedMeta, hoseMeta] = await Promise.all([
+    sharp(bakedImage).metadata(),
+    sharp(hoseImage).metadata(),
+  ]);
+  await sharp({
+    create: {
+      width: bakedMeta.width + hoseMeta.width + 12,
+      height: Math.max(bakedMeta.height, hoseMeta.height),
+      channels: 3,
+      background: '#171a20',
+    },
+  }).composite([
+    { input: bakedImage, left: 0, top: 0 },
+    { input: hoseImage, left: bakedMeta.width + 12, top: 0 },
+  ]).png().toFile(join(output, 'legs-compare.png'));
+
   const images = await Promise.all(captures.map(file => sharp(file).toBuffer()));
   const meta = await Promise.all(images.map(image => sharp(image).metadata()));
   const width = Math.max(...meta.map(entry => entry.width));
