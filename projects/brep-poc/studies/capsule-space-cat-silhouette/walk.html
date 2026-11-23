@@ -23,13 +23,73 @@
     pointer-events: none;
   }
   .tag b { font-weight: 700; }
+  .controls {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    width: max-content;
+    max-width: calc(100% - 24px);
+    padding: 8px;
+    border: 1px solid #c9afa6;
+    border-radius: 12px;
+    background: #fff9f2;
+    color: #4a342e;
+    font: 500 14px/1.2 system-ui, sans-serif;
+  }
+  .controls[hidden] { display: none; }
+  .controls button, .controls select {
+    min-height: 36px;
+    padding: 0 9px;
+    border: 1px solid #ba9e92;
+    border-radius: 6px;
+    background: #fffaf6;
+    color: inherit;
+    font: inherit;
+  }
+  .controls button[aria-pressed="true"] { background: #4a342e; color: #fffaf6; }
+  .controls label { display: inline-flex; align-items: center; gap: 6px; }
 </style>
 <canvas id="view" aria-label="Two capsule space cats walking: baked legs on the left, hose legs on the right"></canvas>
 <p class="tag" id="tag-baked"><b>Baked leg</b> · 3 bones</p>
 <p class="tag" id="tag-hose"><b>Hose leg</b> · stock</p>
+<div class="controls" id="controls" role="group" aria-label="Character inspection" hidden>
+  <button id="playback" type="button">Pause</button>
+  <button id="step" type="button" disabled>Step frame</button>
+  <label>Animation
+    <select id="gait">
+      <option value="idle">Idle</option>
+      <option value="goofy_walk" selected>Goofy walk</option>
+      <option value="bound_run">Bound run</option>
+      <option value="float">Float</option>
+    </select>
+  </label>
+  <label>Speed
+    <select id="speed">
+      <option value="1">1×</option>
+      <option value=".5">½×</option>
+      <option value=".25">¼×</option>
+    </select>
+  </label>
+  <label>View
+    <select id="view-angle">
+      <option value="0">Side</option>
+      <option value="36">Front three-quarter</option>
+      <option value="-42">Rear three-quarter</option>
+      <option value="180">Other side</option>
+    </select>
+  </label>
+  <button id="bones" type="button" aria-pressed="false">Bones</button>
+</div>
 <!-- BODY -->
 <!-- LEG -->
 <!-- REAR_HIP -->
+<!-- FUSED_LEGS -->
+<!-- FUSED_TAIL -->
 <!-- JOINED_CAT -->
 <!-- CONCEPT_CAT -->
 <!-- WALK -->

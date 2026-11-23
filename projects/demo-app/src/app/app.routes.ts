@@ -2,6 +2,10 @@ import { Routes } from '@angular/router';
 
 export const routes: Routes = [
   {
+    path: 'capsule-crowd',
+    loadComponent: () => import('./pages/capsule-crowd/capsule-crowd-page.component').then(m => m.CapsuleCrowdPageComponent),
+  },
+  {
     path: 'crowd-navigation-grid',
     loadComponent: () => import('./pages/crowd-navigation-grid/crowd-navigation-grid-page.component').then(m => m.CrowdNavigationGridPageComponent),
   },

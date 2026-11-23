@@ -1,5 +1,9 @@
 # Capsule space cat silhouette study
 
+The first [fused rear hip](#fused-rear-hip) is the baseline for
+[fusing all four legs](#all-four-legs). Run `build.mjs` and open
+`artifacts/brep-space-cat-silhouette/fused-legs.html` to compare them.
+
 Two catalogued bodies for the Concept Fit cat, both single manifold solids:
 
 - **Tube and sphere** (`capsule-space-cat-tube.brep.ts`) — the intended shape. A
@@ -129,6 +133,35 @@ node projects/brep-poc/studies/capsule-space-cat-silhouette/capture-rear-hip.mjs
 npx --no-install stop-motion-ui run projects/brep-poc/studies/capsule-space-cat-silhouette/rear-hip.video.mjs --out artifacts/videos/space-cat-rear-hip --codec h264 --fps 20
 ```
 
+### All four legs
+
+The same 900 mm body and original rounded paws, with both hips and shoulders
+fused into the torso. The original face, separate animated tail and goofy
+walk are shared with the first rear-hip study. The same three bones drive
+each leg. In `fused-legs.html`, all four legs are fused on the left. The first
+rear-hip cat is on the right.
+
+```powershell
+npx brep verify projects/brep-poc/studies/capsule-space-cat-silhouette/rear-hip.brep.ts --check --param allLegs=true
+node projects/brep-poc/studies/capsule-space-cat-silhouette/capture-rear-hip.mjs --fused-legs
+```
+
+### Original tail fused
+
+Run `build.mjs` and open `artifacts/brep-space-cat-silhouette/fused-tail.html`.
+Both sides use the four-leg bake and the original gait. The left tail joins
+the rump with a 32 mm fillet and bends along an eight-segment bone chain.
+The right tail still follows the original animated curve as a separate mesh.
+
+In the tail or four-leg preview, use **Bones** to overlay the actual joints
+and chains. Use **Pause** and **Step frame** to inspect the same pose on both
+sides. Pick a slower speed or another angle to follow the legs and tail.
+
+```powershell
+npx brep verify projects/brep-poc/studies/capsule-space-cat-silhouette/fused-tail.brep.ts --check
+node projects/brep-poc/studies/capsule-space-cat-silhouette/capture-rear-hip.mjs --fused-tail
+```
+
 ### Joined legs and tail
 
 `joined-cat.brep.ts` rounds both shoulders, both hips and the tail root on one
@@ -136,9 +169,9 @@ solid. The four legs taper to small rounded tips, about 90 mm across in the
 rest bake. The preview reuses the leg gait and drives the tail from the existing
 curve, with a blend into the torso at the root.
 
-Run `build.mjs` and open `artifacts/brep-space-cat-silhouette/joined-cat.html`.
-The new body is on the left. The previous one-rear-hip study is on the right.
-Both use the same goofy walk with their gear hidden.
+The owner set this experiment aside. To reproduce it, run
+`build.mjs --experiments` and open `artifacts/brep-space-cat-silhouette/joined-cat.html`.
+The experiment is on the left, with the first rear-hip study on the right.
 
 ```powershell
 npx brep verify projects/brep-poc/studies/capsule-space-cat-silhouette/joined-cat.brep.ts --check
@@ -153,8 +186,9 @@ lower tail that sweeps back. Its eyes sit deeper in the cheeks. The smaller
 mouth, short whiskers and forward-facing ears follow the supplied Space Cat
 sketch. Both models wear the same helmet and suit band for the comparison.
 
-Run `build.mjs` and open `artifacts/brep-space-cat-silhouette/concept-fit.html`.
-The compact fit is on the left. The previous proportions are on the right.
+The owner set this experiment aside. To reproduce it, run
+`build.mjs --experiments` and open `artifacts/brep-space-cat-silhouette/concept-fit.html`.
+The compact fit is on the left, and the joined legs and tail experiment is on the right.
 
 ```powershell
 npx brep verify projects/brep-poc/studies/capsule-space-cat-silhouette/joined-cat.brep.ts --check --param compact=true
@@ -178,7 +212,7 @@ node projects/brep-poc/studies/capsule-space-cat-silhouette/capture-rear-hip.mjs
 
 - The rigged legs live in this study only. The production actor still swaps in
   `RubberHoseLimbMesh`, because the baked leg arrives as a GLB and the app has no
-  baked-geometry path yet. The joined legs and tail are available in the study preview.
+  baked-geometry path yet. The first fused rear hip remains in the study preview.
 - The knee reads as a soft crease at close range: two segments concentrate the
   bend at one joint. More bones, or a knee blend that follows the curve, would
   smooth it.

@@ -485,6 +485,13 @@ Open questions for the developer:
 4. Per-class or per-faction road multipliers instead of one global factor?
 5. Is neighbour seeding worth the wider invalidation?
 
+## 2026-11-23 — Capsule crowd with animated impostors
+
+- **[action]** Added [Capsule Crowd](http://triangular-demo.localhost:4200/capsule-crowd) as a second consumer of `triangular-engine/crowd-navigation`. The same 256 agents loop between shared destinations in both views. Play, pause and orbit let the viewer compare from the same camera and pose. Agents steer around two planters in the plaza.
+- **[action]** The low-poly view draws one instanced batch per occupied walk pose. The impostor view bakes those eight poses on demand with the existing WebGL octahedral baker, at 25 upper-hemisphere angles per pose. Every bake includes the same set of poses when computing bounds, so the impostor's scale and centre stay fixed through the walk. The baked views blend by camera angle and the animation selects discrete pose frames.
+- **[verification]** The demo and engine builds passed. The focused headless specs passed for 256 moving agents, planter avoidance and distinct walk poses on shared topology. WebGL readback confirmed eight distinct, nonempty albedo atlases. A browser run checked catalog navigation, switching between both renderers, moving and paused playback, camera presets and drag orbit. Both modes used eight crowd batches in the captured pose. The low-poly crowd submitted 577,536 triangles and the impostors submitted 512. These are crowd geometry counts. Frame time on the target hardware and a distance-based transition remain open.
+- **[evidence]** Local only. Run `node artifacts/capsule-crowd/check.mjs` against the existing demo host to regenerate the paused comparison and orbit overview stills.
+
 ## Scope history
 
 <!-- tri:scope-history -->

@@ -60,7 +60,7 @@ determinism (see Q2). The existing `triangular-engine/navigation` entry stays un
 | sector-fields   | done        |
 | goals-edits     | in_progress |
 | worker-scale    | planned     |
-| crowd-rendering | planned     |
+| crowd-rendering | in_progress |
 | unit-classes    | planned     |
 | combat          | planned     |
 | tight-spots     | planned     |
@@ -142,6 +142,8 @@ determinism (see Q2). The existing `triangular-engine/navigation` entry stays un
     <!-- /tri:review -->
 
 ## Delivery progress
+
+The first crowd-rendering comparison uses 256 capsule humans on the public navigation core. Both views use the same walk poses and agent state. One view draws shared low-poly meshes and the other plays a sequence baked by the existing octahedral impostor baker.
 
 Record dated milestones, evidence and material changes in the linked Engineering Record.
 

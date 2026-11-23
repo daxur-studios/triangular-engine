@@ -10,7 +10,7 @@ import buildFatCat, { params as fatParams, rigAnchor as fatAnchor } from '../../
 import buildCatLeg, { params as legParams, restPose as legRestPose } from '../../src/app/part/capsule-space-cat-leg.brep.ts';
 import buildTubeCat, { params as tubeParams, rigAnchor as tubeAnchor } from '../../src/app/part/capsule-space-cat-tube.brep.ts';
 import buildRearHip, { params as rearHipParams, restPose as rearHipRestPose } from './rear-hip.brep.ts';
-import buildJoinedCat, { params as joinedParams } from './joined-cat.brep.ts';
+import buildFusedTail, { params as fusedTailParams } from './fused-tail.brep.ts';
 
 const out = resolve('artifacts/brep-space-cat-silhouette');
 // The tube's front tip is fixed inside the head, so a length change only moves
@@ -191,10 +191,6 @@ const hipBake = bake(buildRearHip, rearHipParams.values);
 await writeFile(resolve(out, 'space-cat-rear-hip.glb'), hipBake.glb);
 const rearHip = { encoded: hipBake.glb.toString('base64'), ...rearHipRestPose };
 console.log('Fused rear hip |', `${rearHipParams.values.hipFillet} mm fillet |`, hipBake.triangles, 'tris');
-const joinedBake = bake(buildJoinedCat, joinedParams.values);
-await writeFile(resolve(out, 'space-cat-joined.glb'), joinedBake.glb);
-const joined = { encoded: joinedBake.glb.toString('base64') };
-console.log('Joined legs and tail |', joinedBake.triangles, 'tris');
 const walkHtml = walkTemplate
   .replace('<!-- BODY -->', () => `<script id="body" type="application/json">${JSON.stringify(walkBody)}</script>`)
   .replace('<!-- LEG -->', () => `<script id="leg" type="application/json">${JSON.stringify(leg)}</script>`)
@@ -206,16 +202,42 @@ const hipHtml = walkHtml
   .replace('<!-- REAR_HIP -->', () => `<script id="rear-hip" type="application/json">${JSON.stringify(rearHip)}</script>`);
 await writeFile(resolve(out, 'rear-hip.html'), hipHtml);
 console.log(resolve(out, 'rear-hip.html'));
-const joinedHtml = hipHtml
-  .replace('<title>Space Cat rear hip comparison</title>', '<title>Space Cat joined legs and tail</title>')
-  .replace('<!-- JOINED_CAT -->', () => `<script id="joined-cat" type="application/json">${JSON.stringify(joined)}</script>`);
-await writeFile(resolve(out, 'joined-cat.html'), joinedHtml);
-console.log(resolve(out, 'joined-cat.html'));
 
-const conceptBake = bake(buildJoinedCat, { ...joinedParams.values, compact: true });
-await writeFile(resolve(out, 'space-cat-concept-fit.glb'), conceptBake.glb);
-const conceptFit = { encoded: conceptBake.glb.toString('base64') };
-await writeFile(resolve(out, 'concept-fit.html'), joinedHtml
-  .replace('<title>Space Cat joined legs and tail</title>', '<title>Space Cat concept proportions</title>')
-  .replace('<!-- CONCEPT_CAT -->', () => `<script id="concept-cat" type="application/json">${JSON.stringify(conceptFit)}</script>`));
-console.log('Concept fit |', conceptBake.triangles, 'tris |', resolve(out, 'concept-fit.html'));
+const fusedLegsBake = bake(buildRearHip, { ...rearHipParams.values, allLegs: true });
+await writeFile(resolve(out, 'space-cat-fused-legs.glb'), fusedLegsBake.glb);
+const fusedLegs = { encoded: fusedLegsBake.glb.toString('base64') };
+const legsScript = () => `<script id="fused-legs" type="application/json">${JSON.stringify(fusedLegs)}</script>`;
+await writeFile(resolve(out, 'fused-legs.html'), hipHtml
+  .replace('<title>Space Cat rear hip comparison</title>', '<title>Space Cat fused legs comparison</title>')
+  .replace('<!-- FUSED_LEGS -->', legsScript));
+console.log('Fused legs |', fusedLegsBake.triangles, 'tris |', resolve(out, 'fused-legs.html'));
+
+const fusedTailBake = bake(buildFusedTail, fusedTailParams.values);
+await writeFile(resolve(out, 'space-cat-fused-tail.glb'), fusedTailBake.glb);
+const fusedTail = { encoded: fusedTailBake.glb.toString('base64') };
+await writeFile(resolve(out, 'fused-tail.html'), walkHtml
+  .replace('<title>Capsule space cat legs, walking</title>', '<title>Space Cat fused tail comparison</title>')
+  .replace('<!-- FUSED_LEGS -->', legsScript)
+  .replace('<!-- FUSED_TAIL -->', () => `<script id="fused-tail" type="application/json">${JSON.stringify(fusedTail)}</script>`));
+console.log('Fused tail |', fusedTailBake.triangles, 'tris |', resolve(out, 'fused-tail.html'));
+
+if (process.argv.includes('--experiments')) {
+  const { default: buildJoinedCat, params: joinedParams } = await import('./joined-cat.brep.ts');
+  const joinedBake = bake(buildJoinedCat, joinedParams.values);
+  await writeFile(resolve(out, 'space-cat-joined.glb'), joinedBake.glb);
+  const joined = { encoded: joinedBake.glb.toString('base64') };
+  console.log('Joined legs and tail |', joinedBake.triangles, 'tris');
+  const joinedHtml = hipHtml
+    .replace('<title>Space Cat rear hip comparison</title>', '<title>Space Cat joined legs and tail</title>')
+    .replace('<!-- JOINED_CAT -->', () => `<script id="joined-cat" type="application/json">${JSON.stringify(joined)}</script>`);
+  await writeFile(resolve(out, 'joined-cat.html'), joinedHtml);
+  console.log(resolve(out, 'joined-cat.html'));
+
+  const conceptBake = bake(buildJoinedCat, { ...joinedParams.values, compact: true });
+  await writeFile(resolve(out, 'space-cat-concept-fit.glb'), conceptBake.glb);
+  const conceptFit = { encoded: conceptBake.glb.toString('base64') };
+  await writeFile(resolve(out, 'concept-fit.html'), joinedHtml
+    .replace('<title>Space Cat joined legs and tail</title>', '<title>Space Cat concept proportions</title>')
+    .replace('<!-- CONCEPT_CAT -->', () => `<script id="concept-cat" type="application/json">${JSON.stringify(conceptFit)}</script>`));
+  console.log('Concept fit |', conceptBake.triangles, 'tris |', resolve(out, 'concept-fit.html'));
+}

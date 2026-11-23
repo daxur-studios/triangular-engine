@@ -1,0 +1,59 @@
+.page {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+scene {
+  flex: 1;
+}
+
+.panel {
+  max-width: min(23rem, calc(100vw - 2rem));
+  padding: .8rem;
+  border: 1px solid #66818b;
+  border-radius: .7rem;
+  background: #172b35f2;
+  color: #f7f0dd;
+  font: .88rem/1.4 system-ui, sans-serif;
+}
+
+.panel a {
+  color: #b9dfeb;
+}
+
+h1 {
+  font-size: 1.2rem;
+  margin: .3rem 0 .6rem;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  margin-top: .4rem;
+}
+
+button {
+  padding: .3rem .55rem;
+  border: 1px solid #75909c;
+  border-radius: .3rem;
+  color: inherit;
+  background: #29434f;
+  font: inherit;
+  cursor: pointer;
+}
+
+button[aria-pressed='true'] {
+  color: #162b32;
+  background: #c1e2db;
+}
+
+button:disabled {
+  opacity: .65;
+  cursor: default;
+}
+
+p {
+  margin: .45rem 0 0;
+}

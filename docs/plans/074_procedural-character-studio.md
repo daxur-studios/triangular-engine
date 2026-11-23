@@ -116,9 +116,11 @@ Use the supplied top-row Space Cat as the target for the suited three-quarter ac
 3. **Blend ears into the head.** Fit rounded triangular tips and preserve the recessed pink cups. Fuse and bevel each ear root into the head. Start with one bone per ear, driven by the existing expression poses, and blend into the stable head at the root. Check alert and flattened ears for creases around the root, distortion in the pink cup and contact with the dome.
 4. **Restore the suited look and compare.** Refit the existing clear dome, dark collar and pale suit front to the new silhouette. Judge the face through the visor, especially how far the eyes stand out and how the muzzle, closed mouth and whiskers read. Compare the current and revised cats at the same three-quarter angle and stride, then play the goofy walk and bound to check the joins and dome clearance in motion.
 
-The study now includes a comparison of the four joined legs, smaller paws and joined tail against the first rear-hip bake. [ER 074 records the joined-body pass](../engineering-records/074_procedural-character-studio.md#2026-11-23--joined-legs-and-tail).
+Resume from the first fused rear hip. The owner set aside the joined-body and compact suited experiments. [ER 074 records the return to the first rear hip](../engineering-records/074_procedural-character-studio.md#2026-11-23--return-to-the-first-rear-hip).
 
-The compact suited comparison is ready for proportion review before fusing the ear roots. [ER 074 records the proportion pass](../engineering-records/074_procedural-character-studio.md#2026-11-23--compact-space-cat-proportions).
+The four-leg comparison extends that same baseline to the remaining three joins. [ER 074 records the four original legs](../engineering-records/074_procedural-character-studio.md#2026-11-23--four-original-legs-fused).
+
+The next comparison fuses the original tail at the rump on that four-leg bake. Use the same locomotion on both sides and inspect the live bones at slow speed or a paused frame. [ER 074 tracks the tail join and rig inspection](../engineering-records/074_procedural-character-studio.md#2026-11-23--original-tail-join-and-rig-inspection).
 
 Scope history in the Engineering Record is append-only. Confirm a specific baseline only after
 explicit developer confirmation; document review and checked boxes do not imply confirmation.

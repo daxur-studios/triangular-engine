@@ -6,6 +6,13 @@ export interface RearHipRestPose {
   hipHeight: number;
 }
 
+/** Fade the original leg into the fixed torso across the rounded join. */
+export function rearHipBlend(y: number, distance: number): number {
+  const alongLeg = 1 - MathUtils.smoothstep(y, -.325, -.165);
+  const nearLeg = 1 - MathUtils.smoothstep(distance, .095, .185);
+  return alongLeg * nearLeg;
+}
+
 /** One fused body and rear leg, posed by the same three bones as a separate leg. */
 export function buildRearHip(geometry: BufferGeometry, material: MeshStandardMaterial, rest: RearHipRestPose) {
   const [x, y, z] = rest.ankle;
@@ -33,9 +40,7 @@ export function buildRearHip(geometry: BufferGeometry, material: MeshStandardMat
     // Keep the far side and top of the rump still. Fade into the leg across
     // the fillet on the near side, with full leg motion below the body.
     const distance = Math.hypot(position.getX(i) - x, position.getZ(i) - z);
-    const alongLeg = 1 - MathUtils.smoothstep(position.getY(i), -.325, -.165);
-    const nearLeg = 1 - MathUtils.smoothstep(distance, .095, .185);
-    const blend = alongLeg * nearLeg;
+    const blend = rearHipBlend(position.getY(i), distance);
     index.setW(i, 3);
     weight.setXYZW(i, weight.getX(i) * blend, weight.getY(i) * blend, weight.getZ(i) * blend, 1 - blend);
   }

@@ -54,26 +54,30 @@ function buildLeg([x, y, z]: Vec3): Shape3D {
   );
 }
 
-function buildTail(rest: typeof joinedTail): Shape3D {
+export function buildTail(
+  rest: typeof joinedTail,
+  radiusAt = (t: number) => TAIL_RADIUS * (1 - t) + TAIL_TIP_RADIUS * t,
+): Shape3D {
   const [base, control1, control2, tip] = rest.map(point => new Vector3(...CAD(point)));
   const centerline = new CubicBezierCurve3(base, control1, control2, tip);
   const tipTangent = centerline.getTangent(1);
+  const tipRadius = radiusAt(1);
   const rings = Array.from({ length: 25 }, (_, i) => {
     const t = i / 24;
     return {
       at: centerline.getPoint(t).toArray(),
       axis: centerline.getTangent(t).toArray(),
-      radius: TAIL_RADIUS * (1 - t) + TAIL_TIP_RADIUS * t,
+      radius: radiusAt(t),
     };
   });
   for (const t of [...CAP].reverse()) {
     rings.push({
-      at: tip.clone().addScaledVector(tipTangent, TAIL_TIP_RADIUS * t).toArray(),
+      at: tip.clone().addScaledVector(tipTangent, tipRadius * t).toArray(),
       axis: tipTangent.toArray(),
-      radius: TAIL_TIP_RADIUS * Math.sqrt(1 - t * t),
+      radius: tipRadius * Math.sqrt(1 - t * t),
     });
   }
-  return roundLoft(rings, base.toArray(), tip.clone().addScaledVector(tipTangent, TAIL_TIP_RADIUS).toArray());
+  return roundLoft(rings, base.toArray(), tip.clone().addScaledVector(tipTangent, tipRadius).toArray());
 }
 
 function join(body: Shape3D, limb: Shape3D, radius: number, atJoin: (bounds: Bounds3D) => boolean, label: string) {

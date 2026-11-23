@@ -1,0 +1,33 @@
+<div class="page">
+  <scene [showFps]="true">
+    <orbitControls [cameraPosition]="cameraPosition()" [target]="cameraTarget()" [far]="180" />
+    <ambientLight [intensity]="1.25" />
+    <directionalLight [position]="[8, 13, 6]" [intensity]="2.2" />
+  </scene>
+
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Capsule crowd controls">
+      <a routerLink="/">← Examples</a>
+      <h1>Capsule crowd</h1>
+      <div class="controls" role="group" aria-label="Crowd rendering">
+        <button type="button" [attr.aria-pressed]="mode() === 'mesh'" [disabled]="bakeStatus() === 'baking'"
+          (click)="selectMode('mesh')">Low-poly 3D</button>
+        <button type="button" [attr.aria-pressed]="mode() === 'impostor'"
+          [disabled]="bakeStatus() === 'baking' || bakeStatus() === 'failed'"
+          (click)="selectMode('impostor')">Animated impostors</button>
+      </div>
+      @if (bakeStatus() === 'baking') {
+        <p role="status">Baking walk poses {{ baked() }} / {{ walkFrames }}</p>
+      } @else if (bakeStatus() === 'failed') {
+        <p role="status">Impostor bake failed. The 3D crowd is available.</p>
+      }
+      <div class="controls" role="group" aria-label="Playback and camera">
+        <button type="button" (click)="paused.set(!paused())">{{ paused() ? 'Play' : 'Pause' }}</button>
+        <button type="button" (click)="focus(false)">Overview</button>
+        <button type="button" (click)="focus(true)">Closer</button>
+      </div>
+      <p>{{ count }} humans · {{ paused() ? 'Paused' : stats().moving + ' moving' }}</p>
+      <p>{{ stats().draws }} crowd batches · {{ stats().triangles.toLocaleString('en-GB') }} crowd triangles</p>
+    </section>
+  </ng-template>
+</div>

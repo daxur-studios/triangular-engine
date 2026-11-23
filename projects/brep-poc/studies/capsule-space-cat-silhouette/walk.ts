@@ -12,6 +12,7 @@ import {
   AmbientLight, CanvasTexture, Clock, Color, DirectionalLight, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial,
   OrthographicCamera, PlaneGeometry, Scene, Vector3, WebGLRenderer,
 } from 'three';
+import { createBoneOverlay } from '../bone-overlay';
 import { buildCat, hideGear, loadBody, loadLegGeometry, type LegPreset, type Preset } from './cat-scene';
 import { buildRearHip, type RearHipRestPose } from './rear-hip';
 import { buildJoinedCatRig } from './joined-cat-rig';
@@ -25,9 +26,12 @@ const tagLeft = document.querySelector<HTMLElement>('#tag-baked')!;
 const tagRight = document.querySelector<HTMLElement>('#tag-hose')!;
 const search = new URLSearchParams(location.search);
 const hipData = document.querySelector('#rear-hip');
+const fusedLegsData = document.querySelector('#fused-legs');
+const fusedTailData = document.querySelector('#fused-tail');
 const joinedData = document.querySelector('#joined-cat');
 const conceptData = document.querySelector('#concept-cat');
-const compareHip = hipData !== null;
+const compareHip = hipData !== null || fusedTailData !== null;
+const inspectRig = fusedTailData !== null || fusedLegsData !== null;
 
 const background = '#ede1d6';
 const cameraTarget = new Vector3(0, .5, 0);
@@ -62,7 +66,7 @@ function applyView(): void {
 function resize(): void {
   const { innerWidth: width, innerHeight: height } = window;
   const aspect = Math.max(.2, width / height);
-  const halfHeight = conceptData ? Math.max(1.02, 1.90 / aspect) : 1.02;
+  const halfHeight = conceptData || inspectRig ? Math.max(1.02, 1.80 / aspect) : 1.02;
   renderer.setSize(width, height, false);
   camera.left = -halfHeight * aspect;
   camera.right = halfHeight * aspect;
@@ -126,11 +130,29 @@ async function main(): Promise<void> {
     canvas.setAttribute('aria-label', 'Space cats walking with joined legs and tail on the left and the earlier rear hip bake on the right');
   }
   const concept = conceptData
-    ? buildJoinedCatRig(await loadLegGeometry(JSON.parse(conceptData.textContent!)), true)
+    ? buildJoinedCatRig(await loadLegGeometry(JSON.parse(conceptData.textContent!)), 'compact')
     : undefined;
   conceptData?.remove();
-  const leftRig = concept ?? joined ?? rearHip;
-  const rightRig = concept ? joined : joined ? rearHip : undefined;
+  const fusedLegs = fusedLegsData
+    ? buildJoinedCatRig(await loadLegGeometry(JSON.parse(fusedLegsData.textContent!)), 'legs-only')
+    : undefined;
+  if (fusedLegsData) {
+    fusedLegsData.remove();
+    tagLeft.textContent = 'All four legs fused';
+    tagRight.textContent = 'First fused rear hip';
+    canvas.setAttribute('aria-label', 'Space Cat with all four legs fused on the left and the first rear hip on the right');
+  }
+  const fusedTail = fusedTailData
+    ? buildJoinedCatRig(await loadLegGeometry(JSON.parse(fusedTailData.textContent!)), 'fused-tail')
+    : undefined;
+  if (fusedTailData) {
+    fusedTailData.remove();
+    tagLeft.textContent = 'Fused tail';
+    tagRight.textContent = 'Separate tail';
+    canvas.setAttribute('aria-label', 'The same four-leg Space Cat, with a fused tail on the left and the original separate tail on the right');
+  }
+  const leftRig = fusedTail ?? fusedLegs ?? concept ?? joined ?? rearHip;
+  const rightRig = fusedTail ? fusedLegs : concept ? joined : joined || fusedLegs ? rearHip : undefined;
   const leftBody = leftRig?.body ?? await loadBody(bodyPreset);
   const left = buildCat(leftBody, bodyPreset.anchor, concept ? conceptRearExtension : bodyPreset.rearExtension,
     legPreset, legGeometry, leftRig);
@@ -171,8 +193,11 @@ async function main(): Promise<void> {
   ground.add(leftShadow, rightShadow);
   scene.add(left.actor.root, right.actor.root, ground);
 
-  resize();
-  new ResizeObserver(resize).observe(canvas);
+  const overlays = inspectRig ? [
+    createBoneOverlay(left.actor.root, 0x3c2977),
+    createBoneOverlay(right.actor.root, 0x00665f),
+  ] : [];
+  scene.add(...overlays.map(overlay => overlay.lines));
 
   const clock = new Clock();
   const tagPoint = new Vector3();
@@ -180,10 +205,14 @@ async function main(): Promise<void> {
     left.update(delta);
     right.update(delta);
     softenFace?.();
-    if (concept) {
+    draw();
+  }
+  function draw(): void {
+    if (concept || inspectRig) {
       // Offset the pair across the camera plane so both use the same framing.
-      const x = -Math.sin(viewAngle) * 1.04;
-      const z = Math.cos(viewAngle) * 1.04;
+      const offset = concept ? 1.04 : leftZ;
+      const x = -Math.sin(viewAngle) * offset;
+      const z = Math.cos(viewAngle) * offset;
       left.actor.root.position.x = leftShadow.position.x = x;
       left.actor.root.position.z = leftShadow.position.z = z;
       right.actor.root.position.x = rightShadow.position.x = -x;
@@ -197,11 +226,12 @@ async function main(): Promise<void> {
     tagPoint.y = 1.03;
     placeTag(tagRight, tagPoint);
   }
-  const paused = search.has('paused');
+  let paused = search.has('paused');
+  let playbackRate = 1;
   function tick(): void {
     // A tab that was hidden can hand back a huge delta; the gait should not jump.
     const delta = Math.min(clock.getDelta(), .05);
-    if (!paused) render(delta);
+    if (!paused) render(delta * playbackRate);
     requestAnimationFrame(tick);
   }
 
@@ -213,11 +243,52 @@ async function main(): Promise<void> {
     setView(degrees: number): void {
       viewAngle = degrees * Math.PI / 180;
       applyView();
+      draw();
+    },
+    setBones(visible: boolean): void {
+      overlays.forEach(overlay => overlay.setVisible(visible));
+      draw();
     },
     step(delta: number): void {
       render(delta);
     },
   };
+  const controls = document.querySelector<HTMLElement>('#controls')!;
+  if (inspectRig && (!search.has('paused') || search.has('controls'))) {
+    const playback = controls.querySelector<HTMLButtonElement>('#playback')!;
+    const step = controls.querySelector<HTMLButtonElement>('#step')!;
+    const gait = controls.querySelector<HTMLSelectElement>('#gait')!;
+    const speed = controls.querySelector<HTMLSelectElement>('#speed')!;
+    const view = controls.querySelector<HTMLSelectElement>('#view-angle')!;
+    const bones = controls.querySelector<HTMLButtonElement>('#bones')!;
+    function refreshPlayback(): void {
+      playback.textContent = paused ? 'Play' : 'Pause';
+      step.disabled = !paused;
+    }
+    playback.addEventListener('click', () => {
+      paused = !paused;
+      refreshPlayback();
+    });
+    step.addEventListener('click', () => render(1 / 30));
+    gait.addEventListener('change', () => {
+      api.setGait(gait.value as Gait);
+      render(0);
+    });
+    speed.addEventListener('change', () => { playbackRate = Number(speed.value); });
+    view.addEventListener('change', () => api.setView(Number(view.value)));
+    bones.addEventListener('click', () => {
+      const visible = bones.getAttribute('aria-pressed') !== 'true';
+      bones.setAttribute('aria-pressed', String(visible));
+      api.setBones(visible);
+    });
+    refreshPlayback();
+    controls.hidden = false;
+  }
+  resize();
+  new ResizeObserver(() => {
+    resize();
+    draw();
+  }).observe(canvas);
   if (compareHip) api.setGait('goofy_walk');
   render(0);
   requestAnimationFrame(tick);

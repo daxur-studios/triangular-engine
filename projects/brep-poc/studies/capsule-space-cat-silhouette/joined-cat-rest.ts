@@ -1,12 +1,17 @@
 export type Point = readonly [number, number, number];
 
-/** Torso-local coordinates in metres, +Y up and +Z forward. */
-export const joinedLegs = [
-  { name: 'capsule-cat-front-left-leg', ankle: [-.178, -.375, .329], hipHeight: .24 },
-  { name: 'capsule-cat-front-right-leg', ankle: [.178, -.375, .329], hipHeight: .24 },
-  { name: 'capsule-cat-back-left-leg', ankle: [-.178, -.375, -.324], hipHeight: .24 },
-  { name: 'capsule-cat-back-right-leg', ankle: [.178, -.375, -.324], hipHeight: .24 },
+/** Original paw stations in torso-local metres, +Y up and +Z forward. */
+export const originalLegs = [
+  { name: 'capsule-cat-front-left-leg', ankle: [-.178, -.395, .329], hipHeight: .265 },
+  { name: 'capsule-cat-front-right-leg', ankle: [.178, -.395, .329], hipHeight: .265 },
+  { name: 'capsule-cat-back-left-leg', ankle: [-.178, -.395, -.324], hipHeight: .265 },
+  { name: 'capsule-cat-back-right-leg', ankle: [.178, -.395, -.324], hipHeight: .265 },
 ] as const;
+
+const joinedLegs = originalLegs.map(leg => {
+  const [x, , z] = leg.ankle;
+  return { ...leg, ankle: [x, -.375, z] as Point, hipHeight: .24 };
+});
 
 export const joinedTail: readonly [Point, Point, Point, Point] = [
   [0, .095, -.337],

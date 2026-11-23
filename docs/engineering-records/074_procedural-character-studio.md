@@ -365,6 +365,32 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **[verification]** Both joined bakes passed the single-solid and bounds checks. The compact bake produced 14,468 triangles. The headless viewer compared eight phases of the goofy walk in the common camera. The body, face and suit treatment are available in the study for owner review.
 - **[evidence]** Local only. Use the [compact concept proportion commands](../../projects/brep-poc/studies/capsule-space-cat-silhouette/README.md#compact-concept-proportions) to regenerate the comparison page and stills.
 
+## 2026-11-23 — Return to the first rear hip
+
+- **[decision]** The owner accepted the first fused rear-hip result for further work and rejected the subsequent joined-body and compact suited passes. The first rear-hip comparison restores the 900 mm torso, original face, legs and tail, with the one rounded rear join.
+- **[action]** The study's default build produces the first rear-hip comparison. Use `--experiments` to reproduce the later trials recorded above.
+
+## 2026-11-23 — Four original legs fused
+
+- **[action]** Extended the first rear-hip bake to all four original legs. The 900 mm torso, face, round paws and separate tail remain the same. Used 55 mm rear fillets and 44 mm shoulder fillets, driven by the existing three-bone chains and goofy walk.
+- **[verification]** The full bake passed as one valid solid with the same bounds as the first rear hip. The first rear-hip bake retained its measured volume and bounds. The four-leg bake produced 16,833 triangles.
+- **[evidence]** Local only. Use the default build and the [four-leg comparison commands](../../projects/brep-poc/studies/capsule-space-cat-silhouette/README.md#all-four-legs) to regenerate the live comparison and stride stills.
+
+## 2026-11-23 — Original tail join and rig inspection
+
+- **[action]** Extend the approved four-leg bake at the tail root. Compare the fused tail with the original separate tail at the same pose and add a live bones overlay to inspect the gait.
+- **[action]** Fused the original tail profile with a 32 mm root fillet. Both sides retain the approved body, face, paws, leg skinning and gait. The fused tail uses the original animated curve to drive an eight-segment bone chain.
+- **[finding]** The overlay follows the actual bones on both sides. The original separate tail is animated directly as a curve, so that side has no tail bones. The current capsule human also deforms its limbs along curves.
+- **[verification]** CAD verified one manifold solid at 20, 32 and 40 mm. The 32 mm bake produced 20,424 triangles. Checked the walk and bound in Chromium and exercised the bones toggle, playback, step and angle controls. Blending the skin weights over the inside of the curl removed a fold seen during the bound. The 286 procedural tests and library build passed.
+- **[proposal]** Reuse the viewport, playback controls and optional rig overlay for future character previews. Each character supplies its available animations and debug geometry. Try the controls with a capsule human before settling the shared component interface.
+- **[evidence]** Local only. Use the default build and the [fused-tail comparison commands](../../projects/brep-poc/studies/capsule-space-cat-silhouette/README.md#original-tail-fused) to regenerate the live preview, stride and bone overlay captures.
+
+## 2026-11-23 — Front knee skinning
+
+- **[finding]** The owner spotted the front leg skin drifting from its debug bones. A matched walk and bound comparison showed identical knee transforms. In the sampled knee section, the torso held an average 59% of the skin influence before the fix.
+- **[action]** Keep the front leg's blend with the torso around the shoulder, with full leg influence near the knee. Use the same front weights in both original four-leg previews.
+- **[verification]** At the sampled front knee, the maximum distance from the skin section centre to the joint fell from 73 to 30 mm in eight walk poses, and from 72 to 48 mm in eight bound poses. The joint positions matched across the comparison. The bound still produces a tight fold on the tucked leg.
+
 ## Scope history
 
 <!-- tri:scope-history -->
