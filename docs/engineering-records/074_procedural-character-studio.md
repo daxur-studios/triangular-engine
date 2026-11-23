@@ -308,6 +308,12 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **[verification]** Both parts pass `brep verify --check` and 22 case checks (defaults, each parameter at both limits, all-min and all-max corners). Tube at the 900 mm default: one valid manifold solid, 276.1 M mm³, bounds x ±318, y −727…520, z −280…460 mm, 10,023 triangles. Fat cat: 288.6 M mm³, 8,451 triangles. The focused demo spec asserts a 0.2 m rear extension moves the hind paw by −0.2 m and the front paw not at all, and the preview comparison at 780, 900 and 1100 mm shows the rear anchors on the rump.
 - **[reproduce]** `node projects/brep-poc/studies/capsule-space-cat-silhouette/verify.mjs`, then `build.mjs` and `capture.mjs`; preview at `artifacts/brep-space-cat-silhouette/preview.html`.
 
+## 2026-11-23 — Space cat body: 50% wider join bevel
+
+- **[action]** Raised the tube body's `joinFillet` default from 90 to 135 mm at Bruno's request. The bevel blends the head-to-tube ring over half again the distance; the rest of the silhouette is unchanged.
+- **[finding]** At `bodyLength` 1100 with `tubeRadius` 340 the fused join ring cannot be filleted at any bevel, including the previous 90 mm, so that corner was already outside the usable parameter space. Capped `tubeRadius` at 330 mm, the largest radius that passes every limit and corner.
+- **[verification]** `brep verify --check` passes at defaults and all 22 study cases pass for both parts (defaults, each parameter at both limits, all-min and all-max corners). Default body 900 mm with the 135 mm bevel: 276.8 M mm³ and 9,553 triangles, against 276.1 M and 10,023 at 90 mm. The preview and all four comparison views were rebaked.
+
 ## Scope history
 
 <!-- tri:scope-history -->

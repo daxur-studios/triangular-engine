@@ -41,7 +41,9 @@ export const params = defineParams({
     type: 'number',
     default: 280,
     min: 200,
-    max: 340,
+    // 340 with the longest body leaves a join the fillet cannot solve, even at
+    // the old 90 mm bevel; 330 is the largest radius that survives every corner.
+    max: 330,
     step: 10,
     unit: 'mm',
     label: 'Tube radius',
@@ -59,7 +61,7 @@ export const params = defineParams({
   },
   joinFillet: {
     type: 'number',
-    default: 90,
+    default: 135,
     min: 0,
     max: 140,
     step: 5,

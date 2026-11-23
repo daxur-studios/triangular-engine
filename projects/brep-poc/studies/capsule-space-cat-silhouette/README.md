@@ -35,10 +35,11 @@ to orbit the result; it embeds the GLB bytes that `brep verify` measured.
 - `bodyLength` (mm, 560–1100, default 900): total body length, front tip buried in
   the head to the rump tip. The capsule cannot be shorter than its two end caps
   (`2 × tubeRadius`), so the builder holds a 40 mm straight run as the minimum.
-- `tubeRadius` (mm, 200–340, default 280): body radius, the Concept Fit
-  `bodyRadius`.
+- `tubeRadius` (mm, 200–330, default 280): body radius, the Concept Fit
+  `bodyRadius`. 340 mm with the longest body leaves a join the fillet cannot
+  solve, so 330 is the largest offered radius.
 - `headRise` (mm, default 30): lifts the head; the rig anchor follows it.
-- `joinFillet` (mm, default 90): radius of the bevel where the tube's side meets
+- `joinFillet` (mm, default 135): radius of the bevel where the tube's side meets
   the head's ball. 0 leaves the sharp intersection.
 
 Rear tip = `BODY_FRONT (-380) + bodyLength`. Because the front tip is fixed in the
@@ -54,8 +55,8 @@ Defaults: 30, 115, 0, 85.
 
 ## Current state
 
-- Tube (body 900): volume 276.1 M mm³, bounds x ±318, y −727…520, z −280…460 mm.
-  10,023 triangles. Verified at defaults, each parameter at both limits, and both
+- Tube (body 900): volume 276.8 M mm³, bounds x ±318, y −727…520, z −280…460 mm.
+  9,553 triangles. Verified at defaults, each parameter at both limits, and both
   all-min / all-max corners.
 - Fat cat: volume 288.6 M mm³, bounds x ±345, y −727…340, z −360…460 mm.
   8,451 triangles. Verified the same way.

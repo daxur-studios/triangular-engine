@@ -27,17 +27,17 @@ const presets = [
   {
     slug: 'tube-short', label: 'Tube · short',
     build: buildTubeCat, values: tubeValues({ bodyLength: 780 }), anchor: tubeAnchor(tubeValues({ bodyLength: 780 })),
-    caption: 'Tube and sphere · body 780 mm · bevel 90 mm',
+    caption: 'Tube and sphere · body 780 mm · bevel 135 mm',
   },
   {
     slug: 'tube-default', label: 'Tube · default length',
     build: buildTubeCat, values: tubeValues(), anchor: tubeAnchor(tubeValues()),
-    caption: 'Tube and sphere · body 900 mm · bevel 90 mm',
+    caption: 'Tube and sphere · body 900 mm · bevel 135 mm',
   },
   {
     slug: 'tube-long', label: 'Tube · long',
     build: buildTubeCat, values: tubeValues({ bodyLength: 1100 }), anchor: tubeAnchor(tubeValues({ bodyLength: 1100 })),
-    caption: 'Tube and sphere · body 1100 mm · bevel 90 mm',
+    caption: 'Tube and sphere · body 1100 mm · bevel 135 mm',
   },
 ];
 const millimetersPerMeter = 1000;
