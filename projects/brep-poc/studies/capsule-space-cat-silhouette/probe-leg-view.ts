@@ -8,6 +8,9 @@ interface Variant {
   label: string;
   caption: string;
   encoded: string;
+  halfHeight?: number;
+  targetY?: number;
+  targetZ?: number;
 }
 
 const root = document.querySelector('.legs')!;
@@ -40,14 +43,16 @@ function makeStage(variant: Variant) {
   scene.add(new AmbientLight(0xffeee1, 1.25), key, rim);
 
   const camera = new OrthographicCamera();
-  camera.position.set(6, -0.12, 0);
-  camera.lookAt(0, -0.12, 0);
+  const targetY = variant.targetY ?? -0.12;
+  const targetZ = variant.targetZ ?? 0;
+  camera.position.set(6, targetY, targetZ);
+  camera.lookAt(0, targetY, targetZ);
 
   const draw = () => renderer.render(scene, camera);
   function resize() {
     const { width, height } = canvas.getBoundingClientRect();
     const aspect = Math.max(.2, width / height);
-    const halfHeight = .2;
+    const halfHeight = variant.halfHeight ?? .2;
     renderer.setSize(width, height, false);
     camera.left = -halfHeight * aspect;
     camera.right = halfHeight * aspect;

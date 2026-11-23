@@ -8,6 +8,7 @@ import { build } from 'esbuild';
 import { OcctKernel } from 'occt-wasm';
 import { chromium } from 'playwright';
 import buildLeg, { params as legParams } from './probe-leg.brep.ts';
+import buildHip, { params as hipParams } from './probe-hip.brep.ts';
 
 const out = resolve('artifacts/brep-space-cat-silhouette');
 const fur = { name: 'Cat fur', baseColor: [0.949, 0.78, 0.627, 1], roughness: .72 };
@@ -30,11 +31,11 @@ function meshLeg(shape) {
   throw new Error(`Leg tessellation lost part of the shape: ${JSON.stringify(bounds)}`);
 }
 
-function bake(values) {
+function bake(buildShape, values) {
   return withScope(scope => {
-    const shape = scope.register(buildLeg({ ...legParams.values, ...values }));
+    const shape = scope.register(buildShape({ ...values }));
     const solids = getSolids(shape).map(solid => scope.register(solid));
-    if (solids.length !== 1 || !isValidSolid(solids[0])) throw new Error('Invalid leg');
+    if (solids.length !== 1 || !isValidSolid(solids[0])) throw new Error('Invalid probe shape');
     const data = meshLeg(shape);
     const materials = new Map();
     for (const group of data.faceGroups) materials.set(group.faceId, fur);
@@ -52,19 +53,26 @@ function bake(values) {
 const kernel = await OcctKernel.init();
 registerKernel('occt-wasm', OcctWasmAdapter.fromKernel(kernel));
 
+const varBody = { halfHeight: .34, targetY: -.12, targetZ: .12 };
 const cases = [
-  { label: 'No bevel', values: { joinFillet: 0 } },
-  { label: 'Bevel 30 mm', values: { joinFillet: 30 } },
-  { label: 'Bevel 60 mm', values: { joinFillet: 60 } },
+  { label: 'No bevel', values: { joinFillet: 0 }, buildShape: buildLeg, base: legParams },
+  { label: 'Bevel 30 mm', values: { joinFillet: 30 }, buildShape: buildLeg, base: legParams },
+  { label: 'Bevel 60 mm', values: { joinFillet: 60 }, buildShape: buildLeg, base: legParams },
+  { label: 'Hip · no bevel', values: { joinFillet: 0 }, buildShape: buildHip, base: hipParams, ...varBody },
+  { label: 'Hip · 40 mm', values: { joinFillet: 40 }, buildShape: buildHip, base: hipParams, ...varBody },
+  { label: 'Hip · 80 mm', values: { joinFillet: 80 }, buildShape: buildHip, base: hipParams, ...varBody },
 ];
-const variants = cases.map(({ label, values }) => {
-  const { glb, triangles } = bake(values);
+const variants = cases.map(({ label, values, buildShape, base, halfHeight, targetY, targetZ }) => {
+  const { glb, triangles } = bake(buildShape, { ...base.values, ...values });
   const bevel = values.joinFillet;
   console.log(`${label} | ${triangles} tris | ${glb.length} bytes`);
   return {
     label,
     caption: bevel === 0 ? 'Sharp join · hard crease ring' : `Filleted as one solid · ${triangles.toLocaleString()} tris`,
     encoded: glb.toString('base64'),
+    halfHeight,
+    targetY,
+    targetZ,
   };
 });
 
@@ -104,7 +112,7 @@ await writeFile(resolve(out, 'leg-probe.html'), html);
 
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 try {
-  const page = await browser.newPage({ viewport: { width: 1200, height: 620 }, deviceScaleFactor: 2 });
+  const page = await browser.newPage({ viewport: { width: 1200, height: 1080 }, deviceScaleFactor: 2 });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
