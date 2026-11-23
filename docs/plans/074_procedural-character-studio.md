@@ -97,15 +97,28 @@ The standalone Brep bob study is ready for visual review. [ER 074 records the co
 
 The standalone space-buns study compares two baked presets on the workshop head. [ER 074 records the CAD and mesh checks and bake command](../engineering-records/074_procedural-character-studio.md#2026-11-22--parametric-brep-space-buns).
 
-The standalone swept-hair study compares two baked presets with a fuller crown, tapered fringe and swept nape on the existing animated face. The swept hair, bob, space buns and space cat previews support linked orbit and zoom. [ER 074 records the fringe and profile checks](../engineering-records/074_procedural-character-studio.md#2026-11-22--swept-hair-fringe-and-profile).
+The standalone swept-hair study is closed at the current two-preset preview. The developer accepted it as a study and flagged the sharper tips and remaining silhouette differences from the concept. The swept hair, bob, space buns and space cat previews support linked orbit and zoom. [ER 074 records the closeout and remaining differences](../engineering-records/074_procedural-character-studio.md#2026-11-23--swept-hair-study-closed).
 
-The space cat now has a baked leg: a leg tube fused to a paw ball with a 60 mm bevel at the join, skinned to a hip/knee/ankle chain so it still bends. The study shows it against the stock hose legs on the same body. [ER 074 records the rig, the two pose bugs and the checks](../engineering-records/074_procedural-character-studio.md#2026-11-23--space-cat-legs-baked-leg-plus-paw-driven-by-bones). Next stage is fusing the legs into the body solid and bevelling the hips.
+The space cat now has a baked leg: a leg tube fused to a paw ball with a 60 mm bevel at the join, skinned to a hip/knee/ankle chain so it still bends. The study shows it against the stock hose legs on the same body, and a walking video compares both gaits side by side. [ER 074 records the rig, the two pose bugs, the walking capture and the checks](../engineering-records/074_procedural-character-studio.md#2026-11-23--space-cat-legs-baked-leg-plus-paw-driven-by-bones). Next stage is fusing the legs into the body solid and bevelling the hips.
 
 The approved continuous bob study is now selectable in [Character Studio](http://triangular-demo.localhost:4200/character-studio?workshop=bob), with length, flare, fringe and groove controls and shared natural hair colour. Owner review on the full animated character remains pending; the studio itself still uses WebGL.
 
 The [WebGPU bob lock prototype](http://triangular-demo.localhost:4200/bob-hair-lock-spike) changes hem length and flare independently while keeping the crown attachment and mesh buffers fixed. The next visual review is the full bob's flared outline against the supplied concept. Its face opening and fringe can be fitted once the outline is approved.
 
 For the next Orange Pigtails body review, compare one rotatable full-body blockout to the original art using the same angle slider and overlay as the head preview. The reproduction steps and local source are recorded in [ER 074](/docs/engineering-records/074_procedural-character-studio.md#2026-11-18--synchronized-concept-and-3d-review).
+
+### Space Cat concept fit proposal
+
+Use the supplied top-row Space Cat as the target for the suited three-quarter action pose. Reuse the corrected five-view turnaround to check proportions and joins from the other angles. [ER 070 records the reference and alignment decisions](../engineering-records/070_capsule-doodle-space-cats.md#2026-11-21--character-studio-concept-fit).
+
+1. **Match the silhouette.** Compare the existing tube lengths at the same camera angle and stride pose. Fit the rounded head and rump, short legs and paws, and the tail's backward sweep and upturned tip. Check the front and rear leg placement against the silhouette before baking all four joins.
+2. **Blend legs into the body.** Start with one rear hip, where the join is visible without the suit. Fuse the leg into the torso, round the join and blend the skin weights from the torso into the hip bone. Reuse the current hip, knee and ankle chain and paw pitch. Compare against the current rig in neutral stance and at both ends of the same stride. The rump should hold its shape and the join should look round throughout the swing. Use the result to fit the other legs, including the front legs under the suit.
+3. **Blend ears into the head.** Fit rounded triangular tips and preserve the recessed pink cups. Fuse and bevel each ear root into the head. Start with one bone per ear, driven by the existing expression poses, and blend into the stable head at the root. Check alert and flattened ears for creases around the root, distortion in the pink cup and contact with the dome.
+4. **Restore the suited look and compare.** Refit the existing clear dome, dark collar and pale suit front to the new silhouette. Judge the face through the visor, especially how far the eyes stand out and how the muzzle, closed mouth and whiskers read. Compare the current and revised cats at the same three-quarter angle and stride, then play the goofy walk and bound to check the joins and dome clearance in motion.
+
+The study now includes a comparison of the four joined legs, smaller paws and joined tail against the first rear-hip bake. [ER 074 records the joined-body pass](../engineering-records/074_procedural-character-studio.md#2026-11-23--joined-legs-and-tail).
+
+The compact suited comparison is ready for proportion review before fusing the ear roots. [ER 074 records the proportion pass](../engineering-records/074_procedural-character-studio.md#2026-11-23--compact-space-cat-proportions).
 
 Scope history in the Engineering Record is append-only. Confirm a specific baseline only after
 explicit developer confirmation; document review and checked boxes do not imply confirmation.

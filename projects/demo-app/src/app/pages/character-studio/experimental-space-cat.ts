@@ -100,7 +100,11 @@ export interface ExperimentalSpaceCatOptions {
    * driven by bones. Returning `null` keeps the default tube.
    */
   readonly legFactory?: (request: SpaceCatLegRequest) => SpaceCatLeg | null;
+  /** Reuses the Concept Fit tail motion on a different tail mesh. */
+  readonly tailFactory?: (color: string) => SpaceCatTail;
 }
+
+export type SpaceCatTail = Pick<CapsuleCatTailMesh, 'root' | 'updateFromPose' | 'setColor' | 'dispose'>;
 
 /**
  * A leg the studio can drive. A baked leg carries its own paw, so the studio
@@ -167,7 +171,8 @@ export function buildExperimentalSpaceCat(
 
   const tailSocket = actor.torsoGroup.getObjectByName('capsule-cat-tail')!;
   tailSocket.remove(...tailSocket.children);
-  const tail = new CapsuleCatTailMesh({ name: 'concept-cat-tail', color: actor.dna.furColor, tipRadiusRatio: 0.9 });
+  const tail = options.tailFactory?.(actor.dna.furColor)
+    ?? new CapsuleCatTailMesh({ name: 'concept-cat-tail', color: actor.dna.furColor, tipRadiusRatio: 0.9 });
   tailSocket.add(tail.root);
   const tailPose = {
     base: new Vector3(), control1: new Vector3(), control2: new Vector3(), tip: new Vector3(), radius: 0.065,

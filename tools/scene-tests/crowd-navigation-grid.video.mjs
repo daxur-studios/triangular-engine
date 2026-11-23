@@ -1,4 +1,5 @@
-import { defineVideo, daxurSpeech } from '@daxur-studios/stop-motion-ui';
+import { defineVideo } from '@daxur-studios/stop-motion-ui';
+import { kokoroNarration } from '../kokoro-narration.mjs';
 
 // App-owned narrated walkthrough of the Plan 086 grid-layers demo.
 // Run: npx --no-install stop-motion-ui run tools/scene-tests/crowd-navigation-grid.video.mjs --out artifacts/demos --json
@@ -9,7 +10,7 @@ export default defineVideo({
   viewport: { width: 1440, height: 960 },
   pointer: { x: 900, y: 500 },
   browser: { channel: 'chrome', args: ['--enable-unsafe-webgpu', '--use-angle=d3d11'] },
-  audioProvider: daxurSpeech({ voice: 'Fola' }),
+  audioProvider: kokoroNarration(),
   segments: [
     {
       id: 'intro',

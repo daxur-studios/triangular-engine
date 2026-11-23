@@ -1,4 +1,5 @@
-import { defineVideo, daxurSpeech } from '@daxur-studios/stop-motion-ui';
+import { defineVideo } from '@daxur-studios/stop-motion-ui';
+import { kokoroNarration } from '../kokoro-narration.mjs';
 import path from 'node:path';
 
 // App-owned recipe. Recording, cursor pacing, speech and retiming live in the
@@ -13,7 +14,7 @@ export default defineVideo({
   viewport: { width: 1440, height: 960 },
   pointer: { x: 1050, y: 400 },
   browser: { channel: 'chrome', args: ['--enable-unsafe-webgpu', '--use-angle=d3d11'] },
-  audioProvider: daxurSpeech({ voice: 'Fola' }),
+  audioProvider: kokoroNarration(),
   segments: [
     { id: 'briefing', caption: 'Operation Moon Boop · one human, eighteen cats', ...speech('intro.wav', 'Welcome to Operation Moon Boop. One human will help us stack eighteen cats all the way to the Moon.') },
     { id: 'assign', caption: 'A few clicks. The collector handles the walking.', ...speech('collector.wav', 'We stack the first cats, buy some faster shoes, and send our collector to work. The green box follows our very patient human.') },

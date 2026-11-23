@@ -29,8 +29,9 @@ npx brep verify projects/brep-poc/src/app/part/capsule-space-cat-tube.brep.ts --
 npx brep verify projects/brep-poc/src/app/part/capsule-space-cat-leg.brep.ts --check
 node projects/brep-poc/studies/capsule-space-cat-silhouette/verify.mjs        # all three parts, 35 cases
 node projects/brep-poc/studies/capsule-space-cat-silhouette/profile.mjs 900   # tube numbers
-node projects/brep-poc/studies/capsule-space-cat-silhouette/build.mjs         # bake GLBs, preview
+node projects/brep-poc/studies/capsule-space-cat-silhouette/build.mjs         # bake GLBs, preview and walk pages
 node projects/brep-poc/studies/capsule-space-cat-silhouette/capture.mjs       # comparison images
+npx --no-install stop-motion-ui run projects/brep-poc/studies/capsule-space-cat-silhouette/walk.video.mjs --out artifacts/videos/space-cat-legs --codec h264 --fps 20
 ```
 
 Output goes to `artifacts/brep-space-cat-silhouette/`. Open `preview.html` there
@@ -88,14 +89,77 @@ on the leg.
 The preview mounts the baked legs through the Concept Fit builder's `legFactory`
 option. The fat cat keeps the stock hose legs so its silhouette stays the subject.
 
+### Walking A/B
+
+`walk.html` is the animation page: the default tube body twice, baked legs on the
+left and stock hose legs on the right, both driven by the actor's own gait and
+stepped with the same delta. `window.__walk.setGait(mode, speed)` switches
+between `idle`, `goofy_walk`, `bound_run` and `float`; `setView(degrees)` turns
+the camera around the pair. The page renders with the real GPU — headless ANGLE
+D3D11 — because SwiftShader cut the capture rate.
+
+`walk.video.mjs` is the stop-motion-ui recipe (idle, walk, bound run, idle) with
+short narration and a baked caption per segment. Capture delivers about 20 fps,
+so encode at 20 to keep source and output frames 1:1; at 30 the encoder repeats
+one frame in three and the motion looks stepped. Output goes to
+`artifacts/videos/space-cat-legs/run-*/demo.mp4`.
+
 ### Feasibility probes
 
 `probe-leg.brep.ts` and `probe-hip.brep.ts` are throwaway parts that answered the
 first two questions — can a leg-to-paw join be filleted, and can a leg-to-body
 join be filleted? Both can. `probe-leg.mjs` bakes them and writes `leg-probe.html`
 and `leg-probe.png` with the with/without-bevel pairs. The hip probe fuses one leg
-into the tube body and bevels the hip ring; that only works if the legs are part of
-the body solid, which is the next stage.
+into the tube body and bevels the hip ring.
+
+### Fused rear hip
+
+`rear-hip.brep.ts` fuses the camera-facing rear leg and paw into the default
+900 mm tube and rounds the hip with a 55 mm fillet. The bake keeps the original
+neck and paw bevels. The study blends the same hip, knee and ankle bones into a
+fourth bone fixed to the torso.
+
+Run `build.mjs` and open `artifacts/brep-space-cat-silhouette/rear-hip.html`.
+The left cat has the fused rear hip. Both cats use the same gait, fur and other
+three baked legs, with the gear hidden to expose the joins.
+
+```powershell
+npx brep verify projects/brep-poc/studies/capsule-space-cat-silhouette/rear-hip.brep.ts --check
+node projects/brep-poc/studies/capsule-space-cat-silhouette/capture-rear-hip.mjs
+npx --no-install stop-motion-ui run projects/brep-poc/studies/capsule-space-cat-silhouette/rear-hip.video.mjs --out artifacts/videos/space-cat-rear-hip --codec h264 --fps 20
+```
+
+### Joined legs and tail
+
+`joined-cat.brep.ts` rounds both shoulders, both hips and the tail root on one
+solid. The four legs taper to small rounded tips, about 90 mm across in the
+rest bake. The preview reuses the leg gait and drives the tail from the existing
+curve, with a blend into the torso at the root.
+
+Run `build.mjs` and open `artifacts/brep-space-cat-silhouette/joined-cat.html`.
+The new body is on the left. The previous one-rear-hip study is on the right.
+Both use the same goofy walk with their gear hidden.
+
+```powershell
+npx brep verify projects/brep-poc/studies/capsule-space-cat-silhouette/joined-cat.brep.ts --check
+node projects/brep-poc/studies/capsule-space-cat-silhouette/capture-rear-hip.mjs --joined
+npx --no-install stop-motion-ui run projects/brep-poc/studies/capsule-space-cat-silhouette/joined-cat.video.mjs --out artifacts/videos/space-cat-joined --codec h264 --fps 20
+```
+
+### Compact concept proportions
+
+The compact joined bake uses the 780 mm torso, shorter rounded legs and a
+lower tail that sweeps back. Its eyes sit deeper in the cheeks. The smaller
+mouth, short whiskers and forward-facing ears follow the supplied Space Cat
+sketch. Both models wear the same helmet and suit band for the comparison.
+
+Run `build.mjs` and open `artifacts/brep-space-cat-silhouette/concept-fit.html`.
+The compact fit is on the left. The previous proportions are on the right.
+
+```powershell
+npx brep verify projects/brep-poc/studies/capsule-space-cat-silhouette/joined-cat.brep.ts --check --param compact=true
+node projects/brep-poc/studies/capsule-space-cat-silhouette/capture-rear-hip.mjs --concept
+```
 
 ## Current state
 
@@ -114,8 +178,7 @@ the body solid, which is the next stage.
 
 - The rigged legs live in this study only. The production actor still swaps in
   `RubberHoseLimbMesh`, because the baked leg arrives as a GLB and the app has no
-  baked-geometry path yet. Next stage: fuse the legs into the body solid, bevel
-  the hips and bake one skinned cat.
+  baked-geometry path yet. The joined legs and tail are available in the study preview.
 - The knee reads as a soft crease at close range: two segments concentrate the
   bend at one joint. More bones, or a knee blend that follows the curve, would
   smooth it.

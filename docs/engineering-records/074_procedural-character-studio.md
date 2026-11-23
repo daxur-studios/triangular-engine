@@ -324,6 +324,47 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **[verification]** The leg part passes `brep verify --check` at defaults, both limits of every parameter and both all-min / all-max corners: 5.21 M mm³, bounds x ±89.1, y −112.9…80.9, z −108.5…265 mm, 2,018 triangles at 60 mm. Bevels of 90 mm and above cannot be solved on the default leg, so `joinFillet` is capped at 85. `verify.mjs` now checks all three parts (35 cases). Six new specs cover the skin weights (sum to one, rigid hip and paw, monotonic ramps) and the pose (bones land exactly on the joints, the paw pitches about X, `rest()` restores the bake); the procedural suite is 286/286 and the library builds. The preview and all four comparison views were rebaked with no page or console errors.
 - **[reproduce]** `npx brep verify projects/brep-poc/src/app/part/capsule-space-cat-leg.brep.ts --check`, then the study's `build.mjs` and `capture.mjs`; leg/hip feasibility pairs come from `probe-leg.mjs`.
 
+## 2026-11-23 — Space cat legs: walking A/B capture
+
+- **[action]** Split the study's cat assembly into `cat-scene.ts` (baked body loader, baked leg loader, Concept Fit builder) so the still preview and a new animation page share one path. Added `walk.html` + `walk.ts`: the default tube body twice, baked legs on the left and stock hose legs on the right, stepped with one delta and driven by `window.__walk.setGait(...)`. `build.mjs` bundles the page next to `preview.html`.
+- **[finding]** The headless CDP screencast delivers about 20 source frames per second no matter whether the page renders on SwiftShader or the real GPU (measured 18.2 vs 19.9 fps over the same 22-second recipe; the page itself runs at 48–60 fps). Encoding that at 30 fps repeats one frame in three and reads as stepped motion, so the recipe captures at 30 and encodes at 20, which matches the source nearly 1:1.
+- **[action]** Added `walk.video.mjs`, a `defineVideo` recipe with four 1x segments — idle pair, goofy walk, bound run, back to idle — each with a caption and short Daxur speech. Two cats share the body, fur and gait, so the leg change is the only difference.
+- **[verification]** Final run: 22.3 s, 1280×720 H.264 at 20 fps with AAC narration, 443 source frames and 446 output frames, 1.64 MB, four narration clips. The contact sheet and a 2-second frame strip on the baked cat show the swing and knee bend with no detached paw or skinning break; `capture.mjs` still passes on the refactored preview.
+- **[reproduce]** `node projects/brep-poc/studies/capsule-space-cat-silhouette/build.mjs`, then `npx --no-install stop-motion-ui run projects/brep-poc/studies/capsule-space-cat-silhouette/walk.video.mjs --out artifacts/videos/space-cat-legs --codec h264 --fps 20`.
+
+## 2026-11-23 — Proposed Space Cat concept fit
+
+- **[finding]** The supplied top-row Space Cat gives us a suited three-quarter action pose. The current baked-leg study hides the gear to expose the joints, while the earlier suited studio capture confirms that a dome, collar and suit already exist. Compare the same pose and camera angle before interpreting differences in torso length or paw size.
+- **[finding]** Concept Fit's ears already have recessed pink cups and independently animated rotations. A continuous ear bevel would need skin weights across the ear root to preserve those expressions. The single-leg hip probe already demonstrated a valid rounded join in the rest shape. How that join deforms under the existing gait is still open.
+- **[action]** Recorded the proposed proportion, hip, ear and suited finish passes in [Plan 074](../plans/074_procedural-character-studio.md#space-cat-concept-fit-proposal). The first comparison pairs the current three-bone leg with one fused rear hip through the same stride.
+
+## 2026-11-23 — First fused rear hip
+
+- **[action]** Fused the camera-facing rear leg and paw into the 900 mm tube with a 55 mm hip fillet. The study blends a fixed torso bone into the existing hip, knee and ankle chain. The two cats share a gait, camera, fur colour and the other three legs. The gear is hidden for the joint comparison.
+- **[verification]** The 20, 55 and 65 mm fillets each passed the solid and bounds checks. The 55 mm bake produced 11,164 triangles. The headless comparison sampled eight poses through one goofy-walk cycle and captured idle and the two stride extremes. The fused hip stays continuous and the rump holds its shape in the sampled frames. A slight crease remains near the knee on the forward fold.
+- **[evidence]** Local only. Use the build, still capture and video commands in the [silhouette study](../../projects/brep-poc/studies/capsule-space-cat-silhouette/README.md#fused-rear-hip) to regenerate the live comparison, `rear-hip-compare.png` and the narrated clip. The other legs, ear roots and suited fit remain in [Plan 074](../plans/074_procedural-character-studio.md#space-cat-concept-fit-proposal).
+
+## 2026-11-23 — Joined legs and tail
+
+- **[action]** Replaced the bulb paws with rounded tips about half as wide in the rest bake. Joined all four legs and the tail to the default body. Rounding uses 44 mm at the shoulders, 55 mm at the hips and 34 mm at the tail root. Reused the original three-bone gait on each leg and blended six tail bones between the rump and animated tail curve.
+- **[verification]** The default bake passed the single-solid and bounds checks and produced 15,692 triangles. Compared eight phases of the same goofy walk against the first rear-hip bake. The new preview lowers the cat by 40 mm to account for the shorter paw tips in the floor view.
+- **[evidence]** Local only. The [joined cat study](../../projects/brep-poc/studies/capsule-space-cat-silhouette/README.md#joined-legs-and-tail) lists the commands to regenerate the live preview, `joined-cat-compare.png` and Kokoro-narrated clip. Ear roots and suited fit remain in [Plan 074](../plans/074_procedural-character-studio.md#space-cat-concept-fit-proposal).
+
+## 2026-11-23 — Swept hair study closed
+
+- **[decision]** The developer accepted the current preview as sufficient for the study and stopped iteration. The pointed hair ends and overall outline still differ from the rounder concept art. The scalp colour mask remains an idea for a future hair pass.
+- **[finding]** The next hand study can reuse the existing glove's wrist attachment, five poses and prop socket. An open hand and a prop grip expose the wrist transition and thumb shape on the assembled character.
+- **[finding]** The crowd-navigation grid already drives 1,000 markers through the public `NavCrowd` API. A fresh Character Studio run of 48 full actors walking scene paths counted 14,649 median draw calls and 5.93 million median triangles per frame. The run recorded noisy load and an unverified hardware profile. Use the counts to prioritize a shared render path. Local result: `artifacts/test-runs/character-studio-human-performance@v1/2026-11-23T19-49-57-502Z_headless-hardware_1a5582ae-5e168ddd.json`.
+- **[verification]** Re-ran the crowd-navigation entry tests. All 74 passed, including arrival of 1,000 agents and a building placed across an active route.
+- **[proposal]** Use the grid demo as the reference consumer for navigation and [Plan 086's crowd-rendering phase](../plans/086_island-crowd-navigation.md#phases-and-acceptance) for the shared renderer. Start with 256 visibly walking capsule humans in a small scene, using a few shared destinations and instanced body parts. Check navigation time and render cost separately. Save detailed hand poses for close characters.
+
+## 2026-11-23 — Compact Space Cat proportions
+
+- **[finding]** The owner flagged the long, bare silhouette and wide, protruding eyes in the joined-body study as a poor fit for the supplied top-row Space Cat. The new comparison uses the same three-quarter camera, suit band and helmet on both models.
+- **[action]** Shortened the tube from 900 to 780 mm and shifted the rear sockets and tail root with it. Shortened the legs, reduced their swing and swept the tail back. Seated smaller eyes into the cheeks, aligned the gaze, narrowed the mouth and fitted the short whiskers and ear positions to the head.
+- **[verification]** Both joined bakes passed the single-solid and bounds checks. The compact bake produced 14,468 triangles. The headless viewer compared eight phases of the goofy walk in the common camera. The body, face and suit treatment are available in the study for owner review.
+- **[evidence]** Local only. Use the [compact concept proportion commands](../../projects/brep-poc/studies/capsule-space-cat-silhouette/README.md#compact-concept-proportions) to regenerate the comparison page and stills.
+
 ## Scope history
 
 <!-- tri:scope-history -->

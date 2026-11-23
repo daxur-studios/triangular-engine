@@ -1,4 +1,5 @@
-import { defineVideo, daxurSpeech } from "@daxur-studios/stop-motion-ui";
+import { defineVideo } from "@daxur-studios/stop-motion-ui";
+import { kokoroNarration } from "../kokoro-narration.mjs";
 import assert from "node:assert/strict";
 
 // Page-owned deterministic fixtures; the installed recorder prepares/cache speech
@@ -11,7 +12,7 @@ export default defineVideo({
     channel: "chrome",
     args: ["--enable-unsafe-webgpu", "--use-angle=d3d11"],
   },
-  audioProvider: daxurSpeech({ voice: "Fola" }),
+  audioProvider: kokoroNarration(),
   segments: [
     {
       id: "briefing",

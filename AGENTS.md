@@ -108,6 +108,8 @@ The package README, `projects/triangular-engine/docs/` and each entry's `<entry>
 
 For narrated UI/game videos, read `node_modules/@daxur-studios/stop-motion-ui/skills/adopt-stop-motion-capture/SKILL.md`. Use `defineVideo` for continuous gameplay and `defineDemo` for reconstructed screenshots. The demo recipe `tools/scene-tests/moon-boop.video.mjs` illustrates the installed API. Await paced pointer helpers, keep input/speech at 1x and label accelerated waits. This development tool does not modify the engine testing recorder or its result-artifact contract.
 
+Use the local Kokoro provider from `tools/kokoro-narration.mjs` for narration. Use Gemini only when the owner explicitly requests it. The Stop Motion UI skill's `daxurSpeech()` example invokes Gemini.
+
 ## Local package archives
 
 All local `.tgz` files go under `/ignore/packages/`, and `/ignore/` must be gitignored.
