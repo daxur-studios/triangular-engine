@@ -82,12 +82,34 @@ export function buildRunUrl(page, { suite, version, profile, mode, repetitions, 
 }
 
 /**
- * Machine-wide FIFO of runs. Each waiting launcher writes one ticket file named `<ms>-<pid>.json`; the oldest ticket
- * whose pid is alive runs, and dead tickets are removed by whoever looks. `dir`, `now`, `alive` and `pid` are
- * injectable for specs.
+ * How long a run that waits for a condition (the owner away, a quiet GPU or CPU) lets other jobs run past it. After
+ * 30 minutes in the queue it stops stepping aside, so a stream of noisy jobs cannot starve it. Shared with other
+ * launchers that use the same queue folder.
+ */
+export const QUEUE_STEP_ASIDE_MS = 30 * 60_000;
+
+/**
+ * Does ticket `other` keep the job `me` from starting? A running job blocks everyone. A job ahead blocks, unless it is
+ * still waiting for a condition, `me` waits for nothing, and it has been queued under {@link QUEUE_STEP_ASIDE_MS}.
+ * So noisy jobs run past a run that waits for quiet, while runs that wait keep their first-come order.
+ */
+export function ticketBlocks(other, me, now) {
+  if (other.running === true) return true;
+  const isAhead = other.ms < me.ms || (other.ms === me.ms && other.pid < me.pid);
+  if (!isAhead) return false;
+  return !(other.waitsFor && !me.waitsFor && now - other.ms < QUEUE_STEP_ASIDE_MS);
+}
+
+/**
+ * Machine-wide queue of runs. Each waiting launcher writes one ticket file named `<ms>-<pid>.json`; the oldest ticket
+ * whose pid is alive runs, and dead tickets are removed by whoever looks. A ticket with `waitsFor` lets jobs that wait
+ * for nothing run past it (see {@link ticketBlocks}); `start` marks a ticket `running`, which blocks every other job.
+ * `dir`, `now`, `alive` and `pid` are injectable for specs.
  */
 export function createRunQueue({ dir = join(tmpdir(), QUEUE_DIR), now = Date.now, alive = pidAlive, pid = process.pid } = {}) {
   let ticket;
+  let ticketMs = 0;
+  let info = {};
   const tickets = () => {
     let names = [];
     try { names = readdirSync(dir).filter((name) => /^\d+-\d+\.json$/.test(name)); } catch { return []; }
@@ -95,25 +117,37 @@ export function createRunQueue({ dir = join(tmpdir(), QUEUE_DIR), now = Date.now
     for (const name of names) {
       const [ms, owner] = name.slice(0, -5).split('-').map(Number);
       if (!alive(owner)) { rmSync(join(dir, name), { force: true }); continue; }
-      let info = {};
-      try { info = JSON.parse(readFileSync(join(dir, name), 'utf8')); } catch { /* still being written */ }
-      live.push({ name, ms, pid: owner, ...info });
+      let fields = {};
+      try { fields = JSON.parse(readFileSync(join(dir, name), 'utf8')); } catch { /* still being written */ }
+      live.push({ name, ms, pid: owner, ...fields });
     }
     return live.sort((a, b) => a.ms - b.ms || a.pid - b.pid);
   };
+  const write = (fields) => { if (ticket) writeFileSync(join(dir, ticket), JSON.stringify(fields)); };
+  /** The live tickets that keep us from starting; empty means it is our turn. */
+  const ahead = () => {
+    const me = { ms: ticketMs, pid, waitsFor: info.waitsFor };
+    return tickets().filter((t) => t.name !== ticket && ticketBlocks(t, me, now()));
+  };
   return {
     dir,
-    enter(info) {
+    /** Write our ticket. Set `waitsFor` when the run will wait for a condition, so other jobs may run past it. */
+    enter(fields) {
       mkdirSync(dir, { recursive: true });
-      ticket = `${now()}-${pid}.json`;
-      writeFileSync(join(dir, ticket), JSON.stringify({ ...info, queuedAt: new Date(now()).toISOString() }));
+      ticketMs = now();
+      ticket = `${ticketMs}-${pid}.json`;
+      info = { ...fields, queuedAt: new Date(ticketMs).toISOString() };
+      write(info);
       return ticket;
     },
-    /** The live tickets ahead of ours; empty means it is our turn. */
-    ahead() {
-      const all = tickets();
-      const index = all.findIndex((t) => t.name === ticket);
-      return index < 0 ? all : all.slice(0, index);
+    ahead,
+    /** Mark our ticket running, then check nobody started at the same moment; false (back to waiting) if someone did. */
+    start() {
+      const { waitsFor: _waitsFor, ...rest } = info;
+      write({ ...rest, running: true, startedAt: new Date(now()).toISOString() });
+      if (ahead().length === 0) return true;
+      write(info);
+      return false;
     },
     leave() { if (ticket) rmSync(join(dir, ticket), { force: true }); ticket = undefined; },
   };
@@ -394,37 +428,50 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
   const leave = () => queue.leave();
   process.on('exit', leave);
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { leave(); process.exit(130); });
-  queue.enter({ suite: options.suite, version: options.version, root, url: options.url });
-  let lastAhead = '';
+  const waitsAway = needsAwaySwitch(options.profile);
+  const waitsFor = [waitsAway && 'owner away', !options.noisy && 'quiet GPU'].filter(Boolean).join(', ') || undefined;
+  // While this run waits for the owner or a quiet GPU, jobs that wait for nothing run past it (up to 30 min queued).
+  queue.enter({ suite: options.suite, version: options.version, root, url: options.url, waitsFor });
+  if (!waitsAway) log('headless profile: not waiting for the owner to be away');
+  if (options.noisy) log('noisy run: not waiting for a quiet GPU; load is sampled and saved with the result');
+  let lastWait = '';
+  const note = (text) => { if (text !== lastWait) log(text); lastWait = text; };
+  let awayUntil;
+  let quietUntil;
   for (;;) {
     const ahead = queue.ahead();
-    if (!ahead.length) break;
-    const text = ahead.map((t) => `${t.suite ?? '?'}@v${t.version ?? '?'} (pid ${t.pid})`).join(', ');
-    if (text !== lastAhead) log(`waiting for ${ahead.length} run(s) ahead: ${text}`);
-    lastAhead = text;
+    if (ahead.length) {
+      note(`waiting for ${ahead.length} run(s): ${ahead.map((t) => `${t.suite ?? '?'}@v${t.version ?? '?'} (pid ${t.pid}${t.running ? ', running' : ''})`).join(', ')}`);
+      await sleep(5000);
+      continue;
+    }
+    // A run never takes the screen from someone using it.
+    if (waitsAway) {
+      const verdict = awayVerdict(readAway());
+      awayUntil ??= Date.now() + options.awayWaitMin * 60_000;
+      if (!verdict.ok) {
+        if (Date.now() >= awayUntil) { console.error(`[triangular-test-run] owner not away in ${options.awayWaitMin} min: ${verdict.reason}`); return 3; }
+        note(`waiting for the owner to be away: ${verdict.reason}`);
+        await sleep(30_000);
+        continue;
+      }
+      note(verdict.reason);
+    }
+    if (!options.noisy) {
+      const { utils, apps } = await gpuReadings(options.quietWindowS);
+      const verdict = quietVerdict(utils, apps, { maxPct: options.quietPct });
+      quietUntil ??= Date.now() + options.quietWaitMin * 60_000;
+      if (!verdict.quiet) {
+        if (Date.now() >= quietUntil) { console.error(`[triangular-test-run] machine never got quiet in ${options.quietWaitMin} min: ${verdict.reason}`); return 3; }
+        note(`waiting for a quiet machine: ${verdict.reason}`);
+        await sleep(30_000);
+        continue;
+      }
+      log(`machine quiet: ${verdict.reason}`);
+    }
+    if (queue.start()) break;
+    note('another job started at the same moment; trying again');
     await sleep(5000);
-  }
-
-  // Hold the head of the queue until the owner is away; a run never takes the screen from someone using it.
-  const awayUntil = Date.now() + options.awayWaitMin * 60_000;
-  if (!needsAwaySwitch(options.profile)) log('headless profile: not waiting for the owner to be away');
-  else for (let first = true; ; first = false) {
-    const verdict = awayVerdict(readAway());
-    if (verdict.ok) { log(verdict.reason); break; }
-    if (Date.now() >= awayUntil) { console.error(`[triangular-test-run] owner not away in ${options.awayWaitMin} min: ${verdict.reason}`); return 3; }
-    if (first) log(`waiting for the owner to be away: ${verdict.reason}`);
-    await sleep(30_000);
-  }
-
-  const quietUntil = Date.now() + options.quietWaitMin * 60_000;
-  if (options.noisy) log('noisy run: not waiting for a quiet GPU; load is sampled and saved with the result');
-  else for (let first = true; ; first = false) {
-    const { utils, apps } = await gpuReadings(options.quietWindowS);
-    const verdict = quietVerdict(utils, apps, { maxPct: options.quietPct });
-    if (verdict.quiet) { log(`machine quiet: ${verdict.reason}`); break; }
-    if (Date.now() >= quietUntil) { console.error(`[triangular-test-run] machine never got quiet in ${options.quietWaitMin} min: ${verdict.reason}`); return 3; }
-    if (first) log(`waiting for a quiet machine: ${verdict.reason}`);
-    await sleep(30_000);
   }
 
   const url = buildRunUrl(options.url, options);

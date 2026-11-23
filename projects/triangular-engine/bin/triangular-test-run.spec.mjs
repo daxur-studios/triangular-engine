@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { awayVerdict, buildRunUrl, chromeArgs, classifyPrograms, cpuPercent, createRunQueue, findChrome, findResult, getJson, HEADLESS_WINDOW, HEAVY_PROGRAMS, listHeavyPrograms, loadSidecarName, needsAwaySwitch, noResultMessage, parseArgs, parseProcessNames, percentStats, quietVerdict, startLoadSampler, summarizeLoad } from './triangular-test-run.mjs';
+import { awayVerdict, buildRunUrl, QUEUE_STEP_ASIDE_MS, chromeArgs, classifyPrograms, cpuPercent, createRunQueue, findChrome, findResult, getJson, HEADLESS_WINDOW, HEAVY_PROGRAMS, listHeavyPrograms, loadSidecarName, needsAwaySwitch, noResultMessage, parseArgs, parseProcessNames, percentStats, quietVerdict, startLoadSampler, summarizeLoad } from './triangular-test-run.mjs';
 import { loadText } from './triangular-test-summary.mjs';
 
 test('awayVerdict: no switch runs; otherwise only while away and unexpired, and a broken file holds back', () => {
@@ -61,6 +61,28 @@ test('the run queue is first come, first served across launchers, and drops dead
   alive.add(33);
   c.enter({ suite: 'three', version: 1 });
   assert.deepEqual(c.ahead(), [], 'a crashed launcher does not block the queue');
+});
+
+test('jobs that wait for nothing run past a run waiting for quiet, until it has waited 30 min', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tt-queue-'));
+  const alive = new Set([1, 2, 3]);
+  let clock = 1000;
+  const make = (pid) => createRunQueue({ dir, pid, now: () => clock, alive: (p) => alive.has(p) });
+  const quiet = make(1);
+  const noisy = make(2);
+  quiet.enter({ suite: 'smoke', version: 1, waitsFor: 'owner away, quiet GPU' });
+  clock += 1;
+  noisy.enter({ suite: 'ribcage B3' });
+  assert.deepEqual(noisy.ahead(), [], 'the noisy job runs past');
+  assert.equal(noisy.start(), true);
+  assert.deepEqual(quiet.ahead().map((t) => t.suite), ['ribcage B3'], 'nobody starts while it runs');
+  assert.equal(quiet.start(), false);
+  noisy.leave();
+  assert.deepEqual(quiet.ahead(), []);
+  clock += QUEUE_STEP_ASIDE_MS;
+  const late = make(3);
+  late.enter({ suite: 'late' });
+  assert.deepEqual(late.ahead().map((t) => t.suite), ['smoke'], 'after 30 min it stops stepping aside');
 });
 
 test('quietVerdict: browsers and the compositor are ignored, a game or a high load is not', () => {
