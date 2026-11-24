@@ -55,5 +55,6 @@ tags: [plans, index]
 | [Island crowd navigation](/docs/plans/086_island-crowd-navigation.md) | planned | [ER 086](/docs/engineering-records/086_island-crowd-navigation.md) |
 | [Multi-turn consensus conversations](/docs/plans/087_multi-turn-consensus-conversations.md) | planned | [ER 087](/docs/engineering-records/087_multi-turn-consensus-conversations.md) |
 | [Concept reference fitting](/docs/plans/088_concept-reference-fitting.md) | planned | [ER 088](/docs/engineering-records/088_concept-reference-fitting.md) |
+| [Parametric catch tower asset](/docs/plans/090_parametric-catch-tower.md) | done | [ER 090](/docs/engineering-records/090_parametric-catch-tower.md) |
 
 Convention: [Plans and Engineering Records](/docs/plans-and-runbooks.md).

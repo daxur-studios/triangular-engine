@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Starbase catch tower · BRep study</title>
+<style>
+  :root { color-scheme: dark; background: #11161b; color: #e7edf1; font: 15px/1.45 system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  main { max-width: 1540px; margin: auto; padding: clamp(14px, 3vw, 40px); }
+  header, .toolbar, .stage-head, .stage-foot, .legend, .control { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  header { justify-content: space-between; margin-bottom: 18px; }
+  h1 { margin: 0; font-size: clamp(1.35rem, 3vw, 2.4rem); font-weight: 610; letter-spacing: -.035em; }
+  h2 { margin: 0; font-size: 1rem; font-weight: 660; }
+  .toolbar { gap: 10px 18px; padding: 11px 0; border-top: 1px solid #34424c; }
+  .toolbar[aria-label="Camera"] { justify-content: space-between; }
+  fieldset { margin: 0; padding: 0; border: 0; }
+  button, select { padding: .42rem .7rem; background: #1d2730; color: inherit; border: 1px solid #3b4b57; border-radius: 5px; font: inherit; cursor: pointer; }
+  button:hover, select:hover { border-color: #9ab0bf; }
+  :focus-visible { outline: 2px solid #87ddea; outline-offset: 2px; }
+  button[aria-pressed="true"] { color: #ffe1a3; background: #342c1e; border-color: #b68e47; }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type="range"] { accent-color: #d8ab5d; margin: 0; width: clamp(98px, 12vw, 180px); }
+  label, .legend, .hint { color: #afbdc8; font-size: .86rem; }
+  .stages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  section { min-width: 0; background: #172129; border: 1px solid #374751; border-radius: 8px; overflow: hidden; }
+  .stage-head, .stage-foot { justify-content: space-between; padding: 10px 13px; }
+  .stage-foot { min-height: 43px; color: #bdc9d3; font-size: .84rem; }
+  .numeric, output { font: .83rem/1.4 ui-monospace, monospace; color: #d9e4eb; }
+  canvas { display: block; width: 100%; height: clamp(300px, 40vw, 570px); background: #202c36; cursor: grab; touch-action: none; }
+  canvas:active { cursor: grabbing; }
+  .legend { gap: 15px; }
+  .legend span::before { content: ''; display: inline-block; width: .65em; height: .65em; margin-right: 6px; border-radius: 2px; background: var(--swatch); }
+  [role="status"] { color: #aebfc9; margin: 13px 0 0; }
+  @media (max-width: 670px) {
+    .stages { gap: 7px; }
+    canvas { height: clamp(185px, 60vw, 330px); }
+    .stage-head, .stage-foot { padding: 7px; }
+    .stage-head { min-height: 60px; align-content: center; }
+    .stage-foot { min-height: 54px; }
+  }
+</style>
+<main>
+  <header>
+    <h1>Starbase catch tower</h1>
+    <div class="legend" aria-label="Model colours"><span style="--swatch:#d1aa58">Rail pads</span><span style="--swatch:#56cbe1">Stock catch pins</span></div>
+  </header>
+  <fieldset id="controls" disabled>
+    <div class="toolbar" aria-label="Motion">
+      <div class="control">
+        <label for="motion">Arm motion</label>
+        <select id="motion"><option value="hinge">V-shaped sweep</option><option value="slide">Game lab slide</option></select>
+        <button id="sweep" type="button">Close arms</button>
+      </div>
+      <div class="control">
+        <label for="height">Rail height</label>
+        <button id="lower" type="button" aria-label="Lower 5 metres">−5 m</button>
+        <input id="height" type="range" min="4.85" max="74.85" step="0.05" value="35.75">
+        <output for="height" id="height-value">35.75 m</output>
+        <button id="raise" type="button" aria-label="Raise 5 metres">+5 m</button>
+        <button id="reset-height" type="button">Catch height</button>
+      </div>
+    </div>
+    <div class="toolbar" aria-label="Camera">
+      <nav class="control" aria-label="Views">
+        <button type="button" data-view="fit" aria-pressed="true">Fit</button>
+        <button type="button" data-view="top" aria-pressed="false">Top</button>
+        <button type="button" data-view="side" aria-pressed="false">Side</button>
+        <button type="button" data-view="pins" aria-pressed="false">Pin contact</button>
+        <button type="button" data-view="tower" aria-pressed="false">Full tower</button>
+      </nav>
+      <div class="control">
+        <label for="variant">Arm profile</label>
+        <select id="variant"><option value="stock">Default</option><option value="slim">Slim</option><option value="deep">Long and deep</option></select>
+      </div>
+    </div>
+  </fieldset>
+  <div class="stages">
+    <section>
+      <div class="stage-head"><h2 id="moving-title">Arms open</h2><span id="arm-state" class="numeric">100% open</span></div>
+      <canvas id="moving" aria-label="Interactive catch tower and booster" aria-describedby="orbit-hint"></canvas>
+      <div class="stage-foot" id="clearance"></div>
+    </section>
+    <section>
+      <div class="stage-head"><h2>Closed reference</h2><span class="numeric">2 pin contacts</span></div>
+      <canvas id="seated" aria-label="Closed catch arms supporting both booster pins" aria-describedby="orbit-hint"></canvas>
+      <div class="stage-foot" id="support"></div>
+    </section>
+  </div>
+  <p id="orbit-hint" class="hint">Drag to orbit both views. Scroll or pinch to zoom.</p>
+  <p id="status" role="status">Loading the baked GLBs…</p>
+</main>
+<!-- ASSETS -->
+<!-- PREVIEW -->
+</html>
