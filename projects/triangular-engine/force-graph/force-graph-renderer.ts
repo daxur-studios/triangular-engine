@@ -325,9 +325,12 @@ export class ForceGraphRenderer {
     window.addEventListener('pointerup', this.handlePointerUp);
     this.canvas.addEventListener('wheel', this.handleWheel, { passive: false });
 
+    let lastTickMs = performance.now();
     const tick = (now: number) => {
       if (this.disposed) return;
-      this.simulation.step(1);
+      const dtScale = Math.max(0.25, Math.min(1.5, (now - lastTickMs) / 16.667));
+      lastTickMs = now;
+      this.simulation.step(dtScale);
       this.syncTransforms();
       this.updatePulses(now);
       this.renderer?.render(this.scene, this.camera);
