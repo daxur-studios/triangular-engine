@@ -52,8 +52,19 @@
               "../cloud-volumes/**/*.spec.ts",
               "../lod-surface/**/*.spec.ts",
               "../gpu-data-flow/**/*.spec.ts",
-              "../development-map/**/*.spec.ts"
+              "../development-map/**/*.spec.ts",
+              "../force-graph/**/*.spec.ts"
             ]
+          }
+        },
+        "test-force-graph": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "watch": false,
+            "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
+            "polyfills": ["zone.js", "zone.js/testing"],
+            "browsers": "ChromeHeadless",
+            "include": ["../force-graph/**/*.spec.ts"]
           }
         },
         "test-testing": {

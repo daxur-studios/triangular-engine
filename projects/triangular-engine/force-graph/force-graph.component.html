@@ -1,0 +1,8 @@
+<div class="tri-force-graph-host">
+  <canvas #canvas class="tri-force-graph-canvas"></canvas>
+  @if (webglFailed()) {
+    <div class="tri-force-graph-fallback" role="status">
+      WebGL context unavailable in this browser; force graph canvas cannot render.
+    </div>
+  }
+</div>

@@ -32,6 +32,16 @@ Plan: [PLAN-090](/docs/plans/090_parametric-catch-tower.md).
 - The library build and strict preview type check passed. The repository-wide records check reported existing issues in Plans 081, 087 and 088.
 - CAD reports, independent GLBs and the HTML preview are local under `artifacts/brep-catch-tower/`. Regenerate with the commands in the [study](/projects/brep-poc/studies/catch-tower/README.md).
 
+### 2026-11-24 — Carriage and arm surface cleanup
+
+- The carriage crossbar now ends where the stop blocks begin. The arm caps, gusset joints and rail brackets have distinct exterior faces. The CAD bounds, arm origins and stock pin fit stayed within the existing checks.
+- The revised parts passed CAD verification. The rebuilt GLBs passed the preview and contact checks, and the carriage end stops were inspected from the reported side angle.
+
+### 2026-11-24 — Downward tower bracing
+
+- The mast now has 18 rows of downward chevrons on all four faces, with both diagonals meeting at the middle of the horizontal beam below. The row spacing is a visual estimate from the supplied reference. Each V is one solid, with a continuous face at the point.
+- The 80 m tower passed `brep verify --check`. The exported assembly was inspected head-on and at an angle, and the Chromium motion and pin contact checks passed. The carriage and arm GLBs were byte-identical after rebaking.
+
 ## Scope history
 
 <!-- tri:scope-history -->

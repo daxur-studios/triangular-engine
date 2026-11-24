@@ -41,7 +41,7 @@ export function withArmBodies<T>(p: Values, side: 1 | -1, consume: (bodies: Body
     block('steelDark', [0, 0, (bottom - 120) / 2], [1_400, 1_400, -120 - bottom]);
     round('hardware', [0, 0, -120], 520, 530);
     round('steel', [0, 0, 410], 290, 160);
-    block('steel', [775, 0, (bottom + crown) / 2], [550, 1_160, p.thickness]);
+    block('steel', [775, 0, (bottom + crown) / 2], [550, 1_160, p.thickness - 30]);
 
     for (const y of [-430, 430]) {
       const edgeY = y - 120;
@@ -51,9 +51,11 @@ export function withArmBodies<T>(p: Values, side: 1 | -1, consume: (bodies: Body
       ], [0, 240, 0]);
       for (let i = 0; i < bays.length - 1; i++) {
         const x = bays[i], nextX = bays[i + 1];
-        beam('steelDark', [x, y, lowerZ(x)], [nextX, y, lowerZ(nextX)], 230, 170);
+        // Adjacent members overlap at the gussets. Give their side faces distinct planes.
+        const widthInset = i % 2 * 20;
+        beam('steelDark', [x, y, lowerZ(x)], [nextX, y, lowerZ(nextX)], 230 - widthInset, 170);
         beam('steel', [x, y, i % 2 ? lowerZ(x) : 300],
-          [nextX, y, i % 2 ? 300 : lowerZ(nextX)], 170, 165);
+          [nextX, y, i % 2 ? 300 : lowerZ(nextX)], 170 - widthInset, 165);
       }
       for (const x of bays) {
         block('edge', [x, y, (lowerZ(x) + 215) / 2], [155, 200, 215 - lowerZ(x)]);
@@ -63,12 +65,12 @@ export function withArmBodies<T>(p: Values, side: 1 | -1, consume: (bodies: Body
       block('steelDark', [x, 0, lowerZ(x)], [240, 1_040, 180]);
       block('steel', [x, 0, 290], [280, 1_080, 270]);
     }
-    block('steelDark', [end - 120, 0, 120], [240, 1_120, 560]);
+    block('steelDark', [end - 135, 0, 120], [210, 1_120, 560]);
 
     // The top face is the game contact plane. Width and length grow about the fixed centre.
     block('rail', [padCenterX, -tower.padInset, 600], [p.padLength, p.padWidth, 300]);
     for (const x of bays.filter(x => Math.abs(x - padCenterX) < p.padLength / 2 - 250)) {
-      block('hardware', [x, -425, 402], [430, 850, 96]);
+      block('hardware', [x, -425, 397], [430, 850, 86]);
     }
 
     return consume(side === 1 ? bodies : bodies.map(({ surface, shape }) => ({

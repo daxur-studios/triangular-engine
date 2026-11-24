@@ -11,10 +11,16 @@ export const expected = () => ({
 /** The base origin is on the ground plane, at the centre of the lab foundation. */
 export function withTowerBodies<T>(consume: (bodies: Body[]) => T) {
   return withScope(scope => {
-    const { bodies, block, beam } = buildBodies(shape => scope.register(shape));
+    const { bodies, block, plate } = buildBodies(shape => scope.register(shape));
     const back = tower.mastCenterX - 2_300;
     const front = tower.mastCenterX + 2_300;
     const halfWidth = 3_270;
+    const postDepth = 900;
+    const postWidth = 960;
+    const sideSpan = front - back - postDepth;
+    const faceSpan = 2 * halfWidth - postWidth;
+    const stories = Array.from({ length: 19 }, (_, index) => 2_300 + index * 4_125);
+    const braceDepth = 360;
     const bottom = 1_000;
     const crown = tower.height - 500;
 
@@ -22,35 +28,47 @@ export function withTowerBodies<T>(consume: (bodies: Body[]) => T) {
     block('concrete', [tower.mastCenterX, 0, 1_400], [7_000, 9_000, 800]);
     for (const x of [back, front]) {
       for (const y of [-halfWidth, halfWidth]) {
-        block('steelDark', [x, y, (crown + bottom) / 2], [900, 960, crown - bottom]);
+        block('steelDark', [x, y, (crown + bottom) / 2], [postDepth, postWidth, crown - bottom]);
         block('edge', [x, y, 2_050], [1_350, 1_400, 400]);
       }
     }
-    const stories = [2_300, 12_900, 23_500, 34_100, 44_700, 55_300, 65_900, 76_500];
     for (const z of stories) {
-      for (const y of [-halfWidth, halfWidth]) beam('steel', [back, y, z], [front, y, z], 470, 590);
-      for (const x of [back, front]) beam('steel', [x, -halfWidth, z], [x, halfWidth, z], 490, 590);
+      for (const y of [-halfWidth, halfWidth]) block('steel', [tower.mastCenterX, y, z], [sideSpan, 470, 520]);
+      for (const x of [back, front]) block('steel', [x, 0, z], [490, faceSpan, 520]);
     }
-    for (let i = 0; i < stories.length - 1; i++) {
-      const low = stories[i], high = stories[i + 1];
+    for (let i = 1; i < stories.length; i++) {
+      const tip = stories[i] - 240;
+      const point = stories[i - 1] + 410;
       for (const y of [-halfWidth, halfWidth]) {
-        beam('steel', [back, y, low], [front, y, high], 440);
-        beam('steelDark', [front, y, low], [back, y, high], 350);
+        plate('steel', downwardBrace(sideSpan, tip, point).map(([run, z]) =>
+          [tower.mastCenterX + run, y - braceDepth / 2, z]), [0, braceDepth, 0]);
       }
       for (const x of [back, front]) {
-        beam('steel', [x, -halfWidth, low], [x, halfWidth, high], 430);
-        beam('steelDark', [x, halfWidth, low], [x, -halfWidth, high], 320);
+        plate('steel', downwardBrace(faceSpan, tip, point).map(([run, z]) =>
+          [x - braceDepth / 2, run, z]), [braceDepth, 0, 0]);
       }
     }
     for (const side of [-1, 1]) {
       block('steelDark', [tower.guideX - 210, side * tower.guideY, 40_000], [420, 520, 77_600]);
       block('edge', [tower.guideX, side * tower.guideY, 40_000], [300, 300, 78_000]);
-      for (const z of stories) block('hardware', [tower.guideX - 290, side * tower.guideY, z], [500, 800, 410]);
+      for (let i = 0; i < stories.length; i += 2) {
+        block('hardware', [tower.guideX - 290, side * tower.guideY, stories[i]], [500, 800, 410]);
+      }
     }
     block('steelDark', [tower.mastCenterX, 0, 78_250], [5_300, 7_420, 2_500]);
     block('edge', [tower.mastCenterX, 0, 79_750], [5_750, 7_650, 500]);
     return consume(bodies);
   });
+}
+
+/** One plate for both diagonals so the meeting point has a single exterior face. */
+function downwardBrace(span: number, tip: number, point: number): [number, number][] {
+  const end = span / 2 + 120;
+  const halfHeight = 300;
+  return [
+    [-end, tip + halfHeight], [0, point + halfHeight], [end, tip + halfHeight],
+    [end, tip - halfHeight], [0, point - halfHeight], [-end, tip - halfHeight],
+  ];
 }
 
 export default () => withTowerBodies(bodies => compound(bodies.map(body => body.shape)));
