@@ -391,6 +391,19 @@ Append dated findings, decisions, scope changes and verification. Do not erase e
 - **[action]** Keep the front leg's blend with the torso around the shoulder, with full leg influence near the knee. Use the same front weights in both original four-leg previews.
 - **[verification]** At the sampled front knee, the maximum distance from the skin section centre to the joint fell from 73 to 30 mm in eight walk poses, and from 72 to 48 mm in eight bound poses. The joint positions matched across the comparison. The bound still produces a tight fold on the tucked leg.
 
+## 2026-11-25 — Fused ear roots
+
+- **[action]** Fused two tapered ears into the head with a 14 mm root fillet and a recessed pink cup in each ear. The comparison uses the current body, leg and tail shapes on both sides.
+- **[action]** Reused the existing expression poses to drive one bone per ear. The ear weights fall off at the fillet, leaving the rest of the head fixed. Added an expression selector and helmet toggle to the comparison.
+- **[verification]** CAD checked a single manifold solid, and the export baked 21,922 triangles. In a paused idle pose, the fused ear vertices stayed inside the existing dome across all four expression presets.
+- **[evidence]** Local only. Regenerate the side-by-side preview and captured poses with the [fused ears study commands](../../projects/brep-poc/studies/capsule-space-cat-silhouette/README.md#fused-ears).
+
+## 2026-11-25 — Triangular ears and outer fillets
+
+- **[rejected]** The tapered loft and round cup made the fused ears look tubular in the comparison.
+- **[action]** Reused the separate ear's rounded triangular outline for both the outer ear and its recessed cup. Cut the cup in the ear before fusing it, then rounded the outer root into the head with a 10 mm fillet. Aligned the existing ear bones with the revised tips.
+- **[verification]** CAD checked one manifold solid and the export baked 22,494 triangles. The fused ears fit inside the existing dome in all four paused expression presets.
+
 ## Scope history
 
 <!-- tri:scope-history -->

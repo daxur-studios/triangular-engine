@@ -162,6 +162,24 @@ npx brep verify projects/brep-poc/studies/capsule-space-cat-silhouette/fused-tai
 node projects/brep-poc/studies/capsule-space-cat-silhouette/capture-rear-hip.mjs --fused-tail
 ```
 
+### Fused ears
+
+Run `build.mjs` and open `artifacts/brep-space-cat-silhouette/fused-ears.html`.
+Both cats use the fused legs and tail and share the rounded triangular ear
+outline. On the left, the outer roots join the head with a 10 mm fillet and the
+pink cups follow the triangular profile. One bone moves each ear, with the skin
+blending into the fixed head at the base.
+
+Pause and use **Expression** to compare neutral, alert, pinned and asymmetric
+poses. Turn on **Bones** to see each ear pivot and tip, or **Helmet** to inspect
+the fit inside the existing dome.
+
+```powershell
+npx brep verify projects/brep-poc/studies/capsule-space-cat-silhouette/fused-ears.brep.ts --check
+node --test projects/brep-poc/studies/capsule-space-cat-silhouette/fused-ear-rig.spec.ts
+node projects/brep-poc/studies/capsule-space-cat-silhouette/capture-rear-hip.mjs --fused-ears
+```
+
 ### Joined legs and tail
 
 `joined-cat.brep.ts` rounds both shoulders, both hips and the tail root on one

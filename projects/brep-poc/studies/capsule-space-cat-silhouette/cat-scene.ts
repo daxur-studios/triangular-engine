@@ -3,8 +3,9 @@
  * baked leg, and build the Concept Fit cat around them.
  */
 
-import { BufferGeometry, Group, Mesh } from 'three';
+import { BufferGeometry, Group, Mesh, MeshStandardMaterial } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CapsuleCatLegMesh } from 'triangular-engine/procedural';
 import { buildExperimentalSpaceCat, type SpaceCatLeg, type SpaceCatTail } from '../../../demo-app/src/app/pages/character-studio/experimental-space-cat';
 
@@ -60,19 +61,26 @@ export function hideGear(root: Group): void {
 }
 
 /** The baked leg's geometry in metres, with the ankle joint at the origin. */
-export async function loadLegGeometry(preset: Pick<LegPreset, 'encoded'>): Promise<BufferGeometry> {
+export async function loadLegGeometry(preset: Pick<LegPreset, 'encoded'>, withEarCups = false): Promise<BufferGeometry> {
   const bytes = Uint8Array.from(atob(preset.encoded), character => character.charCodeAt(0));
   const gltf = await loader.parseAsync(bytes.buffer, '');
   gltf.scene.updateMatrixWorld(true);
-  let geometry: BufferGeometry | null = null;
+  const geometries: BufferGeometry[] = [];
   gltf.scene.traverse(object => {
     const mesh = object as Mesh;
-    if (!mesh.isMesh || geometry) return;
-    geometry = mesh.geometry.clone();
+    if (!mesh.isMesh || (!withEarCups && geometries.length)) return;
+    const geometry = mesh.geometry.clone();
     geometry.applyMatrix4(mesh.matrixWorld);
+    const cup = (mesh.material as MeshStandardMaterial).name === 'Inner ear';
+    geometries[cup ? 1 : 0] = geometry;
   });
-  if (!geometry) throw new Error('The baked leg has no mesh');
-  return geometry;
+  if (!geometries[0]) throw new Error('The bake has no mesh');
+  if (!withEarCups) return geometries[0];
+  if (!geometries[1]) throw new Error('The ear bake has no recessed cup material');
+  const merged = mergeGeometries(geometries, true);
+  for (const geometry of geometries) geometry.dispose();
+  if (!merged) throw new Error('Unable to combine the ear and fur geometry');
+  return merged;
 }
 
 /** An assembled cat, with the Concept Fit's face, tail and either set of legs. */
@@ -113,7 +121,12 @@ export function buildCat(
     uniforms.uNeckZ.value = .5;
     uniforms.uMouthCenterY.value = anchor.y - .087;
     body.traverse(object => {
-      if ((object as Mesh).isMesh) (object as Mesh).material = fit.actor.catBody.mesh.material;
+      const mesh = object as Mesh;
+      if (!mesh.isMesh) return;
+      const fur = fit.actor.catBody.mesh.material;
+      mesh.material = mesh.geometry.groups.length === 2
+        ? [fur as MeshStandardMaterial, new MeshStandardMaterial({ color: fit.actor.dna.innerEarColor, roughness: .8 })]
+        : fur;
     });
     fit.actor.torsoGroup.add(body);
   }

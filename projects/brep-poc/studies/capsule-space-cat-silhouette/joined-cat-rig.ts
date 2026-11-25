@@ -6,19 +6,20 @@ import { CapsuleCatLegMesh, capsuleCatLegSkinWeights } from 'triangular-engine/p
 import type { CapsuleCatTailPose } from 'triangular-engine/characters';
 import type { SpaceCatLeg, SpaceCatTail } from '../../../demo-app/src/app/pages/character-studio/experimental-space-cat';
 import { frontLegBlend } from './front-leg-weights';
+import { createFusedEarRig, earRootBlend } from './fused-ear-rig';
 import { conceptRearExtension, joinedCatRest, joinedTail, originalLegs } from './joined-cat-rest';
 import { rearHipBlend } from './rear-hip';
 
 const TAIL_SAMPLES = 72;
 
-/** One body surface and skeleton with four leg chains and an optional fused tail. */
+/** One body surface and skeleton with four leg chains and optional tail and ears. */
 export function buildJoinedCatRig(
   geometry: BufferGeometry,
-  variant: 'joined' | 'compact' | 'legs-only' | 'fused-tail' = 'joined',
+  variant: 'joined' | 'compact' | 'legs-only' | 'fused-tail' | 'fused-ears' = 'joined',
 ) {
   const compact = variant === 'compact';
   const legsOnly = variant === 'legs-only';
-  const originalTail = variant === 'fused-tail';
+  const originalTail = variant === 'fused-tail' || variant === 'fused-ears';
   const useOriginalLegs = legsOnly || originalTail;
   const tailSegments = originalTail ? 8 : 5;
   const restPose = joinedCatRest(compact);
@@ -81,6 +82,7 @@ export function buildJoinedCatRig(
   emptyGeometry.dispose();
 
   const tailRig = legsOnly ? undefined : buildTailRig(mesh, bones, compact, restPose.tail, tailSegments, disposeRig);
+  const ears = variant === 'fused-ears' ? createFusedEarRig(mesh, bones) : undefined;
   const positions = geometry.getAttribute('position');
   const weightGeometry = new BufferGeometry().setAttribute('position', positions.clone());
   const rest = legRest[0];
@@ -93,6 +95,14 @@ export function buildJoinedCatRig(
   for (let i = 0; i < positions.count; i += 1) {
     point.fromBufferAttribute(positions, i);
     const { x, y, z } = point;
+    if (ears) {
+      const blend = earRootBlend(x, y, z);
+      if (blend > 0) {
+        indices.setXYZW(i, ears.indices[x > 0 ? 1 : 0], 0, 0, 0);
+        weights.setXYZW(i, blend, 1 - blend, 0, 0);
+        continue;
+      }
+    }
     if (tailRig && z < (compact ? -.25 : -.37) && y > .07 && Math.abs(x) < .12) {
       let nearest = 0;
       let distance = Infinity;
@@ -139,7 +149,7 @@ export function buildJoinedCatRig(
   geometry.setAttribute('skinWeight', weights);
   mesh.updateMatrixWorld(true);
   mesh.bind(new Skeleton(bones), new Matrix4());
-  return { body, legs, tail: tailRig?.tail };
+  return { body, legs, tail: tailRig?.tail, ears };
 }
 
 function buildTailRig(

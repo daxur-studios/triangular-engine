@@ -122,5 +122,7 @@ The four-leg comparison extends that same baseline to the remaining three joins.
 
 The next comparison fuses the original tail at the rump on that four-leg bake. Use the same locomotion on both sides and inspect the live bones at slow speed or a paused frame. [ER 074 tracks the tail join and rig inspection](../engineering-records/074_procedural-character-studio.md#2026-11-23--original-tail-join-and-rig-inspection).
 
+The fused-ear comparison uses that tail bake on both sides. Inspect the rounded ear joins in the original expression poses, with the bones and helmet available in the comparison. [ER 074 tracks the ear roots and expression poses](../engineering-records/074_procedural-character-studio.md#2026-11-25--fused-ear-roots).
+
 Scope history in the Engineering Record is append-only. Confirm a specific baseline only after
 explicit developer confirmation; document review and checked boxes do not imply confirmation.

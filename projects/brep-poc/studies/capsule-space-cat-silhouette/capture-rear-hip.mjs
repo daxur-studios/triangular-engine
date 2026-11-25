@@ -9,9 +9,11 @@ const joined = process.argv.includes('--joined');
 const concept = process.argv.includes('--concept');
 const fusedLegs = process.argv.includes('--fused-legs');
 const fusedTail = process.argv.includes('--fused-tail');
-const variant = fusedTail ? 'fused-tail' : fusedLegs ? 'fused-legs' : concept ? 'concept-fit' : joined ? 'joined-cat' : 'rear-hip';
+const fusedEars = process.argv.includes('--fused-ears');
+const variant = fusedEars ? 'fused-ears' : fusedTail ? 'fused-tail' : fusedLegs ? 'fused-legs' : concept ? 'concept-fit' : joined ? 'joined-cat' : 'rear-hip';
 const url = pathToFileURL(resolve(out, `${variant}.html`));
 url.searchParams.set('paused', '');
+if (fusedEars) url.searchParams.set('controls', '');
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 630 } });
@@ -22,9 +24,9 @@ try {
   await page.waitForFunction(() => document.documentElement.dataset.ready || document.documentElement.dataset.error);
   assert.equal(await page.locator('html').getAttribute('data-error'), null);
   assert.equal(await page.locator('#tag-baked').textContent(),
-    fusedTail ? 'Fused tail' : fusedLegs ? 'All four legs fused' : concept ? 'Compact concept fit' : joined ? 'Joined legs and tail' : 'Fused rear hip');
+    fusedEars ? 'Fused ears' : fusedTail ? 'Fused tail' : fusedLegs ? 'All four legs fused' : concept ? 'Compact concept fit' : joined ? 'Joined legs and tail' : 'Fused rear hip');
   assert.equal(await page.locator('#tag-hose').textContent(),
-    fusedTail ? 'Separate tail' : fusedLegs ? 'First fused rear hip' : concept ? 'Previous proportions' : joined ? 'Earlier hip study' : 'Separate baked leg');
+    fusedEars ? 'Separate ears' : fusedTail ? 'Separate tail' : fusedLegs ? 'First fused rear hip' : concept ? 'Previous proportions' : joined ? 'Earlier hip study' : 'Separate baked leg');
 
   await page.evaluate(() => {
     window.__walk.setGait('idle');
@@ -87,6 +89,46 @@ try {
     await play.click();
     await page.getByRole('button', { name: 'Pause' }).click();
     assert.equal(await step.isEnabled(), true);
+    assert.deepEqual(errors, []);
+  }
+  if (fusedEars) {
+    await page.getByRole('combobox', { name: 'Animation' }).selectOption('idle');
+    await page.evaluate(() => window.__walk.setView(58));
+    const expression = page.getByRole('combobox', { name: 'Expression' });
+    const bones = page.getByRole('button', { name: 'Bones' });
+    const helmet = page.getByRole('button', { name: 'Helmet' });
+    const heads = { x: 90, y: 118, width: 1050, height: 290 };
+    const neutral = await page.screenshot({ clip: heads });
+    await sharp(neutral).toFile(resolve(out, 'fused-ears-neutral.png'));
+    await expression.selectOption('surprised');
+    const alert = await page.screenshot({ clip: heads });
+    assert.notDeepEqual(alert, neutral);
+    await expression.selectOption('fearful');
+    const pinned = await page.screenshot({ clip: heads });
+    assert.notDeepEqual(pinned, alert);
+    await expression.selectOption('skeptical');
+    const asymmetric = await page.screenshot({ clip: heads });
+    assert.notDeepEqual(asymmetric, pinned);
+    await bones.click();
+    assert.equal(await bones.getAttribute('aria-pressed'), 'true');
+    const rig = await page.screenshot({ clip: heads });
+    assert.notDeepEqual(rig, asymmetric);
+    await sharp(rig).toFile(resolve(out, 'fused-ears-bones.png'));
+    await bones.click();
+    await expression.selectOption('surprised');
+    const bare = await page.screenshot({ clip: heads });
+    await helmet.click();
+    assert.equal(await helmet.getAttribute('aria-pressed'), 'true');
+    const suited = await page.screenshot({ clip: heads });
+    assert.notDeepEqual(suited, bare);
+    await sharp(suited).toFile(resolve(out, 'fused-ears-helmet.png'));
+    await helmet.click();
+    assert.equal(await helmet.getAttribute('aria-pressed'), 'false');
+    const hidden = await page.screenshot({ clip: heads });
+    const barePixels = await sharp(bare).removeAlpha().raw().toBuffer();
+    const hiddenPixels = await sharp(hidden).removeAlpha().raw().toBuffer();
+    const changedBytes = barePixels.reduce((count, channel, i) => count + Number(Math.abs(channel - hiddenPixels[i]) > 2), 0);
+    assert.ok(changedBytes < barePixels.length * .001, `${changedBytes} color channels changed when restoring the bare pose`);
     assert.deepEqual(errors, []);
   }
 } finally {

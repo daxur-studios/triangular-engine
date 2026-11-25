@@ -20,6 +20,7 @@ import { conceptRearExtension } from './joined-cat-rest';
 import { dressForConcept, fitGentlerFace } from './concept-fit';
 
 type Gait = 'idle' | 'goofy_walk' | 'bound_run' | 'float';
+type EarExpression = 'neutral' | 'surprised' | 'fearful' | 'skeptical';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#view')!;
 const tagLeft = document.querySelector<HTMLElement>('#tag-baked')!;
@@ -28,6 +29,7 @@ const search = new URLSearchParams(location.search);
 const hipData = document.querySelector('#rear-hip');
 const fusedLegsData = document.querySelector('#fused-legs');
 const fusedTailData = document.querySelector('#fused-tail');
+const fusedEarsData = document.querySelector('#fused-ears');
 const joinedData = document.querySelector('#joined-cat');
 const conceptData = document.querySelector('#concept-cat');
 const compareHip = hipData !== null || fusedTailData !== null;
@@ -52,7 +54,8 @@ rim.position.set(4, 6, -5);
 scene.add(new AmbientLight(0xffeee1, 1.25), key, rim);
 
 const camera = new OrthographicCamera();
-let viewAngle = conceptData ? 136 * Math.PI / 180 : compareHip && !joinedData ? 0 : sideAngle;
+let viewAngle = conceptData ? 136 * Math.PI / 180 : fusedEarsData ? 36 * Math.PI / 180
+  : compareHip && !joinedData ? 0 : sideAngle;
 
 function applyView(): void {
   camera.position.set(
@@ -151,8 +154,17 @@ async function main(): Promise<void> {
     tagRight.textContent = 'Separate tail';
     canvas.setAttribute('aria-label', 'The same four-leg Space Cat, with a fused tail on the left and the original separate tail on the right');
   }
-  const leftRig = fusedTail ?? fusedLegs ?? concept ?? joined ?? rearHip;
-  const rightRig = fusedTail ? fusedLegs : concept ? joined : joined || fusedLegs ? rearHip : undefined;
+  const fusedEars = fusedEarsData
+    ? buildJoinedCatRig(await loadLegGeometry(JSON.parse(fusedEarsData.textContent!), true), 'fused-ears')
+    : undefined;
+  if (fusedEarsData) {
+    fusedEarsData.remove();
+    tagLeft.textContent = 'Fused ears';
+    tagRight.textContent = 'Separate ears';
+    canvas.setAttribute('aria-label', 'The same Space Cat with fused ears on the left and separate ears on the right');
+  }
+  const leftRig = fusedEars ?? fusedTail ?? fusedLegs ?? concept ?? joined ?? rearHip;
+  const rightRig = fusedEars ? fusedTail : fusedTail ? fusedLegs : concept ? joined : joined || fusedLegs ? rearHip : undefined;
   const leftBody = leftRig?.body ?? await loadBody(bodyPreset);
   const left = buildCat(leftBody, bodyPreset.anchor, concept ? conceptRearExtension : bodyPreset.rearExtension,
     legPreset, legGeometry, leftRig);
@@ -168,6 +180,8 @@ async function main(): Promise<void> {
     hideGear(left.actor.root);
     hideGear(right.actor.root);
   }
+  const { leftEar, rightEar } = left.actor.catFaceRig;
+  const poseEars = fusedEars?.ears?.follow(leftEar, rightEar);
   // The small tips sit closer to the ankle, so lower the joined cat to the
   // same ground plane as the old bulb paws.
   if (joined) left.actor.root.position.y = -.04;
@@ -204,6 +218,7 @@ async function main(): Promise<void> {
   function render(delta: number): void {
     left.update(delta);
     right.update(delta);
+    poseEars?.();
     softenFace?.();
     draw();
   }
@@ -261,6 +276,29 @@ async function main(): Promise<void> {
     const speed = controls.querySelector<HTMLSelectElement>('#speed')!;
     const view = controls.querySelector<HTMLSelectElement>('#view-angle')!;
     const bones = controls.querySelector<HTMLButtonElement>('#bones')!;
+    if (fusedEars) {
+      const expression = controls.querySelector<HTMLSelectElement>('#expression')!;
+      const helmet = controls.querySelector<HTMLButtonElement>('#helmet')!;
+      controls.querySelector<HTMLElement>('#expression-control')!.hidden = false;
+      helmet.hidden = false;
+      view.value = '36';
+      expression.addEventListener('change', () => {
+        for (const cat of [left, right]) {
+          cat.actor.facialController.setExpression(expression.value as EarExpression, 1, 0);
+        }
+        render(0);
+      });
+      helmet.addEventListener('click', () => {
+        const visible = helmet.getAttribute('aria-pressed') !== 'true';
+        helmet.setAttribute('aria-pressed', String(visible));
+        for (const cat of [left, right]) {
+          const gear = cat.actor.root.getObjectByName('concept-cat-helmet')!;
+          gear.visible = visible;
+          gear.getObjectByName('concept-cat-helmet-dome')!.visible = visible;
+        }
+        draw();
+      });
+    }
     function refreshPlayback(): void {
       playback.textContent = paused ? 'Play' : 'Pause';
       step.disabled = !paused;

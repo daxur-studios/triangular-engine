@@ -53,6 +53,7 @@
   }
   .controls button[aria-pressed="true"] { background: #4a342e; color: #fffaf6; }
   .controls label { display: inline-flex; align-items: center; gap: 6px; }
+  .controls label[hidden] { display: none; }
 </style>
 <canvas id="view" aria-label="Two capsule space cats walking: baked legs on the left, hose legs on the right"></canvas>
 <p class="tag" id="tag-baked"><b>Baked leg</b> · 3 bones</p>
@@ -84,12 +85,22 @@
     </select>
   </label>
   <button id="bones" type="button" aria-pressed="false">Bones</button>
+  <label id="expression-control" hidden>Expression
+    <select id="expression">
+      <option value="neutral">Neutral</option>
+      <option value="surprised">Alert</option>
+      <option value="fearful">Pinned back</option>
+      <option value="skeptical">Asymmetric</option>
+    </select>
+  </label>
+  <button id="helmet" type="button" aria-pressed="false" hidden>Helmet</button>
 </div>
 <!-- BODY -->
 <!-- LEG -->
 <!-- REAR_HIP -->
 <!-- FUSED_LEGS -->
 <!-- FUSED_TAIL -->
+<!-- FUSED_EARS -->
 <!-- JOINED_CAT -->
 <!-- CONCEPT_CAT -->
 <!-- WALK -->

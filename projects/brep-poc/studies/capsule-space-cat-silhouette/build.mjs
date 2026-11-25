@@ -11,6 +11,7 @@ import buildCatLeg, { params as legParams, restPose as legRestPose } from '../..
 import buildTubeCat, { params as tubeParams, rigAnchor as tubeAnchor } from '../../src/app/part/capsule-space-cat-tube.brep.ts';
 import buildRearHip, { params as rearHipParams, restPose as rearHipRestPose } from './rear-hip.brep.ts';
 import buildFusedTail, { params as fusedTailParams } from './fused-tail.brep.ts';
+import buildFusedEars, { params as fusedEarParams, isEarCup } from './fused-ears.brep.ts';
 
 const out = resolve('artifacts/brep-space-cat-silhouette');
 // The tube's front tip is fixed inside the head, so a length change only moves
@@ -45,6 +46,7 @@ const presets = [
 ];
 const millimetersPerMeter = 1000;
 const fur = { name: 'Cat fur', baseColor: [...new Color('#f2c7a0').toArray(), 1], roughness: .72 };
+const innerEar = { name: 'Inner ear', baseColor: [...new Color('#c9857d').toArray(), 1], roughness: .8 };
 
 function meshBody(shape) {
   const bounds = getBounds(shape);
@@ -108,7 +110,7 @@ function weld(data) {
 
 // Bake millimetres to the engine's metres here, once. The GLB exporter adds
 // the Z-up to Y-up rotation, so the preview loads the exact delivered file.
-function bake(buildCat, values) {
+function bake(buildCat, values, colorEarCups = false) {
   return withScope(scope => {
     const shape = scope.register(buildCat(values));
     const solids = getSolids(shape).map(solid => scope.register(solid));
@@ -116,7 +118,17 @@ function bake(buildCat, values) {
     const data = weld(meshBody(shape));
     const vertices = new Float32Array(data.vertices.map(value => value / millimetersPerMeter));
     const materials = new Map();
-    for (const group of data.faceGroups) materials.set(group.faceId, fur);
+    for (const group of data.faceGroups) {
+      const end = group.start + group.count;
+      const isCup = colorEarCups && data.triangles.slice(group.start, end).every(index => {
+        const offset = index * 3;
+        return isEarCup(data.vertices[offset], data.vertices[offset + 1], data.vertices[offset + 2]);
+      });
+      materials.set(group.faceId, isCup ? innerEar : fur);
+    }
+    if (colorEarCups && [...materials.values()].filter(material => material === innerEar).length < 2) {
+      throw new Error('The tessellation lost an inner ear cup');
+    }
     const glb = exportGlb({
       vertices,
       normals: new Float32Array(data.normals),
@@ -215,11 +227,21 @@ console.log('Fused legs |', fusedLegsBake.triangles, 'tris |', resolve(out, 'fus
 const fusedTailBake = bake(buildFusedTail, fusedTailParams.values);
 await writeFile(resolve(out, 'space-cat-fused-tail.glb'), fusedTailBake.glb);
 const fusedTail = { encoded: fusedTailBake.glb.toString('base64') };
+const tailScript = () => `<script id="fused-tail" type="application/json">${JSON.stringify(fusedTail)}</script>`;
 await writeFile(resolve(out, 'fused-tail.html'), walkHtml
   .replace('<title>Capsule space cat legs, walking</title>', '<title>Space Cat fused tail comparison</title>')
   .replace('<!-- FUSED_LEGS -->', legsScript)
-  .replace('<!-- FUSED_TAIL -->', () => `<script id="fused-tail" type="application/json">${JSON.stringify(fusedTail)}</script>`));
+  .replace('<!-- FUSED_TAIL -->', tailScript));
 console.log('Fused tail |', fusedTailBake.triangles, 'tris |', resolve(out, 'fused-tail.html'));
+
+const fusedEarBake = bake(buildFusedEars, fusedEarParams.values, true);
+await writeFile(resolve(out, 'space-cat-fused-ears.glb'), fusedEarBake.glb);
+const fusedEars = { encoded: fusedEarBake.glb.toString('base64') };
+await writeFile(resolve(out, 'fused-ears.html'), walkHtml
+  .replace('<title>Capsule space cat legs, walking</title>', '<title>Space Cat fused ears comparison</title>')
+  .replace('<!-- FUSED_TAIL -->', tailScript)
+  .replace('<!-- FUSED_EARS -->', () => `<script id="fused-ears" type="application/json">${JSON.stringify(fusedEars)}</script>`));
+console.log('Fused ears |', fusedEarBake.triangles, 'tris |', resolve(out, 'fused-ears.html'));
 
 if (process.argv.includes('--experiments')) {
   const { default: buildJoinedCat, params: joinedParams } = await import('./joined-cat.brep.ts');

@@ -1,7 +1,7 @@
 import { BufferGeometry, Float32BufferAttribute, Group, Mesh, MeshStandardMaterial, Shape, ShapeUtils } from 'three';
 
-/** Give the pink cup a shared boundary with the fur rim and a recessed floor. */
-export function fitConceptCatEar(ear: Group): void {
+/** The rounded triangular profile, in the ear's local plane. */
+export function conceptCatEarOutline(): Shape {
   const outline = new Shape();
   outline.moveTo(-0.077, -0.067);
   outline.quadraticCurveTo(-0.082, -0.026, -0.056, 0.024);
@@ -10,8 +10,12 @@ export function fitConceptCatEar(ear: Group): void {
   outline.quadraticCurveTo(0.034, 0.078, 0.059, 0.019);
   outline.quadraticCurveTo(0.079, -0.024, 0.075, -0.065);
   outline.quadraticCurveTo(0.006, -0.092, -0.077, -0.067);
+  return outline;
+}
 
-  const profile = outline.getPoints(7).slice(0, -1);
+/** Give the pink cup a shared boundary with the fur rim and a recessed floor. */
+export function fitConceptCatEar(ear: Group): void {
+  const profile = conceptCatEarOutline().getPoints(7).slice(0, -1);
   if (ShapeUtils.isClockWise(profile)) profile.reverse();
   const count = profile.length;
   const centerY = -0.012;
