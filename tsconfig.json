@@ -52,6 +52,9 @@
       "triangular-engine/impostor": [
         "projects/triangular-engine/impostor/public-api"
       ],
+      "triangular-engine/demo-kit": [
+        "projects/triangular-engine/demo-kit/public-api"
+      ],
       "triangular-engine/trail": [
         "projects/triangular-engine/trail/public-api"
       ],

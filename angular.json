@@ -53,7 +53,8 @@
               "../lod-surface/**/*.spec.ts",
               "../gpu-data-flow/**/*.spec.ts",
               "../development-map/**/*.spec.ts",
-              "../force-graph/**/*.spec.ts"
+              "../force-graph/**/*.spec.ts",
+          "../demo-kit/**/*.spec.ts"
             ]
           }
         },
